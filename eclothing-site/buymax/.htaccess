@@ -1,0 +1,75 @@
+# ============================================================
+#  eMAX Store — Apache configuration
+#  Requires: mod_rewrite enabled (a2enmod rewrite) and
+#  AllowOverride All on the vhost/directory.
+# ============================================================
+
+Options -Indexes -MultiViews
+ServerSignature Off
+
+RewriteEngine On
+
+# BEGIN CUSTOM ADMIN PATH (auto-managed — do not edit by hand)
+# (no custom path set — the default /admin URL is the only one in use)
+# END CUSTOM ADMIN PATH
+
+# RewriteBase /            # uncomment & adjust if in a subfolder
+
+# ---------- Force HTTPS (uncomment in production) ----------
+# RewriteCond %{HTTPS} !=on
+# RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# ---------- Hide .php extension ----------
+# 0) These endpoints are called with POST (AJAX/fetch) — never redirect them.
+#    A 301 on a POST request gets silently downgraded to GET by browsers,
+#    which drops the request body (including the CSRF token and any form
+#    data), making the call fail with "Invalid security token" / empty data.
+RewriteRule ^cart\.php$ - [L]
+RewriteRule ^send-otp\.php$ - [L]
+RewriteRule ^verify-otp\.php$ - [L]
+RewriteRule ^google-auth\.php$ - [L]
+
+# 1) If someone visits /page.php (or /page.php?x=y) directly → 301 redirect to
+#    /page (or /page?x=y) — QSA keeps any query string intact on the redirect.
+RewriteCond %{THE_REQUEST} ^[A-Z]+\s([^\s]+)\.php[\s?] [NC]
+RewriteRule ^ %1 [R=301,L,QSA]
+
+# 2) Pretty category URLs:  /category/slug  →  category.php?slug=slug
+#    Must run BEFORE the generic "map /page -> page.php" rule below: category.php
+#    is a real file, so Apache's own PATH_INFO resolution can treat
+#    /category/some-slug as category.php + path-info "/some-slug" and keep
+#    re-matching the generic rule's file-exists check forever (infinite
+#    redirect loop / 500 error) if that rule runs first.
+RewriteRule ^category/([a-z0-9\-]+)/?$ category.php?slug=$1 [L,QSA]
+
+# 3) Internally map /page → page.php when the file exists
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME}.php -f
+RewriteRule ^(.+?)/?$ $1.php [L]
+
+# ---------- Block direct access to sensitive folders ----------
+RewriteRule ^(config|includes)(/|$) - [F,L]
+RewriteRule ^admin/includes(/|$) - [F,L]
+
+# ---------- Block sensitive file types ----------
+<FilesMatch "\.(sql|log|env|ini|bak|md)$">
+  Require all denied
+</FilesMatch>
+
+# ---------- Security headers ----------
+<IfModule mod_headers.c>
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ---------- Disable PHP execution in asset folders ----------
+<IfModule mod_rewrite.c>
+  RewriteRule ^assets/.*\.php$ - [F,L]
+</IfModule>
+
+# ---------- PHP hardening (mod_php only; ignored under FPM) ----------
+<IfModule mod_php.c>
+  php_flag display_errors Off
+  php_flag expose_php Off
+</IfModule>

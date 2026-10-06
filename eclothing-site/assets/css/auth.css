@@ -1,0 +1,43 @@
+/* ============================================================
+   assets/css/auth.css — Sign Up / Sign In pages
+   Uses the same CSS variables as assets/css/style.css
+   ============================================================ */
+.auth-wrap{min-height:calc(100vh - 300px);display:flex;align-items:center;justify-content:center;padding:48px 16px;background:var(--bg)}
+.auth-card{width:100%;max-width:480px;background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:36px 34px;border:1px solid var(--line)}
+.auth-card h1{font-size:26px;margin-bottom:6px;color:var(--red-950)}
+.auth-sub{color:var(--muted);font-size:14px;margin-bottom:26px}
+.auth-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.auth-field{margin-bottom:16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.auth-field label{font-size:13px;font-weight:700;color:var(--ink)}
+.auth-field input,.auth-field select{padding:12px 14px;border:1.5px solid var(--line);border-radius:10px;font-size:14px;font-family:inherit;background:#fff;color:var(--ink)}
+.auth-field input:focus,.auth-field select:focus{outline:none;border-color:var(--red-500)}
+.auth-field .hint{font-size:12px;color:var(--muted)}
+.auth-field .error{font-size:12px;color:var(--red-600);font-weight:600}
+.mobile-row{display:flex;gap:10px}
+.mobile-row input{flex:1}
+.btn-otp{white-space:nowrap;background:var(--grad-dark);color:#fff;font-weight:700;font-size:13px;padding:0 16px;border-radius:10px}
+.btn-otp:disabled{opacity:.55;cursor:not-allowed}
+.otp-box{display:none;background:#fff7e8;border:1.5px dashed var(--gold);border-radius:10px;padding:14px;margin-bottom:16px}
+.otp-box.show{display:block}
+.otp-box input{width:100%;letter-spacing:6px;text-align:center;font-size:20px;font-weight:800}
+.otp-status{font-size:12.5px;margin-top:8px;font-weight:600}
+.otp-status.ok{color:#1a7a3a}
+.otp-status.err{color:var(--red-600)}
+.check-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;font-size:13px;color:var(--muted);line-height:1.5}
+.check-row input{margin-top:3px;width:16px;height:16px;accent-color:var(--red-600)}
+.check-row a{color:var(--red-600);font-weight:700}
+.auth-submit{width:100%;background:var(--grad-btn);color:#fff;font-weight:800;font-size:15px;padding:14px;border-radius:12px;margin-top:6px;box-shadow:0 8px 20px rgba(192,24,28,.25)}
+.auth-submit:hover{filter:brightness(1.05)}
+.auth-submit:disabled{opacity:.6;cursor:not-allowed}
+.auth-divider{display:flex;align-items:center;gap:12px;margin:22px 0;color:var(--muted);font-size:12.5px}
+.auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:var(--line)}
+.google-btn-wrap{display:flex;justify-content:center}
+.auth-foot{text-align:center;margin-top:22px;font-size:14px;color:var(--muted)}
+.auth-foot a{color:var(--red-600);font-weight:700}
+.alert{padding:12px 14px;border-radius:10px;font-size:13.5px;margin-bottom:18px}
+.alert-error{background:#fdeaea;color:var(--red-700);border:1px solid #f4c7c7}
+.alert-success{background:#e9f7ee;color:#1a7a3a;border:1px solid #bfe6cc}
+@media(max-width:600px){
+  .auth-card{padding:26px 20px}
+  .auth-grid{grid-template-columns:1fr}
+}
