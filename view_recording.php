@@ -204,19 +204,12 @@ $page_origin = $scheme . '://' . $_SERVER['HTTP_HOST'];
         .video-container:fullscreen .video-stage,
         .video-container:-webkit-full-screen .video-stage { position: absolute; inset: 0; }
 
-        /* Fallback fullscreen for iOS Safari (iPhone has no element fullscreen) */
+        /* Page-level fullscreen: used automatically on phones at load, and as iPhone fallback */
         .video-container.pseudo-fs {
             position: fixed; inset: 0; z-index: 99999; padding: 0;
             width: 100vw; height: 100vh; height: 100dvh;
         }
-        @media (orientation: portrait) {
-            .video-container.pseudo-fs {
-                width: 100vh; height: 100vw;
-                top: 0; left: 100%;
-                transform-origin: top left;
-                transform: rotate(90deg);
-            }
-        }
+        .video-container.pseudo-fs .video-stage { position: absolute; inset: 0; }
         body.fs-lock { overflow: hidden; }
 
         .video-info { padding: 30px; }
@@ -403,6 +396,9 @@ $page_origin = $scheme . '://' . $_SERVER['HTTP_HOST'];
         }
         window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
+        // Phones: open the video full screen as soon as the page loads
+        if (isMobile) enterPageFullscreen();
+
         function onReady() {
             ticker = setInterval(updateProgress, 250);
         }
@@ -430,8 +426,11 @@ $page_origin = $scheme . '://' . $_SERVER['HTTP_HOST'];
                 player.pauseVideo();
             } else {
                 player.playVideo();
-                // Phones: first play (a user gesture) -> go fullscreen + landscape automatically
-                if (isMobile && !isFullscreen()) enterFullscreen();
+                // Phones: first play (a user gesture) -> upgrade to true device fullscreen where supported
+                if (isMobile && !(document.fullscreenElement || document.webkitFullscreenElement)) {
+                    const req = box.requestFullscreen || box.webkitRequestFullscreen;
+                    if (req) { try { Promise.resolve(req.call(box)).catch(function () {}); } catch (e) {} }
+                }
             }
         }
 
@@ -452,7 +451,13 @@ $page_origin = $scheme . '://' . $_SERVER['HTTP_HOST'];
                 box.classList.add('pseudo-fs');
                 document.body.classList.add('fs-lock');
             }
-            lockLandscape();
+            syncFsIcon();
+        }
+
+        // Fill the whole phone screen immediately (no tap needed)
+        function enterPageFullscreen() {
+            box.classList.add('pseudo-fs');
+            document.body.classList.add('fs-lock');
             syncFsIcon();
         }
 
@@ -462,14 +467,7 @@ $page_origin = $scheme . '://' . $_SERVER['HTTP_HOST'];
             }
             box.classList.remove('pseudo-fs');
             document.body.classList.remove('fs-lock');
-            if (screen.orientation && screen.orientation.unlock) { try { screen.orientation.unlock(); } catch (e) {} }
             syncFsIcon();
-        }
-
-        function lockLandscape() {
-            if (screen.orientation && screen.orientation.lock) {
-                screen.orientation.lock('landscape').catch(function () {});
-            }
         }
 
         function syncFsIcon() {
@@ -480,17 +478,9 @@ $page_origin = $scheme . '://' . $_SERVER['HTTP_HOST'];
 
         ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (ev) {
             document.addEventListener(ev, function () {
-                if (!isFullscreen()) exitFullscreen(); else lockLandscape();
+                if (!isFullscreen()) exitFullscreen();
                 syncFsIcon();
             });
-        });
-
-        // If the phone is turned sideways while a video is playing, go fullscreen
-        // (only works where the browser still treats the earlier tap as permission).
-        window.addEventListener('orientationchange', function () {
-            if (!isMobile || !player) return;
-            const landscape = (screen.orientation ? screen.orientation.type.indexOf('landscape') === 0 : Math.abs(window.orientation) === 90);
-            if (landscape && box.classList.contains('playing') && !isFullscreen()) enterFullscreen();
         });
 
         // ---- Controls ---------------------------------------------------------------
