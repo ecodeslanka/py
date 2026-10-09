@@ -1,0 +1,16 @@
+ErrorDocument 404 /404.php
+DirectoryIndex index.php
+
+<IfModule mod_php.c>
+  php_flag display_errors Off
+</IfModule>
+
+<Files "*.sqlite">
+  Require all denied
+</Files>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(sqlite)$">
+    Header set Content-Disposition attachment
+  </FilesMatch>
+</IfModule>
