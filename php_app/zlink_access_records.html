@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZKBio Zlink – Access Records</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+  }
+
+  .container { max-width: 860px; margin: 0 auto; }
+
+  .header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 2rem;
+  }
+  .logo {
+    width: 42px; height: 42px; border-radius: 10px;
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 18px; color: #fff;
+  }
+  .header h1 { font-size: 20px; font-weight: 600; color: #f1f5f9; }
+  .header p  { font-size: 13px; color: #64748b; margin-top: 2px; }
+
+  .card {
+    background: #1e2330;
+    border: 1px solid #2d3348;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .card-title {
+    font-size: 12px; font-weight: 600; letter-spacing: .07em;
+    color: #64748b; text-transform: uppercase; margin-bottom: 1rem;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .span-2 { grid-column: span 2; }
+
+  label {
+    display: block; font-size: 12px; color: #94a3b8;
+    margin-bottom: 5px; font-weight: 500;
+  }
+
+  input, select {
+    width: 100%; background: #0f1117;
+    border: 1px solid #2d3348; border-radius: 8px;
+    padding: 9px 12px; font-size: 14px; color: #e2e8f0;
+    outline: none; transition: border-color .15s;
+  }
+  input:focus, select:focus { border-color: #3b82f6; }
+  select option { background: #1e2330; }
+
+  .btn {
+    padding: 10px 22px; border-radius: 8px; font-size: 14px;
+    font-weight: 600; border: none; cursor: pointer;
+    transition: opacity .15s, transform .1s;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn-blue  { background: #3b82f6; color: #fff; }
+  .btn-blue:hover  { opacity: .88; }
+  .btn-green { background: #10b981; color: #fff; }
+  .btn-green:hover { opacity: .88; }
+  .btn-sm    { padding: 6px 14px; font-size: 12px; }
+
+  .status {
+    font-size: 13px; padding: 10px 14px; border-radius: 8px;
+    margin-top: 12px; display: none;
+  }
+  .status.info    { background:#1e3a5f; color:#93c5fd; display:block; }
+  .status.success { background:#064e3b; color:#6ee7b7; display:block; }
+  .status.error   { background:#450a0a; color:#fca5a5; display:block; }
+
+  .token-row {
+    display: flex; gap: 8px; align-items: center; margin-top: 10px;
+  }
+  .token-badge {
+    flex: 1; background: #0f1117; border: 1px solid #2d3348;
+    border-radius: 8px; padding: 8px 12px;
+    font-family: monospace; font-size: 12px; color: #6ee7b7;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .records-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .badge {
+    background: #1e3a5f; color: #93c5fd;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 99px;
+  }
+
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+    min-width: 620px;
+  }
+  thead tr { background: #0f1117; }
+  th {
+    text-align: left; padding: 10px 12px;
+    font-size: 11px; font-weight: 600; color: #64748b;
+    text-transform: uppercase; letter-spacing: .06em;
+    border-bottom: 1px solid #2d3348;
+  }
+  td {
+    padding: 10px 12px; border-bottom: 1px solid #1a2035;
+    color: #cbd5e1;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #252c3d; }
+
+  .verify-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 99px;
+    font-size: 11px; font-weight: 600;
+  }
+  .v-fp  { background:#1e3a5f; color:#93c5fd; }
+  .v-face{ background:#064e3b; color:#6ee7b7; }
+  .v-card{ background:#44230c; color:#fbbf24; }
+  .v-pw  { background:#3b0764; color:#d8b4fe; }
+
+  .result-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 99px;
+    font-size: 11px; font-weight: 600;
+  }
+  .granted { background:#064e3b; color:#6ee7b7; }
+  .denied  { background:#450a0a; color:#fca5a5; }
+
+  .empty {
+    text-align: center; padding: 3rem 1rem;
+    color: #475569; font-size: 14px;
+  }
+  .empty span { font-size: 2rem; display: block; margin-bottom: .5rem; }
+
+  .note {
+    background: #2d2a00; border: 1px solid #78350f;
+    border-radius: 10px; padding: 14px 16px;
+    font-size: 13px; color: #fbbf24; line-height: 1.6;
+    margin-bottom: 1.25rem;
+  }
+  .note strong { color: #fde68a; }
+
+  .cors-warn {
+    background: #2d1a00; border: 1px solid #92400e;
+    border-radius: 8px; padding: 10px 14px;
+    font-size: 12px; color: #fdba74; margin-top: 10px;
+    display: none;
+  }
+
+  footer {
+    text-align: center; font-size: 12px; color: #334155;
+    margin-top: 2rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="logo">Z</div>
+    <div>
+      <h1>ZKBio Zlink — Access Records</h1>
+      <p>Fingerprint &amp; door event log viewer via Zlink API</p>
+    </div>
+  </div>
+
+  <!-- STEP 1: LOGIN -->
+  <div class="card">
+    <div class="card-title">Step 1 — Login to ZKBio Zlink</div>
+    <div class="grid-2">
+      <div>
+        <label for="email">Email address</label>
+        <input type="email" id="email" placeholder="yourname@email.com">
+      </div>
+      <div>
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="••••••••">
+      </div>
+    </div>
+    <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
+      <button class="btn btn-blue" onclick="doLogin()">🔑 Login &amp; Get Token</button>
+      <span id="login-spinner" style="display:none;font-size:13px;color:#64748b;">Logging in…</span>
+    </div>
+    <div id="login-status" class="status"></div>
+    <div class="token-row" id="token-row" style="display:none">
+      <div class="token-badge" id="token-display">—</div>
+      <button class="btn btn-sm" onclick="copyToken()" style="background:#2d3348;color:#e2e8f0;border:1px solid #3d4a60;">Copy</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: QUERY -->
+  <div class="card">
+    <div class="card-title">Step 2 — Query Access Records</div>
+    <div class="grid-3" style="margin-bottom:14px;">
+      <div>
+        <label for="startDate">Start date</label>
+        <input type="date" id="startDate">
+      </div>
+      <div>
+        <label for="endDate">End date</label>
+        <input type="date" id="endDate">
+      </div>
+      <div>
+        <label for="pageSize">Max records</label>
+        <select id="pageSize">
+          <option value="20">20</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-bottom:14px;">
+      <div>
+        <label for="personName">Person name (optional)</label>
+        <input type="text" id="personName" placeholder="Filter by name">
+      </div>
+      <div>
+        <label for="verifyType">Verification type</label>
+        <select id="verifyType">
+          <option value="">All types</option>
+          <option value="1">Fingerprint</option>
+          <option value="2">Face</option>
+          <option value="3">Card</option>
+          <option value="4">Password</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-green" onclick="fetchRecords()">📋 Fetch Access Records</button>
+    <div id="fetch-status" class="status"></div>
+  </div>
+
+  <!-- STEP 3: RESULTS -->
+  <div class="card" id="results-card">
+    <div class="records-header">
+      <div class="card-title" style="margin-bottom:0;">Access Records</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="badge" id="record-count">0 records</span>
+        <button class="btn btn-sm" onclick="exportCSV()" style="background:#2d3348;color:#e2e8f0;border:1px solid #3d4a60;">⬇ CSV</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Person</th>
+            <th>Device / Door</th>
+            <th>Verification</th>
+            <th>Result</th>
+            <th>Date &amp; Time</th>
+          </tr>
+        </thead>
+        <tbody id="records-body">
+          <tr><td colspan="6"><div class="empty"><span>🔍</span>Login and fetch records to see results here.</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>ZKBio Zlink Access Records Viewer &nbsp;·&nbsp; Data fetched directly from zlink.minervaiot.com API</footer>
+
+</div>
+
+<script>
+  // ── State ────────────────────────────────────────────────────────────────
+  let AUTH_TOKEN = '';
+  let allRecords = [];
+
+  // ── Set default dates ────────────────────────────────────────────────────
+  const today = new Date();
+  const weekAgo = new Date(today - 7 * 86400000);
+  document.getElementById('endDate').value = today.toISOString().split('T')[0];
+  document.getElementById('startDate').value = weekAgo.toISOString().split('T')[0];
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function setStatus(id, type, msg) {
+    const el = document.getElementById(id);
+    el.className = 'status ' + type;
+    el.textContent = msg;
+  }
+
+  function toTS(dateStr, isEnd) {
+    // Convert YYYY-MM-DD to Unix ms (Zlink expects milliseconds)
+    const d = new Date(dateStr);
+    if (isEnd) d.setHours(23, 59, 59, 999);
+    return d.getTime();
+  }
+
+  // ── LOGIN ────────────────────────────────────────────────────────────────
+  async function doLogin() {
+    const email = document.getElementById('email').value.trim();
+    const pass  = document.getElementById('password').value;
+    if (!email || !pass) {
+      setStatus('login-status', 'error', 'Please enter email and password.');
+      return;
+    }
+
+    document.getElementById('login-spinner').style.display = 'inline';
+    setStatus('login-status', 'info', 'Connecting to Zlink API…');
+
+    try {
+      // ZKBio Zlink login endpoint (observed from network traffic)
+      const res = await fetch('zlink_proxy.php?path=user/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loginName: email, loginPwd: pass })
+      });
+
+      const data = await res.json();
+
+      if (data && (data.token || data.accessToken || (data.data && data.data.token))) {
+        AUTH_TOKEN = data.token || data.accessToken || data.data.token;
+        setStatus('login-status', 'success', '✅ Login successful! Token obtained. Now fetch your records.');
+        document.getElementById('token-display').textContent = AUTH_TOKEN.substring(0, 40) + '…';
+        document.getElementById('token-row').style.display = 'flex';
+      } else {
+        setStatus('login-status', 'error', '❌ Login failed: ' + (data.msg || data.message || JSON.stringify(data)));
+      }
+    } catch (err) {
+      setStatus('login-status', 'error',
+        '❌ Network error / CORS blocked. See the yellow note above for solutions. (' + err.message + ')');
+    }
+    document.getElementById('login-spinner').style.display = 'none';
+  }
+
+  // ── FETCH RECORDS ────────────────────────────────────────────────────────
+  async function fetchRecords() {
+    if (!AUTH_TOKEN) {
+      setStatus('fetch-status', 'error', '⚠ Please login first (Step 1).');
+      return;
+    }
+
+    const startDate  = document.getElementById('startDate').value;
+    const endDate    = document.getElementById('endDate').value;
+    const pageSize   = document.getElementById('pageSize').value;
+    const personName = document.getElementById('personName').value.trim();
+    const verifyType = document.getElementById('verifyType').value;
+
+    if (!startDate || !endDate) {
+      setStatus('fetch-status', 'error', 'Please select start and end dates.');
+      return;
+    }
+
+    setStatus('fetch-status', 'info', 'Fetching records from Zlink…');
+
+    // Build query payload — matches ZKBio CloudACC event query format
+    const payload = {
+      startTime: toTS(startDate, false),
+      endTime:   toTS(endDate, true),
+      pageNo:    1,
+      pageSize:  parseInt(pageSize),
+    };
+    if (personName)  payload.personName = personName;
+    if (verifyType)  payload.verifyType = parseInt(verifyType);
+
+    try {
+      const res = await fetch('zlink_proxy.php?path=cloudacc/event/list', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + AUTH_TOKEN,
+          'token': AUTH_TOKEN,
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      const records = data.data?.list || data.data?.records || data.list || data.records || [];
+
+      if (!Array.isArray(records)) {
+        // Try alternate endpoint
+        await fetchRecordsAlt(payload);
+        return;
+      }
+
+      allRecords = records;
+      renderTable(records);
+      setStatus('fetch-status', 'success', `✅ Fetched ${records.length} records.`);
+    } catch (err) {
+      setStatus('fetch-status', 'error',
+        '❌ Fetch error / CORS. ' + err.message);
+    }
+  }
+
+  // Alternate endpoint path (Zlink has multiple API paths)
+  async function fetchRecordsAlt(payload) {
+    try {
+      const res = await fetch('zlink_proxy.php?path=acc/api/v1/event/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + AUTH_TOKEN,
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      const records = data.data?.list || data.data || [];
+      allRecords = Array.isArray(records) ? records : [];
+      renderTable(allRecords);
+      setStatus('fetch-status', 'success', `✅ Fetched ${allRecords.length} records (alt endpoint).`);
+    } catch (err) {
+      setStatus('fetch-status', 'error', '❌ Both endpoints failed. ' + err.message);
+    }
+  }
+
+  // ── RENDER TABLE ─────────────────────────────────────────────────────────
+  const VERIFY_MAP = {
+    1: ['Fingerprint','v-fp'],
+    2: ['Face','v-face'],
+    3: ['Card','v-card'],
+    4: ['Password','v-pw'],
+    5: ['Palm','v-fp'],
+  };
+
+  function renderTable(records) {
+    const tbody = document.getElementById('records-body');
+    document.getElementById('record-count').textContent = records.length + ' records';
+
+    if (!records.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><span>📭</span>No records found for this date range.</div></td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = records.map((r, i) => {
+      const person   = r.personName || r.name || r.userName || '—';
+      const device   = r.deviceName || r.devName || '—';
+      const door     = r.doorName   || r.areaName || '';
+      const deviceStr = door ? `${device} / ${door}` : device;
+      const vtype    = r.verifyType || r.checkType || r.eventType;
+      const [vLabel, vClass] = VERIFY_MAP[vtype] || ['Unknown','v-pw'];
+      const granted  = r.verifyState === 1 || r.result === 1 || r.status === 'granted' || r.inOut === 0 || r.checkState === 0;
+      const resultLabel = (r.verifyState === 0 || r.result === 0) ? 'Denied' : 'Granted';
+      const resultClass = resultLabel === 'Denied' ? 'denied' : 'granted';
+      const ts = r.eventTime || r.checkTime || r.time || r.createTime;
+      const timeStr = ts ? new Date(ts).toLocaleString() : '—';
+
+      return `<tr>
+        <td style="color:#475569">${i + 1}</td>
+        <td><strong style="color:#f1f5f9">${person}</strong></td>
+        <td style="color:#94a3b8">${deviceStr}</td>
+        <td><span class="verify-tag ${vClass}">${vLabel}</span></td>
+        <td><span class="result-tag ${resultClass}">${resultLabel}</span></td>
+        <td style="color:#94a3b8;font-size:12px;">${timeStr}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── EXPORT CSV ───────────────────────────────────────────────────────────
+  function exportCSV() {
+    if (!allRecords.length) return;
+    const header = 'No,Person,Device,VerifyType,Result,DateTime\n';
+    const rows = allRecords.map((r, i) => {
+      const person = r.personName || r.name || '';
+      const device = r.deviceName || '';
+      const vtype  = r.verifyType || '';
+      const result = r.verifyState === 0 ? 'Denied' : 'Granted';
+      const ts     = r.eventTime || r.checkTime || '';
+      const time   = ts ? new Date(ts).toLocaleString() : '';
+      return `${i+1},"${person}","${device}","${vtype}","${result}","${time}"`;
+    }).join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'zlink_access_records.csv';
+    a.click();
+  }
+
+  // ── COPY TOKEN ───────────────────────────────────────────────────────────
+  function copyToken() {
+    navigator.clipboard.writeText(AUTH_TOKEN).then(() => alert('Token copied!'));
+  }
+</script>
+</body>
+</html>

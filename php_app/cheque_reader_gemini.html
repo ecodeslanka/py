@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cheque Reader – Gemini AI</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Outfit:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #f0f7f0;
+    --card: #fff;
+    --border: #d4e4d4;
+    --accent: #1a7a3a;
+    --accent2: #0d6efd;
+    --text: #1a2e1a;
+    --muted: #6a8a6a;
+    --gold: #e6a817;
+    --red: #c0392b;
+    --google-blue: #4285f4;
+    --google-red: #ea4335;
+    --google-yellow: #fbbc04;
+    --google-green: #34a853;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Outfit', sans-serif;
+    min-height: 100vh;
+    padding: 24px 16px 60px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .container { width: 100%; max-width: 720px; }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #1a7a3a 0%, #2ecc71 100%);
+    border-radius: 18px;
+    padding: 20px 24px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow: 0 8px 28px rgba(26,122,58,0.25);
+  }
+
+  .header-icon {
+    font-size: 1.9rem;
+    background: rgba(255,255,255,0.18);
+    border-radius: 12px;
+    width: 50px; height: 50px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .header h1 { font-family: 'Space Mono', monospace; font-size: 1.15rem; color: #fff; }
+  .header p  { color: rgba(255,255,255,0.7); font-size: 0.82rem; margin-top: 2px; }
+
+  .g-badge {
+    margin-left: auto; flex-shrink: 0;
+    background: #fff;
+    padding: 5px 12px; border-radius: 20px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.68rem; font-weight: 700;
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  .g-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* Steps */
+  .steps-card {
+    background: #e8f5e9;
+    border: 1px solid #a5d6a7;
+    border-radius: 14px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+    font-size: 0.87rem;
+  }
+
+  .steps-title { font-weight: 700; color: #1b5e20; font-size: 0.9rem; margin-bottom: 10px; }
+
+  .step {
+    display: flex; gap: 10px; align-items: flex-start;
+    margin-bottom: 8px; color: #2e7d32; line-height: 1.5;
+  }
+
+  .step-num {
+    background: var(--accent); color: #fff;
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.7rem; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+  }
+
+  .steps-card a { color: var(--accent); font-weight: 700; text-decoration: none; }
+  .steps-card a:hover { text-decoration: underline; }
+
+  .free-note {
+    margin-top: 10px; padding: 8px 12px;
+    background: #fff; border-radius: 8px;
+    font-size: 0.78rem; color: #1b5e20;
+    border-left: 3px solid var(--accent);
+  }
+
+  /* Card */
+  .card {
+    background: var(--card);
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    padding: 18px 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.04);
+  }
+
+  .card-title {
+    font-size: 0.72rem; font-weight: 700;
+    color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 10px;
+  }
+
+  .field {
+    width: 100%;
+    padding: 11px 14px;
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.82rem;
+    outline: none;
+    transition: border-color 0.18s;
+  }
+
+  .field:focus { border-color: var(--accent); }
+  .field-note { font-size: 0.75rem; color: var(--muted); margin-top: 6px; }
+  .field-note a { color: var(--accent); font-weight: 600; text-decoration: none; }
+
+  /* Model pills */
+  .model-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .mpill {
+    border: 2px solid var(--border);
+    border-radius: 10px; padding: 9px 14px;
+    cursor: pointer; transition: all 0.16s;
+    flex: 1; min-width: 150px; position: relative;
+  }
+
+  .mpill input { position: absolute; opacity: 0; }
+  .mpill:hover  { border-color: var(--accent); background: #f0faf0; }
+  .mpill.active { border-color: var(--accent); background: #e8f5e9; }
+
+  .pill-name { font-family: 'Space Mono', monospace; font-size: 0.78rem; font-weight: 700; color: var(--text); }
+  .pill-desc { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+  .pill-tag {
+    display: inline-block; margin-top: 5px;
+    padding: 2px 7px; border-radius: 20px;
+    font-size: 0.63rem; font-weight: 700; letter-spacing: 0.04em;
+  }
+  .tag-rec  { background: #d1fae5; color: #065f46; }
+  .tag-fast { background: #dbeafe; color: #1e40af; }
+  .tag-best { background: #fef9c3; color: #92400e; }
+
+  /* Upload */
+  .upload-zone {
+    border: 2.5px dashed var(--border);
+    border-radius: 12px; padding: 32px 20px;
+    text-align: center; cursor: pointer;
+    transition: all 0.18s; position: relative; background: #fafff8;
+  }
+
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: #f0faf0; }
+  .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .upload-icon { font-size: 2.2rem; margin-bottom: 8px; }
+  .upload-zone h3 { font-size: 0.97rem; color: var(--accent); }
+  .upload-zone p  { font-size: 0.82rem; color: var(--muted); margin-top: 3px; }
+
+  #preview { width: 100%; border-radius: 10px; margin-top: 14px; display: none; border: 1px solid var(--border); }
+
+  .btn {
+    width: 100%; padding: 13px;
+    background: linear-gradient(135deg, #1a7a3a, #27ae60);
+    color: #fff; font-family: 'Space Mono', monospace;
+    font-weight: 700; font-size: 0.93rem;
+    border: none; border-radius: 11px;
+    cursor: pointer; margin-top: 12px; display: none;
+    transition: opacity 0.18s, transform 0.1s;
+    box-shadow: 0 4px 14px rgba(26,122,58,0.25);
+    letter-spacing: 0.02em;
+  }
+
+  .btn:hover { opacity: 0.9; }
+  .btn:active { transform: scale(0.99); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Loader */
+  .loader { display: none; text-align: center; padding: 26px; }
+  .spin {
+    display: inline-block; width: 32px; height: 32px;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .65s linear infinite; margin-bottom: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loader p { color: var(--muted); font-size: 0.86rem; }
+
+  /* Error */
+  .err {
+    background: #fff5f5; border: 1px solid #fecaca;
+    border-radius: 12px; padding: 14px 18px;
+    color: var(--red); font-size: 0.86rem;
+    margin-top: 10px; display: none; line-height: 1.6;
+  }
+  .err b { display: block; font-size: 0.92rem; margin-bottom: 4px; }
+  .err-fix {
+    margin-top: 10px; background: #fff;
+    border: 1px solid #fecaca; border-radius: 8px;
+    padding: 10px 14px; font-size: 0.81rem; color: #555;
+  }
+  .err-fix b { display: inline; font-size: inherit; color: var(--red); }
+
+  /* Results */
+  .results {
+    background: var(--card); border-radius: 14px;
+    border: 1px solid var(--border); overflow: hidden;
+    display: none; margin-top: 4px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.07);
+  }
+
+  .res-header {
+    background: linear-gradient(135deg, #1a7a3a, #27ae60);
+    color: #fff; padding: 13px 20px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.76rem; letter-spacing: 0.07em; text-transform: uppercase;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  .micr {
+    background: #111827; padding: 13px 20px;
+    display: flex; gap: 22px; flex-wrap: wrap;
+  }
+
+  .micr-item { display: flex; flex-direction: column; gap: 2px; }
+  .micr-lbl  { font-size: 0.58rem; color: #6b7280; text-transform: uppercase; letter-spacing: .1em; }
+  .micr-val  { font-family: 'Space Mono', monospace; font-size: 1rem; color: var(--gold); letter-spacing: .07em; }
+
+  .row {
+    display: flex; align-items: flex-start;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    gap: 12px; animation: up .3s ease both;
+  }
+  .row:last-child { border-bottom: none; }
+
+  @keyframes up {
+    from { opacity: 0; transform: translateY(5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .row-lbl {
+    font-size: 0.71rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em;
+    width: 120px; flex-shrink: 0; padding-top: 2px; font-weight: 600;
+  }
+
+  .row-val {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.92rem; color: var(--accent);
+    font-weight: 700; flex: 1; word-break: break-word; line-height: 1.5;
+  }
+
+  .row-val.amt { font-size: 1.15rem; color: #1a5276; }
+  .row-val.na  { color: var(--muted); font-weight: 400; font-size: 0.85rem; font-family: 'Outfit', sans-serif; }
+
+  .cp {
+    background: none; border: 1px solid var(--border);
+    color: var(--muted); padding: 2px 9px; border-radius: 6px;
+    font-size: 0.7rem; cursor: pointer; transition: all .18s; flex-shrink: 0;
+  }
+  .cp:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-icon">🏦</div>
+    <div>
+      <h1>CHEQUE READER</h1>
+      <p>Google Gemini Vision AI · 100% Free · No Credit Card</p>
+    </div>
+    <div class="g-badge">
+      <div class="g-dot" style="background:var(--google-blue)"></div>
+      <div class="g-dot" style="background:var(--google-red)"></div>
+      <div class="g-dot" style="background:var(--google-yellow)"></div>
+      <div class="g-dot" style="background:var(--google-green)"></div>
+      <span style="font-size:0.7rem;color:#333;margin-left:2px;">GEMINI</span>
+    </div>
+  </div>
+
+  <!-- Setup guide -->
+  <div class="steps-card">
+    <div class="steps-title">🔑 Get FREE Google Gemini API Key (2 minutes)</div>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div>Go to <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a> — sign in with your <b>Google account</b></div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div>Click <b>"Create API Key"</b> → Copy the key (starts with <code>AIza...</code>)</div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div>Paste the key below and upload your cheque image</div>
+    </div>
+    <div class="free-note">
+      ✅ <b>100% Free</b> — No credit card, no activation, works instantly after signup.<br>
+      📊 Free limits: <b>1,500 requests/day</b> with Gemini 2.0 Flash — more than enough for cheque scanning.
+    </div>
+  </div>
+
+  <!-- API Key -->
+  <div class="card">
+    <div class="card-title">🔑 Google Gemini API Key</div>
+    <input type="password" id="apikey" class="field" placeholder="AIzaSy...">
+    <p class="field-note">Get free key instantly at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a> — just sign in with Google</p>
+  </div>
+
+  <!-- Model -->
+  <div class="card">
+    <div class="card-title">🤖 Gemini Model</div>
+    <div class="model-pills">
+
+      <label class="mpill active" id="pill-gemini-2.0-flash" onclick="pick('gemini-2.0-flash')">
+        <input type="radio" name="m" value="gemini-2.0-flash" checked>
+        <div class="pill-name">gemini-2.0-flash</div>
+        <div class="pill-desc">Fast, free, excellent OCR. Best for cheques.</div>
+        <span class="pill-tag tag-rec">✓ RECOMMENDED</span>
+      </label>
+
+      <label class="mpill" id="pill-gemini-2.5-flash" onclick="pick('gemini-2.5-flash')">
+        <input type="radio" name="m" value="gemini-2.5-flash">
+        <div class="pill-name">gemini-2.5-flash</div>
+        <div class="pill-desc">Latest Flash. Smarter reasoning, still free.</div>
+        <span class="pill-tag tag-fast">⚡ LATEST FREE</span>
+      </label>
+
+      <label class="mpill" id="pill-gemini-2.5-pro" onclick="pick('gemini-2.5-pro')">
+        <input type="radio" name="m" value="gemini-2.5-pro">
+        <div class="pill-name">gemini-2.5-pro</div>
+        <div class="pill-desc">Most accurate. 50 requests/day free.</div>
+        <span class="pill-tag tag-best">★ MOST ACCURATE</span>
+      </label>
+
+    </div>
+  </div>
+
+  <!-- Upload -->
+  <div class="card">
+    <div class="card-title">📄 Cheque Image</div>
+    <div class="upload-zone" id="dropzone">
+      <input type="file" id="filein" accept="image/*">
+      <div class="upload-icon">📷</div>
+      <h3>Click to upload or drag & drop</h3>
+      <p>JPG, PNG, WEBP · Sampath, HNB, BOC, Commercial, any Sri Lankan bank</p>
+    </div>
+    <img id="preview" alt="cheque">
+    <button class="btn" id="scanBtn" onclick="scan()">🔍 SCAN CHEQUE WITH GEMINI AI</button>
+  </div>
+
+  <div class="loader" id="loader"><div class="spin"></div><p id="loaderTxt">Sending to Gemini...</p></div>
+  <div class="err"    id="errBox"></div>
+  <div class="results" id="results"></div>
+
+</div>
+<script>
+let b64 = null, mime = 'image/jpeg', model = 'gemini-2.0-flash';
+
+document.getElementById('filein').onchange = e => e.target.files[0] && load(e.target.files[0]);
+const dz = document.getElementById('dropzone');
+dz.ondragover = e => { e.preventDefault(); dz.classList.add('drag'); };
+dz.ondragleave = () => dz.classList.remove('drag');
+dz.ondrop = e => { e.preventDefault(); dz.classList.remove('drag'); e.dataTransfer.files[0] && load(e.dataTransfer.files[0]); };
+
+function load(f) {
+  mime = f.type || 'image/jpeg';
+  new FileReader().onload = ev => {
+    b64 = ev.target.result.split(',')[1];
+    const p = document.getElementById('preview');
+    p.src = ev.target.result; p.style.display = 'block';
+    document.getElementById('scanBtn').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    hide('errBox');
+  }, (new FileReader()).readAsDataURL(f);
+}
+
+// Fix: properly chain FileReader
+document.getElementById('filein').onchange = e => { if (e.target.files[0]) load(e.target.files[0]); };
+
+function load(f) {
+  mime = f.type || 'image/jpeg';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    b64 = ev.target.result.split(',')[1];
+    const p = document.getElementById('preview');
+    p.src = ev.target.result; p.style.display = 'block';
+    document.getElementById('scanBtn').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+    hide('errBox');
+  };
+  reader.readAsDataURL(f);
+}
+
+function pick(m) {
+  model = m;
+  document.querySelectorAll('.mpill').forEach(p => p.classList.remove('active'));
+  document.getElementById('pill-' + m)?.classList.add('active');
+}
+
+async function scan() {
+  const key = document.getElementById('apikey').value.trim();
+  if (!key) { showErr('Please enter your Gemini API key.', '<div class="err-fix">Get it free in 2 minutes at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#1a7a3a;">aistudio.google.com/apikey</a> — just sign in with your Google account.</div>'); return; }
+  if (!b64)  { showErr('Please upload a cheque image first.'); return; }
+
+  document.getElementById('scanBtn').disabled = true;
+  show('loader'); hide('errBox');
+  document.getElementById('results').style.display = 'none';
+  txt('loaderTxt', `Sending to ${model}...`);
+
+  const prompt = `You are an expert bank cheque OCR assistant specializing in Sri Lankan bank cheques.
+
+Carefully analyze every part of this cheque image.
+
+IMPORTANT - The MICR line is at the very bottom of the cheque in special printed font.
+It contains: CHEQUE_NUMBER  BANK_CODE  BRANCH_CODE  ACCOUNT_NUMBER
+Example: "000065" 7278 "201" 0010001100
+The symbols between numbers (⑈ or similar) are separators — ignore them, extract only the digit groups.
+
+Return ONLY a valid JSON object with NO markdown, NO explanation:
+{
+  "cheque_no": "cheque number from MICR line",
+  "bank_code": "bank code from MICR line",
+  "branch_code": "branch code from MICR line",
+  "account_no": "account number from MICR line",
+  "payee": "name written after Pay",
+  "amount_figures": "amount in the Rs. box e.g. 25,354.60",
+  "amount_words": "full amount written in words",
+  "date": "date in DD/MM/YYYY format",
+  "drawn_by": "account holder / company name printed on cheque",
+  "bank_name": "name of bank",
+  "branch_name": "branch name if visible",
+  "crossing": "e.g. A/C Payee Only or N/A"
+}
+Use "N/A" for any field you cannot read. Return ONLY the JSON.`;
+
+  try {
+    txt('loaderTxt', `Gemini is reading your cheque...`);
+
+    // Gemini API endpoint
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: mime, data: b64 } },
+            { text: prompt }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 1000
+        }
+      })
+    });
+
+    if (!res.ok) {
+      let em = `HTTP ${res.status}`;
+      try { const j = await res.json(); em = j.error?.message || em; } catch(e) {}
+      throw new Error(em);
+    }
+
+    const data = await res.json();
+    const raw  = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    if (!raw) throw new Error('Empty response from Gemini. Try again.');
+
+    const jm = raw.replace(/```json|```/g,'').trim().match(/\{[\s\S]*\}/);
+    if (!jm) throw new Error('Could not parse response. Raw: ' + raw.slice(0,200));
+
+    render(JSON.parse(jm[0]));
+
+  } catch(e) {
+    let fix = '';
+    const msg = e.message || '';
+    if (/api.key.not.valid|invalid.api.key|api_key_invalid/i.test(msg)) {
+      fix = `<div class="err-fix"><b>Fix:</b> Invalid API key. Get a new one at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#1a7a3a;">aistudio.google.com/apikey</a></div>`;
+    } else if (/quota|limit|429|resource.exhausted/i.test(msg)) {
+      fix = `<div class="err-fix"><b>Fix:</b> Daily limit reached. Switch to <b>gemini-2.0-flash</b> model (1,500 req/day free) or wait until midnight Pacific Time for reset.</div>`;
+    } else if (/fetch|network|failed/i.test(msg)) {
+      fix = `<div class="err-fix"><b>Fix:</b> Network error. Save this HTML file to your computer and open it directly in Chrome/Firefox.</div>`;
+    } else if (/permission|forbidden|403/i.test(msg)) {
+      fix = `<div class="err-fix"><b>Fix:</b> API key doesn't have Gemini access. Create a new key at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#1a7a3a;">aistudio.google.com/apikey</a></div>`;
+    }
+    showErr('❌ ' + msg, fix);
+  }
+
+  hide('loader');
+  document.getElementById('scanBtn').disabled = false;
+}
+
+function render(d) {
+  const rows = [
+    ['payee',         'Pay To',       false],
+    ['amount_figures','Amount (Rs.)', true ],
+    ['amount_words',  'In Words',     false],
+    ['date',          'Date',         false],
+    ['drawn_by',      'Drawn By',     false],
+    ['bank_name',     'Bank',         false],
+    ['branch_name',   'Branch',       false],
+    ['crossing',      'Crossing',     false],
+  ];
+
+  let h = `
+    <div class="res-header">
+      <span>📋 EXTRACTED CHEQUE DETAILS</span>
+      <span style="opacity:.65;font-size:.66rem;">${model}</span>
+    </div>
+    <div class="micr">
+      <div class="micr-item"><span class="micr-lbl">Cheque No</span><span class="micr-val">${d.cheque_no||'—'}</span></div>
+      <div class="micr-item"><span class="micr-lbl">Bank Code</span><span class="micr-val">${d.bank_code||'—'}</span></div>
+      <div class="micr-item"><span class="micr-lbl">Branch Code</span><span class="micr-val">${d.branch_code||'—'}</span></div>
+      <div class="micr-item"><span class="micr-lbl">Account No</span><span class="micr-val">${d.account_no||'—'}</span></div>
+    </div>`;
+
+  rows.forEach(([k,l,isAmt], i) => {
+    const v    = d[k] || 'N/A';
+    const isNA = !v || v === 'N/A' || v === 'null';
+    const safe = String(v).replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    h += `<div class="row" style="animation-delay:${i*.055}s">
+      <div class="row-lbl">${l}</div>
+      <div class="row-val ${isNA?'na':isAmt?'amt':''}">${v}</div>
+      ${!isNA?`<button class="cp" onclick="cp(this,'${safe}')">Copy</button>`:''}
+    </div>`;
+  });
+
+  const r = document.getElementById('results');
+  r.innerHTML = h; r.style.display = 'block';
+  setTimeout(() => r.scrollIntoView({ behavior:'smooth', block:'nearest' }), 100);
+}
+
+function showErr(msg, extra='') {
+  const b = document.getElementById('errBox');
+  b.innerHTML = `<b>${msg}</b>${extra}`;
+  b.style.display = 'block';
+}
+
+function cp(btn, v) {
+  navigator.clipboard.writeText(v).then(() => { btn.textContent='✓'; setTimeout(()=>btn.textContent='Copy',1500); });
+}
+
+function show(id) { document.getElementById(id).style.display='block'; }
+function hide(id) { document.getElementById(id).style.display='none'; }
+function txt(id,t) { document.getElementById(id).textContent=t; }
+</script>
+</body>
+</html>

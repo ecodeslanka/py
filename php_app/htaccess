@@ -1,0 +1,14 @@
+Options -Indexes
+RewriteEngine On
+
+# 1. Let real files and directories pass through untouched
+#    (covers save_payment.php, get_*.php, AJAX calls, assets, images etc.)
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# 2. Clean URL → serve the .php file silently (URL stays clean)
+#    e.g. /login         → login.php
+#    e.g. /view_employee → view_employee.php
+RewriteCond %{DOCUMENT_ROOT}%{REQUEST_URI}.php -f
+RewriteRule ^(.*)$ $1.php [L]
