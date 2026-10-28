@@ -103,6 +103,7 @@ if ($res) {
 $as_at_display = date('d M Y', $as_at_ts);
 $bcolors = ['1-7'=>'#3b82f6','8-14'=>'#22c55e','15-21'=>'#eab308','22-28'=>'#f97316','29-35'=>'#ef4444','35+'=>'#a855f7'];
 ?>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
 .sca-wrap{padding:0 4px;}
 .sca-title{font-size:22px;font-weight:800;margin-bottom:4px;}
@@ -158,6 +159,7 @@ table.sca tfoot td{background:#0a0c14;color:#fff;font-weight:800;}
         <div class="sca-btns">
             <button class="sca-btn" type="submit"><i class="fa-solid fa-filter"></i> Apply</button>
             <a class="sca-btn ghost" href="sampath_credit_aging_report.php">Reset</a>
+            <button class="sca-btn" type="button" style="background:#14532d;" onclick="scaExport()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
             <button class="sca-btn ghost" type="button" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
             <input type="text" id="scaSearch" placeholder="Search invoice / T code / party…" oninput="scaFilter(this.value)" style="margin-left:auto;border:1.5px solid #e2e6f0;border-radius:8px;padding:8px 12px;font-size:13px;min-width:240px;">
         </div>
@@ -193,7 +195,7 @@ table.sca tfoot td{background:#0a0c14;color:#fff;font-weight:800;}
         </tr></thead>
         <tbody>
         <?php $n = 1; foreach ($rows as $r): ?>
-        <tr data-search="<?php echo htmlspecialchars(strtolower($r['t_code'].' '.$r['party_name'].' '.$r['bill_no'])); ?>">
+        <tr data-idx="<?php echo $n - 1; ?>" data-search="<?php echo htmlspecialchars(strtolower($r['t_code'].' '.$r['party_name'].' '.$r['bill_no'])); ?>">
             <td><?php echo $n++; ?></td>
             <td><?php echo htmlspecialchars($r['t_code'] ?? ''); ?></td>
             <td><?php echo htmlspecialchars($r['party_name'] ?? ''); ?></td>
@@ -225,6 +227,45 @@ table.sca tfoot td{background:#0a0c14;color:#fff;font-weight:800;}
 </div>
 
 <script>
+const SCA_ROWS = <?php echo json_encode(array_values(array_map(function($r){
+    return [
+        't_code'=>$r['t_code'], 'party'=>$r['party_name'], 'bill_no'=>$r['bill_no'], 'bill_date'=>$r['bill_date'],
+        'aging'=>(int)$r['aging_days'], 'sec'=>(float)$r['secondary_value'], 'grn'=>(float)$r['grn_value'],
+        'chq'=>(float)$r['cheque_value'], 'chq_no'=>$r['cheque_no'], 'chq_date'=>$r['cheque_date'],
+        'cn'=>(float)$r['credit_note'], 'bal'=>(float)$r['balance'],
+    ];
+}, $rows)), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+const SCA_AS_AT = <?php echo json_encode($as_at_display); ?>;
+
+async function scaExport(){
+    // export only rows currently visible (respects the search box)
+    const vis = [...document.querySelectorAll('#scaTable tbody tr[data-idx]')]
+        .filter(tr => tr.style.display !== 'none')
+        .map(tr => SCA_ROWS[+tr.dataset.idx - 1]);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Sampath Credit Aging');
+    ws.addRow(['Sampath Credit Aging Report — as at ' + SCA_AS_AT]).font = {bold:true, size:14};
+    ws.addRow([]);
+    const hdr = ws.addRow(['No','T Code','Party','Invoice No','Bill Date','Aging (days)','Secondary Value','GRN Value','Cheque Paid','Cheque No','Cheque Date','Credit Note','Outstanding']);
+    hdr.eachCell(c => { c.font = {bold:true, color:{argb:'FFFFFFFF'}}; c.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FF0A0C14'}}; });
+    let t = {sec:0, grn:0, chq:0, cn:0, bal:0};
+    vis.forEach((r, i) => {
+        ws.addRow([i+1, r.t_code||'', r.party||'', r.bill_no, r.bill_date||'', r.aging, r.sec, r.grn||'', r.chq||'', r.chq_no||'', r.chq_date||'', r.cn||'', r.bal]);
+        t.sec+=r.sec; t.grn+=r.grn; t.chq+=r.chq; t.cn+=r.cn; t.bal+=r.bal;
+    });
+    const tot = ws.addRow(['','','','','','TOTAL', t.sec, t.grn, t.chq, '', '', t.cn, t.bal]);
+    tot.font = {bold:true};
+    [7,8,9,12,13].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
+    [1,2,3,4,5,6,7,8,9,10,11,12,13].forEach((c,i) => ws.getColumn(c).width = [5,12,32,16,12,12,16,16,16,18,12,14,16][i]);
+    ws.views = [{state:'frozen', ySplit:3}];
+    const buf = await wb.xlsx.writeBuffer();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    a.download = 'sampath_credit_aging_' + new Date().toISOString().slice(0,10) + '.xlsx';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
 function scaFilter(q){
     q = q.trim().toLowerCase();
     document.querySelectorAll('#scaTable tbody tr[data-search]').forEach(tr => {
