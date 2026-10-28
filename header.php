@@ -883,6 +883,16 @@ if (isset($conn) && $conn) {
                 <span class="ms-search-kbd">Ctrl+K</span>
             </div>
 
+            <div class="menu-section ms-dashboard-section">
+                <a href="index.php" data-tooltip="Dashboard" class="menu-item ms-dashboard-link <?php echo (basename($_SERVER['PHP_SELF']) == 'index.php') ? 'active' : ''; ?>">
+                    <div class="menu-item-content">
+                        <span class="menu-icon mti-icon-blue"><i class="fa-solid fa-chart-line"></i></span>
+                        <span>Dashboard</span>
+                    </div>
+                    <i class="fa-solid fa-chevron-right ms-dash-chevron"></i>
+                </a>
+            </div>
+
             <div class="menu-section ms-quick-section">
                 <div class="menu-title"><i class="fa-solid fa-star menu-title-icon mti-orange"></i><span>Quick Access</span></div>
                 <div class="menu-item has-submenu" data-tooltip="Daily Transaction Management" onclick="toggleSubmenu(this)">
@@ -1055,13 +1065,6 @@ if (isset($conn) && $conn) {
 
             <div class="menu-section">
                 <div class="menu-title"><i class="fa-solid fa-grip menu-title-icon mti-blue"></i><span>Main Menu</span></div>
-                <a href="index.php" data-tooltip="Dashboard" class="menu-item ms-dashboard-link <?php echo (basename($_SERVER['PHP_SELF']) == 'index.php') ? 'active' : ''; ?>">
-                    <div class="menu-item-content">
-                        <span class="menu-icon mti-icon-blue"><i class="fa-solid fa-chart-line"></i></span>
-                        <span>Dashboard</span>
-                    </div>
-                    <i class="fa-solid fa-chevron-right ms-dash-chevron"></i>
-                </a>
                 <div class="menu-item has-submenu" data-tooltip="Master" onclick="toggleSubmenu(this)">
                     <div class="menu-item-content">
                         <span class="menu-icon icon-purple"><i class="fa-solid fa-briefcase"></i></span>
