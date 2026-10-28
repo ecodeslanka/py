@@ -1,7 +1,7 @@
 <?php
 // ============================================================
 //  sampath_item_stock_report.php
-//  SAMPATH ITEM STOCK REPORT (no opening balance) with item-wise ledger
+//  SAMPATH ITEM STOCK REPORT (as-at-date running balance, no opening entry) with item-wise ledger
 //
 //  One row per item for the chosen period:
 //    Basepack Code / SKU7 (item code) / Product Name / UPC / Item Value
@@ -24,8 +24,10 @@ function isr_table_exists($conn, $t) {
 }
 function isr_upc($v) { return (float)preg_replace('/[^0-9.]/', '', (string)$v); }
 
-$f_from = trim($_GET['date_from'] ?? date('Y-m-01'));
-$f_to   = trim($_GET['date_to']   ?? date('Y-m-d'));
+/* Running balance as at a date (same basis as the Sampath Current Stock Report):
+   everything on record up to and including the As At date. */
+$f_from = '1970-01-01';
+$f_to   = trim($_GET['as_at_date'] ?? '') !== '' ? trim($_GET['as_at_date']) : date('Y-m-d');
 $f_q    = trim($_GET['q'] ?? '');
 $from   = mysqli_real_escape_string($conn, $f_from);
 $to     = mysqli_real_escape_string($conn, $f_to);
@@ -105,7 +107,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
     exit;
 }
 
-/* ── summary ── */
+/* ── summary (cumulative up to the As At date, like sampath_current_stock_report.php) ── */
 $master = isr_master($conn, $have);
 $acc = [];
 $touch = function ($code) use (&$acc) {
@@ -210,12 +212,11 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <div class="isr">
     <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
-    <div class="sub">Movements for the chosen period (no opening balance). Closing = Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment. Click an item to see its ledger.</div>
+    <div class="sub">Running balance as at the chosen date, taken from the same data as the Sampath Current Stock Report (Primary Qty = purchase qty × UPC). Closing = Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment. Click an item to see its ledger.</div>
 
     <form method="GET" class="isr-card">
         <div class="isr-f">
-            <div><label>From</label><input type="date" name="date_from" value="<?php echo htmlspecialchars($f_from); ?>"></div>
-            <div><label>To</label><input type="date" name="date_to" value="<?php echo htmlspecialchars($f_to); ?>"></div>
+            <div><label>As At Date</label><input type="date" name="as_at_date" value="<?php echo htmlspecialchars($f_to); ?>"></div>
             <div><label>Item</label><input type="text" name="q" value="<?php echo htmlspecialchars($f_q); ?>" placeholder="Code / name / basepack" style="min-width:220px"></div>
             <button class="isr-b" type="submit"><i class="fa-solid fa-filter"></i> Apply</button>
             <a class="isr-b l" href="sampath_item_stock_report.php">Reset</a>
@@ -250,7 +251,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <td class="n <?php echo $r['cval'] < 0 ? 'neg' : ''; ?>"><?php echo number_format($r['cval'], 2); ?></td>
         </tr>
         <?php endforeach; ?>
-        <?php if (!$rows): ?><tr><td colspan="13" style="text-align:center;padding:24px;color:#8892a4;">No movements found for this period.</td></tr><?php endif; ?>
+        <?php if (!$rows): ?><tr><td colspan="13" style="text-align:center;padding:24px;color:#8892a4;">No stock records found up to this date.</td></tr><?php endif; ?>
         </tbody>
         <tfoot><tr>
             <td colspan="5" style="text-align:right;">TOTAL — <?php echo count($rows); ?> items</td>
@@ -287,8 +288,8 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <script>
 const ISR_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
-const ISR_PERIOD = <?php echo json_encode($f_from . ' to ' . $f_to); ?>;
-const ISR_QS = <?php echo json_encode('date_from=' . urlencode($f_from) . '&date_to=' . urlencode($f_to)); ?>;
+const ISR_PERIOD = <?php echo json_encode('as at ' . $f_to); ?>;
+const ISR_QS = <?php echo json_encode('as_at_date=' . urlencode($f_to)); ?>;
 let isrLedgerData = null;
 const fm = v => Number(v).toLocaleString('en-US', {maximumFractionDigits:0});
 const fm0 = fm;
@@ -308,7 +309,7 @@ function isrLedger(code){
                  <td class="n">${d.upc ? fm0(d.upc) : '—'}</td>
                  <td class="n">${r.in ? fm(r.in) : '—'}</td><td class="n">${r.out ? fm(r.out) : '—'}</td>
                  <td class="n ${r.bal < 0 ? 'neg' : ''}"><strong>${fm(r.bal)}</strong></td></tr>`).join('')
-                : '<tr><td colspan="7" style="text-align:center;padding:20px;color:#8892a4">No movements in this period.</td></tr>';
+                : '<tr><td colspan="7" style="text-align:center;padding:20px;color:#8892a4">No movements up to this date.</td></tr>';
         }).catch(e => { document.getElementById('isrMSub').textContent = 'Failed to load: ' + e.message; });
 }
 function isrClose(){ document.getElementById('isrModal').classList.remove('open'); }
