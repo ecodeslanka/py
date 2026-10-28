@@ -906,6 +906,17 @@ if (isset($conn) && $conn) {
                     <a href="import_history.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'import_history.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Create Field Summary</span>
                     </a>
+                    <a href="unloading_import_history.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'unloading_import_history.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-truck-loading"></i><span>Create Unloading Sheet</span>
+                    </a>
+                    <a href="gse_list.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'gse_list.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-truck-loading"></i><span>Good Short/Excess</span>
+                    </a>
+                    <div class="submenu-item has-submenu" onclick="toggleSubmenu(this)" style="justify-content:space-between; cursor:pointer;">
+                        <span style="display:flex;align-items:center;gap:8px;"><i class="fa-solid fa-ellipsis"></i><span>More</span></span>
+                        <i class="fa-solid fa-chevron-down submenu-toggle"></i>
+                    </div>
+                    <div class="submenu" style="padding-left:12px;">
                     <a href="blacklisted_import_review.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'blacklisted_import_review.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-user-lock"></i><span>Blacklisted Import Review</span>
                     </a>
@@ -918,13 +929,6 @@ if (isset($conn) && $conn) {
                     <a href="field_summary_list.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'field_summary_list.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Field Summary List</span>
                     </a>
-                    <a href="unloading_import_history.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'unloading_import_history.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-truck-loading"></i><span>Create Unloading Sheet</span>
-                    </a>
-                    <a href="gse_list.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'gse_list.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-truck-loading"></i><span>Good Short/Excess</span>
-                    </a>
-                    
                       <a href="reconcile_unloading.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'reconcile_unloading.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Unloading Reconcile</span>
                     </a>
@@ -934,40 +938,31 @@ if (isset($conn) && $conn) {
                     <a href="invoices.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'invoices.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Invoices</span>
                     </a>
-                    
                        <a href="customer_summary.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'customer_summary.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Invoices Summary</span>
                     </a>
-                  
                     <a href="cc_cash_deposit.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cc_cash_deposit.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>CC Cash Deposit (SR)</span>
                     </a>
-                    
                       <a href="cc_cash_deposit_dp.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cc_cash_deposit_dp.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>CC Cash Deposit (DP)</span>
                     </a>
                     <a href="bo_cash_deposit.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bo_cash_deposit.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>BO Cash Deposit (SR)</span>
                     </a>
-                    
-                    
                        <a href="bo_cash_deposit_dp.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bo_cash_deposit_dp.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>BO Cash Deposit (DP)</span>
                     </a>
-                    
-             
                     <a href="bank_statements.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bank_statements.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Import Bank Statement</span>
                     </a>
                     <a href="cc_deposit_audit.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cc_deposit_audit.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Deposit Reconciliation</span>
                     </a>
-                    
                      <a href="grn_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'grn_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>GRN Report</span>
                     </a>
-                    
-               
+                    </div>
                 </div>
 
                 <div class="menu-item has-submenu" data-tooltip="Inventory Management" onclick="toggleSubmenu(this)">
@@ -2194,6 +2189,7 @@ if (isset($conn) && $conn) {
                         });
                         if (q !== '') {
                             submenu.classList.toggle('open', subHasMatch);
+                            submenu.querySelectorAll('.submenu').forEach(n => n.classList.toggle('open', subHasMatch));
                             const toggle = item.querySelector('.submenu-toggle');
                             if (toggle) toggle.classList.toggle('open', subHasMatch);
                         }
@@ -2250,11 +2246,14 @@ if (isset($conn) && $conn) {
         document.addEventListener('DOMContentLoaded', function() {
             const activeSubmenuItem = document.querySelector('.submenu-item.active');
             if (activeSubmenuItem) {
-                const submenu  = activeSubmenuItem.closest('.submenu');
-                const menuItem = submenu.previousElementSibling;
-                const toggle   = menuItem.querySelector('.submenu-toggle');
-                submenu.classList.add('open');
-                toggle.classList.add('open');
+                let submenu = activeSubmenuItem.closest('.submenu');
+                while (submenu) {
+                    const menuItem = submenu.previousElementSibling;
+                    const toggle   = menuItem && menuItem.querySelector('.submenu-toggle');
+                    submenu.classList.add('open');
+                    if (toggle) toggle.classList.add('open');
+                    submenu = submenu.parentElement.closest('.submenu');
+                }
             }
         });
 
