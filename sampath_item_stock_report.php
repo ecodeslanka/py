@@ -174,12 +174,11 @@ usort($rows, function ($a, $b) { return strcmp($a['sku7'], $b['sku7']); });
 
 include 'header.php';
 function nf($v) { return $v == 0 ? '—' : number_format($v, 2); }
-/* quantity cell: units, with cases (units / UPC) as a sub-label */
+/* whole-number quantity with thousands commas */
+function qn($v) { return number_format(round($v), 0); }
 function qcell($units, $upc, $neg = false) {
-    if ($units == 0) return '—';
-    $o = ($neg ? '-' : '') . number_format($units, 2);
-    if ($upc > 0) $o .= '<div style="font-size:10px;color:#6b7280">' . number_format($units / $upc, 2) . ' cs</div>';
-    return $o;
+    if (round($units) == 0) return '—';
+    return ($neg ? '-' : '') . qn($units);
 }
 ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
@@ -231,7 +230,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         <thead><tr>
             <th>Basepack Code</th><th>SKU7</th><th style="text-align:left">Product Name</th><th>Location</th><th>UPC</th>
             <th>Primary Purchase<br><small>units</small></th><th>Primary Returned<br><small>units</small></th><th>Secondary Inv<br><small>units</small></th><th>Good Rejected<br><small>units</small></th><th>Adjustment<br><small>units</small></th>
-            <th>Closing Balance<br><small>units</small></th><th>Closing<br><small>Cases + Units</small></th><th>Item Value</th><th>Closing Stock Value</th>
+            <th>Closing Balance<br><small>units</small></th><th>Item Value</th><th>Closing Stock Value</th>
         </tr></thead>
         <tbody>
         <?php foreach ($rows as $i => $r): ?>
@@ -240,29 +239,28 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <td><strong><?php echo htmlspecialchars($r['sku7']); ?></strong></td>
             <td><?php echo htmlspecialchars($r['name']); ?></td>
             <td><?php echo htmlspecialchars($r['location']); ?></td>
-            <td class="n"><?php echo $r['upc'] ? number_format($r['upc'], 0) : '—'; ?></td>
+            <td class="n"><?php echo $r['upc'] ? qn($r['upc']) : '—'; ?></td>
             <td class="n"><?php echo qcell($r['pc'], $r['upc']); ?></td>
             <td class="n"><?php echo qcell($r['rc'], $r['upc'], true); ?></td>
             <td class="n"><?php echo qcell($r['so'], $r['upc'], true); ?></td>
             <td class="n"><?php echo qcell($r['rej'], $r['upc'], true); ?></td>
-            <td class="n"><?php echo $r['adj'] == 0 ? '—' : number_format($r['adj'], 2); ?></td>
-            <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo number_format($r['close'], 2); ?></strong></td>
-            <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><?php echo $r['upc'] ? $r['close_cases'] . ' cs + ' . number_format($r['close_rem'], 0) . ' u' : '—'; ?></td>
+            <td class="n"><?php echo qcell($r['adj'], 0); ?></td>
+            <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo qn($r['close']); ?></strong></td>
             <td class="n"><?php echo $r['value'] ? number_format($r['value'], 2) : '—'; ?></td>
             <td class="n <?php echo $r['cval'] < 0 ? 'neg' : ''; ?>"><?php echo number_format($r['cval'], 2); ?></td>
         </tr>
         <?php endforeach; ?>
-        <?php if (!$rows): ?><tr><td colspan="14" style="text-align:center;padding:24px;color:#8892a4;">No movements found for this period.</td></tr><?php endif; ?>
+        <?php if (!$rows): ?><tr><td colspan="13" style="text-align:center;padding:24px;color:#8892a4;">No movements found for this period.</td></tr><?php endif; ?>
         </tbody>
         <tfoot><tr>
             <td colspan="5" style="text-align:right;">TOTAL — <?php echo count($rows); ?> items</td>
-            <td class="n"><?php echo number_format($tot['pc'], 2); ?></td>
-            <td class="n"><?php echo number_format(-$tot['rc'], 2); ?></td>
-            <td class="n"><?php echo number_format(-$tot['so'], 2); ?></td>
-            <td class="n"><?php echo number_format(-$tot['rej'], 2); ?></td>
-            <td class="n"><?php echo number_format($tot['adj'], 2); ?></td>
-            <td class="n"><?php echo number_format($tot['close'], 2); ?></td>
-            <td></td><td></td>
+            <td class="n"><?php echo qn($tot['pc']); ?></td>
+            <td class="n"><?php echo qn(-$tot['rc']); ?></td>
+            <td class="n"><?php echo qn(-$tot['so']); ?></td>
+            <td class="n"><?php echo qn(-$tot['rej']); ?></td>
+            <td class="n"><?php echo qn($tot['adj']); ?></td>
+            <td class="n"><?php echo qn($tot['close']); ?></td>
+            <td></td>
             <td class="n"><?php echo number_format($tot['val'], 2); ?></td>
         </tr></tfoot>
     </table>
@@ -280,7 +278,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         </header>
         <div class="body">
             <table class="isr-t" style="margin-top:12px">
-                <thead><tr><th>Date</th><th style="text-align:left">Type</th><th style="text-align:left">Reference</th><th>Qty</th><th>UPC</th><th>In (units)</th><th>Out (units)</th><th>Balance (units)</th></tr></thead>
+                <thead><tr><th>Date</th><th style="text-align:left">Type</th><th style="text-align:left">Reference</th><th>UPC</th><th>In (units)</th><th>Out (units)</th><th>Balance (units)</th></tr></thead>
                 <tbody id="isrMBody"></tbody>
             </table>
         </div>
@@ -292,7 +290,8 @@ const ISR_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX
 const ISR_PERIOD = <?php echo json_encode($f_from . ' to ' . $f_to); ?>;
 const ISR_QS = <?php echo json_encode('date_from=' . urlencode($f_from) . '&date_to=' . urlencode($f_to)); ?>;
 let isrLedgerData = null;
-const fm = v => Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+const fm = v => Number(v).toLocaleString('en-US', {maximumFractionDigits:0});
+const fm0 = fm;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 function isrLedger(code){
@@ -303,13 +302,13 @@ function isrLedger(code){
     fetch('sampath_item_stock_report.php?ajax=ledger&' + ISR_QS + '&item_code=' + encodeURIComponent(code))
         .then(r => r.json()).then(d => {
             isrLedgerData = d;
-            document.getElementById('isrMSub').textContent = (d.name || '') + ' · ' + ISR_PERIOD + ' · UPC ' + d.upc + ' · Closing ' + fm(d.closing);
+            document.getElementById('isrMSub').textContent = (d.name || '') + ' · ' + ISR_PERIOD + ' · UPC ' + fm(d.upc) + ' · Closing ' + fm(d.closing);
             document.getElementById('isrMBody').innerHTML = d.rows.length ? d.rows.map(r =>
                 `<tr><td style="text-align:center">${esc(r.d)}</td><td>${esc(r.t)}</td><td>${esc(r.ref)}</td>
-                 <td class="n">${fm(r.qty)} ${r.uom === 'cases' ? 'cs' : 'u'}</td><td class="n">${d.upc || '—'}</td>
+                 <td class="n">${d.upc ? fm0(d.upc) : '—'}</td>
                  <td class="n">${r.in ? fm(r.in) : '—'}</td><td class="n">${r.out ? fm(r.out) : '—'}</td>
                  <td class="n ${r.bal < 0 ? 'neg' : ''}"><strong>${fm(r.bal)}</strong></td></tr>`).join('')
-                : '<tr><td colspan="8" style="text-align:center;padding:20px;color:#8892a4">No movements in this period.</td></tr>';
+                : '<tr><td colspan="7" style="text-align:center;padding:20px;color:#8892a4">No movements in this period.</td></tr>';
         }).catch(e => { document.getElementById('isrMSub').textContent = 'Failed to load: ' + e.message; });
 }
 function isrClose(){ document.getElementById('isrModal').classList.remove('open'); }
@@ -326,20 +325,21 @@ function isrHead(row){ row.eachCell(c => { c.font = {bold:true}; c.fill = {type:
 async function isrExport(){
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Item Stock');
     ws.addRow(['Sampath Item Stock Report — ' + ISR_PERIOD]).font = {bold:true, size:14};
-    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)','Closing Cases','Closing Units','Item Value','Closing Stock Value']));
-    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.pc, -r.rc, -r.so, -r.rej, r.adj, r.close, r.close_cases, r.close_rem, r.value, r.cval]));
-    [6,7,8,9,10,11,14,15].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
-    [14,12,40,14,8,14,14,14,14,12,14,10,10,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
+    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)','Item Value','Closing Stock Value']));
+    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.pc, -r.rc, -r.so, -r.rej, r.adj, r.close, r.value, r.cval]));
+    [5,6,7,8,9,10,11].forEach(c => ws.getColumn(c).numFmt = '#,##0');
+    [13,14].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
+    [14,12,40,14,8,14,14,14,14,12,14,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
     await isrSave(wb, 'sampath_item_stock_' + new Date().toISOString().slice(0,10) + '.xlsx');
 }
 async function isrLedgerExport(){
     if (!isrLedgerData) return;
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Ledger');
     ws.addRow(['Item Ledger — ' + isrLedgerData.item + ' ' + (isrLedgerData.name||'') + ' (' + ISR_PERIOD + ')']).font = {bold:true, size:13};
-    isrHead(ws.addRow(['Date','Type','Reference','Qty','Qty UOM','UPC','In (units)','Out (units)','Balance (units)']));
-    isrLedgerData.rows.forEach(r => ws.addRow([r.d, r.t, r.ref, r.qty, r.uom, isrLedgerData.upc, r.in, r.out, r.bal]));
-    [4,7,8,9].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
-    [12,18,40,10,9,8,12,12,14].forEach((w,i) => ws.getColumn(i+1).width = w);
+    isrHead(ws.addRow(['Date','Type','Reference','UPC','In (units)','Out (units)','Balance (units)']));
+    isrLedgerData.rows.forEach(r => ws.addRow([r.d, r.t, r.ref, isrLedgerData.upc, r.in, r.out, r.bal]));
+    [4,5,6,7].forEach(c => ws.getColumn(c).numFmt = '#,##0');
+    [12,18,40,8,12,12,14].forEach((w,i) => ws.getColumn(i+1).width = w);
     await isrSave(wb, 'item_ledger_' + isrLedgerData.item + '.xlsx');
 }
 </script>
