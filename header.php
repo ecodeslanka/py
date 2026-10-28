@@ -916,7 +916,7 @@ if (isset($conn) && $conn) {
                         <span style="display:flex;align-items:center;gap:8px;"><i class="fa-solid fa-ellipsis"></i><span>More</span></span>
                         <i class="fa-solid fa-chevron-down submenu-toggle"></i>
                     </div>
-                    <div class="submenu" style="padding-left:12px;">
+                    <div class="submenu ms-more-sub" style="padding-left:12px;">
                     <a href="blacklisted_import_review.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'blacklisted_import_review.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-user-lock"></i><span>Blacklisted Import Review</span>
                     </a>
@@ -2250,8 +2250,10 @@ if (isset($conn) && $conn) {
                 while (submenu) {
                     const menuItem = submenu.previousElementSibling;
                     const toggle   = menuItem && menuItem.querySelector('.submenu-toggle');
-                    submenu.classList.add('open');
-                    if (toggle) toggle.classList.add('open');
+                    if (!submenu.classList.contains('ms-more-sub')) {
+                        submenu.classList.add('open');
+                        if (toggle) toggle.classList.add('open');
+                    }
                     submenu = submenu.parentElement.closest('.submenu');
                 }
             }
