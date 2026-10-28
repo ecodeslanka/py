@@ -67,7 +67,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
             WHERE p.item_code = '$ce' AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$from' AND '$to'");
         while ($q && $r = mysqli_fetch_assoc($q))
             $ev[] = ['d'=>$r['d'], 't'=>'Primary Purchase', 'ref'=>trim(($r['invoice_number'] ?: '') . ' ' . ($r['supplier_invoice_no'] ? '('.$r['supplier_invoice_no'].')' : '')),
-                     'in'=>(float)$r['q'] * $upc, 'out'=>0];
+                     'in'=>(float)$r['q'] * $upc, 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'cases'];
     }
     if ($have['unilever_item_return_items'] && $have['unilever_item_returns']) {
         $q = mysqli_query($conn, "SELECT r.return_date AS d, r.return_no, r.reason, ri.qty AS q
@@ -75,7 +75,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
             WHERE ri.item_code = '$ce' AND r.return_date BETWEEN '$from' AND '$to'");
         while ($q && $r = mysqli_fetch_assoc($q))
             $ev[] = ['d'=>$r['d'], 't'=>'Primary Returned', 'ref'=>trim($r['return_no'] . ' ' . ($r['reason'] ?? '')),
-                     'in'=>0, 'out'=>(float)$r['q'] * $upc];
+                     'in'=>0, 'out'=>(float)$r['q'] * $upc, 'qty'=>(float)$r['q'], 'uom'=>'cases'];
     }
     if ($have['invoice_wise_sales_data']) {
         $q = mysqli_query($conn, "SELECT delivery_date AS d, bill_number, outlet_name, units AS q
@@ -83,7 +83,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
             WHERE product_code = '$ce' AND delivery_date BETWEEN '$from' AND '$to'");
         while ($q && $r = mysqli_fetch_assoc($q))
             $ev[] = ['d'=>$r['d'], 't'=>'Secondary Inv', 'ref'=>trim($r['bill_number'] . ' ' . ($r['outlet_name'] ?? '')),
-                     'in'=>0, 'out'=>(float)$r['q']];
+                     'in'=>0, 'out'=>(float)$r['q'], 'qty'=>(float)$r['q'], 'uom'=>'units'];
     }
     if ($have['stock_manual_adjustments']) {
         $q = mysqli_query($conn, "SELECT entry_date AS d, rejected_qty, adjustment_qty, note
@@ -91,10 +91,10 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
             WHERE item_code = '$ce' AND entry_date BETWEEN '$from' AND '$to'");
         while ($q && $r = mysqli_fetch_assoc($q)) {
             if ((float)$r['rejected_qty'] != 0)
-                $ev[] = ['d'=>$r['d'], 't'=>'Good Rejected', 'ref'=>$r['note'] ?? '', 'in'=>0, 'out'=>(float)$r['rejected_qty']];
+                $ev[] = ['d'=>$r['d'], 't'=>'Good Rejected', 'ref'=>$r['note'] ?? '', 'in'=>0, 'out'=>(float)$r['rejected_qty'], 'qty'=>(float)$r['rejected_qty'], 'uom'=>'units'];
             if ((float)$r['adjustment_qty'] != 0) {
                 $a = (float)$r['adjustment_qty'];
-                $ev[] = ['d'=>$r['d'], 't'=>'Adjustment', 'ref'=>$r['note'] ?? '', 'in'=>$a > 0 ? $a : 0, 'out'=>$a < 0 ? -$a : 0];
+                $ev[] = ['d'=>$r['d'], 't'=>'Adjustment', 'ref'=>$r['note'] ?? '', 'in'=>$a > 0 ? $a : 0, 'out'=>$a < 0 ? -$a : 0, 'qty'=>abs($a), 'uom'=>'units'];
             }
         }
     }
@@ -160,7 +160,11 @@ foreach ($acc as $code => $a) {
     if ($f_q !== '' && stripos($code . ' ' . $name . ' ' . $bp, $f_q) === false) continue;
     $close = $a['pc'] - $a['rc'] - $a['so'] - $a['rej'] + $a['adj'];
     $value = (float)($m['value'] ?? 0);
-    $rows[] = ['basepack'=>$bp, 'sku7'=>$code, 'name'=>$name, 'location'=>$loc[$code] ?? '',
+    $upc_v = (float)($m['upc'] ?? 0);
+    $cases = $upc_v > 0 ? (int)floor(abs($close) / $upc_v) * ($close < 0 ? -1 : 1) : 0;
+    $rem   = $upc_v > 0 ? round($close - $cases * $upc_v, 2) : round($close, 2);
+    $rows[] = ['basepack'=>$bp, 'sku7'=>$code, 'name'=>$name, 'location'=>$loc[$code] ?? '', 'upc'=>$upc_v,
+        'close_cases'=>$cases, 'close_rem'=>$rem,
         'pc'=>round($a['pc'],2), 'rc'=>round($a['rc'],2), 'so'=>round($a['so'],2), 'rej'=>round($a['rej'],2), 'adj'=>round($a['adj'],2),
         'close'=>round($close,2), 'value'=>$value, 'cval'=>round($close * $value, 2)];
     foreach (['pc','rc','so','rej','adj'] as $k) $tot[$k] += $a[$k];
@@ -170,6 +174,13 @@ usort($rows, function ($a, $b) { return strcmp($a['sku7'], $b['sku7']); });
 
 include 'header.php';
 function nf($v) { return $v == 0 ? '—' : number_format($v, 2); }
+/* quantity cell: units, with cases (units / UPC) as a sub-label */
+function qcell($units, $upc, $neg = false) {
+    if ($units == 0) return '—';
+    $o = ($neg ? '-' : '') . number_format($units, 2);
+    if ($upc > 0) $o .= '<div style="font-size:10px;color:#6b7280">' . number_format($units / $upc, 2) . ' cs</div>';
+    return $o;
+}
 ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
@@ -218,9 +229,9 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
     <div class="isr-wrap">
     <table class="isr-t" id="isrTable">
         <thead><tr>
-            <th>Basepack Code</th><th>SKU7</th><th style="text-align:left">Product Name</th><th>Location</th>
-            <th>Primary Purchase</th><th>Primary Returned</th><th>Secondary Inv</th><th>Good Rejected</th><th>Adjustment</th>
-            <th>Closing Balance</th><th>Item Value</th><th>Closing Stock Value</th>
+            <th>Basepack Code</th><th>SKU7</th><th style="text-align:left">Product Name</th><th>Location</th><th>UPC</th>
+            <th>Primary Purchase<br><small>units</small></th><th>Primary Returned<br><small>units</small></th><th>Secondary Inv<br><small>units</small></th><th>Good Rejected<br><small>units</small></th><th>Adjustment<br><small>units</small></th>
+            <th>Closing Balance<br><small>units</small></th><th>Closing<br><small>Cases + Units</small></th><th>Item Value</th><th>Closing Stock Value</th>
         </tr></thead>
         <tbody>
         <?php foreach ($rows as $i => $r): ?>
@@ -229,27 +240,29 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <td><strong><?php echo htmlspecialchars($r['sku7']); ?></strong></td>
             <td><?php echo htmlspecialchars($r['name']); ?></td>
             <td><?php echo htmlspecialchars($r['location']); ?></td>
-            <td class="n"><?php echo nf($r['pc']); ?></td>
-            <td class="n"><?php echo $r['rc'] ? '-' . number_format($r['rc'], 2) : '—'; ?></td>
-            <td class="n"><?php echo $r['so'] ? '-' . number_format($r['so'], 2) : '—'; ?></td>
-            <td class="n"><?php echo $r['rej'] ? '-' . number_format($r['rej'], 2) : '—'; ?></td>
-            <td class="n"><?php echo nf($r['adj']); ?></td>
+            <td class="n"><?php echo $r['upc'] ? number_format($r['upc'], 0) : '—'; ?></td>
+            <td class="n"><?php echo qcell($r['pc'], $r['upc']); ?></td>
+            <td class="n"><?php echo qcell($r['rc'], $r['upc'], true); ?></td>
+            <td class="n"><?php echo qcell($r['so'], $r['upc'], true); ?></td>
+            <td class="n"><?php echo qcell($r['rej'], $r['upc'], true); ?></td>
+            <td class="n"><?php echo $r['adj'] == 0 ? '—' : number_format($r['adj'], 2); ?></td>
             <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo number_format($r['close'], 2); ?></strong></td>
+            <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><?php echo $r['upc'] ? $r['close_cases'] . ' cs + ' . number_format($r['close_rem'], 0) . ' u' : '—'; ?></td>
             <td class="n"><?php echo $r['value'] ? number_format($r['value'], 2) : '—'; ?></td>
             <td class="n <?php echo $r['cval'] < 0 ? 'neg' : ''; ?>"><?php echo number_format($r['cval'], 2); ?></td>
         </tr>
         <?php endforeach; ?>
-        <?php if (!$rows): ?><tr><td colspan="12" style="text-align:center;padding:24px;color:#8892a4;">No movements found for this period.</td></tr><?php endif; ?>
+        <?php if (!$rows): ?><tr><td colspan="14" style="text-align:center;padding:24px;color:#8892a4;">No movements found for this period.</td></tr><?php endif; ?>
         </tbody>
         <tfoot><tr>
-            <td colspan="4" style="text-align:right;">TOTAL — <?php echo count($rows); ?> items</td>
+            <td colspan="5" style="text-align:right;">TOTAL — <?php echo count($rows); ?> items</td>
             <td class="n"><?php echo number_format($tot['pc'], 2); ?></td>
             <td class="n"><?php echo number_format(-$tot['rc'], 2); ?></td>
             <td class="n"><?php echo number_format(-$tot['so'], 2); ?></td>
             <td class="n"><?php echo number_format(-$tot['rej'], 2); ?></td>
             <td class="n"><?php echo number_format($tot['adj'], 2); ?></td>
             <td class="n"><?php echo number_format($tot['close'], 2); ?></td>
-            <td></td>
+            <td></td><td></td>
             <td class="n"><?php echo number_format($tot['val'], 2); ?></td>
         </tr></tfoot>
     </table>
@@ -267,7 +280,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         </header>
         <div class="body">
             <table class="isr-t" style="margin-top:12px">
-                <thead><tr><th>Date</th><th style="text-align:left">Type</th><th style="text-align:left">Reference</th><th>In</th><th>Out</th><th>Balance</th></tr></thead>
+                <thead><tr><th>Date</th><th style="text-align:left">Type</th><th style="text-align:left">Reference</th><th>Qty</th><th>UPC</th><th>In (units)</th><th>Out (units)</th><th>Balance (units)</th></tr></thead>
                 <tbody id="isrMBody"></tbody>
             </table>
         </div>
@@ -293,9 +306,10 @@ function isrLedger(code){
             document.getElementById('isrMSub').textContent = (d.name || '') + ' · ' + ISR_PERIOD + ' · UPC ' + d.upc + ' · Closing ' + fm(d.closing);
             document.getElementById('isrMBody').innerHTML = d.rows.length ? d.rows.map(r =>
                 `<tr><td style="text-align:center">${esc(r.d)}</td><td>${esc(r.t)}</td><td>${esc(r.ref)}</td>
+                 <td class="n">${fm(r.qty)} ${r.uom === 'cases' ? 'cs' : 'u'}</td><td class="n">${d.upc || '—'}</td>
                  <td class="n">${r.in ? fm(r.in) : '—'}</td><td class="n">${r.out ? fm(r.out) : '—'}</td>
                  <td class="n ${r.bal < 0 ? 'neg' : ''}"><strong>${fm(r.bal)}</strong></td></tr>`).join('')
-                : '<tr><td colspan="6" style="text-align:center;padding:20px;color:#8892a4">No movements in this period.</td></tr>';
+                : '<tr><td colspan="8" style="text-align:center;padding:20px;color:#8892a4">No movements in this period.</td></tr>';
         }).catch(e => { document.getElementById('isrMSub').textContent = 'Failed to load: ' + e.message; });
 }
 function isrClose(){ document.getElementById('isrModal').classList.remove('open'); }
@@ -312,20 +326,20 @@ function isrHead(row){ row.eachCell(c => { c.font = {bold:true}; c.fill = {type:
 async function isrExport(){
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Item Stock');
     ws.addRow(['Sampath Item Stock Report — ' + ISR_PERIOD]).font = {bold:true, size:14};
-    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','Primary Purchase','Primary Returned','Secondary Inv','Good Rejected','Adjustment','Closing Balance','Item Value','Closing Stock Value']));
-    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.pc, -r.rc, -r.so, -r.rej, r.adj, r.close, r.value, r.cval]));
-    [5,6,7,8,9,10,11,12].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
-    [14,12,40,14,14,14,14,14,12,14,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
+    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)','Closing Cases','Closing Units','Item Value','Closing Stock Value']));
+    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.pc, -r.rc, -r.so, -r.rej, r.adj, r.close, r.close_cases, r.close_rem, r.value, r.cval]));
+    [6,7,8,9,10,11,14,15].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
+    [14,12,40,14,8,14,14,14,14,12,14,10,10,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
     await isrSave(wb, 'sampath_item_stock_' + new Date().toISOString().slice(0,10) + '.xlsx');
 }
 async function isrLedgerExport(){
     if (!isrLedgerData) return;
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Ledger');
     ws.addRow(['Item Ledger — ' + isrLedgerData.item + ' ' + (isrLedgerData.name||'') + ' (' + ISR_PERIOD + ')']).font = {bold:true, size:13};
-    isrHead(ws.addRow(['Date','Type','Reference','In','Out','Balance']));
-    isrLedgerData.rows.forEach(r => ws.addRow([r.d, r.t, r.ref, r.in, r.out, r.bal]));
-    [4,5,6].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
-    [12,18,40,12,12,14].forEach((w,i) => ws.getColumn(i+1).width = w);
+    isrHead(ws.addRow(['Date','Type','Reference','Qty','Qty UOM','UPC','In (units)','Out (units)','Balance (units)']));
+    isrLedgerData.rows.forEach(r => ws.addRow([r.d, r.t, r.ref, r.qty, r.uom, isrLedgerData.upc, r.in, r.out, r.bal]));
+    [4,7,8,9].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
+    [12,18,40,10,9,8,12,12,14].forEach((w,i) => ws.getColumn(i+1).width = w);
     await isrSave(wb, 'item_ledger_' + isrLedgerData.item + '.xlsx');
 }
 </script>
