@@ -195,7 +195,7 @@ table.sca tfoot td{background:#0a0c14;color:#fff;font-weight:800;}
         </tr></thead>
         <tbody>
         <?php $n = 1; foreach ($rows as $r): ?>
-        <tr data-idx="<?php echo $n - 1; ?>" data-search="<?php echo htmlspecialchars(strtolower($r['t_code'].' '.$r['party_name'].' '.$r['bill_no'])); ?>">
+        <tr data-idx="<?php echo $n; ?>" data-search="<?php echo htmlspecialchars(strtolower($r['t_code'].' '.$r['party_name'].' '.$r['bill_no'])); ?>">
             <td><?php echo $n++; ?></td>
             <td><?php echo htmlspecialchars($r['t_code'] ?? ''); ?></td>
             <td><?php echo htmlspecialchars($r['party_name'] ?? ''); ?></td>
