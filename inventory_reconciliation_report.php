@@ -11,8 +11,8 @@
 //    TUR                    -> latest TUR per item: invoice_wise_sales_data.tur, else primary_invoice_wise_sales_data.tur,
 //                              else unit price from the purchase import (price per case / UPC)
 //    Opening Inventory      -> closing good stock as at the From date (range mode)
-//    Primary Purchase       -> unilever_purchase_items.purchase_qty_cases x UPC
-//    Primary Return         -> unilever_item_return_items.qty x UPC
+//    Primary Purchase       -> unilever_purchase_items.purchase_qty_cases x UPC (PLUS qty rows only)
+//    Primary Return         -> unilever_item_return_items.qty x UPC + the MINUS qty rows of the purchase import
 //    Pre Secondary          -> primary_invoice_wise_sales_data.units (Daily Pre Secondary Stock)
 //    Secondary              -> invoice_wise_sales_data.units (Daily Secondary Stock)
 //    Diff                   = Pre Secondary - Secondary
@@ -70,16 +70,17 @@ function irr_aggregate($conn, $have, $master, $from, $to, &$errors) {
     $acc = []; $names = [];
     $t = function ($c) use (&$acc) { if (!isset($acc[$c])) $acc[$c] = ['pc'=>0.0,'rc'=>0.0,'pre'=>0.0,'sec'=>0.0,'rej'=>0.0,'adj'=>0.0,'dmg'=>0.0,'name'=>null,'bp'=>null]; };
     if ($have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
-        $q = mysqli_query($conn, "SELECT p.item_code, SUM(p.purchase_qty_cases) AS q FROM unilever_purchase_items p JOIN unilever_purchase_batches b ON b.id = p.batch_id
+        /* purchase import rows with a MINUS qty are purchase returns: purchase = plus rows, return = minus rows */
+        $q = mysqli_query($conn, "SELECT p.item_code, SUM(CASE WHEN p.purchase_qty_cases > 0 THEN p.purchase_qty_cases ELSE 0 END) AS q, SUM(CASE WHEN p.purchase_qty_cases < 0 THEN -p.purchase_qty_cases ELSE 0 END) AS rq FROM unilever_purchase_items p JOIN unilever_purchase_batches b ON b.id = p.batch_id
             WHERE p.item_code <> '' AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$from' AND '$to' GROUP BY p.item_code");
         if (!$q) $errors[] = mysqli_error($conn);
-        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $t($c); $acc[$c]['pc'] = (float)$r['q'] * ($master[$c]['upc'] ?? 0); }
+        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $t($c); $acc[$c]['pc'] = (float)$r['q'] * ($master[$c]['upc'] ?? 0); $acc[$c]['rc'] += (float)$r['rq'] * ($master[$c]['upc'] ?? 0); }
     }
     if ($have['unilever_item_return_items'] && $have['unilever_item_returns']) {
         $q = mysqli_query($conn, "SELECT ri.item_code, SUM(ri.qty) AS q FROM unilever_item_return_items ri JOIN unilever_item_returns r ON r.id = ri.return_id
             WHERE ri.item_code <> '' AND r.return_date BETWEEN '$from' AND '$to' GROUP BY ri.item_code");
         if (!$q) $errors[] = mysqli_error($conn);
-        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $t($c); $acc[$c]['rc'] = (float)$r['q'] * ($master[$c]['upc'] ?? 0); }
+        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $t($c); $acc[$c]['rc'] += (float)$r['q'] * ($master[$c]['upc'] ?? 0); }
     }
     foreach (['pre' => 'primary_invoice_wise_sales_data', 'sec' => 'invoice_wise_sales_data'] as $k => $tbl) {
         if (!$have[$tbl]) continue;

@@ -7,7 +7,8 @@
 //    Basepack Code / SKU7 (item code) / Product Name / UPC / Item Value
 //        -> unilever_purchase_items (latest row per item code)
 //    Location                -> sampath_damage_grn_items.location (latest, if recorded; else blank)
-//    Primary Purchase        -> unilever_purchase_items.purchase_qty_cases x UPC  (units)
+//    Primary Purchase        -> unilever_purchase_items.purchase_qty_cases x UPC  (units) - PLUS qty rows only
+//    Primary Returned        -> unilever_item_return_items.qty x UPC + the MINUS qty rows of the purchase import (purchase returns)
 //    Primary Returned        -> unilever_item_return_items.qty x UPC              (units)
 //    Secondary Inv           -> invoice_wise_sales_data.units                     (units)
 //    Good Rejected           -> stock_manual_adjustments.rejected_qty             (units, Sampath Goods Rejected)
@@ -114,8 +115,11 @@ function isr_ledger_events($conn, $have, $ce, $upc, $loc, $f_cust, $cust_sql, $d
             FROM unilever_purchase_items p JOIN unilever_purchase_batches b ON b.id = p.batch_id
             WHERE p.item_code = '$ce' AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$d1' AND '$d2'");
         while ($q && $r = mysqli_fetch_assoc($q))
-            $ev[] = ['d'=>$r['d'], 't'=>'Primary Purchase', 'ref'=>trim(($r['invoice_number'] ?: '') . ' ' . ($r['supplier_invoice_no'] ? '('.$r['supplier_invoice_no'].')' : '')),
-                     'in'=>(float)$r['q'] * $upc, 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'cases'];
+            $ev[] = ((float)$r['q'] >= 0)
+                ? ['d'=>$r['d'], 't'=>'Primary Purchase', 'ref'=>trim(($r['invoice_number'] ?: '') . ' ' . ($r['supplier_invoice_no'] ? '('.$r['supplier_invoice_no'].')' : '')),
+                   'in'=>(float)$r['q'] * $upc, 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'cases']
+                : ['d'=>$r['d'], 't'=>'Primary Returned', 'ref'=>trim(($r['invoice_number'] ?: '') . ' (purchase import, minus qty)'),
+                   'in'=>0, 'out'=>-(float)$r['q'] * $upc, 'qty'=>-(float)$r['q'], 'uom'=>'cases'];
     }
     if (!$f_cust && $have['unilever_item_return_items'] && $have['unilever_item_returns']) {
         $q = mysqli_query($conn, "SELECT r.return_date AS d, r.return_no, r.reason, ri.qty AS q
@@ -184,18 +188,19 @@ function isr_aggregate($conn, $have, $master, $from, $to, $cust_sql, $f_cust, &$
         if (!isset($acc[$code])) $acc[$code] = ['pc'=>0.0,'rc'=>0.0,'so'=>0.0,'rej'=>0.0,'adj'=>0.0,'name'=>null,'basepack'=>null];
     };
     if (!$f_cust && $have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
-        $q = mysqli_query($conn, "SELECT p.item_code, SUM(p.purchase_qty_cases) AS q
+        /* purchase import rows with a MINUS qty are purchase returns: purchase = the plus rows, return = the minus rows */
+        $q = mysqli_query($conn, "SELECT p.item_code, SUM(CASE WHEN p.purchase_qty_cases > 0 THEN p.purchase_qty_cases ELSE 0 END) AS q, SUM(CASE WHEN p.purchase_qty_cases < 0 THEN -p.purchase_qty_cases ELSE 0 END) AS rq
             FROM unilever_purchase_items p JOIN unilever_purchase_batches b ON b.id = p.batch_id
             WHERE p.item_code <> '' AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$from' AND '$to' GROUP BY p.item_code");
         if (!$q) $errors[] = mysqli_error($conn);
-        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $touch($c); $acc[$c]['pc'] = (float)$r['q'] * ($master[$c]['upc'] ?? 0); }
+        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $touch($c); $acc[$c]['pc'] = (float)$r['q'] * ($master[$c]['upc'] ?? 0); $acc[$c]['rc'] += (float)$r['rq'] * ($master[$c]['upc'] ?? 0); }
     }
     if (!$f_cust && $have['unilever_item_return_items'] && $have['unilever_item_returns']) {
         $q = mysqli_query($conn, "SELECT ri.item_code, SUM(ri.qty) AS q
             FROM unilever_item_return_items ri JOIN unilever_item_returns r ON r.id = ri.return_id
             WHERE ri.item_code <> '' AND r.return_date BETWEEN '$from' AND '$to' GROUP BY ri.item_code");
         if (!$q) $errors[] = mysqli_error($conn);
-        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $touch($c); $acc[$c]['rc'] = (float)$r['q'] * ($master[$c]['upc'] ?? 0); }
+        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $touch($c); $acc[$c]['rc'] += (float)$r['q'] * ($master[$c]['upc'] ?? 0); }
     }
     if ($have['invoice_wise_sales_data']) {
         $q = mysqli_query($conn, "SELECT product_code AS item_code, MAX(basepack_code) AS bp, MAX(product_description) AS nm, SUM(units) AS q
