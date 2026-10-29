@@ -28,7 +28,8 @@ function isr_upc($v) { return (float)preg_replace('/[^0-9.]/', '', (string)$v); 
    everything on record up to and including the As At date. */
 $f_from = '1970-01-01';
 $f_to   = trim($_GET['as_at_date'] ?? '') !== '' ? trim($_GET['as_at_date']) : date('Y-m-d');
-$f_q    = trim($_GET['q'] ?? '');
+$f_items = [];   // Item filter (multi-select): item codes; a "-D" row follows its base item
+foreach ((array)($_GET['items'] ?? []) as $v) { $v = trim((string)$v); if ($v !== '') $f_items[] = $v; }
 $f_loc  = in_array($_GET['loc'] ?? 'all', ['good','damaged']) ? $_GET['loc'] : 'all';   // Stock Location filter
 $from   = mysqli_real_escape_string($conn, $f_from);
 $to     = mysqli_real_escape_string($conn, $f_to);
@@ -170,6 +171,13 @@ if ($have['invoice_wise_sales_data']) {
     while ($q && $r = mysqli_fetch_assoc($q)) $dmg[trim($r['item_code'])] = ['q'=>(float)$r['q'], 'bp'=>$r['bp'], 'nm'=>$r['nm']];
 }
 
+/* Item filter options: every item known to the report, shown as "code - name" */
+$item_opts = [];
+foreach ($master as $c => $m) $item_opts[$c] = $m['name'] ?? '';
+foreach ($acc as $c => $a) if (!isset($item_opts[$c]) || $item_opts[$c] === '') $item_opts[$c] = $a['name'] ?? '';
+foreach ($dmg as $c => $d) if (!isset($item_opts[$c]) || $item_opts[$c] === '') $item_opts[$c] = $d['nm'] ?? '';
+ksort($item_opts);
+
 $rows = [];
 $tot = ['pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,'val'=>0];
 $add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m) use (&$rows, &$tot) {
@@ -191,7 +199,7 @@ if ($f_loc !== 'damaged') {
         $m = $master[$code] ?? [];
         $name = $m['name'] ?? $a['name'] ?? '';
         $bp   = $m['basepack'] ?? $a['basepack'] ?? '';
-        if ($f_q !== '' && stripos($code . ' ' . $name . ' ' . $bp, $f_q) === false) continue;
+        if ($f_items && !in_array($code, $f_items, true)) continue;
         $add_row($code, $code, $name, $bp, 'Good Stock', false, $a, $m);
     }
 }
@@ -200,7 +208,7 @@ if ($f_loc !== 'good') {
         $m = $master[$code] ?? [];
         $name = $m['name'] ?? $d['nm'] ?? '';
         $bp   = $m['basepack'] ?? $d['bp'] ?? '';
-        if ($f_q !== '' && stripos($code . '-D ' . $name . ' ' . $bp, $f_q) === false) continue;
+        if ($f_items && !in_array($code, $f_items, true)) continue;
         $add_row($code . '-D', $code, $name, $bp, 'Damaged Stock', true, ['so'=>$d['q']] + $zero, $m);
     }
 }
@@ -216,8 +224,13 @@ function qcell($units, $upc, $neg = false) {
     return ($neg ? '-' : '') . qn($units);
 }
 ?>
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
+.select2-container .select2-selection--multiple{min-height:37px;border:1.5px solid #e2e6f0;border-radius:8px;}
+.select2-container{min-width:320px;max-width:520px;}
 .isr{padding:0 4px;}
 .isr h2{font-size:22px;font-weight:800;margin:0 0 4px;}
 .isr .sub{font-size:12px;color:#8892a4;margin-bottom:16px;}
@@ -256,7 +269,12 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                     <option value="good" <?php echo $f_loc === 'good' ? 'selected' : ''; ?>>Good Stock</option>
                     <option value="damaged" <?php echo $f_loc === 'damaged' ? 'selected' : ''; ?>>Damaged Stock</option>
                 </select></div>
-            <div><label>Item</label><input type="text" name="q" value="<?php echo htmlspecialchars($f_q); ?>" placeholder="Code / name / basepack" style="min-width:220px"></div>
+            <div><label>Items</label>
+                <select name="items[]" id="itemSelect" multiple style="min-width:320px">
+                    <?php foreach ($item_opts as $c => $nm): ?>
+                    <option value="<?php echo htmlspecialchars($c); ?>" <?php echo in_array((string)$c, $f_items, true) ? 'selected' : ''; ?>><?php echo htmlspecialchars($c . ' - ' . $nm); ?></option>
+                    <?php endforeach; ?>
+                </select></div>
             <button class="isr-b" type="submit"><i class="fa-solid fa-filter"></i> Apply</button>
             <a class="isr-b l" href="sampath_item_stock_report.php">Reset</a>
             <button class="isr-b g" type="button" onclick="isrExport()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
@@ -326,6 +344,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 </div>
 
 <script>
+$(function(){ $('#itemSelect').select2({placeholder:'— All items (code - name) —', allowClear:true, width:'100%'}); });
 const ISR_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 const ISR_PERIOD = <?php echo json_encode('as at ' . $f_to); ?>;
 const ISR_QS = <?php echo json_encode('as_at_date=' . urlencode($f_to)); ?>;
