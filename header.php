@@ -986,87 +986,111 @@ if (isset($conn) && $conn) {
     <i class="fa-solid fa-chevron-down submenu-toggle"></i>
 </div>
 <div class="submenu">
-    <a href="sampath_damage_batches.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_damage_batches.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-truck-loading"></i><span>Sampath Damage Entry</span>
-    </a>
-
     <a href="sampath_damage_match.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_damage_match.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-wand-magic-sparkles"></i><span>Damage Entry AI Tally &amp; Confirm</span>
     </a>
     <a href="sampath_super_payment.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_super_payment.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath Super Payments</span>
     </a>
-    
-      <a href="grn_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'grn_report.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-truck-loading"></i><span>Sampath Goods Rejected</span>
-    </a>
-
-      <a href="sampath_item_rejection.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_rejection.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-file-circle-xmark"></i><span>Sampath Item Rejection Entries</span>
-    </a>
-
-    <a href="sampath_item_match.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_match.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-magnifying-glass-chart"></i><span>Sampath Item Match Report</span>
-    </a>
-    
      <a href="sampath_grn_reasons.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_grn_reasons.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath GRN Reasons</span>
     </a>
-    
+</div>
+
+<div class="menu-item has-submenu" data-tooltip="Sampath Uploads" onclick="toggleSubmenu(this)">
+    <div class="menu-item-content">
+        <span class="menu-icon icon-orange"><i class="fa-solid fa-cloud-arrow-up"></i></span>
+        <span>Sampath Uploads</span>
+        <span style="
+            background-color: #e53935;
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+            line-height: 1.4;
+            display: inline-block;
+            vertical-align: middle;
+        ">S</span>
+    </div>
+    <i class="fa-solid fa-chevron-down submenu-toggle"></i>
+</div>
+<div class="submenu">
+    <a href="sampath_damage_batches.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_damage_batches.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-truck-loading"></i><span>Sampath Damage Entry</span>
+    </a>
+    <a href="sampath_item_match.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_match.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-magnifying-glass-chart"></i><span>Sampath Item Match Report</span>
+    </a>
      <a href="sampath_grn_batches.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_grn_batches.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath GRN Summary</span>
     </a>
-    
-      <a href="sampath_age_analysis_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_age_analysis_report.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-truck-loading"></i><span>Sampath Age Anaylisis</span>
-    </a>
-
-    <a href="sampath_balancing_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_balancing_report.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-scale-balanced"></i><span>Sampath Balancing Report</span>
-    </a>
-
-
-    <a href="sampath_stock_reconciliation.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_stock_reconciliation.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-boxes-stacked"></i><span>Sampath Stock Reconcilation</span>
-    </a>
-
-    <a href="sampath_current_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_current_stock_report.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-warehouse"></i><span>Sampath Current Stock Report</span>
-    </a>
-
-    <a href="sampath_item_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_stock_report.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-boxes-packing"></i><span>Sampath Item Stock Report</span>
-    </a>
-
     <a href="sampath_inventory.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_inventory.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-warehouse"></i><span>Sampath Inventory (Pre Sec + Sec)</span>
     </a>
-
     <a href="unilever_purchase_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'unilever_purchase_import.php' || basename($_SERVER['PHP_SELF']) == 'unilever_purchase_batch_view.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-invoice"></i><span>Unilever Purchase Import</span>
     </a>
-
     <a href="unilever_items_return.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'unilever_items_return.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-rotate-left"></i><span>Unilever Items Return</span>
     </a>
-
     <a href="physical_stock_count_upload.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'physical_stock_count_upload.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-clipboard-check"></i><span>Import Physical Stock</span>
     </a>
-
-    <a href="physical_stock_count_reconciliation.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'physical_stock_count_reconciliation.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-scale-balanced"></i><span>Physical Stock Reconcilation</span>
-    </a>
-
     <a href="market_order_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'market_order_import.php' || basename($_SERVER['PHP_SELF']) == 'market_order_batches.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-cart-flatbed"></i><span>Market Order Import</span>
     </a>
+</div>
 
+<div class="menu-item has-submenu" data-tooltip="Sampath Reports" onclick="toggleSubmenu(this)">
+    <div class="menu-item-content">
+        <span class="menu-icon icon-orange"><i class="fa-solid fa-chart-column"></i></span>
+        <span>Sampath Reports</span>
+        <span style="
+            background-color: #e53935;
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+            line-height: 1.4;
+            display: inline-block;
+            vertical-align: middle;
+        ">S</span>
+    </div>
+    <i class="fa-solid fa-chevron-down submenu-toggle"></i>
+</div>
+<div class="submenu">
+      <a href="grn_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'grn_report.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-truck-loading"></i><span>Sampath Goods Rejected</span>
+    </a>
+      <a href="sampath_item_rejection.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_rejection.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-file-circle-xmark"></i><span>Sampath Item Rejection Entries</span>
+    </a>
+      <a href="sampath_age_analysis_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_age_analysis_report.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-truck-loading"></i><span>Sampath Age Analysis</span>
+    </a>
+    <a href="sampath_balancing_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_balancing_report.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-scale-balanced"></i><span>Sampath Balancing Report</span>
+    </a>
+    <a href="sampath_stock_reconciliation.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_stock_reconciliation.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-boxes-stacked"></i><span>Sampath Stock Reconciliation</span>
+    </a>
+    <a href="sampath_current_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_current_stock_report.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-warehouse"></i><span>Sampath Current Stock Report</span>
+    </a>
+    <a href="sampath_item_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_stock_report.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-boxes-packing"></i><span>Sampath Item Stock Report</span>
+    </a>
     <a href="usl_po_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'usl_po_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-invoice"></i><span>USL PO Report</span>
     </a>
-
 </div>
+
             </div>
 
             <div class="menu-item ms-more-toggle" id="msMoreToggle" onclick="toggleMoreMenus()">
