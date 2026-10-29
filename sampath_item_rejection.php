@@ -181,8 +181,6 @@ $f_to     = trim($_GET['date_to'] ?? '');
 $f_status = trim($_GET['status'] ?? '');
 $f_doc    = in_array($_GET['doc_filter'] ?? '', ['with', 'without']) ? $_GET['doc_filter'] : '';
 $f_search = trim($_GET['search'] ?? '');
-$f_items  = [];   // Items filter: item codes (entries containing them; item totals limited to them)
-foreach ((array)($_GET['items'] ?? []) as $v) { $v = trim((string)$v); if ($v !== '') $f_items[] = $v; }
 $e = function ($v) use ($conn) { return mysqli_real_escape_string($conn, $v); };
 
 $where = ['1=1'];
@@ -195,10 +193,7 @@ if ($f_search) {
     $s = $e($f_search);
     $where[] = "(h.grn_ref LIKE '%$s%' OR h.outlet_name LIKE '%$s%' OR h.outlet_code LIKE '%$s%' OR h.invoice_no LIKE '%$s%' OR h.t_code LIKE '%$s%')";
 }
-$items_in = $f_items ? "'" . implode("','", array_map($e, $f_items)) . "'" : '';
-if ($f_items) $where[] = "EXISTS (SELECT 1 FROM grn_items fx WHERE fx.grn_id = h.id AND fx.product_code IN ($items_in))";
 $where_sql = implode(' AND ', $where);
-$i_filter  = $f_items ? " AND i.product_code IN ($items_in)" : '';
 
 $statuses = [];
 $entries = $summary = [];
@@ -214,7 +209,7 @@ if ($have_grn) {
     $q = mysqli_query($conn, "SELECT COUNT(DISTINCT h.id) AS n, COALESCE(SUM(i.qty),0) AS qty, COALESCE(SUM(i.total_amount),0) AS amt,
             COUNT(DISTINCT CASE WHEN h.document_path IS NOT NULL AND h.document_path <> '' THEN h.id END) AS docs
         FROM grn_headers h LEFT JOIN grn_items i ON i.grn_id = h.id
-        WHERE $where_sql $i_filter AND h.status NOT IN ('draft','cancelled')");
+        WHERE $where_sql AND h.status NOT IN ('draft','cancelled')");
     if ($q && $r = mysqli_fetch_assoc($q)) $kpi = ['entries' => (int)$r['n'], 'qty' => (float)$r['qty'], 'amount' => (float)$r['amt'], 'docs' => (int)$r['docs']];
 
     if ($f_tab === 'entries') {
@@ -228,7 +223,7 @@ if ($have_grn) {
         $q = mysqli_query($conn, "SELECT h.id, h.grn_ref, h.outlet_code, h.outlet_name, h.t_code, h.delivery_date, h.invoice_no, h.total_amount,
                 h.status, h.created_at, h.document_name, h.document_uploaded_at,
                 (SELECT COUNT(*) FROM grn_items i WHERE i.grn_id = h.id) AS item_count,
-                (SELECT COALESCE(SUM(i.qty),0) FROM grn_items i WHERE i.grn_id = h.id $i_filter) AS rej_qty
+                (SELECT COALESCE(SUM(i.qty),0) FROM grn_items i WHERE i.grn_id = h.id) AS rej_qty
                 $user_sel
             FROM grn_headers h $user_join
             WHERE $where_sql ORDER BY h.delivery_date DESC, h.id DESC LIMIT $per_page OFFSET $off");
@@ -237,30 +232,20 @@ if ($have_grn) {
     } else {
         $q = mysqli_query($conn, "SELECT i.product_code, MAX(i.product_description) AS nm, SUM(i.qty) AS qty, SUM(i.total_amount) AS amt, COUNT(DISTINCT h.id) AS n
             FROM grn_items i JOIN grn_headers h ON h.id = i.grn_id
-            WHERE $where_sql $i_filter AND h.status NOT IN ('draft','cancelled') AND i.product_code <> ''
+            WHERE $where_sql AND h.status NOT IN ('draft','cancelled') AND i.product_code <> ''
             GROUP BY i.product_code ORDER BY i.product_code");
         if (!$q) $errors[] = mysqli_error($conn);
         while ($q && $r = mysqli_fetch_assoc($q)) $summary[] = ['code' => $r['product_code'], 'name' => $r['nm'], 'qty' => (float)$r['qty'], 'amt' => (float)$r['amt'], 'n' => (int)$r['n']];
     }
 }
 
-$item_opts = [];
-if ($have_grn) {
-    $q = mysqli_query($conn, "SELECT product_code, MAX(product_description) AS nm FROM grn_items WHERE product_code <> '' GROUP BY product_code ORDER BY product_code");
-    while ($q && $r = mysqli_fetch_assoc($q)) $item_opts[trim($r['product_code'])] = $r['nm'] ?? '';
-}
-$qs_now  = http_build_query(array_filter(['tab' => $f_tab, 'date_from' => $f_from, 'date_to' => $f_to, 'status' => $f_status, 'doc_filter' => $f_doc, 'search' => $f_search, 'items' => $f_items ?: null, 'page' => $page > 1 ? $page : null], function ($v) { return $v !== '' && $v !== null; }));
-$qs_base = ['date_from' => $f_from, 'date_to' => $f_to, 'status' => $f_status, 'doc_filter' => $f_doc, 'search' => $f_search, 'items' => $f_items];
+$qs_now  = http_build_query(array_filter(['tab' => $f_tab, 'date_from' => $f_from, 'date_to' => $f_to, 'status' => $f_status, 'doc_filter' => $f_doc, 'search' => $f_search, 'page' => $page > 1 ? $page : null], function ($v) { return $v !== '' && $v !== null; }));
+$qs_base = ['date_from' => $f_from, 'date_to' => $f_to, 'status' => $f_status, 'doc_filter' => $f_doc, 'search' => $f_search];
 include 'header.php';
 function sir_n($v) { return number_format(round($v), 0); }
 ?>
-<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
-<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
-.select2-container .select2-selection--multiple{min-height:37px;border:1.5px solid #e2e6f0;border-radius:8px;}
-.select2-container{min-width:320px;max-width:520px;}
 .sir{padding:0 4px;}
 .sir h2{font-size:22px;font-weight:800;margin:0 0 4px;}
 .sir .sub{font-size:12px;color:#8892a4;margin-bottom:16px;}
@@ -332,12 +317,6 @@ table.sir-t tfoot td{background:#f1f5f9;font-weight:800;}
                 <select name="doc_filter"><option value="">All</option>
                     <option value="with" <?php echo $f_doc === 'with' ? 'selected' : ''; ?>>With document</option>
                     <option value="without" <?php echo $f_doc === 'without' ? 'selected' : ''; ?>>Without document</option></select></div>
-            <div><label>Items</label>
-                <select name="items[]" id="itemSelect" multiple style="min-width:320px">
-                    <?php foreach ($item_opts as $c => $nm): ?>
-                    <option value="<?php echo htmlspecialchars($c); ?>" <?php echo in_array((string)$c, $f_items, true) ? 'selected' : ''; ?>><?php echo htmlspecialchars($c . ' - ' . $nm); ?></option>
-                    <?php endforeach; ?>
-                </select></div>
             <div><label>Search</label><input type="text" name="search" value="<?php echo htmlspecialchars($f_search); ?>" placeholder="GRN ref / outlet / invoice / T code" style="min-width:230px"></div>
             <button class="sir-b" type="submit"><i class="fa-solid fa-filter"></i> Apply</button>
             <a class="sir-b l" href="sampath_item_rejection.php?tab=<?php echo $f_tab; ?>">Reset</a>
@@ -431,7 +410,6 @@ table.sir-t tfoot td{background:#f1f5f9;font-weight:800;}
 </div>
 
 <script>
-$(function(){ $('#itemSelect').select2({placeholder:'— All items (code - name) —', allowClear:true, width:'100%'}); });
 const SIR_TAB = <?php echo json_encode($f_tab); ?>;
 const SIR_ENTRIES = <?php echo json_encode($entries, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 const SIR_SUMMARY = <?php echo json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
