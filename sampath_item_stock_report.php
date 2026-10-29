@@ -339,10 +339,10 @@ function qcell($units, $upc, $neg = false) {
 .isr-b{padding:9px 16px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:#0a0c14;color:#fff;text-decoration:none;}
 .isr-b.g{background:#14532d;} .isr-b.l{background:#f7f8fc;color:#475569;border:1.5px solid #e2e6f0;}
 .isr-boxes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;}
-.isr-box{background:#fff;border:1.5px solid #e2e6f0;border-top:4px solid var(--c);border-radius:12px;padding:12px 16px;}
-.isr-box .l{font-size:10px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:.4px;}
-.isr-box .v{font-size:22px;font-weight:800;margin-top:3px;color:var(--c);font-family:monospace;}
-.isr-box .s{font-size:10.5px;color:#9ca3af;margin-top:1px;}
+.isr-sbox{background:#fff;border:1.5px solid #e2e6f0;border-top:4px solid var(--c);border-radius:12px;padding:12px 16px;}
+.isr-sbox .l{font-size:10px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:.4px;}
+.isr-sbox .v{font-size:22px;font-weight:800;margin-top:3px;color:var(--c);font-family:monospace;}
+.isr-sbox .s{font-size:10.5px;color:#9ca3af;margin-top:1px;}
 .isr-wrap{overflow:auto;border:1.5px solid #e2e6f0;border-radius:12px;background:#fff;}
 table.isr-t{width:100%;border-collapse:collapse;font-size:12px;}
 table.isr-t th{background:#fbe5d6;color:#111;padding:9px 10px;text-align:center;font-size:11px;border-bottom:2px solid #111;white-space:nowrap;}
@@ -351,6 +351,38 @@ table.isr-t td.n{text-align:right;font-family:monospace;}
 table.isr-t tr.item{cursor:pointer;} table.isr-t tr.item:hover{background:#f5f8ff;} table.isr-t tr.dmg{background:#fff7ed;} .isr-loc{display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:#dcfce7;color:#166534;} .isr-loc.d{background:#ffedd5;color:#9a3412;}
 table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #111;}
 .neg{color:#dc2626;}
+/* ── responsive ── */
+.isr-boxes{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));}
+.isr-wrap{-webkit-overflow-scrolling:touch;max-height:75vh;}
+table.isr-t thead th{position:sticky;top:0;z-index:2;}
+.select2-container{max-width:100% !important;}
+@media (max-width:1024px){
+    .isr h2{font-size:19px;}
+    .isr-boxes{gap:10px;}
+    .isr-sbox .v{font-size:19px;}
+}
+@media (max-width:768px){
+    .isr{padding:0;}
+    .isr .sub{font-size:11px;line-height:1.5;}
+    .isr-card{padding:12px 12px;border-radius:12px;}
+    .isr-f{flex-direction:column;align-items:stretch;gap:10px;}
+    .isr-f > div,.isr-f > div > div{width:100%;min-width:0 !important;}
+    .isr-f input[type=date],.isr-f select{width:100%;}
+    .isr-f .select2-container{min-width:0 !important;width:100% !important;}
+    .isr-f .isr-b{justify-content:center;width:100%;}
+    .isr-boxes{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .isr-sbox{padding:10px 12px;}
+    .isr-sbox .v{font-size:17px;overflow-wrap:anywhere;}
+    table.isr-t{font-size:11px;}
+    table.isr-t th,table.isr-t td{padding:6px 7px;}
+    .isr-modal .isr-box{width:98vw;max-height:92vh;}
+    .isr-modal .isr-box header{flex-direction:column;align-items:flex-start;}
+}
+@media (max-width:420px){
+    .isr-sbox .l{font-size:9px;}
+    .isr-sbox .v{font-size:15px;}
+    .isr-sbox .s{display:none;}
+}
 .isr-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;}
 .isr-modal.open{display:flex;}
 .isr-box{background:#fff;border-radius:14px;width:min(960px,94vw);max-height:88vh;display:flex;flex-direction:column;}
@@ -425,7 +457,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         if ($show_dcol || $f_loc === 'damaged') $boxes[] = ['Damaged Stock', sgn($tot['dmg']), 'units · confirmed damage entries', '#c2410c'];
         $boxes[] = ['Closing Stock Value', number_format($tot['val'], 2), 'Rs. at item value', '#0f766e'];
         foreach ($boxes as $b): ?>
-        <div class="isr-box" style="--c:<?php echo $b[3]; ?>">
+        <div class="isr-sbox" style="--c:<?php echo $b[3]; ?>">
             <div class="l"><?php echo $b[0]; ?></div>
             <div class="v"><?php echo $b[1]; ?></div>
             <div class="s"><?php echo $b[2]; ?></div>
