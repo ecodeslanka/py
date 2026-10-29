@@ -338,6 +338,11 @@ function qcell($units, $upc, $neg = false) {
 .isr-f input{border:1.5px solid #e2e6f0;border-radius:8px;padding:8px 12px;font-size:13px;}
 .isr-b{padding:9px 16px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:#0a0c14;color:#fff;text-decoration:none;}
 .isr-b.g{background:#14532d;} .isr-b.l{background:#f7f8fc;color:#475569;border:1.5px solid #e2e6f0;}
+.isr-boxes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;}
+.isr-box{background:#fff;border:1.5px solid #e2e6f0;border-top:4px solid var(--c);border-radius:12px;padding:12px 16px;}
+.isr-box .l{font-size:10px;font-weight:700;color:#8892a4;text-transform:uppercase;letter-spacing:.4px;}
+.isr-box .v{font-size:22px;font-weight:800;margin-top:3px;color:var(--c);font-family:monospace;}
+.isr-box .s{font-size:10.5px;color:#9ca3af;margin-top:1px;}
 .isr-wrap{overflow:auto;border:1.5px solid #e2e6f0;border-radius:12px;background:#fff;}
 table.isr-t{width:100%;border-collapse:collapse;font-size:12px;}
 table.isr-t th{background:#fbe5d6;color:#111;padding:9px 10px;text-align:center;font-size:11px;border-bottom:2px solid #111;white-space:nowrap;}
@@ -404,6 +409,29 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         </div>
     </form>
     <?php foreach ($errors as $e): ?><div class="isr-card" style="background:#fef2f2;border-color:#fecaca;color:#991b1b;"><?php echo htmlspecialchars($e); ?></div><?php endforeach; ?>
+
+    <!-- SUMMARY BOXES -->
+    <div class="isr-boxes">
+        <?php
+        $boxes = [];
+        $boxes[] = ['Items', qn(count($rows)), 'listed below', '#0a0c14'];
+        if ($has_open) $boxes[] = ['Opening Units', sgn($tot['open']), 'as at ' . $open_to, '#475569'];
+        $boxes[] = ['Primary Purchase', qn($tot['pc']), 'units', '#1d4ed8'];
+        $boxes[] = ['Primary Returned', sgn(-$tot['rc']), 'units', '#b45309'];
+        $boxes[] = ['Secondary Inv', sgn($tot['so']), 'units', '#7c3aed'];
+        $boxes[] = ['Good Rejected', sgn(-$tot['rej']), 'units', '#be123c'];
+        $boxes[] = ['Adjustment', sgn($tot['adj']), 'units', '#0e7490'];
+        $boxes[] = ['Closing Balance', sgn($tot['close']), 'units · good stock', '#15803d'];
+        if ($show_dcol || $f_loc === 'damaged') $boxes[] = ['Damaged Stock', sgn($tot['dmg']), 'units · confirmed damage entries', '#c2410c'];
+        $boxes[] = ['Closing Stock Value', number_format($tot['val'], 2), 'Rs. at item value', '#0f766e'];
+        foreach ($boxes as $b): ?>
+        <div class="isr-box" style="--c:<?php echo $b[3]; ?>">
+            <div class="l"><?php echo $b[0]; ?></div>
+            <div class="v"><?php echo $b[1]; ?></div>
+            <div class="s"><?php echo $b[2]; ?></div>
+        </div>
+        <?php endforeach; ?>
+    </div>
 
     <div class="isr-wrap">
     <table class="isr-t" id="isrTable">
