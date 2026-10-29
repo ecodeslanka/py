@@ -996,6 +996,10 @@ if (isset($conn) && $conn) {
     <a href="sampath_item_rejection.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_rejection.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-circle-xmark"></i><span>Sampath Goods Rejected</span>
     </a>
+
+    <a href="sampath_stock_reconciliation.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_stock_reconciliation.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-boxes-stacked"></i><span>Sampath Stock Reconciliation</span>
+    </a>
 </div>
 
 <div class="menu-item has-submenu" data-tooltip="Sampath Uploads" onclick="toggleSubmenu(this)">
@@ -1071,9 +1075,6 @@ if (isset($conn) && $conn) {
     </a>
     <a href="sampath_balancing_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_balancing_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-scale-balanced"></i><span>Sampath Balancing Report</span>
-    </a>
-    <a href="sampath_stock_reconciliation.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_stock_reconciliation.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-boxes-stacked"></i><span>Sampath Stock Reconciliation</span>
     </a>
     <a href="sampath_item_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_stock_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-boxes-packing"></i><span>Sampath Item Stock Report</span>
