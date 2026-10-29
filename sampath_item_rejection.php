@@ -129,7 +129,7 @@ if ($have_grn && ($_GET['ajax'] ?? '') === 'items') {
 
 /* ── POST: upload / replace / remove a document ── */
 $flash_ok = $flash_err = '';
-if ($have_grn && $_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['upload_document', 'remove_document'], true)) {
+if ($have_grn && $_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['action'] ?? '', ['upload_document', 'remove_document', 'delete_entry'], true)) {
     $id  = (int)($_POST['grn_id'] ?? 0);
     $q   = $id ? mysqli_query($conn, "SELECT document_path FROM grn_headers WHERE id = $id LIMIT 1") : false;
     $old = $q ? mysqli_fetch_assoc($q) : null;
@@ -138,6 +138,15 @@ if ($have_grn && $_SERVER['REQUEST_METHOD'] === 'POST' && in_array($_POST['actio
     unset($back['msg'], $back['err']);
     if (!$old) {
         $back['err'] = 'Entry not found.';
+    } elseif ($_POST['action'] === 'delete_entry') {
+        // delete the whole entry: its item lines, the header and any attached document file
+        mysqli_query($conn, "DELETE FROM grn_items WHERE grn_id = $id");
+        if (mysqli_query($conn, "DELETE FROM grn_headers WHERE id = $id")) {
+            sir_delete_doc_file($old['document_path']);
+            $back['msg'] = 'Entry deleted.';
+        } else {
+            $back['err'] = 'Could not delete the entry: ' . mysqli_error($conn);
+        }
     } elseif ($_POST['action'] === 'remove_document') {
         mysqli_query($conn, "UPDATE grn_headers SET document_path = NULL, document_name = NULL, document_uploaded_at = NULL WHERE id = $id");
         sir_delete_doc_file($old['document_path']);
@@ -327,8 +336,13 @@ table.sir-t tfoot td{background:#f1f5f9;font-weight:800;}
         <input type="hidden" name="grn_id" id="docRemoveId">
         <input type="hidden" name="qs" value="<?php echo htmlspecialchars($qs_now); ?>">
     </form>
+    <form id="entryDeleteForm" method="POST" style="display:none">
+        <input type="hidden" name="action" value="delete_entry">
+        <input type="hidden" name="grn_id" id="entryDeleteId">
+        <input type="hidden" name="qs" value="<?php echo htmlspecialchars($qs_now); ?>">
+    </form>
     <div class="sir-wrap"><table class="sir-t">
-        <thead><tr><th>GRN Ref</th><th>Delivery Date</th><th>Invoice No</th><th>Outlet</th><th>T Code</th><th class="n">Items</th><th class="n">Rejected Qty</th><th class="n">Amount</th><th>Status</th><th>Created By</th><th>Document</th><th class="c">Items</th></tr></thead>
+        <thead><tr><th>GRN Ref</th><th>Delivery Date</th><th>Invoice No</th><th>Outlet</th><th>T Code</th><th class="n">Items</th><th class="n">Rejected Qty</th><th class="n">Amount</th><th>Status</th><th>Created By</th><th>Document</th><th class="c">Items</th><th class="c">Delete</th></tr></thead>
         <tbody>
         <?php foreach ($entries as $r): $has = !empty($r['document_name']); ?>
             <tr>
@@ -353,9 +367,10 @@ table.sir-t tfoot td{background:#f1f5f9;font-weight:800;}
                     <?php endif; ?>
                 </td>
                 <td class="c"><button class="sir-b sm" type="button" onclick="sirItems(<?php echo $r['id']; ?>)"><i class="fa-solid fa-list"></i></button></td>
+                <td class="c"><button class="sir-b r sm" type="button" onclick="sirDelete(<?php echo $r['id']; ?>, <?php echo htmlspecialchars(json_encode($r['grn_ref']), ENT_QUOTES); ?>)" title="Delete entry"><i class="fa-solid fa-trash-can"></i></button></td>
             </tr>
         <?php endforeach; ?>
-        <?php if (!$entries): ?><tr><td colspan="12" style="text-align:center;padding:40px;color:#9ca3af;">No entries found.</td></tr><?php endif; ?>
+        <?php if (!$entries): ?><tr><td colspan="13" style="text-align:center;padding:40px;color:#9ca3af;">No entries found.</td></tr><?php endif; ?>
         </tbody>
     </table></div>
     <?php if ($pages > 1):
@@ -403,6 +418,10 @@ const fm = (v, d=0) => Number(v || 0).toLocaleString('en-US', {minimumFractionDi
 
 function sirPick(id){ document.getElementById('docGrnId').value = id; const f = document.getElementById('docFile'); f.value = ''; f.click(); }
 function sirRemove(id){ if (!confirm('Remove the attached document from this entry?')) return; document.getElementById('docRemoveId').value = id; document.getElementById('docRemoveForm').submit(); }
+function sirDelete(id, ref){
+    if (!confirm('Delete entry ' + ref + ' with ALL its item lines and its document? This cannot be undone.')) return;
+    document.getElementById('entryDeleteId').value = id; document.getElementById('entryDeleteForm').submit();
+}
 function sirClose(){ document.getElementById('sirModal').classList.remove('open'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') sirClose(); });
 function sirItems(id){
