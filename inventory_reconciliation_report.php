@@ -396,6 +396,14 @@ table.irr-t .qq{font-size:10px;color:#8892a4;font-weight:400;}
 table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #111;position:sticky;bottom:0;}
 .neg strong{color:#dc2626;}
 .gd{background:#f0fdf4;} .dg{background:#fff7ed;}
+.vi{font-size:10px;font-weight:700;color:#6d28d9;text-decoration:underline;margin-left:6px;white-space:nowrap;} tr.clk:hover td{background:#ede9fe !important;}
+.dmod{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;} .dmod.open{display:flex;}
+.dbox{background:#fff;border-radius:14px;width:min(1000px,96vw);max-height:90vh;display:flex;flex-direction:column;}
+.dbox header{padding:14px 18px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+.dbox .body{padding:0 16px 16px;overflow:auto;}
+.dx{border:none;background:#f3f4f6;border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:16px;}
+.dchip{border:1.5px solid #e2e6f0;background:#fff;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;} .dchip.on{background:#0a0c14;color:#fff;border-color:#0a0c14;}
+.dsh{color:#dc2626;font-weight:800;} .dex{color:#15803d;font-weight:800;}
 #irrSummary table.irr-t th{position:static;} #irrSummary table.irr-t td.n{text-align:right;}
 @media print{#irrDetails{display:block !important;} #irrToggle{display:none;}}
 </style>
@@ -496,7 +504,7 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                 <tr><td>− Primary Return</td><?php echo $gcells('rc'); ?><?php echo $dash; ?></tr>
                 <tr><td>Pre Secondary (loaded out)</td><?php echo $gcells('pre'); ?><?php echo $dash; ?></tr>
                 <tr><td>− Secondary (sold)</td><?php echo $gcells('sec'); ?><?php echo $dash; ?></tr>
-                <tr style="background:#fefce8"><td>Diff (Pre Secondary − Secondary)</td><?php echo $gcells('diff'); ?><?php echo $dash; ?></tr>
+                <tr style="background:#fefce8;cursor:pointer" onclick="irrDiff('presec')" class="clk" title="Click to see the items with details"><td>Diff (Pre Secondary − Secondary) <span class="vi">view items ▸</span></td><?php echo $gcells('diff'); ?><?php echo $dash; ?></tr>
                 <tr><td>± Rejected / Adjustment</td><?php echo $gcells('oth'); ?><?php echo $dash; ?></tr>
                 <tr><td>+ Damage entries (confirmed)</td><?php echo $dash; ?><?php echo $dcells($tot['dmov_q'], $tot['dmov_v']); ?></tr>
                 <tr style="background:#fbe5d6"><td><strong>Closing Inventory</strong></td>
@@ -506,9 +514,9 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                 <tr style="background:#f5f3ff"><td colspan="5" style="font-weight:800;color:#5b21b6">Stock Count — <?php echo htmlspecialchars(substr((string)$sc['count_date'], 0, 10)); ?> (good stock, <?php echo (int)$tot['counted']; ?> item(s) counted<?php echo $tot['uncounted'] ? ', ' . (int)$tot['uncounted'] . ' in the report not in the count' : ''; ?>)</td></tr>
                 <tr><td>System good stock (counted items)</td><?php echo $dcells($tot['scsys_q'], $tot['scsys_v']); ?><?php echo $dash; ?></tr>
                 <tr style="background:#f5f3ff"><td><strong>Physical Stock Count</strong></td><?php echo $dcells($tot['ph_q'], $tot['ph_v']); ?><?php echo $dash; ?></tr>
-                <tr><td style="color:#dc2626">Short (physical below system)</td><?php echo $dcells($tot['short_q'], $tot['short_v']); ?><?php echo $dash; ?></tr>
-                <tr><td style="color:#15803d">Excess (physical above system)</td><?php echo $dcells($tot['excess_q'], $tot['excess_v']); ?><?php echo $dash; ?></tr>
-                <tr style="background:#ede9fe"><td><strong>Difference (Physical − System)</strong></td><?php echo $dcells($tot['pd_q'], $tot['pd_v']); ?><?php echo $dash; ?></tr>
+                <tr style="cursor:pointer" onclick="irrDiff('short')" class="clk" title="Click to see the items with details"><td style="color:#dc2626">Short (physical below system) <span class="vi">view items ▸</span></td><?php echo $dcells($tot['short_q'], $tot['short_v']); ?><?php echo $dash; ?></tr>
+                <tr style="cursor:pointer" onclick="irrDiff('excess')" class="clk" title="Click to see the items with details"><td style="color:#15803d">Excess (physical above system) <span class="vi">view items ▸</span></td><?php echo $dcells($tot['excess_q'], $tot['excess_v']); ?><?php echo $dash; ?></tr>
+                <tr style="background:#ede9fe;cursor:pointer" onclick="irrDiff('count')" class="clk" title="Click to see the items with details"><td><strong>Difference (Physical − System)</strong> <span class="vi">view items ▸</span></td><?php echo $dcells($tot['pd_q'], $tot['pd_v']); ?><?php echo $dash; ?></tr>
                 <?php endif; ?>
                 <tr style="background:#e2e8f0"><td><strong>Total Closing Inventory (Good + Damaged)</strong></td>
                     <td class="n" colspan="2" style="text-align:right"><strong><?php echo irr_n($tot['g_q'] + $tot['d_q']); ?> units</strong></td>
@@ -607,6 +615,20 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
     </div>
 </div>
 
+<div class="dmod" id="irrDMod" onclick="if(event.target===this)irrDClose()">
+  <div class="dbox">
+    <header>
+      <div><div style="font-size:16px;font-weight:800" id="irrDTitle">Difference items</div><div style="font-size:12px;color:#6b7280" id="irrDSub"></div></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span id="irrDChips"></span>
+        <button class="irr-b g" type="button" style="padding:6px 12px;font-size:12px" onclick="irrDExport()"><i class="fa-solid fa-file-excel"></i> Excel</button>
+        <button class="dx" type="button" onclick="irrDClose()">&times;</button>
+      </div>
+    </header>
+    <div class="body"><table class="irr-t" style="margin-top:10px"><thead id="irrDHead"></thead><tbody id="irrDBody"></tbody><tfoot id="irrDFoot"></tfoot></table></div>
+  </div>
+</div>
+
 <script>
 $(function(){ $('#itemSelect').select2({placeholder:'— All items (code - name) —', allowClear:true, width:'100%'}); });
 function irrDetails(){
@@ -615,6 +637,60 @@ function irrDetails(){
     box.style.display = open ? '' : 'none';
     btn.innerHTML = open ? '<i class="fa-solid fa-eye-slash"></i> Hide Details' : '<i class="fa-solid fa-table-list"></i> View Details';
     if (open) box.scrollIntoView({behavior:'smooth', block:'start'});
+}
+/* ── click a difference line -> the items behind it, with details ── */
+let irrDCur = null;
+const irrFm = (v, d) => (v === null || v === undefined || v === '') ? '—' : Number(v).toLocaleString('en-US', {minimumFractionDigits: d || 0, maximumFractionDigits: d || 0});
+const irrSg = v => (v < 0 ? '-' : (v > 0 ? '+' : '')) + irrFm(Math.abs(v), 0);
+function irrDiff(type, filter){
+    let rows, title, sub, cols;
+    if (type === 'presec') {
+        rows = IRR_ROWS.filter(r => Math.round(r.diff_q * 100) !== 0)
+            .map(r => ({sku7: r.sku7, name: r.name, tur: r.tur, a: r.pre_q, b: r.sec_q, dq: r.diff_q, dv: r.diff_v}));
+        title = 'Diff — Pre Secondary − Secondary'; sub = 'Items where the pre-secondary (loaded) qty differs from the secondary (sold) qty';
+        cols = ['Pre Secondary (units)', 'Secondary (units)'];
+    } else {
+        rows = IRR_ROWS.filter(r => r.pd_q !== null && r.pd_q !== undefined && Math.round(r.pd_q * 100) !== 0)
+            .map(r => ({sku7: r.sku7, name: r.name, tur: r.tur, a: r.g_q, b: r.ph_q, dq: r.pd_q, dv: r.pd_v}));
+        title = 'Stock count difference — Physical − System (good stock)'; sub = 'Items where the physical count differs from the system good stock';
+        cols = ['System good stock (units)', 'Physical count (units)'];
+        if (type === 'short') filter = 'short'; if (type === 'excess') filter = 'excess';
+    }
+    irrDCur = {type, rows, title, sub, cols, filter: filter || 'all'};
+    document.getElementById('irrDMod').classList.add('open');
+    irrDRender();
+}
+function irrDRender(){
+    const c = irrDCur; let rows = c.rows;
+    if (c.type !== 'presec') {
+        if (c.filter === 'short') rows = rows.filter(r => r.dq < 0); else if (c.filter === 'excess') rows = rows.filter(r => r.dq > 0);
+        document.getElementById('irrDChips').innerHTML = ['all','short','excess'].map(k => `<button type="button" class="dchip ${c.filter === k ? 'on' : ''}" onclick="irrDCur.filter='${k}';irrDRender()">${k === 'all' ? 'All' : k === 'short' ? 'Short' : 'Excess'}</button>`).join(' ');
+    } else document.getElementById('irrDChips').innerHTML = '';
+    rows = rows.slice().sort((x, y) => Math.abs(y.dv) - Math.abs(x.dv));
+    c.shown = rows;
+    document.getElementById('irrDTitle').textContent = c.title;
+    document.getElementById('irrDSub').textContent = c.sub + ' · ' + rows.length + ' item(s) · ' + IRR_PERIOD;
+    document.getElementById('irrDHead').innerHTML = '<tr><th>SKU7</th><th style="text-align:left">Product</th><th>TUR</th><th>' + c.cols[0] + '</th><th>' + c.cols[1] + '</th><th>Difference (units)</th><th>Difference (value)</th><th></th></tr>';
+    let tq = 0, tv = 0;
+    document.getElementById('irrDBody').innerHTML = rows.length ? rows.map(r => { tq += r.dq; tv += r.dv; const k = r.dq < 0 ? 'dsh' : 'dex';
+        return `<tr><td><strong>${r.sku7}</strong></td><td>${(r.name || '').replace(/</g,'&lt;')}</td><td class="n">${irrFm(r.tur, 2)}</td><td class="n">${irrFm(r.a, 0)}</td><td class="n">${irrFm(r.b, 0)}</td>
+            <td class="n ${k}">${irrSg(r.dq)}</td><td class="n ${k}">${r.dv < 0 ? '-' : '+'}${irrFm(Math.abs(r.dv), 2)}</td><td class="${k}">${r.dq < 0 ? (c.type === 'presec' ? 'less loaded than sold' : 'Short') : (c.type === 'presec' ? 'more loaded than sold' : 'Excess')}</td></tr>`; }).join('')
+        : '<tr><td colspan="8" style="text-align:center;padding:24px;color:#8892a4">No items with a difference.</td></tr>';
+    document.getElementById('irrDFoot').innerHTML = rows.length ? `<tr><td colspan="5" style="text-align:right">TOTAL — ${rows.length} items</td><td class="n">${irrSg(tq)}</td><td class="n">${tv < 0 ? '-' : '+'}${irrFm(Math.abs(tv), 2)}</td><td></td></tr>` : '';
+}
+function irrDClose(){ document.getElementById('irrDMod').classList.remove('open'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') irrDClose(); });
+async function irrDExport(){
+    const c = irrDCur; if (!c) return;
+    const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Difference items');
+    ws.addRow([c.title + ' — ' + IRR_PERIOD]).font = {bold:true, size:13};
+    const h = ws.addRow(['SKU7','Product','TUR', c.cols[0], c.cols[1], 'Difference (units)', 'Difference (value)']);
+    h.eachCell(x => { x.font = {bold:true}; x.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FFFBE5D6'}}; });
+    c.shown.forEach(r => ws.addRow([r.sku7, r.name, r.tur, r.a, r.b, r.dq, r.dv]));
+    [3,7].forEach(n => ws.getColumn(n).numFmt = '#,##0.00'); ws.getColumn(2).width = 40; ws.getColumn(4).width = 20; ws.getColumn(5).width = 20; ws.getColumn(6).width = 16; ws.getColumn(7).width = 16;
+    const buf = await wb.xlsx.writeBuffer(); const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    a.download = 'inventory_difference_items_' + new Date().toISOString().slice(0,10) + '.xlsx'; a.click(); URL.revokeObjectURL(a.href);
 }
 function irrPrint(){ window.open(location.pathname + (location.search ? location.search + '&' : '?') + 'print=1', '_blank'); }
 function irrSave(){
