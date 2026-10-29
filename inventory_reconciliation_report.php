@@ -117,7 +117,7 @@ ksort($item_opts);
 /* ── rows ── */
 $good = function ($a) { return $a['pc'] - $a['rc'] - $a['sec'] - $a['rej'] + $a['adj']; };
 $rows = [];
-$tot = ['open_q'=>0,'open_v'=>0,'pc_q'=>0,'pc_v'=>0,'rc_q'=>0,'rc_v'=>0,'pre_q'=>0,'pre_v'=>0,'sec_q'=>0,'sec_v'=>0,'diff_q'=>0,'diff_v'=>0,'oth_q'=>0,'oth_v'=>0,'g_q'=>0,'g_v'=>0,'d_q'=>0,'d_v'=>0];
+$tot = ['open_q'=>0,'open_v'=>0,'pc_q'=>0,'pc_v'=>0,'rc_q'=>0,'rc_v'=>0,'pre_q'=>0,'pre_v'=>0,'sec_q'=>0,'sec_v'=>0,'diff_q'=>0,'diff_v'=>0,'oth_q'=>0,'oth_v'=>0,'g_q'=>0,'g_v'=>0,'d_q'=>0,'d_v'=>0,'dopen_q'=>0,'dopen_v'=>0,'dmov_q'=>0,'dmov_v'=>0];
 foreach (array_unique(array_merge(array_keys($acc), array_keys($acc0))) as $code) {
     $a  = $acc[$code]  ?? ['pc'=>0.0,'rc'=>0.0,'pre'=>0.0,'sec'=>0.0,'rej'=>0.0,'adj'=>0.0,'dmg'=>0.0,'name'=>null,'bp'=>null];
     $a0 = $acc0[$code] ?? null;
@@ -132,6 +132,8 @@ foreach (array_unique(array_merge(array_keys($acc), array_keys($acc0))) as $code
     $r = ['sku7'=>(string)$code, 'basepack'=>$m['basepack'] ?? $a['bp'] ?? ($a0['bp'] ?? ''), 'name'=>$m['name'] ?? $a['name'] ?? ($a0['name'] ?? ''), 'upc'=>(float)($m['upc'] ?? 0), 'tur'=>$p,
           'open_q'=>$open, 'pc_q'=>$a['pc'], 'rc_q'=>-$a['rc'], 'pre_q'=>$a['pre'], 'sec_q'=>$a['sec'], 'diff_q'=>$a['pre'] - $a['sec'], 'oth_q'=>$oth, 'g_q'=>$gq, 'd_q'=>$dq];
     foreach (['open','pc','rc','pre','sec','diff','oth','g','d'] as $k) { $r[$k . '_v'] = round($r[$k . '_q'] * $p, 2); $r[$k . '_q'] = round($r[$k . '_q'], 2); $tot[$k . '_q'] += $r[$k . '_q']; $tot[$k . '_v'] += $r[$k . '_v']; }
+    $tot['dopen_q'] += $dopen;     $tot['dopen_v'] += $dopen * $p;
+    $tot['dmov_q']  += $a['dmg'];  $tot['dmov_v']  += $a['dmg'] * $p;
     $rows[] = $r;
 }
 usort($rows, function ($a, $b) { return strcmp($a['sku7'], $b['sku7']); });
@@ -223,31 +225,42 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             </div>
             <button class="irr-b" type="button" id="irrToggle" onclick="irrDetails()"><i class="fa-solid fa-table-list"></i> View Details</button>
         </div>
-        <table class="irr-t" style="max-width:760px;">
-            <thead><tr><th style="text-align:left">Particulars</th><th>Units</th><th>Value (Rs.)</th></tr></thead>
+        <div style="overflow-x:auto;">
+        <table class="irr-t" style="max-width:900px;" id="irrSumTable">
+            <thead>
+                <tr><th rowspan="2" style="text-align:left">Particulars</th>
+                    <th colspan="2" style="background:#bbf7d0">Good Stock</th>
+                    <th colspan="2" style="background:#fed7aa">Damaged Stock</th></tr>
+                <tr><th style="background:#dcfce7">Units</th><th style="background:#dcfce7">Value (Rs.)</th>
+                    <th style="background:#ffedd5">Units</th><th style="background:#ffedd5">Value (Rs.)</th></tr>
+            </thead>
             <tbody>
             <?php
-            $sum_rows = [
-                ['Opening Inventory (good stock)', 'open', ''],
-                ['+ Primary Purchase', 'pc', ''],
-                ['− Primary Return', 'rc', ''],
-                ['Pre Secondary (loaded out)', 'pre', ''],
-                ['− Secondary (sold)', 'sec', ''],
-                ['Diff (Pre Secondary − Secondary)', 'diff', '#fefce8'],
-                ['± Rejected / Adjustment', 'oth', ''],
-            ];
-            foreach ($sum_rows as $sr): ?>
-                <tr style="<?php echo $sr[2] ? 'background:' . $sr[2] : ''; ?>">
-                    <td><?php echo $sr[0]; ?></td>
-                    <td class="n"><?php echo ($tot[$sr[1] . '_q'] < 0 ? '-' : '') . irr_n(abs($tot[$sr[1] . '_q'])); ?></td>
-                    <td class="n"><strong><?php echo irr_v($tot[$sr[1] . '_v']); ?></strong></td>
-                </tr>
-            <?php endforeach; ?>
-                <tr style="background:#f0fdf4;"><td><strong>Closing Inventory — Good Stock</strong></td><td class="n"><strong><?php echo irr_n($tot['g_q']); ?></strong></td><td class="n"><strong><?php echo irr_v($tot['g_v']); ?></strong></td></tr>
-                <tr style="background:#fff7ed;"><td><strong>Closing Inventory — Damaged Stock</strong></td><td class="n"><strong><?php echo irr_n($tot['d_q']); ?></strong></td><td class="n"><strong><?php echo irr_v($tot['d_v']); ?></strong></td></tr>
-                <tr style="background:#fbe5d6;"><td><strong>Total Closing Inventory</strong></td><td class="n"><strong><?php echo irr_n($tot['g_q'] + $tot['d_q']); ?></strong></td><td class="n"><strong><?php echo irr_v($tot['g_v'] + $tot['d_v']); ?></strong></td></tr>
+            $dash = '<td class="n" style="color:#c4c9d4">—</td><td class="n" style="color:#c4c9d4">—</td>';
+            $gcells = function ($k) use ($tot) {
+                return '<td class="n">' . ($tot[$k . '_q'] < 0 ? '-' : '') . irr_n(abs($tot[$k . '_q'])) . '</td><td class="n"><strong>' . irr_v($tot[$k . '_v']) . '</strong></td>';
+            };
+            $dcells = function ($q, $v) {
+                return '<td class="n">' . ($q < 0 ? '-' : '') . irr_n(abs($q)) . '</td><td class="n"><strong>' . irr_v($v) . '</strong></td>';
+            };
+            ?>
+                <tr><td>Opening Inventory</td><?php echo $gcells('open'); ?><?php echo $dcells($tot['dopen_q'], $tot['dopen_v']); ?></tr>
+                <tr><td>+ Primary Purchase</td><?php echo $gcells('pc'); ?><?php echo $dash; ?></tr>
+                <tr><td>− Primary Return</td><?php echo $gcells('rc'); ?><?php echo $dash; ?></tr>
+                <tr><td>Pre Secondary (loaded out)</td><?php echo $gcells('pre'); ?><?php echo $dash; ?></tr>
+                <tr><td>− Secondary (sold)</td><?php echo $gcells('sec'); ?><?php echo $dash; ?></tr>
+                <tr style="background:#fefce8"><td>Diff (Pre Secondary − Secondary)</td><?php echo $gcells('diff'); ?><?php echo $dash; ?></tr>
+                <tr><td>± Rejected / Adjustment</td><?php echo $gcells('oth'); ?><?php echo $dash; ?></tr>
+                <tr><td>+ Damage entries (confirmed)</td><?php echo $dash; ?><?php echo $dcells($tot['dmov_q'], $tot['dmov_v']); ?></tr>
+                <tr style="background:#fbe5d6"><td><strong>Closing Inventory</strong></td>
+                    <td class="n" style="background:#f0fdf4"><strong><?php echo irr_n($tot['g_q']); ?></strong></td><td class="n" style="background:#f0fdf4"><strong><?php echo irr_v($tot['g_v']); ?></strong></td>
+                    <td class="n" style="background:#fff7ed"><strong><?php echo irr_n($tot['d_q']); ?></strong></td><td class="n" style="background:#fff7ed"><strong><?php echo irr_v($tot['d_v']); ?></strong></td></tr>
+                <tr style="background:#e2e8f0"><td><strong>Total Closing Inventory (Good + Damaged)</strong></td>
+                    <td class="n" colspan="2" style="text-align:right"><strong><?php echo irr_n($tot['g_q'] + $tot['d_q']); ?> units</strong></td>
+                    <td class="n" colspan="2" style="text-align:right"><strong>Rs. <?php echo irr_v($tot['g_v'] + $tot['d_v']); ?></strong></td></tr>
             </tbody>
         </table>
+        </div>
     </div>
 
     <!-- ITEM-WISE DETAILS (hidden until View Details) -->
