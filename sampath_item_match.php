@@ -4,9 +4,9 @@
 //  SAMPATH ITEM MATCH REPORT — upload an Excel list and check it against our inventory
 //
 //  Upload an Excel (columns: Sampath Code, Item Name, Price, Qty — Ref / Return Store optional).
-//  Each row is matched to our item masters:
-//    Unilever items  -> unilever_purchase_items  (item code, name, UPC, price per case -> unit price, MRP)
-//    Sampath items   -> sampath_damage_grn_items (product code, name, unit price)
+//  Each row is matched to the items of the Sampath Item Stock Report (same item list and prices):
+//    Item master  -> unilever_purchase_items (item code / SKU7, name, UPC, price per case -> unit price, MRP)
+//    plus items that only appear in the secondary sales data -> invoice_wise_sales_data (code, description, TUR / MRP)
 //  Scoring per row:
 //    Name %    local fuzzy name match (size-aware) — and, for weak rows, a Gemini AI scan of the best candidates
 //    Price %   how close the Excel price is to the item's price (unit price, case price or MRP, whichever is closest)
@@ -14,16 +14,22 @@
 //    Status    >= 85 Matched · 60-84 Review · < 60 No Match
 //  The summary shows the tally percentages.
 //
-//  Gemini API key (server side only): add to config.php
-//      define('GEMINI_API_KEY', 'your-key');          // optional: define('GEMINI_MODEL', 'gemini-2.0-flash');
-//  (or set the GEMINI_API_KEY environment variable). Without a key the report still runs on the local match.
+//  Gemini: the API key is read from the AI Settings page (ai_settings table, key 'gemini_api_key'), the same key the
+//  AI chatbot uses; falls back to a GEMINI_API_KEY constant / environment variable.
 // ============================================================
 include 'config.php';
 include_once 'auth.php';
 requireLogin();
 
-if (!defined('GEMINI_MODEL')) define('GEMINI_MODEL', 'gemini-2.0-flash');
+if (!defined('GEMINI_MODEL')) define('GEMINI_MODEL', 'gemini-2.5-flash');   // same model as the AI chatbot
 function im_gemini_key() {
+    global $conn;
+    // 1) AI Settings page -> ai_settings table
+    if (isset($conn) && $conn) {
+        $q = @mysqli_query($conn, "SELECT `value` FROM ai_settings WHERE `key`='gemini_api_key' LIMIT 1");
+        $r = $q ? mysqli_fetch_assoc($q) : null;
+        if ($r && trim((string)$r['value']) !== '') return trim($r['value']);
+    }
     if (defined('GEMINI_API_KEY') && GEMINI_API_KEY) return GEMINI_API_KEY;
     $k = getenv('GEMINI_API_KEY');
     return $k ? $k : '';
@@ -78,9 +84,9 @@ function im_overall($name, $price) {
 }
 function im_status($o) { return $o >= 85 ? 'Matched' : ($o >= 60 ? 'Review' : 'No Match'); }
 
-/* ── item masters ── */
+/* ── item masters = the Sampath Item Stock Report item list ── */
 function im_load_masters($conn) {
-    $items = [];
+    $items = []; $seen = [];
     if (im_table($conn, 'unilever_purchase_items')) {
         $q = mysqli_query($conn, "SELECT p.item_code, p.item_name, p.upc, p.price_per_case, p.mrp
             FROM unilever_purchase_items p
@@ -88,18 +94,23 @@ function im_load_masters($conn) {
         while ($q && $r = mysqli_fetch_assoc($q)) {
             $upc = (float)preg_replace('/[^0-9.]/', '', (string)$r['upc']);
             $case = (float)$r['price_per_case'];
-            $items[] = ['src' => 'Unilever', 'code' => trim($r['item_code']), 'name' => (string)$r['item_name'], 'tok' => im_norm($r['item_name']),
+            $code = trim($r['item_code']);
+            $seen[$code] = true;
+            $items[] = ['src' => 'Stock Report', 'code' => $code, 'name' => (string)$r['item_name'], 'tok' => im_norm($r['item_name']),
                         'prices' => [$upc > 0 ? $case / $upc : null, $case ?: null, (float)$r['mrp'] ?: null],
                         'price' => $upc > 0 ? round($case / $upc, 2) : ($case ?: null)];
         }
     }
-    if (im_table($conn, 'sampath_damage_grn_items')) {
-        $q = mysqli_query($conn, "SELECT i.product_code, i.product_name, i.unit_price FROM sampath_damage_grn_items i
-            INNER JOIN (SELECT product_code, MAX(id) AS mid FROM sampath_damage_grn_items WHERE product_code <> '' GROUP BY product_code) l ON l.mid = i.id");
+    /* items the stock report also lists because they have secondary sales / Dmg-Exp but no purchase row */
+    if (im_table($conn, 'invoice_wise_sales_data')) {
+        $q = mysqli_query($conn, "SELECT product_code, MAX(product_description) AS nm, MAX(tur) AS tur, MAX(mrp) AS mrp
+            FROM invoice_wise_sales_data WHERE product_code IS NOT NULL AND product_code <> '' GROUP BY product_code");
         while ($q && $r = mysqli_fetch_assoc($q)) {
-            $p = (float)$r['unit_price'];
-            $items[] = ['src' => 'Sampath', 'code' => trim($r['product_code']), 'name' => (string)$r['product_name'], 'tok' => im_norm($r['product_name']),
-                        'prices' => [$p ?: null], 'price' => $p ?: null];
+            $code = trim($r['product_code']);
+            if (isset($seen[$code])) continue;
+            $tur = (float)$r['tur']; $mrp = (float)$r['mrp'];
+            $items[] = ['src' => 'Stock Report', 'code' => $code, 'name' => (string)$r['nm'], 'tok' => im_norm($r['nm']),
+                        'prices' => [$tur ?: null, $mrp ?: null], 'price' => $tur ?: ($mrp ?: null)];
         }
     }
     return $items;
@@ -258,9 +269,9 @@ table.im-t .n{text-align:right;font-family:monospace;}
 
 <div class="im">
     <h2><i class="fa-solid fa-magnifying-glass-chart"></i> Sampath Item Match Report</h2>
-    <div class="sub">Upload an Excel list (Sampath Code, Item Name, Price, Qty) and see how well each item tallies with our inventory by <strong>name</strong> and <strong>price</strong>, with an optional Gemini AI scan for weak matches.</div>
+    <div class="sub">Upload an Excel list (Sampath Code, Item Name, Price, Qty) and see how well each item tallies with the items of the <strong>Sampath Item Stock Report</strong> by <strong>name</strong> and <strong>price</strong>, with a Gemini AI scan for weak matches.</div>
 
-    <?php if (!$has_key): ?><div class="im-msg warn">Gemini AI is not configured, so only the local name/price match will run. Add <code>define('GEMINI_API_KEY', '…');</code> to <code>config.php</code> to enable the AI scan.</div><?php endif; ?>
+    <?php if (!$has_key): ?><div class="im-msg warn">No Gemini API key was found, so only the local name/price match will run. Save the key on the <strong>AI Settings</strong> page (<code>ai_settings.php</code>) to enable the AI scan.</div><?php endif; ?>
 
     <div class="im-card">
         <div class="im-f">
@@ -278,7 +289,7 @@ table.im-t .n{text-align:right;font-family:monospace;}
     <div class="im-wrap" id="imResultWrap" style="display:none">
         <table class="im-t">
             <thead><tr><th>Ref</th><th>Sampath Code</th><th>Excel Item Name</th><th class="n">Excel Price</th><th class="n">Qty</th>
-                <th>Matched Item (our inventory)</th><th class="n">Our Price</th><th class="n">Name %</th><th class="n">Price %</th><th class="n">Overall %</th><th>Method</th><th>Status</th></tr></thead>
+                <th>Matched Stock Report Item</th><th class="n">Our Price</th><th class="n">Name %</th><th class="n">Price %</th><th class="n">Overall %</th><th>Method</th><th>Status</th></tr></thead>
             <tbody id="imBody"></tbody>
         </table>
     </div>
@@ -336,7 +347,7 @@ async function imRun(){
 function imRender(){
     const d = imResult, s = d.summary, n = s.rows || 1;
     let msgs = '';
-    if (!d.masters) msgs += '<div class="im-msg err">No item masters found (Unilever Purchase Import / Sampath damage import are empty), so nothing could be matched.</div>';
+    if (!d.masters) msgs += '<div class="im-msg err">No stock report items found (Unilever Purchase Import / secondary sales data are empty), so nothing could be matched.</div>';
     if (d.ai.error) msgs += '<div class="im-msg err">Gemini AI scan stopped: ' + esc(d.ai.error) + ' (local match used for the remaining rows).</div>';
     else if (document.getElementById('imAi').checked && d.ai.key) msgs += '<div class="im-msg ok">Gemini AI scanned ' + d.ai.asked + ' weak row(s); ' + d.ai.used + ' answered.</div>';
     document.getElementById('imMsgs').innerHTML = msgs;
