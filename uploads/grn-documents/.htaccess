@@ -1,0 +1,9 @@
+# Uploaded entry documents are private: they are only served through
+# sampath_item_rejection.php?doc=<id> (login required).
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order Allow,Deny
+    Deny from all
+</IfModule>

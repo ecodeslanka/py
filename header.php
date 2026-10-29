@@ -996,6 +996,10 @@ if (isset($conn) && $conn) {
       <a href="grn_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'grn_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath Goods Rejected</span>
     </a>
+
+      <a href="sampath_item_rejection.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_rejection.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-file-circle-xmark"></i><span>Sampath Item Rejection Entries</span>
+    </a>
     
      <a href="sampath_grn_reasons.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_grn_reasons.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath GRN Reasons</span>
