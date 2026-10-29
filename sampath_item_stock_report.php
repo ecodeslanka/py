@@ -14,6 +14,8 @@
 //    Adjustment              -> stock_manual_adjustments.adjustment_qty           (units)
 //    Closing Balance         = Primary Purchase - Primary Returned - Secondary Inv - Good Rejected + Adjustment
 //    Closing Stock Value     = Closing Balance x Item Value (price per case / UPC)
+//    Damaged Stock          -> column after Closing Balance (option); source = confirmed Sampath Damage Entry lines ONLY
+//                              (NOT the secondary Dmg/Exp qty). Stock Location 'Damaged Stock items' lists them as <code>-D rows.
 //  Click an item to open its ledger (every movement + running balance).
 // ============================================================
 include 'config.php';
@@ -53,6 +55,7 @@ if ($has_open) {
 }
 $f_items = [];   // Item filter (multi-select): item codes; a "-D" row follows its base item
 foreach ((array)($_GET['items'] ?? []) as $v) { $v = trim((string)$v); if ($v !== '') $f_items[] = $v; }
+$show_dcol = ($_GET['dcol'] ?? '1') !== '0';   // option: show the Damaged Stock column after Closing Balance
 $f_loc  = in_array($_GET['loc'] ?? 'all', ['good','damaged']) ? $_GET['loc'] : 'all';   // Stock Location filter
 $from   = mysqli_real_escape_string($conn, $f_from);
 $to     = mysqli_real_escape_string($conn, $f_to);
@@ -90,15 +93,7 @@ function isr_ledger_events($conn, $have, $ce, $upc, $loc, $f_cust, $cust_sql, $d
     $ev = [];
     $d1 = mysqli_real_escape_string($conn, $d1); $d2 = mysqli_real_escape_string($conn, $d2);
     if ($loc === 'damaged') {
-        /* Damaged Stock ledger: Dmg/Exp qty on secondary bills */
-        if ($have['invoice_wise_sales_data']) {
-            $q = mysqli_query($conn, "SELECT delivery_date AS d, bill_number, outlet_name, damage_expiry_shortage_qty AS q
-                FROM invoice_wise_sales_data
-                WHERE product_code = '$ce' AND damage_expiry_shortage_qty <> 0 AND delivery_date BETWEEN '$d1' AND '$d2'$cust_sql");
-            while ($q && $r = mysqli_fetch_assoc($q))
-                $ev[] = ['d'=>$r['d'], 't'=>'Secondary Dmg/Exp', 'ref'=>trim($r['bill_number'] . ' ' . ($r['outlet_name'] ?? '')),
-                         'in'=>(float)$r['q'], 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'units'];
-        }
+        /* Damaged Stock ledger: confirmed Sampath Damage Entry lines only (not linked to secondary invoices) */
         /* confirmed Sampath Damage Entry lines (Sampath Damage Match & Confirm) -> Damaged Stock */
         if (!$f_cust && $have['sampath_damage_item_map'] && $have['sampath_damage_grn_items'] && $have['sampath_damage_grn_headers']) {
             $q = mysqli_query($conn, "SELECT h.grn_date AS d, h.grn_no, h.grn_branch_code, i.product_name, i.qty AS q
@@ -216,17 +211,8 @@ function isr_aggregate($conn, $have, $master, $from, $to, $cust_sql, $f_cust, &$
         if (!$q) $errors[] = mysqli_error($conn);
         while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $touch($c); $acc[$c]['rej'] = (float)$r['rq']; $acc[$c]['adj'] = (float)$r['aq']; }
     }
-    /* Damaged Stock: Dmg/Exp qty on secondary bills, shown as its own item "<code>-D" */
+    /* Damaged Stock: confirmed Sampath Damage Entry lines only (NOT linked to secondary invoices / Dmg-Exp qty) */
     $dmg = [];
-    if ($have['invoice_wise_sales_data']) {
-        $q = mysqli_query($conn, "SELECT product_code AS item_code, MAX(basepack_code) AS bp, MAX(product_description) AS nm,
-                SUM(damage_expiry_shortage_qty) AS q
-            FROM invoice_wise_sales_data
-            WHERE product_code <> '' AND delivery_date BETWEEN '$from' AND '$to'$cust_sql
-            GROUP BY product_code HAVING SUM(damage_expiry_shortage_qty) <> 0");
-        if (!$q) $errors[] = mysqli_error($conn);
-        while ($q && $r = mysqli_fetch_assoc($q)) $dmg[trim($r['item_code'])] = ['q'=>(float)$r['q'], 'bp'=>$r['bp'], 'nm'=>$r['nm']];
-    }
     /* confirmed Sampath Damage Entry lines (Sampath Damage Match & Confirm), by GRN date -> added to Damaged Stock */
     if (!$f_cust && $have['sampath_damage_item_map'] && $have['sampath_damage_grn_items'] && $have['sampath_damage_grn_headers']) {
         $q = mysqli_query($conn, "SELECT m.item_code, MAX(m.item_name) AS nm, SUM(i.qty) AS q
@@ -266,36 +252,38 @@ if ($have['invoice_wise_sales_data']) {
 }
 
 $rows = [];
-$tot = ['open'=>0,'pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,'val'=>0];
-$add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m, $open = 0.0) use (&$rows, &$tot) {
+$tot = ['dmg'=>0,'open'=>0,'pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,'val'=>0];
+$add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m, $open = 0.0, $dmg_q = 0.0) use (&$rows, &$tot) {
     $upc_v = (float)($m['upc'] ?? 0);
     $value = (float)($m['value'] ?? 0);
     // Good Stock: Primary Purchase - Primary Returned - Secondary Inv - Good Rejected + Adjustment
-    // Damaged Stock: Dmg/Exp qty received on secondary bills
+    // Damaged Stock item (<code>-D): confirmed Sampath damage entries
     $so_s  = $is_dmg ? $a['so'] : -$a['so'];
     $close = $open + ($is_dmg ? $a['so'] : $a['pc'] - $a['rc'] - $a['so'] - $a['rej'] + $a['adj']);
     $rows[] = ['basepack'=>$bp, 'open'=>round($open,2), 'sku7'=>$code, 'base'=>$base, 'name'=>$name, 'location'=>$loc_label, 'is_dmg'=>$is_dmg ? 1 : 0, 'upc'=>$upc_v,
         'pc'=>round($a['pc'],2), 'rc'=>round($a['rc'],2), 'so'=>round($a['so'],2), 'so_s'=>round($so_s,2), 'rej'=>round($a['rej'],2), 'adj'=>round($a['adj'],2),
-        'close'=>round($close,2), 'value'=>$value, 'cval'=>round($close * $value, 2)];
+        'close'=>round($close,2), 'dmg'=>round($is_dmg ? $close : $dmg_q, 2), 'value'=>$value, 'cval'=>round($close * $value, 2)];
+    $tot['dmg'] += $is_dmg ? $close : $dmg_q;
     $tot['open'] += $open; $tot['pc'] += $a['pc']; $tot['rc'] += $a['rc']; $tot['so'] += $so_s; $tot['rej'] += $a['rej']; $tot['adj'] += $a['adj'];
     $tot['close'] += $close; $tot['val'] += $close * $value;
 };
 $zero = ['pc'=>0.0,'rc'=>0.0,'so'=>0.0,'rej'=>0.0,'adj'=>0.0];
 $net = function ($a) { return $a['pc'] - $a['rc'] - $a['so'] - $a['rej'] + $a['adj']; };
 if ($f_loc !== 'damaged') {
-    foreach (array_unique(array_merge(array_keys($acc), array_keys($acc0))) as $code) {
+    foreach (array_unique(array_merge(array_keys($acc), array_keys($acc0), array_keys($dmg), array_keys($dmg0))) as $code) {
         $a  = $acc[$code] ?? ($zero + ['name'=>null,'basepack'=>null]);
         $a0 = $acc0[$code] ?? null;
         $open = $a0 ? $net($a0) : 0.0;
-        if (round($open, 2) == 0 && round($net($a), 2) == 0 && !array_filter($zero, function ($k) use ($a) { return round($a[$k], 2) != 0; }, ARRAY_FILTER_USE_KEY)) continue;
+        $dq = (float)($dmg0[$code]['q'] ?? 0) + (float)($dmg[$code]['q'] ?? 0);      // Damaged Stock (opening + movement)
+        if (round($open, 2) == 0 && round($net($a), 2) == 0 && round($dq, 2) == 0 && !array_filter($zero, function ($k) use ($a) { return round($a[$k], 2) != 0; }, ARRAY_FILTER_USE_KEY)) continue;
         $m = $master[$code] ?? [];
-        $name = $m['name'] ?? $a['name'] ?? ($a0['name'] ?? '');
+        $name = $m['name'] ?? $a['name'] ?? ($a0['name'] ?? ($dmg[$code]['nm'] ?? ($dmg0[$code]['nm'] ?? '')));
         $bp   = $m['basepack'] ?? $a['basepack'] ?? ($a0['basepack'] ?? '');
         if ($f_items && !in_array((string)$code, $f_items, true)) continue;
-        $add_row($code, $code, $name, $bp, 'Good Stock', false, $a, $m, $open);
+        $add_row($code, $code, $name, $bp, 'Good Stock', false, $a, $m, $open, $dq);
     }
 }
-if ($f_loc !== 'good') {
+if ($f_loc === 'damaged') {      // Damaged Stock items (<code>-D) as their own rows
     foreach (array_unique(array_merge(array_keys($dmg), array_keys($dmg0))) as $code) {
         $d  = $dmg[$code]  ?? ['q'=>0.0, 'bp'=>null, 'nm'=>null];
         $d0 = $dmg0[$code] ?? null;
@@ -352,7 +340,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <div class="isr">
     <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
-    <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> <strong>Opening Units</strong> = closing balance as at the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the transactions after it up to the To date; Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). Damaged Stock = Opening + the Dmg/Exp qty on secondary bills + confirmed Sampath Damage Entry lines, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
+    <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> <strong>Opening Units</strong> = closing balance as at the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the transactions after it up to the To date; Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). <strong>Damaged Stock</strong> (column after Closing Balance — untick the option to hide it) = opening + confirmed Sampath Damage Entry lines (Damage Entry AI Tally &amp; Confirm); it is <strong>not linked to the secondary invoices</strong>. Choose Stock Location → Damaged Stock items to list them as separate <em>&lt;code&gt;-D</em> rows. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
 
     <?php if ($range_err): ?><div class="isr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($range_err); ?></div><?php endif; ?>
     <form method="GET" class="isr-card">
@@ -380,10 +368,13 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                 </select></div>
             <div><label>Stock Location</label>
                 <select name="loc" style="border:1.5px solid #e2e6f0;border-radius:8px;padding:8px 12px;font-size:13px;">
-                    <option value="all" <?php echo $f_loc === 'all' ? 'selected' : ''; ?>>All</option>
+                    <option value="all" <?php echo $f_loc === 'all' ? 'selected' : ''; ?>>All items (Good Stock)</option>
                     <option value="good" <?php echo $f_loc === 'good' ? 'selected' : ''; ?>>Good Stock</option>
-                    <option value="damaged" <?php echo $f_loc === 'damaged' ? 'selected' : ''; ?>>Damaged Stock</option>
+                    <option value="damaged" <?php echo $f_loc === 'damaged' ? 'selected' : ''; ?>>Damaged Stock items (-D)</option>
                 </select></div>
+            <div><label>Option</label>
+                <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:13px;font-weight:600;color:#111;height:36px;cursor:pointer;">
+                    <input type="hidden" name="dcol" value="0"><input type="checkbox" name="dcol" value="1" <?php echo $show_dcol ? 'checked' : ''; ?>> Damaged Stock column</label></div>
             <div><label>Items</label>
                 <select name="items[]" id="itemSelect" multiple style="min-width:320px">
                     <?php foreach ($item_opts as $c => $nm): ?>
@@ -403,7 +394,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         <thead><tr>
             <th>Basepack Code</th><th>SKU7</th><th style="text-align:left">Product Name</th><th>Location</th><th>UPC</th>
             <th>Opening Units<br><small>units</small></th><th>Primary Purchase<br><small>units</small></th><th>Primary Returned<br><small>units</small></th><th>Secondary Inv<br><small>units</small></th><th>Good Rejected<br><small>units</small></th><th>Adjustment<br><small>units</small></th>
-            <th>Closing Balance<br><small>units</small></th><th>Item Value</th><th>Closing Stock Value</th>
+            <th>Closing Balance<br><small>units</small></th><?php if ($show_dcol): ?><th style="background:#fed7aa">Damaged Stock<br><small>units</small></th><?php endif; ?><th>Item Value</th><th>Closing Stock Value</th>
         </tr></thead>
         <tbody>
         <?php foreach ($rows as $i => $r): ?>
@@ -420,11 +411,13 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <td class="n"><?php echo qcell($r['rej'], $r['upc'], true); ?></td>
             <td class="n"><?php echo qcell($r['adj'], 0); ?></td>
             <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo qn($r['close']); ?></strong></td>
+            <?php if ($show_dcol): ?><td class="n" style="background:#fff7ed;color:#9a3412;font-weight:700;<?php echo round($r['dmg']) != 0 ? 'cursor:pointer;text-decoration:underline dotted;' : ''; ?>"
+                <?php if (round($r['dmg']) != 0 && !$r['is_dmg']): ?>onclick="event.stopPropagation();isrLedger(<?php echo htmlspecialchars(json_encode($r['base']), ENT_QUOTES); ?>, 'damaged')" title="Damaged Stock ledger"<?php endif; ?>><?php echo sgn($r['dmg']); ?></td><?php endif; ?>
             <td class="n"><?php echo $r['value'] ? number_format($r['value'], 2) : '—'; ?></td>
             <td class="n <?php echo $r['cval'] < 0 ? 'neg' : ''; ?>"><?php echo number_format($r['cval'], 2); ?></td>
         </tr>
         <?php endforeach; ?>
-        <?php if (!$rows): ?><tr><td colspan="14" style="text-align:center;padding:24px;color:#8892a4;">No stock records found up to this date.</td></tr><?php endif; ?>
+        <?php if (!$rows): ?><tr><td colspan="<?php echo 14 + ($show_dcol ? 1 : 0); ?>" style="text-align:center;padding:24px;color:#8892a4;">No stock records found up to this date.</td></tr><?php endif; ?>
         </tbody>
         <tfoot><tr>
             <td colspan="5" style="text-align:right;">TOTAL — <?php echo count($rows); ?> items</td>
@@ -435,6 +428,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <td class="n"><?php echo qn(-$tot['rej']); ?></td>
             <td class="n"><?php echo qn($tot['adj']); ?></td>
             <td class="n"><?php echo qn($tot['close']); ?></td>
+            <?php if ($show_dcol): ?><td class="n" style="background:#ffedd5;color:#9a3412"><?php echo sgn($tot['dmg']); ?></td><?php endif; ?>
             <td></td>
             <td class="n"><?php echo number_format($tot['val'], 2); ?></td>
         </tr></tfoot>
@@ -472,6 +466,7 @@ function isrMode(){
     document.getElementById('isrTo').disabled   = !range;
 }
 document.addEventListener('DOMContentLoaded', isrMode);
+const ISR_DCOL = <?php echo $show_dcol ? 'true' : 'false'; ?>;
 const ISR_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 const ISR_PERIOD = <?php echo json_encode($has_open ? ('opening as at ' . $open_to . ' · transactions ' . $f_from . ' to ' . $f_to) : ('as at ' . $f_to)); ?>;
 const ISR_QS = <?php echo json_encode(($has_open ? 'mode=range&date_from=' . urlencode($f_from_in) . '&date_to=' . urlencode($f_to_in) : 'mode=asat&as_at_date=' . urlencode($f_asat)) . ($f_cust ? '&' . http_build_query(['cust' => $f_cust]) : '')); ?>;
@@ -512,11 +507,12 @@ function isrHead(row){ row.eachCell(c => { c.font = {bold:true}; c.fill = {type:
 async function isrExport(){
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Item Stock');
     ws.addRow(['Sampath Item Stock Report — ' + ISR_PERIOD]).font = {bold:true, size:14};
-    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Opening Units','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)','Item Value','Closing Stock Value']));
-    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.open, r.pc, -r.rc, r.so_s, -r.rej, r.adj, r.close, r.value, r.cval]));
-    [5,6,7,8,9,10,11,12].forEach(c => ws.getColumn(c).numFmt = '#,##0');
-    [13,14].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
-    [14,12,40,14,8,12,14,14,14,14,12,14,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
+    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Opening Units','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)'].concat(ISR_DCOL ? ['Damaged Stock (units)'] : [], ['Item Value','Closing Stock Value'])));
+    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.open, r.pc, -r.rc, r.so_s, -r.rej, r.adj, r.close].concat(ISR_DCOL ? [r.dmg] : [], [r.value, r.cval])));
+    const nq = ISR_DCOL ? 13 : 12;
+    for (let c = 5; c <= nq; c++) ws.getColumn(c).numFmt = '#,##0';
+    [nq + 1, nq + 2].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
+    [14,12,40,14,8,12,14,14,14,14,12,14,14,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
     await isrSave(wb, 'sampath_item_stock_' + new Date().toISOString().slice(0,10) + '.xlsx');
 }
 async function isrLedgerExport(){
