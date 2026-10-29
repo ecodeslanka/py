@@ -1082,6 +1082,9 @@ if (isset($conn) && $conn) {
     <a href="usl_po_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'usl_po_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-invoice"></i><span>USL PO Report</span>
     </a>
+    <a href="sampath_credit_aging_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_credit_aging_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-folder"></i><span>Sampath Credit Aging Report</span>
+                    </a>
 </div>
 
             </div>
@@ -1910,9 +1913,6 @@ if (isset($conn) && $conn) {
                     </a>
                     <a href="rep_wise_credit_aging_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'rep_wise_credit_aging_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Credit Aging Report (Rep)</span>
-                    </a>
-                    <a href="sampath_credit_aging_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_credit_aging_report.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-folder"></i><span>Sampath Credit Aging Report</span>
                     </a>
                     <a href="customer_credit_risk_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'customer_credit_risk_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Customer Risk</span>
