@@ -959,9 +959,6 @@ if (isset($conn) && $conn) {
                     <a href="cc_deposit_audit.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cc_deposit_audit.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Deposit Reconciliation</span>
                     </a>
-                     <a href="grn_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'grn_report.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-truck-loading"></i><span>GRN Report</span>
-                    </a>
                     </div>
                 </div>
 
@@ -1065,9 +1062,6 @@ if (isset($conn) && $conn) {
     <i class="fa-solid fa-chevron-down submenu-toggle"></i>
 </div>
 <div class="submenu">
-      <a href="grn_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'grn_report.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-truck-loading"></i><span>Sampath Goods Rejected</span>
-    </a>
       <a href="sampath_item_rejection.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_rejection.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-circle-xmark"></i><span>Sampath Item Rejection Entries</span>
     </a>
@@ -1079,9 +1073,6 @@ if (isset($conn) && $conn) {
     </a>
     <a href="sampath_stock_reconciliation.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_stock_reconciliation.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-boxes-stacked"></i><span>Sampath Stock Reconciliation</span>
-    </a>
-    <a href="sampath_current_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_current_stock_report.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-warehouse"></i><span>Sampath Current Stock Report</span>
     </a>
     <a href="sampath_item_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_stock_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-boxes-packing"></i><span>Sampath Item Stock Report</span>
