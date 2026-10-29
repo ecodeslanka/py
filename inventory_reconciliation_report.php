@@ -19,6 +19,9 @@
 //    Rejected / Adjustment  -> stock_manual_adjustments (rejected qty is deducted, adjustment qty added)
 //    Closing - Good Stock   = Opening + Primary Purchase - Primary Return - Secondary - Rejected + Adjustment   (same as the Inventory Report)
 //    Closing - Damaged Stock= confirmed Sampath Damage Entry lines (Damage Entry AI Tally & Confirm); its own log
+//    Stock Count (optional)  -> pick a saved physical stock count (sampath_stock_count_*): the count's item qty (and value at TUR) is shown
+//                              against the Good Stock closing as at the count date, with the Difference (Physical - System).
+//                              In As At mode the report date follows the count date. Items the count has no qty for are not compared.
 // ============================================================
 include 'config.php';
 include_once 'auth.php';
@@ -27,10 +30,25 @@ require_once 'item_match_lib.php';     // im_table(), im_load_tur()
 
 function irr_upc($v) { return (float)preg_replace('/[^0-9.]/', '', (string)$v); }
 
+/* ── optional stock count to compare the good stock with ── */
+$have_sc = im_table($conn, 'sampath_stock_count_headers') && im_table($conn, 'sampath_stock_count_items');
+$counts = []; $sc = null; $phys = []; $count_warn = '';
+$f_count = (int)($_GET['stock_count'] ?? 0);
+if ($have_sc) {
+    $q = mysqli_query($conn, "SELECT id, count_date, file_name, note FROM sampath_stock_count_headers ORDER BY count_date DESC, id DESC");
+    while ($q && $r = mysqli_fetch_assoc($q)) { $counts[] = $r; if ((int)$r['id'] === $f_count) $sc = $r; }
+    if ($sc) {
+        $q = mysqli_query($conn, "SELECT item_code, SUM(counted_units) AS u FROM sampath_stock_count_items
+            WHERE header_id = " . (int)$sc['id'] . " AND counted_units IS NOT NULL AND item_code <> '' GROUP BY item_code");
+        while ($q && $r = mysqli_fetch_assoc($q)) $phys[trim($r['item_code'])] = (float)$r['u'];
+    }
+}
+
 /* ── dates: As At (normal) or Date Range (opening = closing as at From) ── */
 $ok_date = function ($v) { $v = trim((string)$v); return $v !== '' && strtotime($v) ? date('Y-m-d', strtotime($v)) : ''; };
 $f_mode    = ($_GET['mode'] ?? '') === 'range' ? 'range' : 'asat';
 $f_asat    = $ok_date($_GET['as_at_date'] ?? '') ?: date('Y-m-d');
+if ($sc && $f_mode === 'asat') $f_asat = substr((string)$sc['count_date'], 0, 10);   // system stock is compared as at the count date
 $f_from_in = $ok_date($_GET['date_from'] ?? '');
 $f_to_in   = $ok_date($_GET['date_to'] ?? '');
 $range_err = '';
@@ -41,6 +59,7 @@ if ($f_mode === 'range' && ($f_from_in === '' || $f_to_in === '' || $f_from_in >
 $has_open = $f_mode === 'range';
 if ($has_open) { $open_to = $f_from_in; $f_from = date('Y-m-d', strtotime($f_from_in . ' +1 day')); $f_to = $f_to_in; }
 else           { $open_to = null;       $f_from = '1970-01-01';                                     $f_to = $f_asat; }
+if ($sc && $f_to !== substr((string)$sc['count_date'], 0, 10)) $count_warn = 'The stock count is dated ' . substr((string)$sc['count_date'], 0, 10) . ' but the report closes on ' . $f_to . ' — the difference compares counts taken on different dates. Use the As At Date option to compare on the count date.';
 
 $f_items = [];
 foreach ((array)($_GET['items'] ?? []) as $v) { $v = trim((string)$v); if ($v !== '') $f_items[] = $v; }
@@ -117,8 +136,9 @@ ksort($item_opts);
 /* ── rows ── */
 $good = function ($a) { return $a['pc'] - $a['rc'] - $a['sec'] - $a['rej'] + $a['adj']; };
 $rows = [];
-$tot = ['open_q'=>0,'open_v'=>0,'pc_q'=>0,'pc_v'=>0,'rc_q'=>0,'rc_v'=>0,'pre_q'=>0,'pre_v'=>0,'sec_q'=>0,'sec_v'=>0,'diff_q'=>0,'diff_v'=>0,'oth_q'=>0,'oth_v'=>0,'g_q'=>0,'g_v'=>0,'d_q'=>0,'d_v'=>0,'dopen_q'=>0,'dopen_v'=>0,'dmov_q'=>0,'dmov_v'=>0];
-foreach (array_unique(array_merge(array_keys($acc), array_keys($acc0))) as $code) {
+$tot = ['open_q'=>0,'open_v'=>0,'pc_q'=>0,'pc_v'=>0,'rc_q'=>0,'rc_v'=>0,'pre_q'=>0,'pre_v'=>0,'sec_q'=>0,'sec_v'=>0,'diff_q'=>0,'diff_v'=>0,'oth_q'=>0,'oth_v'=>0,'g_q'=>0,'g_v'=>0,'d_q'=>0,'d_v'=>0,'dopen_q'=>0,'dopen_v'=>0,'dmov_q'=>0,'dmov_v'=>0,
+        'ph_q'=>0,'ph_v'=>0,'pd_q'=>0,'pd_v'=>0,'scsys_q'=>0,'scsys_v'=>0,'short_q'=>0,'short_v'=>0,'excess_q'=>0,'excess_v'=>0,'counted'=>0,'uncounted'=>0];
+foreach (array_unique(array_merge(array_keys($acc), array_keys($acc0), array_keys($phys))) as $code) {
     $a  = $acc[$code]  ?? ['pc'=>0.0,'rc'=>0.0,'pre'=>0.0,'sec'=>0.0,'rej'=>0.0,'adj'=>0.0,'dmg'=>0.0,'name'=>null,'bp'=>null];
     $a0 = $acc0[$code] ?? null;
     if ($f_items && !in_array((string)$code, $f_items, true)) continue;
@@ -127,11 +147,22 @@ foreach (array_unique(array_merge(array_keys($acc), array_keys($acc0))) as $code
     $oth   = $a['adj'] - $a['rej'];
     $gq    = $open + $good($a);
     $dq    = $dopen + $a['dmg'];
-    if (round($open,2) == 0 && round($good($a),2) == 0 && round($a['pre'],2) == 0 && round($dq,2) == 0 && round($oth,2) == 0 && round($a['pc'],2) == 0) continue;
+    $counted = isset($phys[$code]);
+    if (!$counted && round($open,2) == 0 && round($good($a),2) == 0 && round($a['pre'],2) == 0 && round($dq,2) == 0 && round($oth,2) == 0 && round($a['pc'],2) == 0) continue;
     $m = $master[$code] ?? []; $p = $price($code);
     $r = ['sku7'=>(string)$code, 'basepack'=>$m['basepack'] ?? $a['bp'] ?? ($a0['bp'] ?? ''), 'name'=>$m['name'] ?? $a['name'] ?? ($a0['name'] ?? ''), 'upc'=>(float)($m['upc'] ?? 0), 'tur'=>$p,
           'open_q'=>$open, 'pc_q'=>$a['pc'], 'rc_q'=>-$a['rc'], 'pre_q'=>$a['pre'], 'sec_q'=>$a['sec'], 'diff_q'=>$a['pre'] - $a['sec'], 'oth_q'=>$oth, 'g_q'=>$gq, 'd_q'=>$dq];
     foreach (['open','pc','rc','pre','sec','diff','oth','g','d'] as $k) { $r[$k . '_v'] = round($r[$k . '_q'] * $p, 2); $r[$k . '_q'] = round($r[$k . '_q'], 2); $tot[$k . '_q'] += $r[$k . '_q']; $tot[$k . '_v'] += $r[$k . '_v']; }
+    if ($sc) {      // physical count vs the system good stock (counted items only)
+        if ($counted) {
+            $r['ph_q'] = round($phys[$code], 2);        $r['ph_v'] = round($phys[$code] * $p, 2);
+            $r['pd_q'] = round($phys[$code] - $gq, 2);  $r['pd_v'] = round(($phys[$code] - $gq) * $p, 2);
+            $tot['ph_q'] += $r['ph_q']; $tot['ph_v'] += $r['ph_v']; $tot['pd_q'] += $r['pd_q']; $tot['pd_v'] += $r['pd_v'];
+            $tot['scsys_q'] += $r['g_q']; $tot['scsys_v'] += $r['g_v']; $tot['counted']++;
+            if ($r['pd_q'] < 0) { $tot['short_q'] += $r['pd_q'];  $tot['short_v'] += $r['pd_v']; }
+            if ($r['pd_q'] > 0) { $tot['excess_q'] += $r['pd_q']; $tot['excess_v'] += $r['pd_v']; }
+        } else { $r['ph_q'] = $r['ph_v'] = $r['pd_q'] = $r['pd_v'] = null; $tot['uncounted']++; }
+    }
     $tot['dopen_q'] += $dopen;     $tot['dopen_v'] += $dopen * $p;
     $tot['dmov_q']  += $a['dmg'];  $tot['dmov_v']  += $a['dmg'] * $p;
     $rows[] = $r;
@@ -183,6 +214,8 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
     <h2><i class="fa-solid fa-scale-balanced"></i> Inventory Reconciliation Report</h2>
     <div class="sub">A <strong>summary</strong> of the stock position — click <strong>View Details</strong> for the item-wise table. <strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> Opening Inventory = closing good stock as at the From date, then the transactions after it up to the To date. Every value = units × <strong>TUR</strong> (latest TUR of the item). <strong>Diff</strong> = Pre Secondary − Secondary. Closing is shown on two sides: <strong>Good Stock</strong> (Opening + Primary Purchase − Primary Return − Secondary − Rejected + Adjustment) and <strong>Damaged Stock</strong> (confirmed Sampath damage entries).</div>
 
+    <?php if ($count_warn): ?><div class="irr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($count_warn); ?></div><?php endif; ?>
+    <?php if ($sc && $f_mode === 'asat'): ?><div class="irr-card" style="background:#eff6ff;border-color:#bfdbfe;color:#1e40af;">Stock count of <strong><?php echo htmlspecialchars(substr((string)$sc['count_date'], 0, 10)); ?></strong> selected — the report is as at that date so the system good stock can be compared with the physical count.</div><?php endif; ?>
     <?php if ($range_err): ?><div class="irr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($range_err); ?></div><?php endif; ?>
     <?php foreach ($errors as $er): ?><div class="irr-card" style="background:#fef2f2;border-color:#fecaca;color:#991b1b;"><?php echo htmlspecialchars($er); ?></div><?php endforeach; ?>
 
@@ -203,6 +236,13 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                     </div>
                 </div>
             </div>
+            <?php if ($have_sc): ?>
+            <div><label>Stock Count (physical)</label>
+                <select name="stock_count" style="border:1.5px solid #e2e6f0;border-radius:8px;padding:8px 12px;font-size:13px;min-width:230px;max-width:100%;">
+                    <option value="">— none —</option>
+                    <?php foreach ($counts as $c): ?><option value="<?php echo (int)$c['id']; ?>" <?php echo $sc && (int)$sc['id'] === (int)$c['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars(substr($c['count_date'], 0, 10) . ($c['file_name'] ? ' · ' . $c['file_name'] : '') . ($c['note'] ? ' · ' . $c['note'] : '')); ?></option><?php endforeach; ?>
+                </select></div>
+            <?php endif; ?>
             <div><label>Items</label>
                 <select name="items[]" id="itemSelect" multiple style="min-width:320px">
                     <?php foreach ($item_opts as $c => $nm): ?>
@@ -255,6 +295,14 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                 <tr style="background:#fbe5d6"><td><strong>Closing Inventory</strong></td>
                     <td class="n" style="background:#f0fdf4"><strong><?php echo irr_n($tot['g_q']); ?></strong></td><td class="n" style="background:#f0fdf4"><strong><?php echo irr_v($tot['g_v']); ?></strong></td>
                     <td class="n" style="background:#fff7ed"><strong><?php echo irr_n($tot['d_q']); ?></strong></td><td class="n" style="background:#fff7ed"><strong><?php echo irr_v($tot['d_v']); ?></strong></td></tr>
+                <?php if ($sc): ?>
+                <tr style="background:#f5f3ff"><td colspan="5" style="font-weight:800;color:#5b21b6">Stock Count — <?php echo htmlspecialchars(substr((string)$sc['count_date'], 0, 10)); ?> (good stock, <?php echo (int)$tot['counted']; ?> item(s) counted<?php echo $tot['uncounted'] ? ', ' . (int)$tot['uncounted'] . ' in the report not in the count' : ''; ?>)</td></tr>
+                <tr><td>System good stock (counted items)</td><?php echo $dcells($tot['scsys_q'], $tot['scsys_v']); ?><?php echo $dash; ?></tr>
+                <tr style="background:#f5f3ff"><td><strong>Physical Stock Count</strong></td><?php echo $dcells($tot['ph_q'], $tot['ph_v']); ?><?php echo $dash; ?></tr>
+                <tr><td style="color:#dc2626">Short (physical below system)</td><?php echo $dcells($tot['short_q'], $tot['short_v']); ?><?php echo $dash; ?></tr>
+                <tr><td style="color:#15803d">Excess (physical above system)</td><?php echo $dcells($tot['excess_q'], $tot['excess_v']); ?><?php echo $dash; ?></tr>
+                <tr style="background:#ede9fe"><td><strong>Difference (Physical − System)</strong></td><?php echo $dcells($tot['pd_q'], $tot['pd_v']); ?><?php echo $dash; ?></tr>
+                <?php endif; ?>
                 <tr style="background:#e2e8f0"><td><strong>Total Closing Inventory (Good + Damaged)</strong></td>
                     <td class="n" colspan="2" style="text-align:right"><strong><?php echo irr_n($tot['g_q'] + $tot['d_q']); ?> units</strong></td>
                     <td class="n" colspan="2" style="text-align:right"><strong>Rs. <?php echo irr_v($tot['g_v'] + $tot['d_v']); ?></strong></td></tr>
@@ -272,11 +320,13 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                 <th class="top" colspan="5">Item</th>
                 <th class="top" colspan="9">Value (units × TUR)</th>
                 <th class="top" colspan="2" style="background:#14532d">Closing Inventory</th>
+                <?php if ($sc): ?><th class="top" colspan="2" style="background:#6d28d9">Stock Count <?php echo htmlspecialchars(substr((string)$sc['count_date'], 0, 10)); ?> (good stock)</th><?php endif; ?>
             </tr>
             <tr>
                 <th>Basepack</th><th>SKU7</th><th style="text-align:left">Product Name</th><th>UPC</th><th>TUR</th>
                 <th>Opening Inventory</th><th>Primary Purchase</th><th>Primary Return</th><th>Pre Secondary</th><th>Secondary</th><th>Diff<br><small>Pre − Sec</small></th><th>Rejected / Adj.</th>
                 <th class="gd" style="background:#bbf7d0">Good Stock</th><th style="background:#fed7aa">Damaged Stock</th>
+                <?php if ($sc): ?><th style="background:#ddd6fe">Physical Count</th><th style="background:#ede9fe">Difference<br><small>Physical − System</small></th><?php endif; ?>
             </tr>
         </thead>
         <tbody>
@@ -296,15 +346,19 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                 <?php echo irr_cell($r['oth_q'], $r['oth_v']); ?>
                 <?php echo irr_cell($r['g_q'], $r['g_v'], '#f0fdf4'); ?>
                 <?php echo irr_cell($r['d_q'], $r['d_v'], '#fff7ed'); ?>
+                <?php if ($sc): ?><?php echo $r['ph_q'] === null ? '<td class="n" style="color:#c4c9d4" title="not in the stock count">—</td><td class="n" style="color:#c4c9d4">—</td>' : irr_cell($r['ph_q'], $r['ph_v'], '#f5f3ff') . irr_cell($r['pd_q'], $r['pd_v'], '#ede9fe'); ?><?php endif; ?>
             </tr>
         <?php endforeach; ?>
-        <?php if (!$rows): ?><tr><td colspan="14" style="text-align:center;padding:30px;color:#8892a4;">No stock records found.</td></tr><?php endif; ?>
+        <?php if (!$rows): ?><tr><td colspan="<?php echo 14 + ($sc ? 2 : 0); ?>" style="text-align:center;padding:30px;color:#8892a4;">No stock records found.</td></tr><?php endif; ?>
         </tbody>
         <tfoot><tr>
             <td colspan="5" style="text-align:right;">TOTAL — <?php echo count($rows); ?> items</td>
             <?php foreach (['open','pc','rc','pre','sec','diff','oth','g','d'] as $k): ?>
                 <td class="n"><?php echo irr_v($tot[$k . '_v']); ?><div class="qq"><?php echo irr_n($tot[$k . '_q']); ?> u</div></td>
             <?php endforeach; ?>
+            <?php if ($sc): foreach (['ph','pd'] as $k): ?>
+                <td class="n"><?php echo irr_v($tot[$k . '_v']); ?><div class="qq"><?php echo irr_n($tot[$k . '_q']); ?> u</div></td>
+            <?php endforeach; endif; ?>
         </tr></tfoot>
     </table>
     </div>
@@ -329,15 +383,17 @@ function irrMode(){
 document.addEventListener('DOMContentLoaded', irrMode);
 const IRR_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 const IRR_TOT  = <?php echo json_encode($tot); ?>;
+const IRR_SC   = <?php echo $sc ? 'true' : 'false'; ?>;
 const IRR_PERIOD = <?php echo json_encode($period); ?>;
 async function irrExport(){
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Inventory Reconciliation');
     ws.addRow(['Inventory Reconciliation Report — ' + IRR_PERIOD + ' (value = units x TUR)']).font = {bold:true, size:14};
     const groups = [['open','Opening Inventory'],['pc','Primary Purchase'],['rc','Primary Return'],['pre','Pre Secondary'],['sec','Secondary'],['diff','Diff (Pre - Sec)'],['oth','Rejected / Adj.'],['g','Closing - Good Stock'],['d','Closing - Damaged Stock']];
+    if (IRR_SC) groups.push(['ph','Physical Count (Good)'], ['pd','Difference (Physical - System)']);
     const head = ['Basepack','SKU7','Product Name','UPC','TUR'];
     groups.forEach(g => head.push(g[1] + ' Qty', g[1] + ' Value'));
     const h = ws.addRow(head); h.eachCell(c => { c.font = {bold:true}; c.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FFFBE5D6'}}; });
-    IRR_ROWS.forEach(r => { const row = [r.basepack, r.sku7, r.name, r.upc, r.tur]; groups.forEach(g => row.push(r[g[0] + '_q'], r[g[0] + '_v'])); ws.addRow(row); });
+    IRR_ROWS.forEach(r => { const row = [r.basepack, r.sku7, r.name, r.upc, r.tur]; groups.forEach(g => row.push(r[g[0] + '_q'] ?? '', r[g[0] + '_v'] ?? '')); ws.addRow(row); });
     const t = ['TOTAL','','','','']; groups.forEach(g => t.push(IRR_TOT[g[0] + '_q'], IRR_TOT[g[0] + '_v'])); ws.addRow(t).font = {bold:true};
     for (let c = 6; c <= head.length; c++) ws.getColumn(c).numFmt = c % 2 === 1 ? '#,##0.00' : '#,##0';   // value columns = odd, qty = even
     ws.getColumn(5).numFmt = '#,##0.00';
