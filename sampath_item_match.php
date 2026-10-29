@@ -6,10 +6,12 @@
 //  Upload an Excel (columns: Sampath Code, Item Name, Price, Qty — Ref / Return Store optional).
 //  Each row is matched to the items of the Sampath Item Stock Report (same item list and prices):
 //    Item master  -> unilever_purchase_items (item code / SKU7, name, UPC, price per case -> unit price, MRP)
-//    plus items that only appear in the secondary sales data -> invoice_wise_sales_data (code, description, TUR / MRP)
+//    TUR (price)  -> invoice_wise_sales_data.tur (latest per item), else primary_invoice_wise_sales_data.tur
+//    plus items that only appear in the secondary sales data -> invoice_wise_sales_data (code, description)
 //  Scoring per row:
 //    Name %    local fuzzy name match (size-aware) — and, for weak rows, a Gemini AI scan of the best candidates
-//    Price %   how close the Excel price is to the item's price (unit price, case price or MRP, whichever is closest)
+//    Price %   how close the Excel price is to the item's TUR (latest TUR from the secondary / pre-secondary sales data;
+//              items with no TUR fall back to unit price / case price / MRP)
 //    Overall % = 60% Name + 40% Price (Name only when the item has no price)
 //    Status    >= 85 Matched · 60-84 Review · < 60 No Match
 //  The summary shows the tally percentages.
@@ -84,9 +86,22 @@ function im_overall($name, $price) {
 }
 function im_status($o) { return $o >= 85 ? 'Matched' : ($o >= 60 ? 'Review' : 'No Match'); }
 
-/* ── item masters = the Sampath Item Stock Report item list ── */
+/* ── latest TUR (trade unit rate) per item from the Sampath sales data: secondary first, pre-secondary as fallback ── */
+function im_load_tur($conn) {
+    $tur = [];
+    foreach (['primary_invoice_wise_sales_data', 'invoice_wise_sales_data'] as $t) {   // secondary loaded last so it wins
+        if (!im_table($conn, $t)) continue;
+        $q = mysqli_query($conn, "SELECT d.product_code, d.tur FROM $t d
+            INNER JOIN (SELECT product_code, MAX(id) AS mid FROM $t WHERE product_code <> '' AND tur IS NOT NULL AND tur > 0 GROUP BY product_code) l ON l.mid = d.id");
+        while ($q && $r = mysqli_fetch_assoc($q)) $tur[trim($r['product_code'])] = (float)$r['tur'];
+    }
+    return $tur;
+}
+
+/* ── item masters = the Sampath Item Stock Report item list; price = TUR ── */
 function im_load_masters($conn) {
     $items = []; $seen = [];
+    $tur = im_load_tur($conn);
     if (im_table($conn, 'unilever_purchase_items')) {
         $q = mysqli_query($conn, "SELECT p.item_code, p.item_name, p.upc, p.price_per_case, p.mrp
             FROM unilever_purchase_items p
@@ -96,21 +111,23 @@ function im_load_masters($conn) {
             $case = (float)$r['price_per_case'];
             $code = trim($r['item_code']);
             $seen[$code] = true;
+            $unit = $upc > 0 ? round($case / $upc, 2) : ($case ?: null);
+            if (isset($tur[$code])) { $prices = [$tur[$code]]; $price = $tur[$code]; $psrc = 'TUR'; }
+            else { $prices = [$upc > 0 ? $case / $upc : null, $case ?: null, (float)$r['mrp'] ?: null]; $price = $unit; $psrc = 'Unit price'; }
             $items[] = ['src' => 'Stock Report', 'code' => $code, 'name' => (string)$r['item_name'], 'tok' => im_norm($r['item_name']),
-                        'prices' => [$upc > 0 ? $case / $upc : null, $case ?: null, (float)$r['mrp'] ?: null],
-                        'price' => $upc > 0 ? round($case / $upc, 2) : ($case ?: null)];
+                        'prices' => $prices, 'price' => $price, 'psrc' => $psrc];
         }
     }
     /* items the stock report also lists because they have secondary sales / Dmg-Exp but no purchase row */
     if (im_table($conn, 'invoice_wise_sales_data')) {
-        $q = mysqli_query($conn, "SELECT product_code, MAX(product_description) AS nm, MAX(tur) AS tur, MAX(mrp) AS mrp
+        $q = mysqli_query($conn, "SELECT product_code, MAX(product_description) AS nm, MAX(mrp) AS mrp
             FROM invoice_wise_sales_data WHERE product_code IS NOT NULL AND product_code <> '' GROUP BY product_code");
         while ($q && $r = mysqli_fetch_assoc($q)) {
             $code = trim($r['product_code']);
             if (isset($seen[$code])) continue;
-            $tur = (float)$r['tur']; $mrp = (float)$r['mrp'];
+            $t = $tur[$code] ?? null; $mrp = (float)$r['mrp'];
             $items[] = ['src' => 'Stock Report', 'code' => $code, 'name' => (string)$r['nm'], 'tok' => im_norm($r['nm']),
-                        'prices' => [$tur ?: null, $mrp ?: null], 'price' => $tur ?: ($mrp ?: null)];
+                        'prices' => $t ? [$t] : [$mrp ?: null], 'price' => $t ?: ($mrp ?: null), 'psrc' => $t ? 'TUR' : 'MRP'];
         }
     }
     return $items;
@@ -228,7 +245,7 @@ if (($_GET['ajax'] ?? '') === 'match' && $_SERVER['REQUEST_METHOD'] === 'POST') 
         if ($x['price_pct'] !== null) { $sum['price_known']++; if ($x['price_pct'] >= 95) $sum['price_ok']++; }
         $out[] = [
             'ref' => $r['ref'] ?? ($n + 1), 'code' => $r['code'] ?? '', 'name' => $r['name'] ?? '', 'price' => (float)($r['price'] ?? 0), 'qty' => $r['qty'] ?? '',
-            'm_src' => $m['src'] ?? '', 'm_code' => $m['code'] ?? '', 'm_name' => $m['name'] ?? '', 'm_price' => $m['price'] ?? null,
+            'm_src' => $m['src'] ?? '', 'm_code' => $m['code'] ?? '', 'm_name' => $m['name'] ?? '', 'm_price' => $m['price'] ?? null, 'm_psrc' => $m['psrc'] ?? '',
             'name_pct' => round($x['name_pct'], 1), 'price_pct' => $x['price_pct'] === null ? null : round($x['price_pct'], 1),
             'overall' => round($o, 1), 'method' => $x['method'], 'status' => $st,
         ];
@@ -289,7 +306,7 @@ table.im-t .n{text-align:right;font-family:monospace;}
     <div class="im-wrap" id="imResultWrap" style="display:none">
         <table class="im-t">
             <thead><tr><th>Ref</th><th>Sampath Code</th><th>Excel Item Name</th><th class="n">Excel Price</th><th class="n">Qty</th>
-                <th>Matched Stock Report Item</th><th class="n">Our Price</th><th class="n">Name %</th><th class="n">Price %</th><th class="n">Overall %</th><th>Method</th><th>Status</th></tr></thead>
+                <th>Matched Stock Report Item</th><th class="n">Our TUR Price</th><th class="n">Name %</th><th class="n">Price %</th><th class="n">Overall %</th><th>Method</th><th>Status</th></tr></thead>
             <tbody id="imBody"></tbody>
         </table>
     </div>
@@ -367,7 +384,7 @@ function imRender(){
     document.getElementById('imBody').innerHTML = d.rows.map(r => `<tr>
         <td>${esc(r.ref)}</td><td>${esc(r.code)}</td><td style="max-width:300px;white-space:normal">${esc(r.name)}</td><td class="n">${fm(r.price)}</td><td class="n">${esc(r.qty)}</td>
         <td style="max-width:320px;white-space:normal">${r.m_code ? '<strong>' + esc(r.m_code) + '</strong> - ' + esc(r.m_name) + ' <span style="color:#8892a4">(' + esc(r.m_src) + ')</span>' : '—'}</td>
-        <td class="n">${fm(r.m_price)}</td>
+        <td class="n">${fm(r.m_price)}${r.m_price !== null && r.m_psrc && r.m_psrc !== 'TUR' ? ' <span style="color:#b45309;font-size:10px" title="No TUR on record - ' + esc(r.m_psrc) + ' used">(' + esc(r.m_psrc) + ')</span>' : ''}</td>
         <td class="n pct">${fm(r.name_pct, 1)}%</td><td class="n pct">${r.price_pct === null ? 'n/a' : fm(r.price_pct, 1) + '%'}</td>
         <td class="n pct" style="color:${col(r.overall)}">${fm(r.overall, 1)}%</td><td>${esc(r.method)}</td>
         <td><span class="pill ${r.status.replace(' ', '')}">${esc(r.status)}</span></td></tr>`).join('');
@@ -378,7 +395,7 @@ function imRender(){
 async function imExport(){
     if (!imResult) return;
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Item Match');
-    const h = ws.addRow(['Ref','Sampath Code','Excel Item Name','Excel Price','Qty','Matched Code','Matched Item','Source','Our Price','Name %','Price %','Overall %','Method','Status']);
+    const h = ws.addRow(['Ref','Sampath Code','Excel Item Name','Excel Price','Qty','Matched Code','Matched Item','Source','Our TUR Price','Name %','Price %','Overall %','Method','Status']);
     h.eachCell(c => { c.font = {bold:true}; c.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FFFBE5D6'}}; });
     imResult.rows.forEach(r => ws.addRow([r.ref, r.code, r.name, r.price, r.qty, r.m_code, r.m_name, r.m_src, r.m_price, r.name_pct, r.price_pct, r.overall, r.method, r.status]));
     const s = imResult.summary, n = s.rows || 1;
