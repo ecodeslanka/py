@@ -64,7 +64,7 @@ $cust_sql = $f_cust ? " AND outlet_code IN ('" . implode("','", array_map(functi
 
 $have = [];
 foreach (['unilever_purchase_items','unilever_purchase_batches','unilever_item_return_items','unilever_item_returns',
-          'invoice_wise_sales_data','stock_manual_adjustments','sampath_damage_grn_items','sampath_damage_grn_headers'] as $t)
+          'invoice_wise_sales_data','stock_manual_adjustments','sampath_damage_grn_items','sampath_damage_grn_headers','sampath_damage_item_map'] as $t)
     $have[$t] = isr_table_exists($conn, $t);
 
 /* ── item master: latest purchase row per item code ── */
@@ -97,6 +97,17 @@ function isr_ledger_events($conn, $have, $ce, $upc, $loc, $f_cust, $cust_sql, $d
                 WHERE product_code = '$ce' AND damage_expiry_shortage_qty <> 0 AND delivery_date BETWEEN '$d1' AND '$d2'$cust_sql");
             while ($q && $r = mysqli_fetch_assoc($q))
                 $ev[] = ['d'=>$r['d'], 't'=>'Secondary Dmg/Exp', 'ref'=>trim($r['bill_number'] . ' ' . ($r['outlet_name'] ?? '')),
+                         'in'=>(float)$r['q'], 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'units'];
+        }
+        /* confirmed Sampath Damage Entry lines (Sampath Damage Match & Confirm) -> Damaged Stock */
+        if (!$f_cust && $have['sampath_damage_item_map'] && $have['sampath_damage_grn_items'] && $have['sampath_damage_grn_headers']) {
+            $q = mysqli_query($conn, "SELECT h.grn_date AS d, h.grn_no, h.grn_branch_code, i.product_name, i.qty AS q
+                FROM sampath_damage_item_map m
+                JOIN sampath_damage_grn_items i ON i.id = m.line_id
+                JOIN sampath_damage_grn_headers h ON h.id = i.grn_header_id
+                WHERE m.item_code = '$ce' AND h.grn_date BETWEEN '$d1' AND '$d2'");
+            while ($q && $r = mysqli_fetch_assoc($q))
+                $ev[] = ['d'=>$r['d'], 't'=>'Sampath Damage Entry', 'ref'=>trim('GRN ' . $r['grn_no'] . ' · ' . $r['grn_branch_code'] . ' · ' . ($r['product_name'] ?? '')),
                          'in'=>(float)$r['q'], 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'units'];
         }
         return $ev;
@@ -216,6 +227,20 @@ function isr_aggregate($conn, $have, $master, $from, $to, $cust_sql, $f_cust, &$
         if (!$q) $errors[] = mysqli_error($conn);
         while ($q && $r = mysqli_fetch_assoc($q)) $dmg[trim($r['item_code'])] = ['q'=>(float)$r['q'], 'bp'=>$r['bp'], 'nm'=>$r['nm']];
     }
+    /* confirmed Sampath Damage Entry lines (Sampath Damage Match & Confirm), by GRN date -> added to Damaged Stock */
+    if (!$f_cust && $have['sampath_damage_item_map'] && $have['sampath_damage_grn_items'] && $have['sampath_damage_grn_headers']) {
+        $q = mysqli_query($conn, "SELECT m.item_code, MAX(m.item_name) AS nm, SUM(i.qty) AS q
+            FROM sampath_damage_item_map m
+            JOIN sampath_damage_grn_items i ON i.id = m.line_id
+            JOIN sampath_damage_grn_headers h ON h.id = i.grn_header_id
+            WHERE h.grn_date BETWEEN '$from' AND '$to' GROUP BY m.item_code");
+        if (!$q) $errors[] = mysqli_error($conn);
+        while ($q && $r = mysqli_fetch_assoc($q)) {
+            $c = trim($r['item_code']);
+            if (!isset($dmg[$c])) $dmg[$c] = ['q'=>0.0, 'bp'=>null, 'nm'=>$r['nm']];
+            $dmg[$c]['q'] += (float)$r['q'];
+        }
+    }
     return [$acc, $dmg];
 }
 
@@ -327,7 +352,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <div class="isr">
     <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
-    <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> <strong>Opening Units</strong> = closing balance as at the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the transactions after it up to the To date; Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). Damaged Stock = Opening + the Dmg/Exp qty on secondary bills, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
+    <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> <strong>Opening Units</strong> = closing balance as at the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the transactions after it up to the To date; Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). Damaged Stock = Opening + the Dmg/Exp qty on secondary bills + confirmed Sampath Damage Entry lines, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
 
     <?php if ($range_err): ?><div class="isr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($range_err); ?></div><?php endif; ?>
     <form method="GET" class="isr-card">

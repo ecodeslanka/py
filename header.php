@@ -989,6 +989,10 @@ if (isset($conn) && $conn) {
     <a href="sampath_damage_batches.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_damage_batches.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath Damage Entry</span>
     </a>
+
+    <a href="sampath_damage_match.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_damage_match.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-wand-magic-sparkles"></i><span>Damage Entry AI Tally &amp; Confirm</span>
+    </a>
     <a href="sampath_super_payment.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_super_payment.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath Super Payments</span>
     </a>
