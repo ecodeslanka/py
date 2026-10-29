@@ -1079,6 +1079,9 @@ if (isset($conn) && $conn) {
     <a href="usl_po_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'usl_po_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-invoice"></i><span>USL PO Report</span>
     </a>
+    <a href="inventory_reconciliation_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'inventory_reconciliation_report.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-scale-balanced"></i><span>Inventory Reconciliation Report</span>
+    </a>
 </div>
 
             </div>
