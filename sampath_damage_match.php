@@ -4,7 +4,7 @@
 //  SAMPATH DAMAGE ENTRY — AI SCAN, TALLY & CONFIRM
 //
 //  Shows every line of the Sampath Damage Entry imports (sampath_damage_grn_items, grouped by batch / GRN) and tallies each
-//  line with a system item (the Sampath Item Stock Report items) by name and price (TUR), with a Gemini AI scan for weak
+//  line with a system item (the Sampath Inventory Report items) by name and price (TUR), with a Gemini AI scan for weak
 //  rows. Lines can be confirmed one by one, as a selection, or in bulk (all lines at or above a tally %). Lines that do not
 //  tally can be pointed at any system item by hand before confirming.
 //
@@ -271,7 +271,7 @@ table.dm-t tr.bh td{background:#1e293b;color:#fff;font-weight:700;padding:9px 10
 
 <div class="dm">
     <h2><i class="fa-solid fa-triangle-exclamation"></i> Sampath Damage Entry — AI Scan, Tally &amp; Confirm</h2>
-    <div class="sub">Each damage item is tallied with a system item by name and price (TUR), with a Gemini AI scan for weak matches. Lines with the <strong>same Sampath code in the same batch are totalled into one row</strong>. <strong>Confirmed</strong> rows are added as <strong>Damaged Stock</strong> (<em>&lt;code&gt;-D</em>) in the Sampath Item Stock Report and its item ledger. Confirm by row, by selection, by <strong>batch</strong>, or in bulk — and <strong>reverse</strong> any of them. If an item does not tally, choose the right system item with <em>Change</em> first.</div>
+    <div class="sub">Each damage item is tallied with a system item by name and price (TUR), with a Gemini AI scan for weak matches. Lines with the <strong>same Sampath code in the same batch are totalled into one row</strong>. <strong>Confirmed</strong> rows are added as <strong>Damaged Stock</strong> (<em>&lt;code&gt;-D</em>) in the Sampath Inventory Report and its item ledger. Confirm by row, by selection, by <strong>batch</strong>, or in bulk — and <strong>reverse</strong> any of them. If an item does not tally, choose the right system item with <em>Change</em> first.</div>
 
     <?php if (!$have_dmg): ?><div class="dm-msg err">No Sampath damage entries found yet (sampath_damage_* tables are empty / missing). Import damage entries first.</div><?php endif; ?>
     <?php if (!$has_key): ?><div class="dm-msg warn">No Gemini API key was found, so only the local name/price tally will run. Save the key on the <strong>AI Settings</strong> page to enable the AI scan.</div><?php endif; ?>

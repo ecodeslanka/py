@@ -2,7 +2,7 @@
 // ============================================================
 //  item_match_lib.php — shared name / price matching + Gemini scan
 //  Used by sampath_item_match.php (Excel check) and sampath_damage_match.php (damage entries).
-//  Matches supplier items to the Sampath Item Stock Report items by name (size-aware fuzzy), price (TUR) and,
+//  Matches supplier items to the Sampath Inventory Report items by name (size-aware fuzzy), price (TUR) and,
 //  for weak rows, a Gemini AI scan (key from AI Settings -> ai_settings table).
 // ============================================================
 
@@ -81,7 +81,7 @@ function im_load_tur($conn) {
     return $tur;
 }
 
-/* ── item masters = the Sampath Item Stock Report item list; price = TUR ── */
+/* ── item masters = the Sampath Inventory Report item list; price = TUR ── */
 function im_load_masters($conn) {
     $items = []; $seen = [];
     $tur = im_load_tur($conn);

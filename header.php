@@ -1070,21 +1070,21 @@ if (isset($conn) && $conn) {
     <i class="fa-solid fa-chevron-down submenu-toggle"></i>
 </div>
 <div class="submenu">
+    <a href="credit_aging_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'credit_aging_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-folder"></i><span>Credit Aging Report</span>
+                    </a>
+    <a href="sampath_item_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_stock_report.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-boxes-packing"></i><span>Sampath Inventory Report</span>
+    </a>
       <a href="sampath_age_analysis_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_age_analysis_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath Age Analysis</span>
     </a>
     <a href="sampath_balancing_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_balancing_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-scale-balanced"></i><span>Sampath Balancing Report</span>
     </a>
-    <a href="sampath_item_stock_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_stock_report.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-boxes-packing"></i><span>Sampath Item Stock Report</span>
-    </a>
     <a href="usl_po_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'usl_po_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-invoice"></i><span>USL PO Report</span>
     </a>
-    <a href="credit_aging_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'credit_aging_report.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-folder"></i><span>Credit Aging Report</span>
-                    </a>
 </div>
 
             </div>

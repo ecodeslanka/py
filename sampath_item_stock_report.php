@@ -1,7 +1,7 @@
 <?php
 // ============================================================
 //  sampath_item_stock_report.php
-//  SAMPATH ITEM STOCK REPORT (as-at-date running balance, no opening entry) with item-wise ledger
+//  SAMPATH INVENTORY REPORT (as-at-date running balance, no opening entry) with item-wise ledger
 //
 //  One row per item for the chosen period:
 //    Basepack Code / SKU7 (item code) / Product Name / UPC / Item Value
@@ -350,7 +350,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 </style>
 
 <div class="isr">
-    <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
+    <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Inventory Report</h2>
     <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> <strong>Opening Units</strong> = closing balance as at the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the transactions after it up to the To date; Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). <strong>Damaged Stock</strong> is a separate log — it never shows in Opening Units, Secondary Inv or Closing Balance — and is the column after Closing Balance (untick the option to hide it) = opening + confirmed Sampath Damage Entry lines (Damage Entry AI Tally &amp; Confirm); it is <strong>not linked to the secondary invoices</strong>. Choose Stock Location → Damaged Stock items to list them as separate <em>&lt;code&gt;-D</em> rows. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
 
     <?php if ($range_err): ?><div class="isr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($range_err); ?></div><?php endif; ?>
@@ -517,7 +517,7 @@ function isrHead(row){ row.eachCell(c => { c.font = {bold:true}; c.fill = {type:
 
 async function isrExport(){
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Item Stock');
-    ws.addRow(['Sampath Item Stock Report — ' + ISR_PERIOD]).font = {bold:true, size:14};
+    ws.addRow(['Sampath Inventory Report — ' + ISR_PERIOD]).font = {bold:true, size:14};
     isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Opening Units','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)'].concat(ISR_DCOL ? ['Damaged Stock (units)'] : [], ['Item Value','Closing Stock Value'])));
     ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.open, r.pc, -r.rc, r.so_s, -r.rej, r.adj, r.close].concat(ISR_DCOL ? [r.dmg] : [], [r.value, r.cval])));
     const nq = ISR_DCOL ? 13 : 12;

@@ -4,7 +4,7 @@
 //  SAMPATH ITEM MATCH REPORT — upload an Excel list and check it against our inventory
 //
 //  Upload an Excel (columns: Sampath Code, Item Name, Price, Qty — Ref / Return Store optional).
-//  Each row is matched to the items of the Sampath Item Stock Report (same item list and prices):
+//  Each row is matched to the items of the Sampath Inventory Report (same item list and prices):
 //    Item master  -> unilever_purchase_items (item code / SKU7, name, UPC, price per case -> unit price, MRP)
 //    TUR (price)  -> invoice_wise_sales_data.tur (latest per item), else primary_invoice_wise_sales_data.tur
 //    plus items that only appear in the secondary sales data -> invoice_wise_sales_data (code, description)
@@ -117,7 +117,7 @@ table.im-t .n{text-align:right;font-family:monospace;}
 
 <div class="im">
     <h2><i class="fa-solid fa-magnifying-glass-chart"></i> Sampath Item Match Report</h2>
-    <div class="sub">Upload an Excel list (Sampath Code, Item Name, Price, Qty) and see how well each item tallies with the items of the <strong>Sampath Item Stock Report</strong> by <strong>name</strong> and <strong>price</strong>, with a Gemini AI scan for weak matches.</div>
+    <div class="sub">Upload an Excel list (Sampath Code, Item Name, Price, Qty) and see how well each item tallies with the items of the <strong>Sampath Inventory Report</strong> by <strong>name</strong> and <strong>price</strong>, with a Gemini AI scan for weak matches.</div>
 
     <?php if (!$has_key): ?><div class="im-msg warn">No Gemini API key was found, so only the local name/price match will run. Save the key on the <strong>AI Settings</strong> page (<code>ai_settings.php</code>) to enable the AI scan.</div><?php endif; ?>
 
