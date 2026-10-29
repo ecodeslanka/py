@@ -133,28 +133,35 @@ function im_load_masters($conn) {
     return $items;
 }
 
-/* ── Gemini: pick the best candidate per weak row (batched) ── */
+/* ── Gemini: pick the best candidate per weak row (small batches; thinking off for speed; one retry) ── */
 function im_gemini_pick($key, $batch, &$err) {
     // $batch: list of ['ref'=>..,'name'=>..,'price'=>..,'cands'=>[['i'=>0,'name'=>..,'price'=>..],..]]
-    $prompt = "You match product names from a supplier's Excel list to our inventory. For each row choose the candidate that is the SAME product "
-        . "(same brand, variant/flavour and pack size; prices are a hint, not decisive). If none is the same product answer null. "
-        . "Reply ONLY with a JSON array: [{\"ref\":<row ref>,\"candidate\":<index or null>,\"confidence\":<0-100 name-match confidence>}].\n"
+    $prompt = "Match each supplier product name to the SAME product in our candidate list (same brand, variant/flavour and pack size; "
+        . "the price is only a hint). If no candidate is the same product use null. "
+        . "Reply ONLY with a JSON array: [{\"ref\":<row ref>,\"candidate\":<candidate i or null>,\"confidence\":<0-100>}].\n"
         . json_encode($batch, JSON_UNESCAPED_UNICODE);
     $body = json_encode([
         'contents' => [['parts' => [['text' => $prompt]]]],
-        'generationConfig' => ['temperature' => 0, 'responseMimeType' => 'application/json'],
+        'generationConfig' => ['temperature' => 0, 'maxOutputTokens' => 1024, 'responseMimeType' => 'application/json',
+                               'thinkingConfig' => ['thinkingBudget' => 0]],
     ]);
     $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode(GEMINI_MODEL) . ':generateContent';
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 45,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-goog-api-key: ' . $key]]);
-    $res = curl_exec($ch);
-    $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    if ($res === false) { $err = 'Gemini request failed: ' . curl_error($ch); curl_close($ch); return []; }
-    curl_close($ch);
+    $res = false; $http = 0; $cerr = '';
+    for ($try = 0; $try < 2 && $res === false; $try++) {          // one retry on a network failure / timeout
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 40,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-goog-api-key: ' . $key]]);
+        $res = curl_exec($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if ($res === false) $cerr = curl_error($ch);
+        curl_close($ch);
+    }
+    if ($res === false) { $err = 'Gemini request failed: ' . $cerr; return []; }
     $j = json_decode($res, true);
     if ($http >= 400) { $err = 'Gemini error ' . $http . ': ' . ($j['error']['message'] ?? 'unknown'); return []; }
-    $txt = $j['candidates'][0]['content']['parts'][0]['text'] ?? '';
+    $txt = '';
+    foreach (($j['candidates'][0]['content']['parts'] ?? []) as $p) $txt .= $p['text'] ?? '';
     $arr = json_decode(trim($txt), true);
     if (!is_array($arr)) { $err = 'Gemini returned an unreadable answer.'; return []; }
     $out = [];
@@ -162,36 +169,47 @@ function im_gemini_pick($key, $batch, &$err) {
     return $out;
 }
 
-/* ── AJAX: run the match ── */
+/* ── AJAX: Gemini scan of one small batch of weak rows (called repeatedly by the page) ── */
+if (($_GET['ajax'] ?? '') === 'ai' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    @set_time_limit(120);
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $key = im_gemini_key();
+    if ($key === '') { echo json_encode(['ok' => false, 'error' => 'No Gemini API key saved in AI Settings.']); exit; }
+    $batch = array_slice((array)($in['batch'] ?? []), 0, 8);
+    $err = '';
+    $ans = im_gemini_pick($key, $batch, $err);
+    echo json_encode(['ok' => $err === '', 'error' => $err, 'answers' => $ans], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/* ── AJAX: local match (name + price against the stock report items); returns the weak rows for the AI scan ── */
 if (($_GET['ajax'] ?? '') === 'match' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
-    @set_time_limit(180);
+    @set_time_limit(120);
     $in   = json_decode(file_get_contents('php://input'), true) ?: [];
     $rows = array_slice((array)($in['rows'] ?? []), 0, 1000);
-    $use_ai = !empty($in['use_ai']);
-    $key  = im_gemini_key();
+    $want_ai = !empty($in['use_ai']) && im_gemini_key() !== '';
     $masters = im_load_masters($conn);
     $by_code = [];
     foreach ($masters as $i => $m) $by_code[mb_strtoupper($m['code'])][] = $i;
 
-    $res = []; $weak = [];
+    $out = []; $weak = [];
     foreach ($rows as $n => $r) {
         $code  = trim((string)($r['code'] ?? ''));
         $name  = trim((string)($r['name'] ?? ''));
         $price = (float)($r['price'] ?? 0);
         $tok   = im_norm($name);
-        $cand  = [];   // [index => name score]
+        $cand  = [];   // [master index => name score]
         foreach ($masters as $i => $m) $cand[$i] = im_name_score($tok, $m['tok']);
         arsort($cand);
-        $top = array_slice($cand, 0, 8, true);
+        $top = array_slice($cand, 0, 6, true);
         $pick = null; $method = 'Name';
-        // 1) exact code match wins
-        if ($code !== '' && isset($by_code[mb_strtoupper($code)])) {
+        if ($code !== '' && isset($by_code[mb_strtoupper($code)])) {          // 1) exact code match wins
             $best = null;
             foreach ($by_code[mb_strtoupper($code)] as $i) { $o = im_overall($cand[$i], im_price_score($price, $masters[$i]['prices'])); if ($best === null || $o > $best[1]) $best = [$i, $o]; }
             $pick = $best[0]; $method = 'Code';
-        } else {
-            // 2) best overall (name + price) among the top name candidates
+        } else {                                                                // 2) best name + price among the top candidates
             $bo = -1;
             foreach (array_slice($top, 0, 5, true) as $i => $ns) {
                 $o = im_overall($ns, im_price_score($price, $masters[$i]['prices']));
@@ -200,57 +218,25 @@ if (($_GET['ajax'] ?? '') === 'match' && $_SERVER['REQUEST_METHOD'] === 'POST') 
         }
         $ns = $pick !== null ? $cand[$pick] : 0.0;
         $ps = $pick !== null ? im_price_score($price, $masters[$pick]['prices']) : null;
-        $res[$n] = ['pick' => $pick, 'name_pct' => $ns, 'price_pct' => $ps, 'method' => $method, 'top' => array_keys($top)];
-        $overall = im_overall($ns, $ps);
-        if ($use_ai && $key && $method !== 'Code' && $overall < 85) $weak[$n] = true;
-    }
-
-    /* Gemini scan of the weak rows, 12 per request */
-    $ai_err = ''; $ai_used = 0;
-    if ($use_ai && $key && $weak) {
-        foreach (array_chunk(array_keys($weak), 12) as $chunk) {
-            $batch = [];
-            foreach ($chunk as $n) {
-                $cs = [];
-                foreach ($res[$n]['top'] as $k => $i) $cs[] = ['i' => $k, 'name' => $masters[$i]['name'], 'price' => $masters[$i]['price']];
-                $batch[] = ['ref' => $n, 'name' => (string)($rows[$n]['name'] ?? ''), 'price' => (float)($rows[$n]['price'] ?? 0), 'cands' => $cs];
+        $m = $pick !== null ? $masters[$pick] : null;
+        $o = im_overall($ns, $ps);
+        $out[] = [
+            'ref' => $r['ref'] ?? ($n + 1), 'code' => $r['code'] ?? '', 'name' => $r['name'] ?? '', 'price' => $price, 'qty' => $r['qty'] ?? '',
+            'm_src' => $m['src'] ?? '', 'm_code' => $m['code'] ?? '', 'm_name' => $m['name'] ?? '', 'm_price' => $m['price'] ?? null, 'm_psrc' => $m['psrc'] ?? '',
+            'name_pct' => round($ns, 1), 'price_pct' => $ps === null ? null : round($ps, 1), 'overall' => round($o, 1), 'method' => $method, 'status' => im_status($o),
+        ];
+        if ($want_ai && $method !== 'Code' && $o < 85) {
+            $cs = [];
+            foreach (array_keys($top) as $k => $i) {
+                $mp = $masters[$i];
+                $p = im_price_score($price, $mp['prices']);
+                $cs[] = ['i' => $k, 'code' => $mp['code'], 'name' => $mp['name'], 'price' => $mp['price'], 'psrc' => $mp['psrc'] ?? '', 'src' => $mp['src'],
+                         'price_pct' => $p === null ? null : round($p, 1)];
             }
-            $e = '';
-            $ans = im_gemini_pick($key, $batch, $e);
-            if ($e) { $ai_err = $e; break; }
-            foreach ($ans as $ref => $a) {
-                if (!isset($res[$ref])) continue;
-                $ai_used++;
-                if ($a['cand'] !== null && isset($res[$ref]['top'][$a['cand']])) {
-                    $i = $res[$ref]['top'][$a['cand']];
-                    $price = (float)($rows[$ref]['price'] ?? 0);
-                    $res[$ref]['pick'] = $i;
-                    $res[$ref]['name_pct'] = $a['conf'];
-                    $res[$ref]['price_pct'] = im_price_score($price, $masters[$i]['prices']);
-                    $res[$ref]['method'] = 'AI';
-                }
-            }
+            $weak[] = ['n' => $n, 'ref' => (string)$n, 'name' => $name, 'price' => $price, 'cands' => $cs];
         }
     }
-
-    $out = [];
-    $sum = ['rows' => 0, 'matched' => 0, 'review' => 0, 'nomatch' => 0, 'price_ok' => 0, 'price_known' => 0, 'overall_sum' => 0, 'name_sum' => 0];
-    foreach ($rows as $n => $r) {
-        $x = $res[$n];
-        $m = $x['pick'] !== null ? $masters[$x['pick']] : null;
-        $o = im_overall($x['name_pct'], $x['price_pct']);
-        $st = im_status($o);
-        $sum['rows']++; $sum['overall_sum'] += $o; $sum['name_sum'] += $x['name_pct'];
-        if ($st === 'Matched') $sum['matched']++; elseif ($st === 'Review') $sum['review']++; else $sum['nomatch']++;
-        if ($x['price_pct'] !== null) { $sum['price_known']++; if ($x['price_pct'] >= 95) $sum['price_ok']++; }
-        $out[] = [
-            'ref' => $r['ref'] ?? ($n + 1), 'code' => $r['code'] ?? '', 'name' => $r['name'] ?? '', 'price' => (float)($r['price'] ?? 0), 'qty' => $r['qty'] ?? '',
-            'm_src' => $m['src'] ?? '', 'm_code' => $m['code'] ?? '', 'm_name' => $m['name'] ?? '', 'm_price' => $m['price'] ?? null, 'm_psrc' => $m['psrc'] ?? '',
-            'name_pct' => round($x['name_pct'], 1), 'price_pct' => $x['price_pct'] === null ? null : round($x['price_pct'], 1),
-            'overall' => round($o, 1), 'method' => $x['method'], 'status' => $st,
-        ];
-    }
-    echo json_encode(['ok' => true, 'rows' => $out, 'summary' => $sum, 'masters' => count($masters), 'ai' => ['key' => $key !== '', 'asked' => count($weak), 'used' => $ai_used, 'error' => $ai_err]], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => true, 'rows' => $out, 'masters' => count($masters), 'weak' => $weak, 'ai_key' => im_gemini_key() !== ''], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -346,27 +332,77 @@ document.getElementById('imFile').addEventListener('change', async e => {
     }
 });
 
+function imStatus(o){ return o >= 85 ? 'Matched' : (o >= 60 ? 'Review' : 'No Match'); }
+function imOverall(name, price){ return price === null || price === undefined ? name : (0.6 * name + 0.4 * price); }
+function imSummarize(rows){
+    const s = {rows: rows.length, matched: 0, review: 0, nomatch: 0, price_ok: 0, price_known: 0, overall_sum: 0, name_sum: 0};
+    rows.forEach(r => {
+        s.overall_sum += r.overall; s.name_sum += r.name_pct;
+        if (r.status === 'Matched') s.matched++; else if (r.status === 'Review') s.review++; else s.nomatch++;
+        if (r.price_pct !== null && r.price_pct !== undefined) { s.price_known++; if (r.price_pct >= 95) s.price_ok++; }
+    });
+    return s;
+}
+
 async function imRun(){
     const btn = document.getElementById('imRun'); btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Matching…';
-    document.getElementById('imMsgs').innerHTML = '';
+    const msgs = document.getElementById('imMsgs'); msgs.innerHTML = '';
     try {
         const r = await fetch('sampath_item_match.php?ajax=match', {method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({rows: imRows, use_ai: document.getElementById('imAi').checked})});
         imResult = await r.json();
         if (!imResult.ok) throw new Error('Match failed.');
+        imResult.ai = {asked: imResult.weak.length, used: 0, failed: 0, error: ''};
         imRender();
+        // Gemini scan of the weak rows, a few at a time so no single request runs long
+        if (imResult.weak.length) await imAiScan(btn);
     } catch (err) {
-        document.getElementById('imMsgs').innerHTML = '<div class="im-msg err">' + esc(err.message) + '</div>';
+        msgs.innerHTML = '<div class="im-msg err">' + esc(err.message) + '</div>';
     }
     btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play"></i> Run Match';
 }
 
+async function imAiScan(btn){
+    const weak = imResult.weak, chunk = 5; let fails = 0;
+    for (let i = 0; i < weak.length; i += chunk) {
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gemini scan ' + Math.min(i + chunk, weak.length) + '/' + weak.length + '…';
+        const part = weak.slice(i, i + chunk);
+        let res;
+        try {
+            const r = await fetch('sampath_item_match.php?ajax=ai', {method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({batch: part.map(w => ({ref: w.ref, name: w.name, price: w.price, cands: w.cands.map(c => ({i: c.i, name: c.name, price: c.price}))}))})});
+            res = await r.json();
+        } catch (e) { res = {ok: false, error: 'Gemini request failed: ' + e.message}; }
+        if (!res.ok) {
+            imResult.ai.failed += part.length; imResult.ai.error = res.error; fails++;
+            if (fails >= 3) break;               // give up after 3 failed batches; remaining rows keep their local match
+            continue;
+        }
+        part.forEach(w => {
+            const a = res.answers[w.ref]; if (!a) return;
+            imResult.ai.used++;
+            const row = imResult.rows[w.n];
+            const c = a.cand !== null ? w.cands[a.cand] : null;
+            if (c) {
+                Object.assign(row, {m_src: c.src, m_code: c.code, m_name: c.name, m_price: c.price, m_psrc: c.psrc,
+                                    name_pct: a.conf, price_pct: c.price_pct, method: 'AI'});
+            } else {
+                row.name_pct = Math.min(row.name_pct, 40); row.method = 'AI: no match';
+            }
+            row.overall = Math.round(imOverall(row.name_pct, row.price_pct) * 10) / 10;
+            row.status = imStatus(row.overall);
+        });
+        imRender();
+    }
+    imRender();
+}
+
 function imRender(){
-    const d = imResult, s = d.summary, n = s.rows || 1;
+    const d = imResult, s = imSummarize(d.rows), n = s.rows || 1;
     let msgs = '';
     if (!d.masters) msgs += '<div class="im-msg err">No stock report items found (Unilever Purchase Import / secondary sales data are empty), so nothing could be matched.</div>';
-    if (d.ai.error) msgs += '<div class="im-msg err">Gemini AI scan stopped: ' + esc(d.ai.error) + ' (local match used for the remaining rows).</div>';
-    else if (document.getElementById('imAi').checked && d.ai.key) msgs += '<div class="im-msg ok">Gemini AI scanned ' + d.ai.asked + ' weak row(s); ' + d.ai.used + ' answered.</div>';
+    if (d.ai.error) msgs += '<div class="im-msg err">Gemini AI scan problem (' + d.ai.failed + ' row(s) kept their local match): ' + esc(d.ai.error) + '</div>';
+    if (document.getElementById('imAi').checked && d.ai_key && d.ai.asked) msgs += '<div class="im-msg ok">Gemini AI scanned ' + d.ai.asked + ' weak row(s); ' + d.ai.used + ' answered.</div>';
     document.getElementById('imMsgs').innerHTML = msgs;
     const pct = v => (v / n * 100).toFixed(1) + '%';
     const kpi = (l, v, sub, color) => `<div class="im-kpi"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="im-bar"><i style="width:${sub};background:${color}"></i></div>` : ''}</div>`;
@@ -398,7 +434,7 @@ async function imExport(){
     const h = ws.addRow(['Ref','Sampath Code','Excel Item Name','Excel Price','Qty','Matched Code','Matched Item','Source','Our TUR Price','Name %','Price %','Overall %','Method','Status']);
     h.eachCell(c => { c.font = {bold:true}; c.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FFFBE5D6'}}; });
     imResult.rows.forEach(r => ws.addRow([r.ref, r.code, r.name, r.price, r.qty, r.m_code, r.m_name, r.m_src, r.m_price, r.name_pct, r.price_pct, r.overall, r.method, r.status]));
-    const s = imResult.summary, n = s.rows || 1;
+    const s = imSummarize(imResult.rows), n = s.rows || 1;
     ws.addRow([]);
     ws.addRow(['Summary']).font = {bold:true};
     ws.addRow(['Items', s.rows]); ws.addRow(['Overall tally %', +(s.overall_sum / n).toFixed(1)]);
