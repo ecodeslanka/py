@@ -33,6 +33,11 @@ foreach ((array)($_GET['items'] ?? []) as $v) { $v = trim((string)$v); if ($v !=
 $f_loc  = in_array($_GET['loc'] ?? 'all', ['good','damaged']) ? $_GET['loc'] : 'all';   // Stock Location filter
 $from   = mysqli_real_escape_string($conn, $f_from);
 $to     = mysqli_real_escape_string($conn, $f_to);
+/* Customer-wise filter (outlet codes). Only secondary invoices belong to a customer, so when it is set the
+   report shows that customer's Secondary Inv and Dmg/Exp only (purchases, returns, rejections and adjustments are not customer-wise). */
+$f_cust = [];
+foreach ((array)($_GET['cust'] ?? []) as $v) { $v = trim((string)$v); if ($v !== '') $f_cust[] = $v; }
+$cust_sql = $f_cust ? " AND outlet_code IN ('" . implode("','", array_map(function ($v) use ($conn) { return mysqli_real_escape_string($conn, $v); }, $f_cust)) . "')" : '';
 
 $have = [];
 foreach (['unilever_purchase_items','unilever_purchase_batches','unilever_item_return_items','unilever_item_returns',
@@ -71,12 +76,12 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
         if ($have['invoice_wise_sales_data']) {
             $q = mysqli_query($conn, "SELECT delivery_date AS d, bill_number, outlet_name, damage_expiry_shortage_qty AS q
                 FROM invoice_wise_sales_data
-                WHERE product_code = '$ce' AND damage_expiry_shortage_qty <> 0 AND delivery_date BETWEEN '$from' AND '$to'");
+                WHERE product_code = '$ce' AND damage_expiry_shortage_qty <> 0 AND delivery_date BETWEEN '$from' AND '$to'$cust_sql");
             while ($q && $r = mysqli_fetch_assoc($q))
                 $ev[] = ['d'=>$r['d'], 't'=>'Secondary Dmg/Exp', 'ref'=>trim($r['bill_number'] . ' ' . ($r['outlet_name'] ?? '')),
                          'in'=>(float)$r['q'], 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'units'];
         }
-    } elseif ($have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
+    } elseif (!$f_cust && $have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
         $q = mysqli_query($conn, "SELECT COALESCE(p.invoice_date, b.received_date) AS d, p.invoice_number, p.supplier_invoice_no, p.purchase_qty_cases AS q
             FROM unilever_purchase_items p JOIN unilever_purchase_batches b ON b.id = p.batch_id
             WHERE p.item_code = '$ce' AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$from' AND '$to'");
@@ -84,7 +89,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
             $ev[] = ['d'=>$r['d'], 't'=>'Primary Purchase', 'ref'=>trim(($r['invoice_number'] ?: '') . ' ' . ($r['supplier_invoice_no'] ? '('.$r['supplier_invoice_no'].')' : '')),
                      'in'=>(float)$r['q'] * $upc, 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'cases'];
     }
-    if ($ledger_loc === 'good' && $have['unilever_item_return_items'] && $have['unilever_item_returns']) {
+    if (!$f_cust && $ledger_loc === 'good' && $have['unilever_item_return_items'] && $have['unilever_item_returns']) {
         $q = mysqli_query($conn, "SELECT r.return_date AS d, r.return_no, r.reason, ri.qty AS q
             FROM unilever_item_return_items ri JOIN unilever_item_returns r ON r.id = ri.return_id
             WHERE ri.item_code = '$ce' AND r.return_date BETWEEN '$from' AND '$to'");
@@ -95,12 +100,12 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
     if ($ledger_loc === 'good' && $have['invoice_wise_sales_data']) {
         $q = mysqli_query($conn, "SELECT delivery_date AS d, bill_number, outlet_name, units AS q
             FROM invoice_wise_sales_data
-            WHERE product_code = '$ce' AND delivery_date BETWEEN '$from' AND '$to'");
+            WHERE product_code = '$ce' AND delivery_date BETWEEN '$from' AND '$to'$cust_sql");
         while ($q && $r = mysqli_fetch_assoc($q))
             $ev[] = ['d'=>$r['d'], 't'=>'Secondary Inv', 'ref'=>trim($r['bill_number'] . ' ' . ($r['outlet_name'] ?? '')),
                      'in'=>0, 'out'=>(float)$r['q'], 'qty'=>(float)$r['q'], 'uom'=>'units'];
     }
-    if ($ledger_loc === 'good' && $have['stock_manual_adjustments']) {
+    if (!$f_cust && $ledger_loc === 'good' && $have['stock_manual_adjustments']) {
         $q = mysqli_query($conn, "SELECT entry_date AS d, rejected_qty, adjustment_qty, note
             FROM stock_manual_adjustments
             WHERE item_code = '$ce' AND entry_date BETWEEN '$from' AND '$to'");
@@ -129,14 +134,14 @@ $touch = function ($code) use (&$acc) {
     if (!isset($acc[$code])) $acc[$code] = ['pc'=>0.0,'rc'=>0.0,'so'=>0.0,'rej'=>0.0,'adj'=>0.0,'name'=>null,'basepack'=>null];
 };
 $errors = [];
-if ($have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
+if (!$f_cust && $have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
     $q = mysqli_query($conn, "SELECT p.item_code, SUM(p.purchase_qty_cases) AS q
         FROM unilever_purchase_items p JOIN unilever_purchase_batches b ON b.id = p.batch_id
         WHERE p.item_code <> '' AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$from' AND '$to' GROUP BY p.item_code");
     if (!$q) $errors[] = mysqli_error($conn);
     while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $touch($c); $acc[$c]['pc'] = (float)$r['q'] * ($master[$c]['upc'] ?? 0); }
 }
-if ($have['unilever_item_return_items'] && $have['unilever_item_returns']) {
+if (!$f_cust && $have['unilever_item_return_items'] && $have['unilever_item_returns']) {
     $q = mysqli_query($conn, "SELECT ri.item_code, SUM(ri.qty) AS q
         FROM unilever_item_return_items ri JOIN unilever_item_returns r ON r.id = ri.return_id
         WHERE ri.item_code <> '' AND r.return_date BETWEEN '$from' AND '$to' GROUP BY ri.item_code");
@@ -146,14 +151,14 @@ if ($have['unilever_item_return_items'] && $have['unilever_item_returns']) {
 if ($have['invoice_wise_sales_data']) {
     $q = mysqli_query($conn, "SELECT product_code AS item_code, MAX(basepack_code) AS bp, MAX(product_description) AS nm, SUM(units) AS q
         FROM invoice_wise_sales_data
-        WHERE product_code <> '' AND delivery_date BETWEEN '$from' AND '$to' GROUP BY product_code");
+        WHERE product_code <> '' AND delivery_date BETWEEN '$from' AND '$to'$cust_sql GROUP BY product_code");
     if (!$q) $errors[] = mysqli_error($conn);
     while ($q && $r = mysqli_fetch_assoc($q)) {
         $c = trim($r['item_code']); $touch($c);
         $acc[$c]['so'] = (float)$r['q']; $acc[$c]['name'] = $r['nm']; $acc[$c]['basepack'] = $r['bp'];
     }
 }
-if ($have['stock_manual_adjustments']) {
+if (!$f_cust && $have['stock_manual_adjustments']) {
     $q = mysqli_query($conn, "SELECT item_code, SUM(rejected_qty) AS rq, SUM(adjustment_qty) AS aq
         FROM stock_manual_adjustments WHERE item_code <> '' AND entry_date BETWEEN '$from' AND '$to' GROUP BY item_code");
     if (!$q) $errors[] = mysqli_error($conn);
@@ -165,7 +170,7 @@ if ($have['invoice_wise_sales_data']) {
     $q = mysqli_query($conn, "SELECT product_code AS item_code, MAX(basepack_code) AS bp, MAX(product_description) AS nm,
             SUM(damage_expiry_shortage_qty) AS q
         FROM invoice_wise_sales_data
-        WHERE product_code <> '' AND delivery_date BETWEEN '$from' AND '$to'
+        WHERE product_code <> '' AND delivery_date BETWEEN '$from' AND '$to'$cust_sql
         GROUP BY product_code HAVING SUM(damage_expiry_shortage_qty) <> 0");
     if (!$q) $errors[] = mysqli_error($conn);
     while ($q && $r = mysqli_fetch_assoc($q)) $dmg[trim($r['item_code'])] = ['q'=>(float)$r['q'], 'bp'=>$r['bp'], 'nm'=>$r['nm']];
@@ -177,6 +182,11 @@ foreach ($master as $c => $m) $item_opts[$c] = $m['name'] ?? '';
 foreach ($acc as $c => $a) if (!isset($item_opts[$c]) || $item_opts[$c] === '') $item_opts[$c] = $a['name'] ?? '';
 foreach ($dmg as $c => $d) if (!isset($item_opts[$c]) || $item_opts[$c] === '') $item_opts[$c] = $d['nm'] ?? '';
 ksort($item_opts);
+$cust_opts = [];
+if ($have['invoice_wise_sales_data']) {
+    $q = mysqli_query($conn, "SELECT outlet_code, MAX(outlet_name) AS nm FROM invoice_wise_sales_data WHERE outlet_code IS NOT NULL AND outlet_code <> '' GROUP BY outlet_code ORDER BY nm");
+    while ($q && $r = mysqli_fetch_assoc($q)) $cust_opts[trim($r['outlet_code'])] = $r['nm'] ?? '';
+}
 
 $rows = [];
 $tot = ['pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,'val'=>0];
@@ -258,11 +268,17 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <div class="isr">
     <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
-    <div class="sub">Running balance as at the chosen date, taken from the same data as the Sampath Current Stock Report (Primary Qty = purchase qty × UPC). Good Stock closing = Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment. Damaged Stock = the Dmg/Exp qty on secondary bills, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger.</div>
+    <div class="sub">Running balance as at the chosen date, taken from the same data as the Sampath Current Stock Report (Primary Qty = purchase qty × UPC). Good Stock closing = Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment. Damaged Stock = the Dmg/Exp qty on secondary bills, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
 
     <form method="GET" class="isr-card">
         <div class="isr-f">
             <div><label>As At Date</label><input type="date" name="as_at_date" value="<?php echo htmlspecialchars($f_to); ?>"></div>
+            <div><label>Customers</label>
+                <select name="cust[]" id="custSelect" multiple style="min-width:320px">
+                    <?php foreach ($cust_opts as $c => $nm): ?>
+                    <option value="<?php echo htmlspecialchars($c); ?>" <?php echo in_array((string)$c, $f_cust, true) ? 'selected' : ''; ?>><?php echo htmlspecialchars($c . ' - ' . $nm); ?></option>
+                    <?php endforeach; ?>
+                </select></div>
             <div><label>Stock Location</label>
                 <select name="loc" style="border:1.5px solid #e2e6f0;border-radius:8px;padding:8px 12px;font-size:13px;">
                     <option value="all" <?php echo $f_loc === 'all' ? 'selected' : ''; ?>>All</option>
@@ -344,10 +360,13 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 </div>
 
 <script>
-$(function(){ $('#itemSelect').select2({placeholder:'— All items (code - name) —', allowClear:true, width:'100%'}); });
+$(function(){
+    $('#itemSelect').select2({placeholder:'— All items (code - name) —', allowClear:true, width:'100%'});
+    $('#custSelect').select2({placeholder:'— All customers (code - name) —', allowClear:true, width:'100%'});
+});
 const ISR_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
 const ISR_PERIOD = <?php echo json_encode('as at ' . $f_to); ?>;
-const ISR_QS = <?php echo json_encode('as_at_date=' . urlencode($f_to)); ?>;
+const ISR_QS = <?php echo json_encode('as_at_date=' . urlencode($f_to) . ($f_cust ? '&' . http_build_query(['cust' => $f_cust]) : '')); ?>;
 let isrLedgerData = null;
 const fm = v => Number(v).toLocaleString('en-US', {maximumFractionDigits:0});
 const fm0 = fm;
