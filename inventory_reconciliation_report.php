@@ -22,6 +22,10 @@
 //    Stock Count (optional)  -> pick a saved physical stock count (sampath_stock_count_*): the count's item qty (and value at TUR) is shown
 //                              against the Good Stock closing as at the count date, with the Difference (Physical - System).
 //                              In As At mode the report date follows the count date. Items the count has no qty for are not compared.
+//  Save Report -> stores a snapshot (filters, summary, every item row) in inventory_recon_saved; the Saved Reports list at the bottom
+//                 re-opens it (read-only) or deletes it.
+//  Print / PDF -> a creative black & white print layout (A4 landscape) of the live report or a saved one; use the browser's
+//                 "Save as PDF" destination to get the PDF.
 // ============================================================
 include 'config.php';
 include_once 'auth.php';
@@ -169,6 +173,193 @@ foreach (array_unique(array_merge(array_keys($acc), array_keys($acc0), array_key
 }
 usort($rows, function ($a, $b) { return strcmp($a['sku7'], $b['sku7']); });
 
+/* ── saved reports + PDF print view ── */
+if (session_status() === PHP_SESSION_NONE) session_start();
+$who = $_SESSION['username'] ?? $_SESSION['user_name'] ?? 'System';
+$period = $has_open ? ('opening as at ' . $open_to . ' · transactions ' . $f_from . ' to ' . $f_to) : ('as at ' . $f_to);
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS inventory_recon_saved (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    note VARCHAR(500) NULL,
+    period VARCHAR(200) NULL,
+    sc_date DATE NULL,
+    item_count INT NOT NULL DEFAULT 0,
+    good_value DECIMAL(18,2) NOT NULL DEFAULT 0,
+    damaged_value DECIMAL(18,2) NOT NULL DEFAULT 0,
+    data_json LONGTEXT NOT NULL,
+    created_by VARCHAR(100) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+$irr_sc_meta = $sc ? ['count_date' => substr((string)$sc['count_date'], 0, 10), 'file' => (string)($sc['file_name'] ?? '')] : null;
+$snap_row = null;
+$saved_id = (int)($_GET['saved'] ?? 0);
+if ($saved_id) {
+    $q = mysqli_query($conn, "SELECT * FROM inventory_recon_saved WHERE id = $saved_id LIMIT 1");
+    $snap_row = $q ? mysqli_fetch_assoc($q) : null;
+    if ($snap_row && ($data = json_decode($snap_row['data_json'], true))) {       // show the saved snapshot instead of the live figures
+        $rows = $data['rows']; $tot = $data['tot']; $period = $data['period']; $has_open = !empty($data['has_open']);
+        $sc = $data['sc'] ? ['id' => 0, 'count_date' => $data['sc']['count_date'], 'file_name' => $data['sc']['file']] : null;
+        $irr_sc_meta = $data['sc']; $count_warn = ''; $range_err = '';
+    } else { $snap_row = null; }
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $act = $_POST['action'] ?? '';
+    $base_url = 'inventory_reconciliation_report.php';
+    if ($act === 'save' && !$snap_row) {
+        $title = trim((string)($_POST['title'] ?? ''));
+        if ($title === '') $title = 'Inventory Reconciliation ' . $period;
+        $data = ['rows' => $rows, 'tot' => $tot, 'period' => $period, 'has_open' => $has_open, 'sc' => $irr_sc_meta, 'filters' => ['items' => $f_items]];
+        $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        $ok = mysqli_query($conn, "INSERT INTO inventory_recon_saved (title, note, period, sc_date, item_count, good_value, damaged_value, data_json, created_by) VALUES ('"
+            . mysqli_real_escape_string($conn, mb_substr($title, 0, 200)) . "', '" . mysqli_real_escape_string($conn, mb_substr(trim((string)($_POST['note'] ?? '')), 0, 500)) . "', '"
+            . mysqli_real_escape_string($conn, $period) . "', " . ($irr_sc_meta ? "'" . $irr_sc_meta['count_date'] . "'" : 'NULL') . ", " . count($rows) . ", "
+            . (float)$tot['g_v'] . ", " . (float)$tot['d_v'] . ", '" . mysqli_real_escape_string($conn, $json) . "', '" . mysqli_real_escape_string($conn, $who) . "')");
+        $newid = $ok ? mysqli_insert_id($conn) : 0;
+        header('Location: ' . $base_url . '?' . http_build_query($ok ? ['saved' => $newid, 'msg' => 'Report saved.'] : ['err' => 'Could not save the report: ' . mysqli_error($conn)]));
+        exit;
+    }
+    if ($act === 'delete_saved') {
+        $did = (int)($_POST['id'] ?? 0);
+        if ($did > 0) mysqli_query($conn, "DELETE FROM inventory_recon_saved WHERE id = $did");
+        header('Location: ' . $base_url . '?' . http_build_query(['msg' => 'Saved report deleted.']));
+        exit;
+    }
+}
+
+/* ── creative black & white print view (live or saved) — use the browser's "Save as PDF" for the PDF ── */
+function irr_pu($q) { return $q < 0 ? '(' . number_format(abs($q), 0) . ')' : number_format($q, 0); }
+function irr_pf($v, $d = 2) { $t = number_format(abs($v), $d); return $v < -0.004 ? '(' . $t . ')' : $t; }
+function irr_pcell($q, $v) {
+    if (round($q, 2) == 0 && round($v, 2) == 0) return '<td class="n z">–</td>';
+    return '<td class="n"><b>' . irr_pf($v) . '</b><i>' . ($q < 0 ? '(' : '') . number_format(abs($q), 0) . ($q < 0 ? ')' : '') . ' u</i></td>';
+}
+if (isset($_GET['print'])) {
+    $title_p = $snap_row ? $snap_row['title'] : 'Inventory Reconciliation Report';
+    $scd = $sc ? substr((string)$sc['count_date'], 0, 10) : null;
+    $grp = [['open','Opening Inventory'],['pc','Primary Purchase'],['rc','Primary Return'],['pre','Pre Secondary'],['sec','Secondary'],['diff','Diff (Pre − Sec)'],['oth','Rejected / Adj.'],['g','Good Stock'],['d','Damaged Stock']];
+    if ($sc) { $grp[] = ['ph','Physical Count']; $grp[] = ['pd','Difference']; }
+    header('Content-Type: text/html; charset=utf-8');
+    ?><!doctype html><html lang="en"><head><meta charset="utf-8"><title><?php echo htmlspecialchars($title_p); ?></title>
+<style>
+@page{size:A4 landscape;margin:10mm 9mm 14mm;@bottom-right{content:"Page " counter(page) " of " counter(pages);font:7pt Georgia,serif;color:#000}@bottom-left{content:"Inventory Reconciliation Report";font:7pt Georgia,serif;color:#000}}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+body{margin:0;font-family:"Helvetica Neue",Arial,sans-serif;color:#000;background:#fff;font-size:9pt;}
+.bar{position:sticky;top:0;background:#000;color:#fff;padding:8px 14px;display:flex;gap:10px;align-items:center;font-size:12px;z-index:5}
+.bar button,.bar a{background:#fff;color:#000;border:0;padding:6px 14px;font-weight:700;cursor:pointer;text-decoration:none;font-size:12px}
+@media print{.bar{display:none}}
+.wrap{padding:6mm 2mm 0;}
+.mast{display:flex;border:2.5pt solid #000;}
+.mast .l{background:#000;color:#fff;padding:9mm 8mm;flex:1;position:relative;}
+.mast .l:after{content:"";position:absolute;right:0;top:0;bottom:0;width:22mm;background:repeating-linear-gradient(135deg,#fff 0 1.2pt,#000 1.2pt 4pt);}
+.mast h1{margin:0;font:900 25pt/1 "Arial Black",Impact,Arial,sans-serif;letter-spacing:2pt;text-transform:uppercase;}
+.mast .tag{margin-top:3mm;font-size:8.5pt;letter-spacing:3pt;text-transform:uppercase;}
+.mast .r{width:78mm;padding:4mm 5mm;font-size:8pt;line-height:1.6}
+.mast .r b{display:inline-block;min-width:23mm;text-transform:uppercase;font-size:6.8pt;letter-spacing:1pt;}
+.glance{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin:5mm 0 4mm;border:1.2pt solid #000;}
+.glance div{padding:3.5mm 4mm;border-right:1.2pt solid #000;}
+.glance div:last-child{border-right:0}
+.glance small{display:block;font-size:6.8pt;letter-spacing:1.2pt;text-transform:uppercase;border-bottom:1.2pt solid #000;padding-bottom:1.2mm;margin-bottom:1.5mm}
+.glance strong{font:900 14pt/1.1 "Arial Black",Arial,sans-serif;font-variant-numeric:tabular-nums}
+.glance span{font-size:7pt;display:block;margin-top:1mm}
+h2{font:900 10pt Arial,sans-serif;letter-spacing:2pt;text-transform:uppercase;margin:5mm 0 2mm;display:flex;align-items:center;gap:3mm}
+h2:after{content:"";flex:1;border-top:1.2pt solid #000;}
+table{border-collapse:collapse;width:100%;}
+.sum{width:62%}
+.sum th{background:#000;color:#fff;padding:2mm 3mm;font-size:7.5pt;letter-spacing:1pt;text-transform:uppercase;text-align:right}
+.sum th:first-child{text-align:left}
+.sum td{padding:1.6mm 3mm;border-bottom:.5pt solid #000;font-size:8.5pt}
+.sum td.n{text-align:right;font-variant-numeric:tabular-nums}
+.sum tr.sub td{background:#e6e6e6;font-weight:700}
+.sum tr.tot td{border-top:2.2pt double #000;border-bottom:0;font-weight:900;background:repeating-linear-gradient(135deg,#fff 0 1.5pt,#e0e0e0 1.5pt 3pt)}
+.det{font-size:6.6pt;margin-top:1mm}
+.det thead{display:table-header-group}
+.det th{background:#000;color:#fff;padding:1.5mm 1.2mm;text-align:center;font-weight:700;font-size:6.2pt;letter-spacing:.4pt;text-transform:uppercase;border-right:.5pt solid #fff}
+.det td{padding:1mm 1.2mm;border-bottom:.4pt solid #888;vertical-align:top}
+.det tr{page-break-inside:avoid}
+.det tbody tr:nth-child(even) td{background:#f1f1f1}
+.det td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.det td.n b{display:block;font-weight:700}
+.det td.n i{display:block;font-style:normal;font-size:5.6pt;color:#444}
+.det td.z{color:#999}
+.det td.sku{font-weight:700;white-space:nowrap}
+.det tfoot td{border-top:2.2pt double #000;font-weight:900;background:repeating-linear-gradient(135deg,#fff 0 1.5pt,#dcdcdc 1.5pt 3pt)}
+.cols2{display:flex;gap:6mm;align-items:flex-start}
+.note{font-size:7.5pt;border:1pt solid #000;padding:3mm;flex:1;line-height:1.5}
+.note b{text-transform:uppercase;letter-spacing:1pt;font-size:6.8pt}
+.sign{display:flex;gap:10mm;margin-top:12mm;page-break-inside:avoid}
+.sign div{flex:1;border-top:1.2pt solid #000;padding-top:1.5mm;font-size:7pt;letter-spacing:1.5pt;text-transform:uppercase;text-align:center}
+</style></head><body>
+<div class="bar"><b>Inventory Reconciliation Report — print / PDF preview</b>
+  <button onclick="window.print()">Print / Save as PDF</button><button onclick="window.close()">Close</button>
+  <span style="opacity:.7">Choose “Save as PDF” as the printer destination to get the PDF. Landscape A4.</span></div>
+<div class="wrap">
+<div class="mast">
+  <div class="l"><h1>Inventory<br>Reconciliation</h1><div class="tag">Good stock · Damaged stock · valued at TUR</div></div>
+  <div class="r">
+    <b>Report</b> <?php echo htmlspecialchars($title_p); ?><br>
+    <b>Period</b> <?php echo htmlspecialchars($period); ?><br>
+    <b>Stock count</b> <?php echo $scd ? htmlspecialchars($scd) : '—'; ?><br>
+    <b>Items</b> <?php echo count($rows); ?><br>
+    <b><?php echo $snap_row ? 'Saved' : 'Generated'; ?></b> <?php echo htmlspecialchars($snap_row ? substr((string)$snap_row['created_at'], 0, 16) . ' · ' . $snap_row['created_by'] : date('Y-m-d H:i') . ' · ' . $who); ?>
+  </div>
+</div>
+
+<div class="glance">
+  <div><small>Closing — Good Stock</small><strong>Rs. <?php echo irr_pf($tot['g_v']); ?></strong><span><?php echo irr_pu($tot['g_q']); ?> units</span></div>
+  <div><small>Closing — Damaged Stock</small><strong>Rs. <?php echo irr_pf($tot['d_v']); ?></strong><span><?php echo irr_pu($tot['d_q']); ?> units</span></div>
+  <div><small>Total Closing Inventory</small><strong>Rs. <?php echo irr_pf($tot['g_v'] + $tot['d_v']); ?></strong><span><?php echo irr_pu($tot['g_q'] + $tot['d_q']); ?> units</span></div>
+  <?php if ($sc): ?><div><small>Stock count difference</small><strong>Rs. <?php echo irr_pf($tot['pd_v']); ?></strong><span><?php echo ($tot['pd_q'] < 0 ? '(' : '') . number_format(abs($tot['pd_q']), 0) . ($tot['pd_q'] < 0 ? ')' : ''); ?> units · physical − system</span></div>
+  <?php else: ?><div><small>Diff · Pre − Secondary</small><strong>Rs. <?php echo irr_pf($tot['diff_v']); ?></strong><span><?php echo irr_pu($tot['diff_q']); ?> units</span></div><?php endif; ?>
+</div>
+
+<h2>Summary</h2>
+<div class="cols2">
+<table class="sum">
+  <thead><tr><th>Particulars</th><th>Good · Units</th><th>Good · Value</th><th>Damaged · Units</th><th>Damaged · Value</th></tr></thead>
+  <tbody>
+  <?php
+  $sr = [['Opening Inventory','open',true],['+ Primary Purchase','pc',false],['− Primary Return','rc',false],['Pre Secondary (loaded out)','pre',false],['− Secondary (sold)','sec',false],['Diff (Pre Secondary − Secondary)','diff',false],['± Rejected / Adjustment','oth',false]];
+  foreach ($sr as $x): ?>
+    <tr><td><?php echo $x[0]; ?></td><td class="n"><?php echo ($tot[$x[1].'_q'] < 0 ? '(' : '') . number_format(abs($tot[$x[1].'_q']), 0) . ($tot[$x[1].'_q'] < 0 ? ')' : ''); ?></td><td class="n"><b><?php echo irr_pf($tot[$x[1].'_v']); ?></b></td>
+        <?php if ($x[2]): ?><td class="n"><?php echo irr_pu($tot['dopen_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['dopen_v']); ?></b></td><?php else: ?><td class="n">–</td><td class="n">–</td><?php endif; ?></tr>
+  <?php endforeach; ?>
+    <tr><td>+ Damage entries (confirmed)</td><td class="n">–</td><td class="n">–</td><td class="n"><?php echo irr_pu($tot['dmov_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['dmov_v']); ?></b></td></tr>
+    <tr class="sub"><td>Closing Inventory</td><td class="n"><?php echo irr_pu($tot['g_q']); ?></td><td class="n"><?php echo irr_pf($tot['g_v']); ?></td><td class="n"><?php echo irr_pu($tot['d_q']); ?></td><td class="n"><?php echo irr_pf($tot['d_v']); ?></td></tr>
+  <?php if ($sc): ?>
+    <tr><td>System good stock (counted items)</td><td class="n"><?php echo irr_pu($tot['scsys_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['scsys_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
+    <tr><td>Physical stock count — <?php echo htmlspecialchars($scd); ?></td><td class="n"><?php echo irr_pu($tot['ph_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['ph_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
+    <tr><td>Short (physical below system)</td><td class="n">(<?php echo number_format(abs($tot['short_q']), 0); ?>)</td><td class="n"><b><?php echo irr_pf($tot['short_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
+    <tr><td>Excess (physical above system)</td><td class="n"><?php echo irr_pu($tot['excess_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['excess_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
+    <tr class="sub"><td>Difference (Physical − System)</td><td class="n"><?php echo ($tot['pd_q'] < 0 ? '(' : '') . number_format(abs($tot['pd_q']), 0) . ($tot['pd_q'] < 0 ? ')' : ''); ?></td><td class="n"><?php echo irr_pf($tot['pd_v']); ?></td><td class="n">–</td><td class="n">–</td></tr>
+  <?php endif; ?>
+    <tr class="tot"><td>Total Closing Inventory (Good + Damaged)</td><td class="n" colspan="2"><?php echo irr_pu($tot['g_q'] + $tot['d_q']); ?> units</td><td class="n" colspan="2">Rs. <?php echo irr_pf($tot['g_v'] + $tot['d_v']); ?></td></tr>
+  </tbody>
+</table>
+<div class="note"><b>How to read this report</b><br>
+  Every value = units × the item's latest TUR. Good Stock = Opening + Primary Purchase − Primary Return − Secondary − Rejected + Adjustment. Damaged Stock = confirmed Sampath damage entries, kept as its own stock.
+  Diff = Pre Secondary − Secondary. Figures in ( ) are negative.<?php if ($sc): ?> Physical count is the saved stock count of <?php echo htmlspecialchars($scd); ?>; items it has no qty for are not compared (<?php echo (int)$tot['uncounted']; ?> in this report).<?php endif; ?></div>
+</div>
+
+<h2>Item detail</h2>
+<table class="det">
+  <thead><tr><th>SKU7</th><th style="text-align:left">Product</th><th>UPC</th><th>TUR</th><?php foreach ($grp as $g): ?><th><?php echo $g[1]; ?></th><?php endforeach; ?></tr></thead>
+  <tbody>
+  <?php foreach ($rows as $r): ?>
+    <tr><td class="sku"><?php echo htmlspecialchars($r['sku7']); ?></td><td><?php echo htmlspecialchars($r['name']); ?></td>
+        <td class="n"><?php echo $r['upc'] ? number_format($r['upc'], 0) : '–'; ?></td><td class="n"><?php echo $r['tur'] ? number_format($r['tur'], 2) : '–'; ?></td>
+        <?php foreach ($grp as $g): $q = $r[$g[0].'_q'] ?? null; if ($q === null) echo '<td class="n z">–</td>'; else echo irr_pcell($q, $r[$g[0].'_v']); endforeach; ?></tr>
+  <?php endforeach; ?>
+  </tbody>
+  <tfoot><tr><td colspan="4" style="text-align:right">TOTAL — <?php echo count($rows); ?> items</td>
+    <?php foreach ($grp as $g): echo irr_pcell($tot[$g[0].'_q'], $tot[$g[0].'_v']); endforeach; ?></tr></tfoot>
+</table>
+<div class="sign"><div>Prepared by</div><div>Checked by</div><div>Approved by</div></div>
+</div>
+<script>window.addEventListener('load', function(){ setTimeout(function(){ window.print(); }, 500); });</script>
+</body></html><?php
+    exit;
+}
+
 include 'header.php';
 function irr_n($v) { return number_format(round($v), 0); }
 function irr_v($v) { return number_format($v, 2); }
@@ -178,7 +369,6 @@ function irr_cell($q, $v, $bg = '') {
     $neg = $v < 0 ? ' neg' : '';
     return '<td class="n' . $neg . '"' . ($bg ? ' style="background:' . $bg . '"' : '') . '><strong>' . irr_v($v) . '</strong><div class="qq">' . ($q < 0 ? '-' : '') . irr_n(abs($q)) . ' u</div></td>';
 }
-$period = $has_open ? ('opening as at ' . $open_to . ' · transactions ' . $f_from . ' to ' . $f_to) : ('as at ' . $f_to);
 ?>
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
@@ -214,11 +404,25 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
     <h2><i class="fa-solid fa-scale-balanced"></i> Inventory Reconciliation Report</h2>
     <div class="sub">A <strong>summary</strong> of the stock position — click <strong>View Details</strong> for the item-wise table. <strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> Opening Inventory = closing good stock as at the From date, then the transactions after it up to the To date. Every value = units × <strong>TUR</strong> (latest TUR of the item). <strong>Diff</strong> = Pre Secondary − Secondary. Closing is shown on two sides: <strong>Good Stock</strong> (Opening + Primary Purchase − Primary Return − Secondary − Rejected + Adjustment) and <strong>Damaged Stock</strong> (confirmed Sampath damage entries).</div>
 
+    <?php if (!empty($_GET['msg'])): ?><div class="irr-card" style="background:#dcfce7;border-color:#86efac;color:#166534;"><?php echo htmlspecialchars($_GET['msg']); ?></div><?php endif; ?>
+    <?php if (!empty($_GET['err'])): ?><div class="irr-card" style="background:#fef2f2;border-color:#fecaca;color:#991b1b;"><?php echo htmlspecialchars($_GET['err']); ?></div><?php endif; ?>
+    <?php if ($snap_row): ?>
+    <div class="irr-card" style="background:#0a0c14;color:#fff;border-color:#0a0c14;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <div><div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;opacity:.7">Saved report (read-only snapshot)</div>
+            <div style="font-size:17px;font-weight:800"><?php echo htmlspecialchars($snap_row['title']); ?></div>
+            <div style="font-size:12px;opacity:.75"><?php echo htmlspecialchars($period); ?> · saved <?php echo htmlspecialchars(substr((string)$snap_row['created_at'], 0, 16) . ' by ' . $snap_row['created_by']); ?><?php echo $snap_row['note'] ? ' · ' . htmlspecialchars($snap_row['note']) : ''; ?></div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a class="irr-b" style="background:#fff;color:#000" href="javascript:void(0)" onclick="irrPrint()"><i class="fa-solid fa-file-pdf"></i> PDF / Print</a>
+            <a class="irr-b" style="background:#334155" href="inventory_reconciliation_report.php">Back to live report</a>
+        </div>
+    </div>
+    <?php endif; ?>
     <?php if ($count_warn): ?><div class="irr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($count_warn); ?></div><?php endif; ?>
-    <?php if ($sc && $f_mode === 'asat'): ?><div class="irr-card" style="background:#eff6ff;border-color:#bfdbfe;color:#1e40af;">Stock count of <strong><?php echo htmlspecialchars(substr((string)$sc['count_date'], 0, 10)); ?></strong> selected — the report is as at that date so the system good stock can be compared with the physical count.</div><?php endif; ?>
+    <?php if ($sc && $f_mode === 'asat' && !$snap_row): ?><div class="irr-card" style="background:#eff6ff;border-color:#bfdbfe;color:#1e40af;">Stock count of <strong><?php echo htmlspecialchars(substr((string)$sc['count_date'], 0, 10)); ?></strong> selected — the report is as at that date so the system good stock can be compared with the physical count.</div><?php endif; ?>
     <?php if ($range_err): ?><div class="irr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($range_err); ?></div><?php endif; ?>
     <?php foreach ($errors as $er): ?><div class="irr-card" style="background:#fef2f2;border-color:#fecaca;color:#991b1b;"><?php echo htmlspecialchars($er); ?></div><?php endforeach; ?>
 
+    <?php if (!$snap_row): ?>
     <form method="GET" class="irr-card">
         <div class="irr-f">
             <div style="display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;border:1.5px solid #e2e6f0;border-radius:10px;padding:8px 12px;">
@@ -252,9 +456,12 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <button class="irr-b" type="submit"><i class="fa-solid fa-filter"></i> Apply</button>
             <a class="irr-b l" href="inventory_reconciliation_report.php">Reset</a>
             <button class="irr-b g" type="button" onclick="irrExport()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
-            <button class="irr-b l" type="button" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="irr-b l" type="button" onclick="irrPrint()"><i class="fa-solid fa-file-pdf"></i> PDF / Print</button>
+            <button class="irr-b" type="button" style="background:#6d28d9" onclick="irrSave()"><i class="fa-solid fa-floppy-disk"></i> Save Report</button>
         </div>
     </form>
+    <form method="POST" id="irrSaveForm" style="display:none"><input type="hidden" name="action" value="save"><input type="hidden" name="title" id="irrSaveTitle"><input type="hidden" name="note" id="irrSaveNote"></form>
+    <?php endif; ?>
 
     <!-- SUMMARY -->
     <div class="irr-card" id="irrSummary">
@@ -363,6 +570,41 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
     </table>
     </div>
     </div>
+
+    <!-- SAVED REPORTS -->
+    <?php
+    $saved_list = [];
+    $q = mysqli_query($conn, "SELECT id, title, note, period, sc_date, item_count, good_value, damaged_value, created_by, created_at FROM inventory_recon_saved ORDER BY id DESC LIMIT 100");
+    while ($q && $r = mysqli_fetch_assoc($q)) $saved_list[] = $r;
+    ?>
+    <div class="irr-card" style="margin-top:18px">
+        <div style="font-size:15px;font-weight:800;margin-bottom:10px;"><i class="fa-solid fa-box-archive"></i> Saved Reports <span style="font-size:12px;font-weight:500;color:#8892a4">(<?php echo count($saved_list); ?>)</span></div>
+        <div style="overflow-x:auto;">
+        <table class="irr-t" style="min-width:760px">
+            <thead><tr><th style="text-align:left">Title</th><th>Period</th><th>Stock count</th><th>Items</th><th>Good Stock (Rs.)</th><th>Damaged (Rs.)</th><th>Saved</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($saved_list as $sv): ?>
+                <tr style="<?php echo $snap_row && (int)$snap_row['id'] === (int)$sv['id'] ? 'background:#f1f5f9' : ''; ?>">
+                    <td><a href="?saved=<?php echo (int)$sv['id']; ?>" style="font-weight:700;color:#0a0c14"><?php echo htmlspecialchars($sv['title']); ?></a><?php echo $sv['note'] ? '<div style="font-size:10.5px;color:#8892a4">' . htmlspecialchars($sv['note']) . '</div>' : ''; ?></td>
+                    <td style="white-space:nowrap;font-size:11px"><?php echo htmlspecialchars($sv['period']); ?></td>
+                    <td><?php echo $sv['sc_date'] ? htmlspecialchars($sv['sc_date']) : '—'; ?></td>
+                    <td class="n"><?php echo (int)$sv['item_count']; ?></td>
+                    <td class="n"><?php echo irr_v($sv['good_value']); ?></td>
+                    <td class="n"><?php echo irr_v($sv['damaged_value']); ?></td>
+                    <td style="white-space:nowrap;font-size:11px"><?php echo htmlspecialchars(substr((string)$sv['created_at'], 0, 16) . ' · ' . $sv['created_by']); ?></td>
+                    <td style="white-space:nowrap">
+                        <a class="irr-b" style="padding:4px 10px;font-size:11px" href="?saved=<?php echo (int)$sv['id']; ?>">View</a>
+                        <a class="irr-b l" style="padding:4px 10px;font-size:11px" target="_blank" href="?saved=<?php echo (int)$sv['id']; ?>&print=1"><i class="fa-solid fa-file-pdf"></i> PDF</a>
+                        <form method="POST" style="display:inline" onsubmit="return confirm('Delete this saved report?')"><input type="hidden" name="action" value="delete_saved"><input type="hidden" name="id" value="<?php echo (int)$sv['id']; ?>">
+                            <button class="irr-b" style="padding:4px 10px;font-size:11px;background:#dc2626" type="submit"><i class="fa-solid fa-trash"></i></button></form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            <?php if (!$saved_list): ?><tr><td colspan="8" style="text-align:center;padding:18px;color:#8892a4">No saved reports yet — set the report you want and press <strong>Save Report</strong>.</td></tr><?php endif; ?>
+            </tbody>
+        </table>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -374,7 +616,16 @@ function irrDetails(){
     btn.innerHTML = open ? '<i class="fa-solid fa-eye-slash"></i> Hide Details' : '<i class="fa-solid fa-table-list"></i> View Details';
     if (open) box.scrollIntoView({behavior:'smooth', block:'start'});
 }
+function irrPrint(){ window.open(location.pathname + (location.search ? location.search + '&' : '?') + 'print=1', '_blank'); }
+function irrSave(){
+    const t = prompt('Name for this saved report:', 'Inventory Reconciliation ' + IRR_PERIOD);
+    if (t === null) return;
+    const n = prompt('Note (optional):', '') || '';
+    document.getElementById('irrSaveTitle').value = t; document.getElementById('irrSaveNote').value = n;
+    document.getElementById('irrSaveForm').submit();
+}
 function irrMode(){
+    if (!document.getElementById('irrAsAt')) return;      // saved-report view has no filter form
     const range = document.querySelector('input[name=mode]:checked').value === 'range';
     document.getElementById('irrAsAt').disabled = range;
     document.getElementById('irrFrom').disabled = !range;
