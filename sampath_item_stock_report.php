@@ -199,7 +199,7 @@ if ($f_loc !== 'damaged') {
         $m = $master[$code] ?? [];
         $name = $m['name'] ?? $a['name'] ?? '';
         $bp   = $m['basepack'] ?? $a['basepack'] ?? '';
-        if ($f_items && !in_array($code, $f_items, true)) continue;
+        if ($f_items && !in_array((string)$code, $f_items, true)) continue;
         $add_row($code, $code, $name, $bp, 'Good Stock', false, $a, $m);
     }
 }
@@ -208,7 +208,7 @@ if ($f_loc !== 'good') {
         $m = $master[$code] ?? [];
         $name = $m['name'] ?? $d['nm'] ?? '';
         $bp   = $m['basepack'] ?? $d['bp'] ?? '';
-        if ($f_items && !in_array($code, $f_items, true)) continue;
+        if ($f_items && !in_array((string)$code, $f_items, true)) continue;
         $add_row($code . '-D', $code, $name, $bp, 'Damaged Stock', true, ['so'=>$d['q']] + $zero, $m);
     }
 }
