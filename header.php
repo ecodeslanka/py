@@ -1026,6 +1026,10 @@ if (isset($conn) && $conn) {
         <i class="fa-solid fa-boxes-packing"></i><span>Sampath Item Stock Report</span>
     </a>
 
+    <a href="sampath_inventory.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_inventory.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-warehouse"></i><span>Sampath Inventory (Pre Sec + Sec)</span>
+    </a>
+
     <a href="unilever_purchase_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'unilever_purchase_import.php' || basename($_SERVER['PHP_SELF']) == 'unilever_purchase_batch_view.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-invoice"></i><span>Unilever Purchase Import</span>
     </a>
