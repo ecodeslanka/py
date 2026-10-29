@@ -29,6 +29,7 @@ function isr_upc($v) { return (float)preg_replace('/[^0-9.]/', '', (string)$v); 
 $f_from = '1970-01-01';
 $f_to   = trim($_GET['as_at_date'] ?? '') !== '' ? trim($_GET['as_at_date']) : date('Y-m-d');
 $f_q    = trim($_GET['q'] ?? '');
+$f_loc  = in_array($_GET['loc'] ?? 'all', ['good','damaged']) ? $_GET['loc'] : 'all';   // Stock Location filter
 $from   = mysqli_real_escape_string($conn, $f_from);
 $to     = mysqli_real_escape_string($conn, $f_to);
 
@@ -63,7 +64,18 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
     $master = isr_master($conn, $have);
     $upc = $master[$code]['upc'] ?? 0;
     $ev = [];
-    if ($have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
+    $ledger_loc = ($_GET['loc'] ?? '') === 'damaged' ? 'damaged' : 'good';
+    if ($ledger_loc === 'damaged') {
+        /* Damaged Stock ledger: Dmg/Exp qty on secondary bills */
+        if ($have['invoice_wise_sales_data']) {
+            $q = mysqli_query($conn, "SELECT delivery_date AS d, bill_number, outlet_name, damage_expiry_shortage_qty AS q
+                FROM invoice_wise_sales_data
+                WHERE product_code = '$ce' AND damage_expiry_shortage_qty <> 0 AND delivery_date BETWEEN '$from' AND '$to'");
+            while ($q && $r = mysqli_fetch_assoc($q))
+                $ev[] = ['d'=>$r['d'], 't'=>'Secondary Dmg/Exp', 'ref'=>trim($r['bill_number'] . ' ' . ($r['outlet_name'] ?? '')),
+                         'in'=>(float)$r['q'], 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'units'];
+        }
+    } elseif ($have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
         $q = mysqli_query($conn, "SELECT COALESCE(p.invoice_date, b.received_date) AS d, p.invoice_number, p.supplier_invoice_no, p.purchase_qty_cases AS q
             FROM unilever_purchase_items p JOIN unilever_purchase_batches b ON b.id = p.batch_id
             WHERE p.item_code = '$ce' AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$from' AND '$to'");
@@ -71,7 +83,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
             $ev[] = ['d'=>$r['d'], 't'=>'Primary Purchase', 'ref'=>trim(($r['invoice_number'] ?: '') . ' ' . ($r['supplier_invoice_no'] ? '('.$r['supplier_invoice_no'].')' : '')),
                      'in'=>(float)$r['q'] * $upc, 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'cases'];
     }
-    if ($have['unilever_item_return_items'] && $have['unilever_item_returns']) {
+    if ($ledger_loc === 'good' && $have['unilever_item_return_items'] && $have['unilever_item_returns']) {
         $q = mysqli_query($conn, "SELECT r.return_date AS d, r.return_no, r.reason, ri.qty AS q
             FROM unilever_item_return_items ri JOIN unilever_item_returns r ON r.id = ri.return_id
             WHERE ri.item_code = '$ce' AND r.return_date BETWEEN '$from' AND '$to'");
@@ -79,7 +91,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
             $ev[] = ['d'=>$r['d'], 't'=>'Primary Returned', 'ref'=>trim($r['return_no'] . ' ' . ($r['reason'] ?? '')),
                      'in'=>0, 'out'=>(float)$r['q'] * $upc, 'qty'=>(float)$r['q'], 'uom'=>'cases'];
     }
-    if ($have['invoice_wise_sales_data']) {
+    if ($ledger_loc === 'good' && $have['invoice_wise_sales_data']) {
         $q = mysqli_query($conn, "SELECT delivery_date AS d, bill_number, outlet_name, units AS q
             FROM invoice_wise_sales_data
             WHERE product_code = '$ce' AND delivery_date BETWEEN '$from' AND '$to'");
@@ -87,7 +99,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
             $ev[] = ['d'=>$r['d'], 't'=>'Secondary Inv', 'ref'=>trim($r['bill_number'] . ' ' . ($r['outlet_name'] ?? '')),
                      'in'=>0, 'out'=>(float)$r['q'], 'qty'=>(float)$r['q'], 'uom'=>'units'];
     }
-    if ($have['stock_manual_adjustments']) {
+    if ($ledger_loc === 'good' && $have['stock_manual_adjustments']) {
         $q = mysqli_query($conn, "SELECT entry_date AS d, rejected_qty, adjustment_qty, note
             FROM stock_manual_adjustments
             WHERE item_code = '$ce' AND entry_date BETWEEN '$from' AND '$to'");
@@ -103,7 +115,7 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
     usort($ev, function ($a, $b) { return strcmp((string)$a['d'], (string)$b['d']); });
     $bal = 0;
     foreach ($ev as &$e) { $bal += $e['in'] - $e['out']; $e['bal'] = round($bal, 2); $e['in'] = round($e['in'], 2); $e['out'] = round($e['out'], 2); }
-    echo json_encode(['item'=>$code, 'name'=>$master[$code]['name'] ?? '', 'upc'=>$upc, 'rows'=>$ev, 'closing'=>round($bal, 2)], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['item'=>$code . ($ledger_loc === 'damaged' ? '-D' : ''), 'loc'=>$ledger_loc === 'damaged' ? 'Damaged Stock' : 'Good Stock', 'name'=>$master[$code]['name'] ?? '', 'upc'=>$upc, 'rows'=>$ev, 'closing'=>round($bal, 2)], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -144,40 +156,59 @@ if ($have['stock_manual_adjustments']) {
     if (!$q) $errors[] = mysqli_error($conn);
     while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $touch($c); $acc[$c]['rej'] = (float)$r['rq']; $acc[$c]['adj'] = (float)$r['aq']; }
 }
-/* Location: latest recorded on a Sampath damage GRN line */
-$loc = [];
-if ($have['sampath_damage_grn_items']) {
-    $q = mysqli_query($conn, "SELECT i.product_code, i.location FROM sampath_damage_grn_items i
-        INNER JOIN (SELECT product_code, MAX(id) AS mid FROM sampath_damage_grn_items
-                    WHERE location IS NOT NULL AND location <> '' GROUP BY product_code) l ON l.mid = i.id");
-    while ($q && $r = mysqli_fetch_assoc($q)) $loc[trim($r['product_code'])] = $r['location'];
+/* Damaged Stock: Dmg/Exp qty on secondary bills, shown as its own item "<code>-D" */
+$dmg = [];
+if ($have['invoice_wise_sales_data']) {
+    $q = mysqli_query($conn, "SELECT product_code AS item_code, MAX(basepack_code) AS bp, MAX(product_description) AS nm,
+            SUM(damage_expiry_shortage_qty) AS q
+        FROM invoice_wise_sales_data
+        WHERE product_code <> '' AND delivery_date BETWEEN '$from' AND '$to'
+        GROUP BY product_code HAVING SUM(damage_expiry_shortage_qty) <> 0");
+    if (!$q) $errors[] = mysqli_error($conn);
+    while ($q && $r = mysqli_fetch_assoc($q)) $dmg[trim($r['item_code'])] = ['q'=>(float)$r['q'], 'bp'=>$r['bp'], 'nm'=>$r['nm']];
 }
 
 $rows = [];
 $tot = ['pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,'val'=>0];
-foreach ($acc as $code => $a) {
-    $m = $master[$code] ?? [];
-    $name = $m['name'] ?? $a['name'] ?? '';
-    $bp   = $m['basepack'] ?? $a['basepack'] ?? '';
-    if ($f_q !== '' && stripos($code . ' ' . $name . ' ' . $bp, $f_q) === false) continue;
-    $close = $a['pc'] - $a['rc'] - $a['so'] - $a['rej'] + $a['adj'];
-    $value = (float)($m['value'] ?? 0);
+$add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m) use (&$rows, &$tot) {
     $upc_v = (float)($m['upc'] ?? 0);
-    $cases = $upc_v > 0 ? (int)floor(abs($close) / $upc_v) * ($close < 0 ? -1 : 1) : 0;
-    $rem   = $upc_v > 0 ? round($close - $cases * $upc_v, 2) : round($close, 2);
-    $rows[] = ['basepack'=>$bp, 'sku7'=>$code, 'name'=>$name, 'location'=>$loc[$code] ?? '', 'upc'=>$upc_v,
-        'close_cases'=>$cases, 'close_rem'=>$rem,
-        'pc'=>round($a['pc'],2), 'rc'=>round($a['rc'],2), 'so'=>round($a['so'],2), 'rej'=>round($a['rej'],2), 'adj'=>round($a['adj'],2),
+    $value = (float)($m['value'] ?? 0);
+    // Good Stock: Primary Purchase - Primary Returned - Secondary Inv - Good Rejected + Adjustment
+    // Damaged Stock: Dmg/Exp qty received on secondary bills
+    $so_s  = $is_dmg ? $a['so'] : -$a['so'];
+    $close = $is_dmg ? $a['so'] : $a['pc'] - $a['rc'] - $a['so'] - $a['rej'] + $a['adj'];
+    $rows[] = ['basepack'=>$bp, 'sku7'=>$code, 'base'=>$base, 'name'=>$name, 'location'=>$loc_label, 'is_dmg'=>$is_dmg ? 1 : 0, 'upc'=>$upc_v,
+        'pc'=>round($a['pc'],2), 'rc'=>round($a['rc'],2), 'so'=>round($a['so'],2), 'so_s'=>round($so_s,2), 'rej'=>round($a['rej'],2), 'adj'=>round($a['adj'],2),
         'close'=>round($close,2), 'value'=>$value, 'cval'=>round($close * $value, 2)];
-    foreach (['pc','rc','so','rej','adj'] as $k) $tot[$k] += $a[$k];
+    $tot['pc'] += $a['pc']; $tot['rc'] += $a['rc']; $tot['so'] += $so_s; $tot['rej'] += $a['rej']; $tot['adj'] += $a['adj'];
     $tot['close'] += $close; $tot['val'] += $close * $value;
+};
+$zero = ['pc'=>0.0,'rc'=>0.0,'so'=>0.0,'rej'=>0.0,'adj'=>0.0];
+if ($f_loc !== 'damaged') {
+    foreach ($acc as $code => $a) {
+        $m = $master[$code] ?? [];
+        $name = $m['name'] ?? $a['name'] ?? '';
+        $bp   = $m['basepack'] ?? $a['basepack'] ?? '';
+        if ($f_q !== '' && stripos($code . ' ' . $name . ' ' . $bp, $f_q) === false) continue;
+        $add_row($code, $code, $name, $bp, 'Good Stock', false, $a, $m);
+    }
 }
-usort($rows, function ($a, $b) { return strcmp($a['sku7'], $b['sku7']); });
+if ($f_loc !== 'good') {
+    foreach ($dmg as $code => $d) {
+        $m = $master[$code] ?? [];
+        $name = $m['name'] ?? $d['nm'] ?? '';
+        $bp   = $m['basepack'] ?? $d['bp'] ?? '';
+        if ($f_q !== '' && stripos($code . '-D ' . $name . ' ' . $bp, $f_q) === false) continue;
+        $add_row($code . '-D', $code, $name, $bp, 'Damaged Stock', true, ['so'=>$d['q']] + $zero, $m);
+    }
+}
+usort($rows, function ($a, $b) { return strcmp($a['base'], $b['base']) ?: $a['is_dmg'] <=> $b['is_dmg']; });
 
 include 'header.php';
 function nf($v) { return $v == 0 ? '—' : number_format($v, 2); }
 /* whole-number quantity with thousands commas */
 function qn($v) { return number_format(round($v), 0); }
+function sgn($v) { return round($v) == 0 ? '—' : ($v < 0 ? '-' : '') . number_format(abs(round($v)), 0); }
 function qcell($units, $upc, $neg = false) {
     if (round($units) == 0) return '—';
     return ($neg ? '-' : '') . qn($units);
@@ -199,7 +230,7 @@ table.isr-t{width:100%;border-collapse:collapse;font-size:12px;}
 table.isr-t th{background:#fbe5d6;color:#111;padding:9px 10px;text-align:center;font-size:11px;border-bottom:2px solid #111;white-space:nowrap;}
 table.isr-t td{padding:7px 10px;border-bottom:1px solid #eef0f6;white-space:nowrap;}
 table.isr-t td.n{text-align:right;font-family:monospace;}
-table.isr-t tr.item{cursor:pointer;} table.isr-t tr.item:hover{background:#f5f8ff;}
+table.isr-t tr.item{cursor:pointer;} table.isr-t tr.item:hover{background:#f5f8ff;} table.isr-t tr.dmg{background:#fff7ed;} .isr-loc{display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;background:#dcfce7;color:#166534;} .isr-loc.d{background:#ffedd5;color:#9a3412;}
 table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #111;}
 .neg{color:#dc2626;}
 .isr-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;}
@@ -212,11 +243,17 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <div class="isr">
     <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
-    <div class="sub">Running balance as at the chosen date, taken from the same data as the Sampath Current Stock Report (Primary Qty = purchase qty × UPC). Closing = Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment. Click an item to see its ledger.</div>
+    <div class="sub">Running balance as at the chosen date, taken from the same data as the Sampath Current Stock Report (Primary Qty = purchase qty × UPC). Good Stock closing = Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment. Damaged Stock = the Dmg/Exp qty on secondary bills, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger.</div>
 
     <form method="GET" class="isr-card">
         <div class="isr-f">
             <div><label>As At Date</label><input type="date" name="as_at_date" value="<?php echo htmlspecialchars($f_to); ?>"></div>
+            <div><label>Stock Location</label>
+                <select name="loc" style="border:1.5px solid #e2e6f0;border-radius:8px;padding:8px 12px;font-size:13px;">
+                    <option value="all" <?php echo $f_loc === 'all' ? 'selected' : ''; ?>>All</option>
+                    <option value="good" <?php echo $f_loc === 'good' ? 'selected' : ''; ?>>Good Stock</option>
+                    <option value="damaged" <?php echo $f_loc === 'damaged' ? 'selected' : ''; ?>>Damaged Stock</option>
+                </select></div>
             <div><label>Item</label><input type="text" name="q" value="<?php echo htmlspecialchars($f_q); ?>" placeholder="Code / name / basepack" style="min-width:220px"></div>
             <button class="isr-b" type="submit"><i class="fa-solid fa-filter"></i> Apply</button>
             <a class="isr-b l" href="sampath_item_stock_report.php">Reset</a>
@@ -235,15 +272,15 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         </tr></thead>
         <tbody>
         <?php foreach ($rows as $i => $r): ?>
-        <tr class="item" onclick="isrLedger(<?php echo htmlspecialchars(json_encode($r['sku7']), ENT_QUOTES); ?>)" title="Click to view item ledger">
+        <tr class="item <?php echo $r['is_dmg'] ? 'dmg' : ''; ?>" onclick="isrLedger(<?php echo htmlspecialchars(json_encode($r['base']), ENT_QUOTES); ?>, '<?php echo $r['is_dmg'] ? 'damaged' : 'good'; ?>')" title="Click to view item ledger">
             <td><?php echo htmlspecialchars($r['basepack'] ?? ''); ?></td>
             <td><strong><?php echo htmlspecialchars($r['sku7']); ?></strong></td>
             <td><?php echo htmlspecialchars($r['name']); ?></td>
-            <td><?php echo htmlspecialchars($r['location']); ?></td>
+            <td><span class="isr-loc <?php echo $r['is_dmg'] ? 'd' : ''; ?>"><?php echo htmlspecialchars($r['location']); ?></span></td>
             <td class="n"><?php echo $r['upc'] ? qn($r['upc']) : '—'; ?></td>
             <td class="n"><?php echo qcell($r['pc'], $r['upc']); ?></td>
             <td class="n"><?php echo qcell($r['rc'], $r['upc'], true); ?></td>
-            <td class="n"><?php echo qcell($r['so'], $r['upc'], true); ?></td>
+            <td class="n"><?php echo sgn($r['so_s']); ?></td>
             <td class="n"><?php echo qcell($r['rej'], $r['upc'], true); ?></td>
             <td class="n"><?php echo qcell($r['adj'], 0); ?></td>
             <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo qn($r['close']); ?></strong></td>
@@ -257,7 +294,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <td colspan="5" style="text-align:right;">TOTAL — <?php echo count($rows); ?> items</td>
             <td class="n"><?php echo qn($tot['pc']); ?></td>
             <td class="n"><?php echo qn(-$tot['rc']); ?></td>
-            <td class="n"><?php echo qn(-$tot['so']); ?></td>
+            <td class="n"><?php echo sgn($tot['so']); ?></td>
             <td class="n"><?php echo qn(-$tot['rej']); ?></td>
             <td class="n"><?php echo qn($tot['adj']); ?></td>
             <td class="n"><?php echo qn($tot['close']); ?></td>
@@ -295,12 +332,13 @@ const fm = v => Number(v).toLocaleString('en-US', {maximumFractionDigits:0});
 const fm0 = fm;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-function isrLedger(code){
-    document.getElementById('isrMTitle').textContent = 'Item Ledger — ' + code;
+function isrLedger(code, loc){
+    loc = loc || 'good';
+    document.getElementById('isrMTitle').textContent = 'Item Ledger — ' + code + (loc === 'damaged' ? '-D (Damaged Stock)' : ' (Good Stock)');
     document.getElementById('isrMSub').textContent = 'Loading…';
     document.getElementById('isrMBody').innerHTML = '';
     document.getElementById('isrModal').classList.add('open');
-    fetch('sampath_item_stock_report.php?ajax=ledger&' + ISR_QS + '&item_code=' + encodeURIComponent(code))
+    fetch('sampath_item_stock_report.php?ajax=ledger&' + ISR_QS + '&loc=' + loc + '&item_code=' + encodeURIComponent(code))
         .then(r => r.json()).then(d => {
             isrLedgerData = d;
             document.getElementById('isrMSub').textContent = (d.name || '') + ' · ' + ISR_PERIOD + ' · UPC ' + fm(d.upc) + ' · Closing ' + fm(d.closing);
@@ -327,7 +365,7 @@ async function isrExport(){
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Item Stock');
     ws.addRow(['Sampath Item Stock Report — ' + ISR_PERIOD]).font = {bold:true, size:14};
     isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)','Item Value','Closing Stock Value']));
-    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.pc, -r.rc, -r.so, -r.rej, r.adj, r.close, r.value, r.cval]));
+    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.pc, -r.rc, r.so_s, -r.rej, r.adj, r.close, r.value, r.cval]));
     [5,6,7,8,9,10,11].forEach(c => ws.getColumn(c).numFmt = '#,##0');
     [13,14].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
     [14,12,40,14,8,14,14,14,14,12,14,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
