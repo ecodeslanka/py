@@ -172,11 +172,13 @@ table.irr-t .qq{font-size:10px;color:#8892a4;font-weight:400;}
 table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #111;position:sticky;bottom:0;}
 .neg strong{color:#dc2626;}
 .gd{background:#f0fdf4;} .dg{background:#fff7ed;}
+#irrSummary table.irr-t th{position:static;} #irrSummary table.irr-t td.n{text-align:right;}
+@media print{#irrDetails{display:block !important;} #irrToggle{display:none;}}
 </style>
 
 <div class="irr">
     <h2><i class="fa-solid fa-scale-balanced"></i> Inventory Reconciliation Report</h2>
-    <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> Opening Inventory = closing good stock as at the From date, then the transactions after it up to the To date. Every value = units × <strong>TUR</strong> (latest TUR of the item). <strong>Diff</strong> = Pre Secondary − Secondary. Closing is shown on two sides: <strong>Good Stock</strong> (Opening + Primary Purchase − Primary Return − Secondary − Rejected + Adjustment) and <strong>Damaged Stock</strong> (confirmed Sampath damage entries).</div>
+    <div class="sub">A <strong>summary</strong> of the stock position — click <strong>View Details</strong> for the item-wise table. <strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> Opening Inventory = closing good stock as at the From date, then the transactions after it up to the To date. Every value = units × <strong>TUR</strong> (latest TUR of the item). <strong>Diff</strong> = Pre Secondary − Secondary. Closing is shown on two sides: <strong>Good Stock</strong> (Opening + Primary Purchase − Primary Return − Secondary − Rejected + Adjustment) and <strong>Damaged Stock</strong> (confirmed Sampath damage entries).</div>
 
     <?php if ($range_err): ?><div class="irr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($range_err); ?></div><?php endif; ?>
     <?php foreach ($errors as $er): ?><div class="irr-card" style="background:#fef2f2;border-color:#fecaca;color:#991b1b;"><?php echo htmlspecialchars($er); ?></div><?php endforeach; ?>
@@ -211,6 +213,44 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         </div>
     </form>
 
+    <!-- SUMMARY -->
+    <div class="irr-card" id="irrSummary">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+            <div>
+                <div style="font-size:15px;font-weight:800;">Reconciliation Summary</div>
+                <div style="font-size:12px;color:#8892a4;"><?php echo htmlspecialchars($period); ?> · <?php echo count($rows); ?> items · values at TUR</div>
+            </div>
+            <button class="irr-b" type="button" id="irrToggle" onclick="irrDetails()"><i class="fa-solid fa-table-list"></i> View Details</button>
+        </div>
+        <table class="irr-t" style="max-width:760px;">
+            <thead><tr><th style="text-align:left">Particulars</th><th>Units</th><th>Value (Rs.)</th></tr></thead>
+            <tbody>
+            <?php
+            $sum_rows = [
+                ['Opening Inventory (good stock)', 'open', ''],
+                ['+ Primary Purchase', 'pc', ''],
+                ['− Primary Return', 'rc', ''],
+                ['Pre Secondary (loaded out)', 'pre', ''],
+                ['− Secondary (sold)', 'sec', ''],
+                ['Diff (Pre Secondary − Secondary)', 'diff', '#fefce8'],
+                ['± Rejected / Adjustment', 'oth', ''],
+            ];
+            foreach ($sum_rows as $sr): ?>
+                <tr style="<?php echo $sr[2] ? 'background:' . $sr[2] : ''; ?>">
+                    <td><?php echo $sr[0]; ?></td>
+                    <td class="n"><?php echo ($tot[$sr[1] . '_q'] < 0 ? '-' : '') . irr_n(abs($tot[$sr[1] . '_q'])); ?></td>
+                    <td class="n"><strong><?php echo irr_v($tot[$sr[1] . '_v']); ?></strong></td>
+                </tr>
+            <?php endforeach; ?>
+                <tr style="background:#f0fdf4;"><td><strong>Closing Inventory — Good Stock</strong></td><td class="n"><strong><?php echo irr_n($tot['g_q']); ?></strong></td><td class="n"><strong><?php echo irr_v($tot['g_v']); ?></strong></td></tr>
+                <tr style="background:#fff7ed;"><td><strong>Closing Inventory — Damaged Stock</strong></td><td class="n"><strong><?php echo irr_n($tot['d_q']); ?></strong></td><td class="n"><strong><?php echo irr_v($tot['d_v']); ?></strong></td></tr>
+                <tr style="background:#fbe5d6;"><td><strong>Total Closing Inventory</strong></td><td class="n"><strong><?php echo irr_n($tot['g_q'] + $tot['d_q']); ?></strong></td><td class="n"><strong><?php echo irr_v($tot['g_v'] + $tot['d_v']); ?></strong></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ITEM-WISE DETAILS (hidden until View Details) -->
+    <div id="irrDetails" style="display:none;">
     <div class="irr-wrap">
     <table class="irr-t" id="irrTable">
         <thead>
@@ -254,10 +294,18 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
         </tr></tfoot>
     </table>
     </div>
+    </div>
 </div>
 
 <script>
 $(function(){ $('#itemSelect').select2({placeholder:'— All items (code - name) —', allowClear:true, width:'100%'}); });
+function irrDetails(){
+    const box = document.getElementById('irrDetails'), btn = document.getElementById('irrToggle');
+    const open = box.style.display === 'none';
+    box.style.display = open ? '' : 'none';
+    btn.innerHTML = open ? '<i class="fa-solid fa-eye-slash"></i> Hide Details' : '<i class="fa-solid fa-table-list"></i> View Details';
+    if (open) box.scrollIntoView({behavior:'smooth', block:'start'});
+}
 function irrMode(){
     const range = document.querySelector('input[name=mode]:checked').value === 'range';
     document.getElementById('irrAsAt').disabled = range;
