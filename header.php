@@ -1000,6 +1000,10 @@ if (isset($conn) && $conn) {
     <a href="sampath_stock_reconciliation.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_stock_reconciliation.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-boxes-stacked"></i><span>Sampath Stock Reconciliation</span>
     </a>
+
+    <a href="item_adjustment.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'item_adjustment.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-sliders"></i><span>Item Adjustment</span>
+    </a>
 </div>
 
 <div class="menu-item has-submenu" data-tooltip="Sampath Uploads" onclick="toggleSubmenu(this)">

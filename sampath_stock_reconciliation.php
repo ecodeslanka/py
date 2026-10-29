@@ -9,8 +9,9 @@
 //         a) CURRENT STOCK      -> system stock = running balance of every record on file up to
 //                                  and including the date (exactly the Current Stock Report).
 //                                  Last Stock Count Units = 0, movements from the very beginning.
-//         b) LAST STOCK COUNT   -> system stock = item's last saved physical count before the date
-//                                  + movements dated AFTER that count up to and including the date.
+//         b) LAST STOCK COUNT   -> system stock = the LAST UPLOADED physical count before the date (item-wise qty of that
+//                                  one count only; an item with no qty in it starts at 0 - it is not taken from an
+//                                  earlier count) + movements dated AFTER that count up to and including the date.
 //    3. Upload the stock count Excel (Sr No | SKU7 | Product Name | Stock Count Unit).
 //       SKU7 = our item code (same code used in the Current Stock Report / Tally).
 //    4. The page shows the reconciliation (short / excess) against system stock.
@@ -19,8 +20,8 @@
 //
 //  Reconciliation layout (same as srtock_count_reconc.xlsx):
 //    Item Code / Item Name / UPC
-//    Last Stock Count Units   -> (Last Stock Count base only) physical count from the most recent
-//                                SAVED stock count dated BEFORE the selected date; 0 if none.
+//    Last Stock Count Units   -> (Last Stock Count base only) the item's qty in the most recent SAVED stock count
+//                                dated BEFORE the selected date; 0 if it has no qty in that count (older counts are not used).
 //                                Always 0 on the Current Stock base.
 //    Primary Qty              -> Unilever Purchase Import  (cases x UPC = units)
 //    Primary Returns          -> Unilever Items Return      (cases x UPC = units)
@@ -163,20 +164,25 @@ function sc_compute($conn, $dt_raw, $base = 'last_count') {
         ];
     }
 
-    /* Last stock count per item (Last Stock Count base only) */
+    /* Last stock count (Last Stock Count base only): the base is the LAST UPLOADED count only, item by item.
+       An item with no qty in that last count gets no base qty (0) - it is NOT taken from an earlier count -
+       and every item's movements are counted only after the last count's date. */
     $last = [];
+    $cut_date = null;       // date of the last uploaded count (movements after it are added)
     if ($base === 'last_count') {
-        $res = mysqli_query($conn, "SELECT i.item_code, i.item_name, h.count_date, i.counted_units
-                FROM sampath_stock_count_items i
-                JOIN sampath_stock_count_headers h ON h.id = i.header_id
-                WHERE h.count_date < '$dt' AND i.counted_units IS NOT NULL
-                ORDER BY h.count_date ASC, h.id ASC");
-        if (!$res) { $out['error'] = mysqli_error($conn); return $out; }
-        while ($r = mysqli_fetch_assoc($res)) {
-            $code = trim((string)$r['item_code']);
-            if ($code === '') continue;
-            $last[$code] = ['date' => substr((string)$r['count_date'], 0, 10),
-                            'units' => (float)$r['counted_units'], 'name' => $r['item_name']];   // later dates overwrite earlier
+        $hq = mysqli_query($conn, "SELECT id, count_date FROM sampath_stock_count_headers WHERE count_date < '$dt' ORDER BY count_date DESC, id DESC LIMIT 1");
+        $hrow = $hq ? mysqli_fetch_assoc($hq) : null;
+        if ($hrow) {
+            $cut_date = substr((string)$hrow['count_date'], 0, 10);
+            $res = mysqli_query($conn, "SELECT i.item_code, i.item_name, i.counted_units
+                    FROM sampath_stock_count_items i
+                    WHERE i.header_id = " . (int)$hrow['id'] . " AND i.counted_units IS NOT NULL");
+            if (!$res) { $out['error'] = mysqli_error($conn); return $out; }
+            while ($r = mysqli_fetch_assoc($res)) {
+                $code = trim((string)$r['item_code']);
+                if ($code === '') continue;
+                $last[$code] = ['date' => $cut_date, 'units' => (float)$r['counted_units'], 'name' => $r['item_name']];
+            }
         }
     }
 
@@ -188,11 +194,11 @@ function sc_compute($conn, $dt_raw, $base = 'last_count') {
     };
     foreach ($last as $code => $l) $touch($code, $l['name']);
 
-    // Current Stock base: every record counts. Last Stock Count base: only after the item's last count.
-    $in_window = function ($code, $d) use ($last) {
+    // Current Stock base: every record counts. Last Stock Count base: only records after the last uploaded count's date.
+    $in_window = function ($code, $d) use ($cut_date) {
         $d = substr((string)$d, 0, 10);
         if ($d === '') return false;
-        return !isset($last[$code]) || $d > $last[$code]['date'];
+        return $cut_date === null || $d > $cut_date;
     };
 
     /* Primary Qty (cases) */
@@ -698,7 +704,7 @@ include 'header.php';
                 <label class="base-opt <?php echo $init_base === 'last_count' ? 'active' : ''; ?>">
                     <input type="radio" name="sc-base" value="last_count" <?php echo $init_base === 'last_count' ? 'checked' : ''; ?>>
                     <span><span class="bo-title">Last Stock Count</span>
-                    <span class="bo-desc" style="display:block">Last saved physical count + movements after it, up to the date.</span></span>
+                    <span class="bo-desc" style="display:block">Last uploaded stock count only (item qty; items with no qty in it start at 0) + movements after its date, up to the date.</span></span>
                 </label>
             </div>
         </div>
@@ -833,7 +839,7 @@ async function loadSystem() {
         msg += 'Running balance of every purchase, return, sale and adjustment up to and including this date (same as the Current Stock Report).';
     } else {
         msg += SYS.prev_count_date
-            ? 'Previous saved stock count: <strong>' + esc(SYS.prev_count_date) + '</strong> — movements after it are added on top.'
+            ? 'Last uploaded stock count: <strong>' + esc(SYS.prev_count_date) + '</strong> — its item qty is the base (items with no qty in it start at 0, nothing is taken from older counts) and movements after it are added on top.'
             : 'No earlier saved stock count — Last Stock Count Units start at 0 and movements are taken from the beginning (same result as Current Stock).';
     }
     if (SYS.existing) {
