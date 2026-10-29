@@ -1,7 +1,7 @@
 <?php
 // ============================================================
 //  sampath_item_rejection.php
-//  SAMPATH ITEM REJECTION ENTRIES (GRN) — list, item summary and supporting documents
+//  SAMPATH GOODS REJECTED (GRN rejection entries) — list, item summary and supporting documents
 //
 //  Data: grn_headers / grn_items — the same GRN entries that feed "Sampath Rejected Qty"
 //  on the Sampath stock reports (statuses saved / cc_checked / st_checked count as rejected;
@@ -284,7 +284,7 @@ table.sir-t tfoot td{background:#f1f5f9;font-weight:800;}
 </style>
 
 <div class="sir">
-    <h2><i class="fa-solid fa-ban"></i> Sampath Item Rejection Entries</h2>
+    <h2><i class="fa-solid fa-ban"></i> Sampath Goods Rejected</h2>
     <div class="sub">GRN rejection entries (the feed for Sampath Rejected Qty) with item totals and an optional supporting document per entry.</div>
 
     <?php if ($flash_ok): ?><div class="sir-ok"><?php echo htmlspecialchars($flash_ok); ?></div><?php endif; ?>

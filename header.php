@@ -992,6 +992,10 @@ if (isset($conn) && $conn) {
      <a href="sampath_grn_reasons.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_grn_reasons.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath GRN Reasons</span>
     </a>
+
+    <a href="sampath_item_rejection.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_rejection.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-file-circle-xmark"></i><span>Sampath Goods Rejected</span>
+    </a>
 </div>
 
 <div class="menu-item has-submenu" data-tooltip="Sampath Uploads" onclick="toggleSubmenu(this)">
@@ -1062,9 +1066,6 @@ if (isset($conn) && $conn) {
     <i class="fa-solid fa-chevron-down submenu-toggle"></i>
 </div>
 <div class="submenu">
-      <a href="sampath_item_rejection.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_item_rejection.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-file-circle-xmark"></i><span>Sampath Item Rejection Entries</span>
-    </a>
       <a href="sampath_age_analysis_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_age_analysis_report.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath Age Analysis</span>
     </a>
