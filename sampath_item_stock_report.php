@@ -26,14 +26,14 @@ function isr_upc($v) { return (float)preg_replace('/[^0-9.]/', '', (string)$v); 
 
 /* Running balance as at a date (same basis as the Sampath Current Stock Report):
    everything on record up to and including the As At date. */
-$f_to   = trim($_GET['as_at_date'] ?? '') !== '' ? trim($_GET['as_at_date']) : date('Y-m-d');
-/* Optional From date: when set, the report is a date range. Opening Units = closing balance of the day before
-   the From date (everything on record up to then); the movement columns cover From..To. */
-$f_from_in = trim($_GET['date_from'] ?? '');
-if ($f_from_in !== '' && (!strtotime($f_from_in) || $f_from_in > $f_to)) $f_from_in = '';
-$has_open  = $f_from_in !== '';
-$f_from    = $has_open ? $f_from_in : '1970-01-01';
-$open_to   = $has_open ? date('Y-m-d', strtotime($f_from_in . ' -1 day')) : null;
+/* As At Date = the opening cut-off: Opening Units is the closing balance as at that date (everything on record
+   up to and including it). The other columns show the movements AFTER it, up to the optional To Date (default today). */
+$f_asat = trim($_GET['as_at_date'] ?? '') !== '' && strtotime($_GET['as_at_date']) ? date('Y-m-d', strtotime($_GET['as_at_date'])) : date('Y-m-d');
+$f_to_in = trim($_GET['date_to'] ?? '') !== '' && strtotime($_GET['date_to']) ? date('Y-m-d', strtotime($_GET['date_to'])) : '';
+$has_open = true;
+$open_to  = $f_asat;                                              // opening = closing balance as at this date
+$f_from   = date('Y-m-d', strtotime($f_asat . ' +1 day'));        // movements start the day after
+$f_to     = $f_to_in !== '' ? $f_to_in : date('Y-m-d');           // ...and run to the To Date (or today)
 $f_items = [];   // Item filter (multi-select): item codes; a "-D" row follows its base item
 foreach ((array)($_GET['items'] ?? []) as $v) { $v = trim((string)$v); if ($v !== '') $f_items[] = $v; }
 $f_loc  = in_array($_GET['loc'] ?? 'all', ['good','damaged']) ? $_GET['loc'] : 'all';   // Stock Location filter
@@ -310,12 +310,12 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <div class="isr">
     <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
-    <div class="sub">Running balance as at the chosen To / As At date (leave From Date empty), or a date range: <strong>Opening Units</strong> = closing balance of the day before the From date, then the movements From..To. Data is the same as the Sampath Current Stock Report (Primary Qty = purchase qty × UPC). Good Stock closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment. Damaged Stock = Opening + the Dmg/Exp qty on secondary bills, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
+    <div class="sub"><strong>Opening Units</strong> = closing balance as at the <strong>As At Date</strong>. Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the movements <strong>after</strong> that date, up to the To Date (today if empty). Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). Damaged Stock = Opening + the Dmg/Exp qty on secondary bills, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
 
     <form method="GET" class="isr-card">
         <div class="isr-f">
-            <div><label>From Date (optional)</label><input type="date" name="date_from" value="<?php echo htmlspecialchars($f_from_in); ?>"></div>
-            <div><label>To / As At Date</label><input type="date" name="as_at_date" value="<?php echo htmlspecialchars($f_to); ?>"></div>
+            <div><label>As At Date (Opening Balance)</label><input type="date" name="as_at_date" value="<?php echo htmlspecialchars($f_asat); ?>"></div>
+            <div><label>To Date (movements after As At)</label><input type="date" name="date_to" value="<?php echo htmlspecialchars($f_to_in); ?>"></div>
             <div><label>Customers</label>
                 <select name="cust[]" id="custSelect" multiple style="min-width:320px">
                     <?php foreach ($cust_opts as $c => $nm): ?>
@@ -410,8 +410,8 @@ $(function(){
     $('#custSelect').select2({placeholder:'— All customers (code - name) —', allowClear:true, width:'100%'});
 });
 const ISR_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
-const ISR_PERIOD = <?php echo json_encode($has_open ? ($f_from_in . ' to ' . $f_to . ' (opening = closing of ' . $open_to . ')') : ('as at ' . $f_to)); ?>;
-const ISR_QS = <?php echo json_encode('as_at_date=' . urlencode($f_to) . ($has_open ? '&date_from=' . urlencode($f_from_in) : '') . ($f_cust ? '&' . http_build_query(['cust' => $f_cust]) : '')); ?>;
+const ISR_PERIOD = <?php echo json_encode('opening as at ' . $f_asat . ' · movements ' . $f_from . ' to ' . $f_to); ?>;
+const ISR_QS = <?php echo json_encode('as_at_date=' . urlencode($f_asat) . '&date_to=' . urlencode($f_to) . ($f_cust ? '&' . http_build_query(['cust' => $f_cust]) : '')); ?>;
 let isrLedgerData = null;
 const fm = v => Number(v).toLocaleString('en-US', {maximumFractionDigits:0});
 const fm0 = fm;
