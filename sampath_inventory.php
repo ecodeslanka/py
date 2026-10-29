@@ -42,6 +42,8 @@ $f_view   = ($_GET['view'] ?? 'uploads') === 'items' ? 'items' : 'uploads';
 $f_from   = trim($_GET['date_from'] ?? '');
 $f_to     = trim($_GET['date_to'] ?? '');
 $f_search = trim($_GET['search'] ?? '');
+$f_items  = [];   // Items filter (Item Summary): product codes
+foreach ((array)($_GET['items'] ?? []) as $v) { $v = trim((string)$v); if ($v !== '') $f_items[] = $v; }
 $e = function ($v) use ($conn) { return mysqli_real_escape_string($conn, $v); };
 
 $active = $f_type === 'all' ? array_keys($TYPES) : [$f_type];
@@ -78,6 +80,7 @@ if ($f_view === 'uploads') {
         if ($f_from) $w[] = "delivery_date >= '" . $e($f_from) . "'";
         if ($f_to)   $w[] = "delivery_date <= '" . $e($f_to) . "'";
         if ($f_search) $w[] = "(product_code LIKE '%" . $e($f_search) . "%' OR product_description LIKE '%" . $e($f_search) . "%' OR basepack_code LIKE '%" . $e($f_search) . "%')";
+        if ($f_items) $w[] = "product_code IN ('" . implode("','", array_map($e, $f_items)) . "')";
         $q = mysqli_query($conn, "SELECT product_code, MAX(basepack_code) AS bp, MAX(product_description) AS nm,
                 SUM(units) AS units, SUM(free_qty) AS free_qty, SUM(gross_sales) AS gross, COUNT(DISTINCT bill_number) AS bills
             FROM {$t['data']} WHERE " . implode(' AND ', $w) . " GROUP BY product_code");
@@ -92,12 +95,26 @@ if ($f_view === 'uploads') {
     $rows = array_values($items);
 }
 
-$qs_base = ['type' => $f_type, 'date_from' => $f_from, 'date_to' => $f_to, 'search' => $f_search];
+/* Items filter options: every product in the active inventory tables, as "code - name" */
+$item_opts = [];
+if ($f_view === 'items') {
+    foreach ($active as $k) {
+        $q = mysqli_query($conn, "SELECT product_code, MAX(product_description) AS nm FROM {$TYPES[$k]['data']} WHERE product_code <> '' GROUP BY product_code");
+        while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['product_code']); if (!isset($item_opts[$c]) || $item_opts[$c] === '') $item_opts[$c] = $r['nm'] ?? ''; }
+    }
+    ksort($item_opts);
+}
+$qs_base = ['type' => $f_type, 'date_from' => $f_from, 'date_to' => $f_to, 'search' => $f_search, 'items' => $f_items];
 include 'header.php';
 function si_n($v) { return number_format(round($v), 0); }
 function si_m($v) { return number_format($v, 2); }
 ?>
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <style>
+.select2-container .select2-selection--multiple{min-height:37px;border:1.5px solid #e2e6f0;border-radius:8px;}
+.select2-container{min-width:320px;max-width:520px;}
 .si{padding:0 4px;}
 .si h2{font-size:22px;font-weight:800;margin:0 0 4px;}
 .si .sub{font-size:12px;color:#8892a4;margin-bottom:16px;}
@@ -154,8 +171,17 @@ table.si-t td.n{font-family:monospace;}
                 </select></div>
             <div><label>Delivery Date From</label><input type="date" name="date_from" value="<?php echo htmlspecialchars($f_from); ?>"></div>
             <div><label>Delivery Date To</label><input type="date" name="date_to" value="<?php echo htmlspecialchars($f_to); ?>"></div>
-            <div><label><?php echo $f_view === 'items' ? 'Item code / name / basepack' : 'Filename / note'; ?></label>
+            <?php if ($f_view === 'items'): ?>
+            <div><label>Items</label>
+                <select name="items[]" id="itemSelect" multiple style="min-width:320px">
+                    <?php foreach ($item_opts as $c => $nm): ?>
+                    <option value="<?php echo htmlspecialchars($c); ?>" <?php echo in_array((string)$c, $f_items, true) ? 'selected' : ''; ?>><?php echo htmlspecialchars($c . ' - ' . $nm); ?></option>
+                    <?php endforeach; ?>
+                </select></div>
+            <?php else: ?>
+            <div><label>Filename / note</label>
                 <input type="text" name="search" value="<?php echo htmlspecialchars($f_search); ?>" style="min-width:220px" placeholder="search…"></div>
+            <?php endif; ?>
             <button class="si-b" type="submit"><i class="fa-solid fa-filter"></i> Apply</button>
             <a class="si-b l" href="sampath_inventory.php?view=<?php echo $f_view; ?>">Reset</a>
             <?php if ($f_view === 'items'): ?><button class="si-b g" type="button" onclick="siExport()"><i class="fa-solid fa-file-excel"></i> Export Excel</button><?php endif; ?>
@@ -228,6 +254,7 @@ table.si-t td.n{font-family:monospace;}
     </table></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
     <script>
+    $(function(){ $('#itemSelect').select2({placeholder:'— All items (code - name) —', allowClear:true, width:'100%'}); });
     const SI_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
     const SI_SHOW = <?php echo json_encode($show); ?>;
     const SI_LABEL = <?php echo json_encode(array_map(function ($t) { return $t['label']; }, $TYPES)); ?>;
