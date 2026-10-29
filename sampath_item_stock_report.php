@@ -56,6 +56,8 @@ if ($has_open) {
 $f_items = [];   // Item filter (multi-select): item codes; a "-D" row follows its base item
 foreach ((array)($_GET['items'] ?? []) as $v) { $v = trim((string)$v); if ($v !== '') $f_items[] = $v; }
 $show_dcol = ($_GET['dcol'] ?? '1') !== '0';   // option: show the Damaged Stock column after Closing Balance
+$f_loc_pre = $_GET['loc'] ?? 'all';
+if ($f_loc_pre === 'damaged') $show_dcol = true;   // the damaged items view is all about that column
 $f_loc  = in_array($_GET['loc'] ?? 'all', ['good','damaged']) ? $_GET['loc'] : 'all';   // Stock Location filter
 $from   = mysqli_real_escape_string($conn, $f_from);
 $to     = mysqli_real_escape_string($conn, $f_to);
@@ -256,14 +258,23 @@ $tot = ['dmg'=>0,'open'=>0,'pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,
 $add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m, $open = 0.0, $dmg_q = 0.0) use (&$rows, &$tot) {
     $upc_v = (float)($m['upc'] ?? 0);
     $value = (float)($m['value'] ?? 0);
-    // Good Stock: Primary Purchase - Primary Returned - Secondary Inv - Good Rejected + Adjustment
-    // Damaged Stock item (<code>-D): confirmed Sampath damage entries
-    $so_s  = $is_dmg ? $a['so'] : -$a['so'];
-    $close = $open + ($is_dmg ? $a['so'] : $a['pc'] - $a['rc'] - $a['so'] - $a['rej'] + $a['adj']);
-    $rows[] = ['basepack'=>$bp, 'open'=>round($open,2), 'sku7'=>$code, 'base'=>$base, 'name'=>$name, 'location'=>$loc_label, 'is_dmg'=>$is_dmg ? 1 : 0, 'upc'=>$upc_v,
+    if ($is_dmg) {
+        /* Damaged Stock item (<code>-D): its own log from the confirmed Sampath damage entries. It never shows in Opening Units,
+           Secondary Inv or Closing Balance - the qty is only in the Damaged Stock column. */
+        $dm = $open + $a['so'];            // ($a['so'] carries the damage movement in the period; $open = damage before it)
+        $rows[] = ['basepack'=>$bp, 'open'=>0, 'sku7'=>$code, 'base'=>$base, 'name'=>$name, 'location'=>$loc_label, 'is_dmg'=>1, 'upc'=>$upc_v,
+            'pc'=>0, 'rc'=>0, 'so'=>0, 'so_s'=>0, 'rej'=>0, 'adj'=>0, 'close'=>0, 'dmg'=>round($dm,2), 'value'=>$value, 'cval'=>0];
+        $tot['dmg'] += $dm;
+        return;
+    }
+    // Good Stock: Opening + Primary Purchase - Primary Returned - Secondary Inv - Good Rejected + Adjustment
+    // (Damaged Stock is a separate log and is not part of Secondary Inv or Closing Balance)
+    $so_s  = -$a['so'];
+    $close = $open + $a['pc'] - $a['rc'] - $a['so'] - $a['rej'] + $a['adj'];
+    $rows[] = ['basepack'=>$bp, 'open'=>round($open,2), 'sku7'=>$code, 'base'=>$base, 'name'=>$name, 'location'=>$loc_label, 'is_dmg'=>0, 'upc'=>$upc_v,
         'pc'=>round($a['pc'],2), 'rc'=>round($a['rc'],2), 'so'=>round($a['so'],2), 'so_s'=>round($so_s,2), 'rej'=>round($a['rej'],2), 'adj'=>round($a['adj'],2),
-        'close'=>round($close,2), 'dmg'=>round($is_dmg ? $close : $dmg_q, 2), 'value'=>$value, 'cval'=>round($close * $value, 2)];
-    $tot['dmg'] += $is_dmg ? $close : $dmg_q;
+        'close'=>round($close,2), 'dmg'=>round($dmg_q,2), 'value'=>$value, 'cval'=>round($close * $value, 2)];
+    $tot['dmg'] += $dmg_q;
     $tot['open'] += $open; $tot['pc'] += $a['pc']; $tot['rc'] += $a['rc']; $tot['so'] += $so_s; $tot['rej'] += $a['rej']; $tot['adj'] += $a['adj'];
     $tot['close'] += $close; $tot['val'] += $close * $value;
 };
@@ -340,7 +351,7 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <div class="isr">
     <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
-    <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> <strong>Opening Units</strong> = closing balance as at the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the transactions after it up to the To date; Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). <strong>Damaged Stock</strong> (column after Closing Balance — untick the option to hide it) = opening + confirmed Sampath Damage Entry lines (Damage Entry AI Tally &amp; Confirm); it is <strong>not linked to the secondary invoices</strong>. Choose Stock Location → Damaged Stock items to list them as separate <em>&lt;code&gt;-D</em> rows. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
+    <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> <strong>Opening Units</strong> = closing balance as at the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the transactions after it up to the To date; Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). <strong>Damaged Stock</strong> is a separate log — it never shows in Opening Units, Secondary Inv or Closing Balance — and is the column after Closing Balance (untick the option to hide it) = opening + confirmed Sampath Damage Entry lines (Damage Entry AI Tally &amp; Confirm); it is <strong>not linked to the secondary invoices</strong>. Choose Stock Location → Damaged Stock items to list them as separate <em>&lt;code&gt;-D</em> rows. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
 
     <?php if ($range_err): ?><div class="isr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($range_err); ?></div><?php endif; ?>
     <form method="GET" class="isr-card">
@@ -410,11 +421,11 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <td class="n"><?php echo sgn($r['so_s']); ?></td>
             <td class="n"><?php echo qcell($r['rej'], $r['upc'], true); ?></td>
             <td class="n"><?php echo qcell($r['adj'], 0); ?></td>
-            <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo qn($r['close']); ?></strong></td>
+            <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo $r['is_dmg'] ? '—' : qn($r['close']); ?></strong></td>
             <?php if ($show_dcol): ?><td class="n" style="background:#fff7ed;color:#9a3412;font-weight:700;<?php echo round($r['dmg']) != 0 ? 'cursor:pointer;text-decoration:underline dotted;' : ''; ?>"
                 <?php if (round($r['dmg']) != 0 && !$r['is_dmg']): ?>onclick="event.stopPropagation();isrLedger(<?php echo htmlspecialchars(json_encode($r['base']), ENT_QUOTES); ?>, 'damaged')" title="Damaged Stock ledger"<?php endif; ?>><?php echo sgn($r['dmg']); ?></td><?php endif; ?>
             <td class="n"><?php echo $r['value'] ? number_format($r['value'], 2) : '—'; ?></td>
-            <td class="n <?php echo $r['cval'] < 0 ? 'neg' : ''; ?>"><?php echo number_format($r['cval'], 2); ?></td>
+            <td class="n <?php echo $r['cval'] < 0 ? 'neg' : ''; ?>"><?php echo $r['is_dmg'] ? '—' : number_format($r['cval'], 2); ?></td>
         </tr>
         <?php endforeach; ?>
         <?php if (!$rows): ?><tr><td colspan="<?php echo 14 + ($show_dcol ? 1 : 0); ?>" style="text-align:center;padding:24px;color:#8892a4;">No stock records found up to this date.</td></tr><?php endif; ?>
