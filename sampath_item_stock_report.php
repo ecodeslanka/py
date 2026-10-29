@@ -26,19 +26,26 @@ function isr_upc($v) { return (float)preg_replace('/[^0-9.]/', '', (string)$v); 
 
 /* Running balance as at a date (same basis as the Sampath Current Stock Report):
    everything on record up to and including the As At date. */
-/* Two ways to run the report:
-     1) As At Date only (From/To empty)  -> the normal report: running balance as at that date (no opening column value).
-     2) Date range (From + To both set)  -> Opening Units = closing balance of the day before From, the movement columns
-                                            cover From..To, and Closing is the balance at To. */
+/* Two options (radio): 
+     As At Date  -> the normal report: all transactions up to the date (Opening Units not used).
+     Date Range  -> the From date is taken as the as-at date: Opening Units = closing balance as at the From date;
+                    Primary Purchase / Returned / Secondary / Rejected / Adjustment show the transactions AFTER it up to
+                    the To date, and Closing = Opening + those transactions. */
 $ok_date = function ($v) { $v = trim((string)$v); return $v !== '' && strtotime($v) ? date('Y-m-d', strtotime($v)) : ''; };
-$f_asat   = $ok_date($_GET['as_at_date'] ?? '') ?: date('Y-m-d');
+$f_mode    = ($_GET['mode'] ?? '') === 'range' ? 'range' : 'asat';
+$f_asat    = $ok_date($_GET['as_at_date'] ?? '') ?: date('Y-m-d');
 $f_from_in = $ok_date($_GET['date_from'] ?? '');
 $f_to_in   = $ok_date($_GET['date_to'] ?? '');
-$has_open  = $f_from_in !== '' && $f_to_in !== '' && $f_from_in <= $f_to_in;
+$range_err = '';
+if ($f_mode === 'range' && ($f_from_in === '' || $f_to_in === '' || $f_from_in > $f_to_in)) {
+    $range_err = 'Select a From Date and a To Date (From must not be after To) to run the date range. Showing the As At report meanwhile.';
+    $f_mode = 'asat';
+}
+$has_open = $f_mode === 'range';
 if ($has_open) {
-    $open_to = date('Y-m-d', strtotime($f_from_in . ' -1 day'));   // opening = closing balance of the day before From
-    $f_from  = $f_from_in;
-    $f_to    = $f_to_in;
+    $open_to = $f_from_in;                                          // opening = closing balance as at the From date
+    $f_from  = date('Y-m-d', strtotime($f_from_in . ' +1 day'));    // transactions after it
+    $f_to    = $f_to_in;                                            // ...up to the To date
 } else {
     $open_to = null;
     $f_from  = '1970-01-01';                                        // normal report: everything up to the As At Date
@@ -320,14 +327,26 @@ table.isr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
 
 <div class="isr">
     <h2><i class="fa-solid fa-boxes-stacked"></i> Sampath Item Stock Report</h2>
-    <div class="sub"><strong>As At Date only:</strong> the normal report — running balance as at that date. <strong>Date range (From + To):</strong> <strong>Opening Units</strong> = closing balance of the day before the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment cover From to To; Closing is the balance at the To date. Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). Damaged Stock = Opening + the Dmg/Exp qty on secondary bills, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
+    <div class="sub"><strong>As At Date:</strong> the normal report — all transactions up to that date. <strong>Date Range:</strong> <strong>Opening Units</strong> = closing balance as at the From date; Primary Purchase, Primary Returned, Secondary Inv, Good Rejected and Adjustment show the transactions after it up to the To date; Closing = Opening + Primary Purchase − Primary Returned − Secondary Inv − Good Rejected + Adjustment (Primary Qty = purchase qty × UPC, same data as the Sampath Current Stock Report). Damaged Stock = Opening + the Dmg/Exp qty on secondary bills, shown as a separate item with code <em>&lt;code&gt;-D</em>. Click an item to see its ledger. <strong>Customers filter:</strong> shows only those customers' Secondary Inv and Dmg/Exp (primary purchase, returns, rejections and adjustments are not customer-wise, so they are left out).</div>
 
+    <?php if ($range_err): ?><div class="isr-card" style="background:#fffbeb;border-color:#fcd34d;color:#92400e;"><?php echo htmlspecialchars($range_err); ?></div><?php endif; ?>
     <form method="GET" class="isr-card">
         <div class="isr-f">
-            <div><label>As At Date (normal report)</label><input type="date" name="as_at_date" value="<?php echo htmlspecialchars($f_asat); ?>"></div>
-            <div style="align-self:center;font-size:11px;font-weight:700;color:#8892a4;padding-top:16px">OR RANGE</div>
-            <div><label>From Date (range)</label><input type="date" name="date_from" value="<?php echo htmlspecialchars($f_from_in); ?>"></div>
-            <div><label>To Date (range)</label><input type="date" name="date_to" value="<?php echo htmlspecialchars($f_to_in); ?>"></div>
+            <div style="display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;border:1.5px solid #e2e6f0;border-radius:10px;padding:8px 12px;">
+                <div>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;font-size:12px;color:#111;">
+                        <input type="radio" name="mode" value="asat" <?php echo $f_mode === 'asat' ? 'checked' : ''; ?> onchange="isrMode()"> <strong>As At Date</strong></label>
+                    <input type="date" name="as_at_date" id="isrAsAt" value="<?php echo htmlspecialchars($f_asat); ?>">
+                </div>
+                <div>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;font-size:12px;color:#111;">
+                        <input type="radio" name="mode" value="range" <?php echo $f_mode === 'range' ? 'checked' : ''; ?> onchange="isrMode()"> <strong>Date Range</strong></label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="date" name="date_from" id="isrFrom" value="<?php echo htmlspecialchars($f_from_in); ?>" title="From date = opening as at date">
+                        <input type="date" name="date_to" id="isrTo" value="<?php echo htmlspecialchars($f_to_in); ?>" title="To date">
+                    </div>
+                </div>
+            </div>
             <div><label>Customers</label>
                 <select name="cust[]" id="custSelect" multiple style="min-width:320px">
                     <?php foreach ($cust_opts as $c => $nm): ?>
@@ -421,9 +440,16 @@ $(function(){
     $('#itemSelect').select2({placeholder:'— All items (code - name) —', allowClear:true, width:'100%'});
     $('#custSelect').select2({placeholder:'— All customers (code - name) —', allowClear:true, width:'100%'});
 });
+function isrMode(){
+    const range = document.querySelector('input[name=mode]:checked').value === 'range';
+    document.getElementById('isrAsAt').disabled = range;
+    document.getElementById('isrFrom').disabled = !range;
+    document.getElementById('isrTo').disabled   = !range;
+}
+document.addEventListener('DOMContentLoaded', isrMode);
 const ISR_ROWS = <?php echo json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>;
-const ISR_PERIOD = <?php echo json_encode($has_open ? ($f_from . ' to ' . $f_to . ' (opening = closing of ' . $open_to . ')') : ('as at ' . $f_to)); ?>;
-const ISR_QS = <?php echo json_encode('as_at_date=' . urlencode($f_asat) . ($has_open ? '&date_from=' . urlencode($f_from_in) . '&date_to=' . urlencode($f_to_in) : '') . ($f_cust ? '&' . http_build_query(['cust' => $f_cust]) : '')); ?>;
+const ISR_PERIOD = <?php echo json_encode($has_open ? ('opening as at ' . $open_to . ' · transactions ' . $f_from . ' to ' . $f_to) : ('as at ' . $f_to)); ?>;
+const ISR_QS = <?php echo json_encode(($has_open ? 'mode=range&date_from=' . urlencode($f_from_in) . '&date_to=' . urlencode($f_to_in) : 'mode=asat&as_at_date=' . urlencode($f_asat)) . ($f_cust ? '&' . http_build_query(['cust' => $f_cust]) : '')); ?>;
 let isrLedgerData = null;
 const fm = v => Number(v).toLocaleString('en-US', {maximumFractionDigits:0});
 const fm0 = fm;
