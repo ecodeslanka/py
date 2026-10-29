@@ -115,6 +115,8 @@ if (($_GET['ajax'] ?? '') === 'ledger') {
     usort($ev, function ($a, $b) { return strcmp((string)$a['d'], (string)$b['d']); });
     $bal = 0;
     foreach ($ev as &$e) { $bal += $e['in'] - $e['out']; $e['bal'] = round($bal, 2); $e['in'] = round($e['in'], 2); $e['out'] = round($e['out'], 2); }
+    unset($e);
+    $ev = array_reverse($ev);   // latest transaction first (running balance was built oldest to newest)
     echo json_encode(['item'=>$code . ($ledger_loc === 'damaged' ? '-D' : ''), 'loc'=>$ledger_loc === 'damaged' ? 'Damaged Stock' : 'Good Stock', 'name'=>$master[$code]['name'] ?? '', 'upc'=>$upc, 'rows'=>$ev, 'closing'=>round($bal, 2)], JSON_UNESCAPED_UNICODE);
     exit;
 }
