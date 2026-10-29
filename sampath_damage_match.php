@@ -128,7 +128,8 @@ $f_from   = trim($_GET['date_from'] ?? '');
 $f_to     = trim($_GET['date_to'] ?? '');
 $f_status = in_array($_GET['status'] ?? '', ['pending', 'confirmed']) ? $_GET['status'] : '';
 $f_search = trim($_GET['search'] ?? '');
-$per      = in_array((int)($_GET['per'] ?? 100), [50, 100, 200, 500]) ? (int)$_GET['per'] : 100;
+$per_in   = (int)($_GET['per'] ?? 100);
+$per      = in_array($per_in, [50, 100, 200, 500], true) ? $per_in : 100;
 $page     = max(1, (int)($_GET['page'] ?? 1));
 
 $batches = []; $lines = []; $total = 0; $pages = 1;
