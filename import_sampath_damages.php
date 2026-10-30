@@ -129,6 +129,21 @@ function idm_read($tmp) {
     return [$out, ''];
 }
 
+/** Which product codes exist in the inventory report (purchase items master / sales data)? returns [code => true] */
+function idm_known($conn, $codes) {
+    $codes = array_values(array_unique(array_filter(array_map('strval', $codes), 'strlen')));
+    $known = [];
+    foreach (array_chunk($codes, 400) as $ch) {
+        $in = implode(',', array_map(function ($c) use ($conn) { return "'" . mysqli_real_escape_string($conn, $c) . "'"; }, $ch));
+        foreach (["SELECT DISTINCT item_code AS c FROM unilever_purchase_items WHERE item_code IN ($in)",
+                  "SELECT DISTINCT product_code AS c FROM invoice_wise_sales_data WHERE product_code IN ($in)"] as $sql) {
+            $q = @mysqli_query($conn, $sql);
+            if ($q) while ($r = mysqli_fetch_assoc($q)) $known[trim($r['c'])] = true;
+        }
+    }
+    return $known;
+}
+
 /* ── JSON endpoints ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $act = $_POST['action'];
@@ -153,7 +168,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         ksort($dates);
 
         if ($act === 'preview') {
-            idm_json(['ok' => true, 'rows' => count($new), 'dups' => $dups, 'qty' => $tq, 'value' => $tv,
+            $kn = idm_known($conn, array_column($new, 'product_code')); $unk = [];
+            foreach ($new as $r) if (!isset($kn[$r['product_code']])) $unk[$r['product_code']] = $r['product_description'];
+            idm_json(['ok' => true, 'rows' => count($new), 'dups' => $dups, 'qty' => $tq, 'value' => $tv, 'unmatched' => count($unk), 'unmatched_list' => array_slice(array_map(function ($c, $n) { return $c . ' ' . $n; }, array_keys($unk), $unk), 0, 6),
                       'date' => $dates ? array_key_first($dates) : date('Y-m-d'), 'sample' => array_slice($new, 0, 8)]);
         }
         $dd = trim($_POST['damage_date'] ?? ''); $remark = trim($_POST['remark'] ?? '');
@@ -193,6 +210,9 @@ if (($_GET['ajax'] ?? '') === 'items') {
     $id = (int)($_GET['id'] ?? 0); $items = [];
     $q = mysqli_query($conn, "SELECT * FROM sampath_damage_import_items WHERE import_id=$id ORDER BY bill_number, product_code");
     if ($q) while ($r = mysqli_fetch_assoc($q)) $items[] = $r;
+    $kn = idm_known($conn, array_column($items, 'product_code'));
+    foreach ($items as &$it) $it['in_report'] = isset($kn[trim($it['product_code'])]) ? 1 : 0;
+    unset($it);
     idm_json(['ok' => true, 'items' => $items]);
 }
 
@@ -286,7 +306,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><h3 style="margin:0;" id="idmVT">Damage lines</h3>
       <button class="idm-b r s" style="margin-left:auto;" onclick="idmDelLines()"><i class="fa-solid fa-trash"></i> Delete selected</button>
       <button class="idm-b l s" onclick="idmClose('idmView')">Close</button></div>
-    <div class="idm-wrap" style="max-height:62vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.idm-ic').forEach(c=>c.checked=this.checked)"></th><th>Bill no</th><th>Bill date</th><th>Outlet</th><th>Product code</th><th>Product</th><th>Batch</th><th class="n">Qty</th><th class="n">Value</th></tr></thead><tbody id="idmVB"></tbody></table></div>
+    <div class="idm-wrap" style="max-height:62vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.idm-ic').forEach(c=>c.checked=this.checked)"></th><th>Bill no</th><th>Bill date</th><th>Outlet</th><th>Product code</th><th>Product</th><th>Batch</th><th class="n">Qty</th><th class="n">Value</th><th>Inventory report</th></tr></thead><tbody id="idmVB"></tbody></table></div>
   </div>
 </div>
 
@@ -313,7 +333,8 @@ function idmPick(f){
         if (!d.ok) { idmMsg($i('idmMsg'), 'err', d.msg); return; }
         $i('idmMsg').className = 'idm-msg';
         $i('idmSummary').innerHTML = '<b>' + d.rows + '</b> damage line(s) found · qty <b>' + fmt(d.qty, 0) + '</b> · value <b>' + fmt(d.value) + '</b>'
-            + (d.dups ? '<div style="color:#92400e;margin-top:4px;">' + d.dups + ' line(s) were already imported and will be skipped.</div>' : '');
+            + (d.dups ? '<div style="color:#92400e;margin-top:4px;">' + d.dups + ' line(s) were already imported and will be skipped.</div>' : '')
+            + (d.unmatched ? '<div style="color:#991b1b;margin-top:4px;">' + d.unmatched + ' product code(s) are not in the Sampath inventory report items: ' + esc(d.unmatched_list.join(', ')) + '</div>' : '<div style="color:#166534;margin-top:4px;">All products match the Sampath inventory report items.</div>');
         $i('idmDate').value = d.date; $i('idmRemark').value = ''; $i('idmMMsg').className = 'idm-msg';
         $i('idmGo').disabled = false; $i('idmModal').classList.add('open');
     }).catch(e => idmMsg($i('idmMsg'), 'err', 'Upload failed: ' + e.message));
@@ -335,7 +356,7 @@ function idmDel(id){
 function idmView(id){
     idmViewId = id; $i('idmVT').textContent = 'Damage lines — import #' + id; $i('idmVB').innerHTML = '<tr><td colspan="9" style="padding:18px;color:#94a3b8;">Loading…</td></tr>'; $i('idmView').classList.add('open');
     fetch('import_sampath_damages.php?ajax=items&id=' + id, {credentials:'same-origin'}).then(r => r.json()).then(d => {
-        $i('idmVB').innerHTML = d.items.map(i => '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td><b>' + esc(i.bill_number) + '</b></td><td>' + fd(i.bill_date) + '</td><td>' + esc(i.outlet_name) + '</td><td>' + esc(i.product_code) + '</td><td>' + esc(i.product_description) + '</td><td>' + esc(i.batch_code) + '</td><td class="n">' + fmt(i.damage_qty, 0) + '</td><td class="n">' + fmt(i.damage_value) + '</td></tr>').join('') || '<tr><td colspan="9" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
+        $i('idmVB').innerHTML = d.items.map(i => '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td><b>' + esc(i.bill_number) + '</b></td><td>' + fd(i.bill_date) + '</td><td>' + esc(i.outlet_name) + '</td><td>' + esc(i.product_code) + '</td><td>' + esc(i.product_description) + '</td><td>' + esc(i.batch_code) + '</td><td class="n">' + fmt(i.damage_qty, 0) + '</td><td class="n">' + fmt(i.damage_value) + '</td><td>' + (i.in_report == 1 ? '<span style="color:#166534;font-weight:700;">&#10003; matched</span>' : '<span style="color:#991b1b;font-weight:700;">&#10007; not in report</span>') + '</td></tr>').join('') || '<tr><td colspan="10" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
     });
 }
 function idmDelLines(){
