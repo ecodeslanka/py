@@ -1010,6 +1010,9 @@ if (isset($conn) && $conn) {
     <a href="bulk_adjustment_import2.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bulk_adjustment_import2.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-boxes-stacked"></i><span>Bulk Adjustment Import 2</span>
     </a>
+    <a href="bulk_adjustment_import3.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bulk_adjustment_import3.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-scale-balanced"></i><span>Stock Sync (Current Stock)</span>
+    </a>
     <a href="bulk_damage_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bulk_damage_import.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-triangle-exclamation"></i><span>Bulk Damage Import</span>
     </a>
