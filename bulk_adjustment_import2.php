@@ -3,8 +3,8 @@
 //  bulk_adjustment_import2.php  –  BULK ADJUSTMENT IMPORT 2   (Sampath Operation)   — "Variance" Excel
 //
 //  Upload an Excel with the columns:  Basepack Code | SKU7 | Product Name | Varience   (one sheet, header on row 1).
-//      Varience PLUS  (+5)  -> units are ADDED to the inventory
-//      Varience MINUS (-3)  -> units are TAKEN OUT of the inventory
+//      Varience MINUS (-3)  -> units are ADDED to the inventory   (reversed on purpose: variance = system − physical)
+//      Varience PLUS  (+5)  -> units are TAKEN OUT of the inventory
 //  After the file is read a modal asks for the ADJUSTMENT DATE and a REASON / REMARK, then Import. Each line is saved as a stock
 //  adjustment in stock_manual_adjustments (same as Item Adjustment and Bulk Adjustment Import), so the Sampath Inventory Report,
 //  Inventory Reconciliation Report and Stock Reconciliation pick it up. A whole import or single lines can be deleted.
@@ -146,7 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         foreach (im_load_masters($conn) as $m) $masters[(string)$m['code']] = $m['name'];
         $in = 0; $out = 0; $nf = [];
         foreach ($rows as $r) {
-            if ($r['signed'] > 0) $in += $r['signed']; else $out += -$r['signed'];
+            if ($r['signed'] < 0) $in += -$r['signed']; else $out += $r['signed'];     // Excel minus = units IN, Excel plus = units OUT
             if (!isset($masters[$r['sku_code']])) $nf[$r['sku_code']] = $r['item_name'];
         }
         if ($act === 'preview') {
@@ -167,8 +167,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $ia = mysqli_prepare($conn, "INSERT INTO stock_manual_adjustments (item_code, entry_date, adjustment_qty, note, created_by) VALUES (?,?,?,?,?)");
         $il = mysqli_prepare($conn, "INSERT INTO stock_adjustment_import_lines (import_id, adjustment_id, sku_code, basepack_code, item_name, transaction_type, txn_ref, txn_date, party_name, qty_units, signed_qty, tur, line_value) VALUES (?,?,?,?,?,?,'',?, '',?,?,0,0)");
         foreach ($rows as $r) {
-            $signed = $r['signed']; $abs = abs($signed); $tt = $signed > 0 ? 'Variance (+)' : 'Variance (−)';
-            $note = mb_substr('Variance import #' . $iid . ' · ' . ($signed > 0 ? 'add to inventory' : 'take out of inventory') . ($reason !== '' ? ' · ' . $reason : ''), 0, 255);
+            $signed = -$r['signed'];     // REVERSED: Excel minus = plus to inventory, Excel plus = minus from inventory
+            $abs = abs($signed); $tt = $signed > 0 ? 'Variance (−) → in' : 'Variance (+) → out';
+            $note = mb_substr('Variance import #' . $iid . ' · Excel ' . ($r['signed'] > 0 ? '+' : '−') . abs($r['signed']) . ' · ' . ($signed > 0 ? 'plus to inventory' : 'minus from inventory') . ($reason !== '' ? ' · ' . $reason : ''), 0, 255);
             mysqli_stmt_bind_param($ia, 'ssdss', $r['sku_code'], $dd, $signed, $note, $who); mysqli_stmt_execute($ia);
             $aid = mysqli_insert_id($conn);
             mysqli_stmt_bind_param($il, 'iisssssdd', $iid, $aid, $r['sku_code'], $r['basepack_code'], $r['item_name'], $tt, $dd, $abs, $signed);
@@ -243,7 +244,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
 </style>
 <div class="idm">
   <h2><i class="fa-solid fa-boxes-stacked"></i> Bulk Adjustment Import 2</h2>
-  <div class="sub">Upload the stock <b>variance</b> Excel (<b>Basepack Code · SKU7 · Product Name · Varience</b>). A <b>plus</b> variance is <b>added to</b> the inventory and a <b>minus</b> variance is <b>taken out of</b> it, in units on the SKU7. They show in <a href="item_adjustment.php">Item Adjustment</a> and in all stock reports. (For the LeverEDGE Stock Adjustments file use <a href="bulk_adjustment_import.php">Bulk Adjustment Import</a>.)</div>
+  <div class="sub">Upload the stock <b>variance</b> Excel (<b>Basepack Code · SKU7 · Product Name · Varience</b>). A <b>minus</b> variance is <b>added to</b> the inventory and a <b>plus</b> variance is <b>taken out of</b> it, in units on the SKU7. They show in <a href="item_adjustment.php">Item Adjustment</a> and in all stock reports. (For the LeverEDGE Stock Adjustments file use <a href="bulk_adjustment_import.php">Bulk Adjustment Import</a>.)</div>
 
   <div class="idm-kp">
     <div><small>Imports</small><b><?php echo number_format($sum['n']); ?></b></div>
