@@ -1004,6 +1004,10 @@ if (isset($conn) && $conn) {
     <a href="item_adjustment.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'item_adjustment.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-sliders"></i><span>Item Adjustment</span>
     </a>
+
+    <a href="invoice_grn_check.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'invoice_grn_check.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-file-circle-check"></i><span>Invoice GRN Check</span>
+    </a>
 </div>
 
 <div class="menu-item has-submenu" data-tooltip="Sampath Uploads" onclick="toggleSubmenu(this)">
