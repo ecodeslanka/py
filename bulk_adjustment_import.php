@@ -22,6 +22,21 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 mysqli_report(MYSQLI_REPORT_OFF);
 $who = $_SESSION['username'] ?? $_SESSION['user_name'] ?? 'System';
 
+/* a half-uploaded deployment (new page + old item_match_lib.php) used to give an EMPTY response -> "Unexpected end of JSON input".
+   Answer with a readable JSON message instead. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['ajax'])) {
+    $__need = array_filter(['im_price_fill', 'im_create_missing_items', 'im_load_tur', 'im_load_masters'], function ($fn) { return !function_exists($fn); });
+    if ($__need) { while (ob_get_level()) ob_end_clean(); header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok' => false, 'msg' => 'item_match_lib.php on the server is out of date (missing ' . implode(', ', $__need) . '). Upload the latest item_match_lib.php together with this page.']); exit; }
+    register_shutdown_function(function () {
+        $e = error_get_last();
+        if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            while (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'msg' => 'Server error: ' . $e['message'] . ' (line ' . $e['line'] . ')']);
+        }
+    });
+}
+
 mysqli_query($conn, "CREATE TABLE IF NOT EXISTS stock_manual_adjustments (
     id INT(11) AUTO_INCREMENT PRIMARY KEY,
     item_code VARCHAR(100) NOT NULL,
