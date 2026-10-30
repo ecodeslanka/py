@@ -72,6 +72,8 @@ $have = [];
 foreach (['unilever_purchase_items','unilever_purchase_batches','unilever_item_return_items','unilever_item_returns','invoice_wise_sales_data',
           'primary_invoice_wise_sales_data','stock_manual_adjustments','sampath_damage_grn_items','sampath_damage_grn_headers','sampath_damage_item_map','sampath_damage_import_items'] as $t)
     $have[$t] = im_table($conn, $t);
+$have['sdii_applied'] = false;      // Bulk Damage Import lines saved without applying (applied = 0) do not count
+if ($have['sampath_damage_import_items']) { $cx = mysqli_query($conn, "SHOW COLUMNS FROM sampath_damage_import_items LIKE 'applied'"); $have['sdii_applied'] = $cx && mysqli_num_rows($cx) > 0; }
 
 /* ── item master (latest purchase row per item) + TUR ── */
 $master = [];
@@ -128,7 +130,7 @@ function irr_aggregate($conn, $have, $master, $from, $to, &$errors) {
     /* damages imported from the Invoice Wise Sales Excel (Import Sampath Damages), by damage date */
     if ($have['sampath_damage_import_items']) {
         $q = mysqli_query($conn, "SELECT product_code AS item_code, MAX(product_description) AS nm, SUM(damage_qty) AS q FROM sampath_damage_import_items
-            WHERE product_code <> '' AND damage_date BETWEEN '$from' AND '$to' GROUP BY product_code");
+            WHERE product_code <> '' AND damage_date BETWEEN '$from' AND '$to'" . ($have['sdii_applied'] ? ' AND applied = 1' : '') . " GROUP BY product_code");
         if (!$q) $errors[] = mysqli_error($conn);
         while ($q && $r = mysqli_fetch_assoc($q)) { $c = trim($r['item_code']); $t($c); $acc[$c]['dmg'] += (float)$r['q']; if ($acc[$c]['name'] === null) $acc[$c]['name'] = $r['nm']; }
     }

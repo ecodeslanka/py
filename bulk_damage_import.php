@@ -6,8 +6,9 @@
 //    • each line is added to DAMAGED STOCK of its SKU Code (units) — saved in sampath_damage_import_items (marked
 //      outlet_code = 'TRANSFER'), so the Sampath Inventory Report and the Inventory Reconciliation Report show it in the
 //      Damaged Stock column / "-D" rows / damaged ledger on the date you choose;
-//    • optionally (tick-box in the modal, ON by default) the same units are taken OUT of GOOD stock, as the transfer says,
-//      with a minus entry in stock_manual_adjustments (shown on Item Adjustment too).
+//    • tick-box in the modal (ON by default): ticked = the units are taken OUT of GOOD stock (an automatic minus adjustment in
+//      stock_manual_adjustments, shown on Item Adjustment too) AND added to DAMAGED stock. Unticked = the lines are only saved
+//      (not applied, no stock effect); use Apply on the import later to apply them, or Remove from stock to undo.
 //  After the file is read a modal asks for the DATE and a REASON / REMARK. A whole import or single lines can be deleted,
 //  which also removes the good-stock deduction.
 // ============================================================
@@ -36,7 +37,7 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sampath_damage_import_items (
     tur DECIMAL(15,4) NULL, damage_qty DECIMAL(14,2) NOT NULL DEFAULT 0, damage_value DECIMAL(16,4) NOT NULL DEFAULT 0,
     INDEX idx_import (import_id), INDEX idx_prod (product_code), INDEX idx_dup (bill_number, product_code, batch_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-foreach (['adjustment_id' => 'INT NULL', 'reason' => 'VARCHAR(255) NULL'] as $col => $def) {
+foreach (['adjustment_id' => 'INT NULL', 'reason' => 'VARCHAR(255) NULL', 'applied' => 'TINYINT(1) NOT NULL DEFAULT 1'] as $col => $def) {
     $c = mysqli_query($conn, "SHOW COLUMNS FROM sampath_damage_import_items LIKE '$col'");
     if ($c && mysqli_num_rows($c) === 0) mysqli_query($conn, "ALTER TABLE sampath_damage_import_items ADD COLUMN $col $def");
 }
@@ -149,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                       'notfound' => count($nf), 'notfound_list' => array_slice(array_map(function ($c, $n) { return $c . ' ' . $n; }, array_keys($nf), $nf), 0, 6),
                       'date' => $dates ? $dates[0] : date('Y-m-d')]);
         }
-        $dd = trim($_POST['damage_date'] ?? ''); $remark = trim($_POST['remark'] ?? ''); $deduct = !empty($_POST['deduct_good']);
+        $dd = trim($_POST['damage_date'] ?? ''); $remark = trim($_POST['remark'] ?? ''); $deduct = !empty($_POST['apply_stock']);
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dd) || !checkdate((int)substr($dd, 5, 2), (int)substr($dd, 8, 2), (int)substr($dd, 0, 4))) bdi_json(['ok' => false, 'msg' => 'Please select a valid date.']);
         if (!$ok) bdi_json(['ok' => false, 'msg' => 'There is nothing new to import in this file (already imported, or not a transfer to the damage godown).']);
         $n = count($ok); $name = mb_substr($f['name'], 0, 255);
@@ -157,9 +158,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         mysqli_stmt_bind_param($st, 'sssidds', $dd, $remark, $name, $n, $tq, $tv, $who); mysqli_stmt_execute($st);
         $iid = mysqli_insert_id($conn);
         $ia = mysqli_prepare($conn, "INSERT INTO stock_manual_adjustments (item_code, entry_date, adjustment_qty, note, created_by) VALUES (?,?,?,?,?)");
-        $ii = mysqli_prepare($conn, "INSERT INTO sampath_damage_import_items (import_id, damage_date, bill_number, bill_date, delivery_date, outlet_code, outlet_name, basepack_code, product_code, product_description, batch_code, tur, damage_qty, damage_value, adjustment_id, reason) VALUES (?,?,?,?,?,'TRANSFER',?,?,?,?,'',?,?,?,?,?)");
+        $ii = mysqli_prepare($conn, "INSERT INTO sampath_damage_import_items (import_id, damage_date, bill_number, bill_date, delivery_date, outlet_code, outlet_name, basepack_code, product_code, product_description, batch_code, tur, damage_qty, damage_value, adjustment_id, reason, applied) VALUES (?,?,?,?,?,'TRANSFER',?,?,?,?,'',?,?,?,?,?,?)");
         foreach ($ok as $r) {
-            $aid = null;
+            $aid = null; $applied = $deduct ? 1 : 0;
             if ($deduct) {
                 $neg = -$r['qty'];
                 $note = mb_substr('Damage transfer import #' . $iid . ' · ' . $r['txn_ref'] . ' · ' . $r['from_loc'] . ' → ' . $r['to_loc'] . ($remark !== '' ? ' · ' . $remark : ''), 0, 255);
@@ -167,10 +168,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $aid = mysqli_insert_id($conn);
             }
             $loc = $r['from_loc'] . ' → ' . $r['to_loc']; $val = $r['qty'] * $r['rate']; $td = $r['txn_date'];
-            mysqli_stmt_bind_param($ii, 'issssssssdddis', $iid, $dd, $r['txn_ref'], $td, $td, $loc, $r['basepack_code'], $r['sku_code'], $r['item_name'], $r['rate'], $r['qty'], $val, $aid, $r['reason']);
+            mysqli_stmt_bind_param($ii, 'issssssssdddisi', $iid, $dd, $r['txn_ref'], $td, $td, $loc, $r['basepack_code'], $r['sku_code'], $r['item_name'], $r['rate'], $r['qty'], $val, $aid, $r['reason'], $applied);
             mysqli_stmt_execute($ii);
         }
         bdi_json(['ok' => true, 'id' => $iid, 'rows' => $n, 'dups' => $dups, 'deducted' => $deduct]);
+    }
+    if ($act === 'apply_import' || $act === 'unapply_import') {
+        $id = (int)($_POST['id'] ?? 0);
+        $im = mysqli_fetch_assoc(mysqli_query($conn, "SELECT damage_date, remark FROM sampath_damage_imports WHERE id=$id"));
+        if (!$im) bdi_json(['ok' => false, 'msg' => 'Import not found.']);
+        if ($act === 'unapply_import') {
+            mysqli_query($conn, "DELETE a FROM stock_manual_adjustments a JOIN sampath_damage_import_items i ON i.adjustment_id = a.id WHERE i.import_id=$id AND i.outlet_code='TRANSFER'");
+            mysqli_query($conn, "UPDATE sampath_damage_import_items SET adjustment_id=NULL, applied=0 WHERE import_id=$id AND outlet_code='TRANSFER'");
+            bdi_json(['ok' => true]);
+        }
+        $ia = mysqli_prepare($conn, "INSERT INTO stock_manual_adjustments (item_code, entry_date, adjustment_qty, note, created_by) VALUES (?,?,?,?,?)");
+        $q = mysqli_query($conn, "SELECT id, product_code, damage_qty, bill_number, outlet_name FROM sampath_damage_import_items WHERE import_id=$id AND outlet_code='TRANSFER' AND adjustment_id IS NULL");
+        while ($q && $r = mysqli_fetch_assoc($q)) {
+            $neg = -(float)$r['damage_qty'];
+            $note = mb_substr('Damage transfer import #' . $id . ' · ' . $r['bill_number'] . ' · ' . $r['outlet_name'] . ($im['remark'] ? ' · ' . $im['remark'] : ''), 0, 255);
+            mysqli_stmt_bind_param($ia, 'ssdss', $r['product_code'], $im['damage_date'], $neg, $note, $who); mysqli_stmt_execute($ia);
+            $aid = mysqli_insert_id($conn);
+            mysqli_query($conn, "UPDATE sampath_damage_import_items SET adjustment_id=$aid, applied=1 WHERE id=" . (int)$r['id']);
+        }
+        mysqli_query($conn, "UPDATE sampath_damage_import_items SET applied=1 WHERE import_id=$id AND outlet_code='TRANSFER'");
+        bdi_json(['ok' => true]);
     }
     if ($act === 'delete_import') {
         $id = (int)($_POST['id'] ?? 0);
@@ -205,7 +227,7 @@ if (($_GET['ajax'] ?? '') === 'items') {
 }
 
 $imports = [];
-$q = mysqli_query($conn, "SELECT i.* FROM sampath_damage_imports i WHERE EXISTS (SELECT 1 FROM sampath_damage_import_items x WHERE x.import_id = i.id AND x.outlet_code='TRANSFER') ORDER BY i.damage_date DESC, i.id DESC");
+$q = mysqli_query($conn, "SELECT i.*, (SELECT COUNT(*) FROM sampath_damage_import_items y WHERE y.import_id = i.id AND y.outlet_code='TRANSFER' AND y.applied = 0) AS not_applied FROM sampath_damage_imports i WHERE EXISTS (SELECT 1 FROM sampath_damage_import_items x WHERE x.import_id = i.id AND x.outlet_code='TRANSFER') ORDER BY i.damage_date DESC, i.id DESC");
 if ($q) while ($r = mysqli_fetch_assoc($q)) $imports[] = $r;
 $sum = ['n' => count($imports), 'rows' => 0, 'qty' => 0, 'val' => 0];
 foreach ($imports as $r) { $sum['rows'] += $r['total_rows']; $sum['qty'] += $r['total_qty']; $sum['val'] += $r['total_value']; }
@@ -253,7 +275,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
   <h3 style="font-size:15px;margin:6px 0 8px;">Imported damage transfers</h3>
   <div class="idm-wrap">
   <table class="idm-t">
-    <thead><tr><th>#</th><th>Damage date</th><th>Reason / remark</th><th>File</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th><th>Imported by</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Damage date</th><th>Reason / remark</th><th>File</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th><th>Stock effect</th><th>Imported by</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($imports as $r): $id = (int)$r['id']; ?>
       <tr>
@@ -261,14 +283,17 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
         <td style="white-space:normal;max-width:260px;"><?php echo htmlspecialchars($r['remark'] ?: '—'); ?></td>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="<?php echo htmlspecialchars($r['filename']); ?>"><?php echo htmlspecialchars($r['filename']); ?></td>
         <td class="n"><?php echo (int)$r['total_rows']; ?></td><td class="n"><?php echo number_format($r['total_qty'], 0); ?></td><td class="n"><?php echo number_format($r['total_value'], 2); ?></td>
+        <td><?php echo (int)$r['not_applied'] > 0 ? '<span style="color:#92400e;font-weight:700;">Not applied</span>' : '<span style="color:#166534;font-weight:700;">Good − / Damage +</span>'; ?></td>
         <td><?php echo htmlspecialchars($r['created_by'] ?? ''); ?><div style="font-size:10.5px;color:#94a3b8;"><?php echo htmlspecialchars(substr((string)$r['created_at'], 0, 16)); ?></div></td>
         <td style="white-space:nowrap;">
           <button class="idm-b l s" onclick="idmView(<?php echo $id; ?>)"><i class="fa-solid fa-eye"></i> View</button>
+          <?php if ((int)$r['not_applied'] > 0): ?><button class="idm-b g s" onclick="idmApply(<?php echo $id; ?>, 1)"><i class="fa-solid fa-check"></i> Apply</button>
+          <?php else: ?><button class="idm-b l s" onclick="idmApply(<?php echo $id; ?>, 0)" title="Put the stock back and keep the lines"><i class="fa-solid fa-rotate-left"></i> Remove from stock</button><?php endif; ?>
           <button class="idm-b r s" onclick="idmDel(<?php echo $id; ?>)"><i class="fa-solid fa-trash"></i> Delete</button>
         </td>
       </tr>
     <?php endforeach; ?>
-    <?php if (!$imports): ?><tr><td colspan="9" style="text-align:center;padding:30px;color:#94a3b8;">Nothing imported yet.</td></tr><?php endif; ?>
+    <?php if (!$imports): ?><tr><td colspan="10" style="text-align:center;padding:30px;color:#94a3b8;">Nothing imported yet.</td></tr><?php endif; ?>
     </tbody>
   </table>
   </div>
@@ -280,7 +305,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
     <div id="idmSummary" style="font-size:13px;color:#334155;background:#f8fafc;border:1px solid #e2e6f0;border-radius:8px;padding:10px 12px;margin-bottom:12px;"></div>
     <div class="fld"><label>Damage date</label><input class="idm-in" type="date" id="idmDate"></div>
     <div class="fld"><label>Reason / remark</label><textarea class="idm-in" id="idmReason" rows="3" maxlength="400" placeholder="e.g. Packaging defects returned to RS"></textarea></div>
-    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-bottom:6px;"><input type="checkbox" id="idmDeduct" checked style="margin-top:3px;"> <span><b>Also take these units out of Good stock</b> (the transfer moves them from MAIN GODOWN to DAMAGE GODOWN)</span></label>
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-bottom:6px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:9px 11px;"><input type="checkbox" id="idmDeduct" checked style="margin-top:3px;"> <span><b>Apply to stock</b> — <b>minus</b> these units from <b>Good stock</b> (automatic adjustment out) and <b>plus</b> them to <b>Damaged stock</b>. Untick to only save the lines (you can apply later).</span></label>
     <div class="idm-msg" id="idmMMsg"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
       <button class="idm-b l" onclick="idmClose('idmModal')">Cancel</button>
@@ -329,7 +354,7 @@ function idmImport(){
     if (!$i('idmDate').value) { idmMsg($i('idmMMsg'), 'err', 'Select the damage date.'); return; }
     $i('idmGo').disabled = true; $i('idmGo').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing…';
     const f = new FormData(); f.append('action', 'import'); f.append('xlsx_file', idmFile); f.append('damage_date', $i('idmDate').value); f.append('remark', $i('idmReason').value);
-    if ($i('idmDeduct').checked) f.append('deduct_good', '1');
+    if ($i('idmDeduct').checked) f.append('apply_stock', '1');
     fetch('bulk_damage_import.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()).then(d => {
         if (!d.ok) { idmMsg($i('idmMMsg'), 'err', d.msg); $i('idmGo').disabled = false; $i('idmGo').innerHTML = '<i class="fa-solid fa-file-import"></i> Import'; return; }
         idmMsg($i('idmMMsg'), 'ok', d.rows + ' damage line(s) imported.'); setTimeout(() => location.reload(), 700);
@@ -340,10 +365,14 @@ function idmDel(id){
     if (!confirm('Delete import #' + id + '? The damaged stock is removed and any good-stock deduction is put back.')) return;
     idmPost({action:'delete_import', id:id}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
 }
+function idmApply(id, on){
+    if (!confirm(on ? 'Apply import #' + id + ' to stock? Good stock goes down and Damaged stock goes up.' : 'Remove import #' + id + ' from stock? Good stock is put back and the damaged units are taken off. The lines are kept.')) return;
+    idmPost({action: on ? 'apply_import' : 'unapply_import', id:id}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
+}
 function idmView(id){
     idmViewId = id; $i('idmVT').textContent = 'Damage lines — import #' + id; $i('idmVB').innerHTML = '<tr><td colspan="10" style="padding:18px;color:#94a3b8;">Loading…</td></tr>'; $i('idmView').classList.add('open');
     fetch('bulk_damage_import.php?ajax=items&id=' + id, {credentials:'same-origin'}).then(r => r.json()).then(d => {
-        $i('idmVB').innerHTML = d.items.map(i => '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td><b>' + esc(i.bill_number) + '</b></td><td>' + fdt(i.bill_date) + '</td><td>' + esc(i.product_code) + '</td><td>' + esc(i.product_description) + '</td><td style="white-space:normal;max-width:220px;">' + esc(i.reason) + '</td><td class="n">' + fmt(i.damage_qty) + '</td><td class="n">' + fmt(i.damage_value, 2) + '</td><td>' + (i.adjustment_id ? '<span class="negq">−' + fmt(i.damage_qty) + '</span>' : '—') + '</td><td>' + (i.in_report == 1 ? '<span style="color:#166534;font-weight:700;">&#10003; matched</span>' : '<span style="color:#991b1b;font-weight:700;">&#10007; not in items</span>') + '</td></tr>').join('') || '<tr><td colspan="10" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
+        $i('idmVB').innerHTML = d.items.map(i => '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td><b>' + esc(i.bill_number) + '</b></td><td>' + fdt(i.bill_date) + '</td><td>' + esc(i.product_code) + '</td><td>' + esc(i.product_description) + '</td><td style="white-space:normal;max-width:220px;">' + esc(i.reason) + '</td><td class="n">' + fmt(i.damage_qty) + '</td><td class="n">' + fmt(i.damage_value, 2) + '</td><td>' + (+i.applied === 0 ? '<span style="color:#92400e">not applied</span>' : (i.adjustment_id ? '<span class="negq">−' + fmt(i.damage_qty) + '</span>' : '—')) + '</td><td>' + (i.in_report == 1 ? '<span style="color:#166534;font-weight:700;">&#10003; matched</span>' : '<span style="color:#991b1b;font-weight:700;">&#10007; not in items</span>') + '</td></tr>').join('') || '<tr><td colspan="10" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
     });
 }
 function idmDelLines(){

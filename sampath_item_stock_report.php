@@ -72,6 +72,8 @@ $have = [];
 foreach (['unilever_purchase_items','unilever_purchase_batches','unilever_item_return_items','unilever_item_returns',
           'invoice_wise_sales_data','stock_manual_adjustments','sampath_damage_grn_items','sampath_damage_grn_headers','sampath_damage_item_map','sampath_damage_import_items'] as $t)
     $have[$t] = isr_table_exists($conn, $t);
+$have['sdii_applied'] = false;      // Bulk Damage Import can save lines without applying them (applied = 0) - those do not count
+if ($have['sampath_damage_import_items']) { $cx = mysqli_query($conn, "SHOW COLUMNS FROM sampath_damage_import_items LIKE 'applied'"); $have['sdii_applied'] = $cx && mysqli_num_rows($cx) > 0; }
 
 /* ── item master: latest purchase row per item code ── */
 function isr_master($conn, $have) {
@@ -111,7 +113,7 @@ function isr_ledger_events($conn, $have, $ce, $upc, $loc, $f_cust, $cust_sql, $d
         /* damages imported from the Invoice Wise Sales Excel (Import Sampath Damages) */
         if (!$f_cust && $have['sampath_damage_import_items']) {
             $q = mysqli_query($conn, "SELECT damage_date AS d, bill_number, outlet_code, outlet_name, product_description, damage_qty AS q
-                FROM sampath_damage_import_items WHERE product_code = '$ce' AND damage_date BETWEEN '$d1' AND '$d2'");
+                FROM sampath_damage_import_items WHERE product_code = '$ce' AND damage_date BETWEEN '$d1' AND '$d2'" . ($have['sdii_applied'] ? ' AND applied = 1' : ''));
             while ($q && $r = mysqli_fetch_assoc($q))
                 $ev[] = ['d'=>$r['d'], 't'=>($r['outlet_code'] === 'TRANSFER' ? 'Damage Transfer' : 'Imported Damage'), 'ref'=>trim(($r['outlet_code'] === 'TRANSFER' ? 'Ref ' : 'Bill ') . $r['bill_number'] . ' · ' . ($r['outlet_name'] ?? '')),
                          'in'=>(float)$r['q'], 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'units'];
@@ -245,7 +247,7 @@ function isr_aggregate($conn, $have, $master, $from, $to, $cust_sql, $f_cust, &$
     /* damages imported from the Invoice Wise Sales Excel (Import Sampath Damages), by damage date */
     if (!$f_cust && $have['sampath_damage_import_items']) {
         $q = mysqli_query($conn, "SELECT product_code AS item_code, MAX(product_description) AS nm, SUM(damage_qty) AS q
-            FROM sampath_damage_import_items WHERE product_code <> '' AND damage_date BETWEEN '$from' AND '$to' GROUP BY product_code");
+            FROM sampath_damage_import_items WHERE product_code <> '' AND damage_date BETWEEN '$from' AND '$to'" . ($have['sdii_applied'] ? ' AND applied = 1' : '') . " GROUP BY product_code");
         if (!$q) $errors[] = mysqli_error($conn);
         while ($q && $r = mysqli_fetch_assoc($q)) {
             $c = trim($r['item_code']);
