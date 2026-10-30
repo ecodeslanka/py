@@ -256,8 +256,8 @@ table.spr-t tr.sent td{background:#f8fafc;color:#94a3b8;} table.spr-t tr.sel td{
     <thead><tr>
       <th><input type="checkbox" id="sprHead" onclick="sprAll(this.checked)"></th>
       <th>Bill Number</th><th>Bill Date</th><th>Party Name</th>
-      <th class="n">Bill Mention Value</th><th class="n">Secondary Final Bill</th>
-      <th>ACT Delivery</th><th>GRN Date</th><th>GRN Date 2</th><th class="n">GRN Value</th><th>Sched. Chq (GRN+21)</th><th>Cheque</th><th>Request</th>
+      <th class="n">Secondary Final Bill</th>
+      <th>ACT Delivery</th><th>GRN Date</th><th class="n">GRN Value</th><th>Sched. Chq (GRN+21)</th><th>Cheque</th><th>Request</th>
     </tr></thead>
     <tbody>
     <?php foreach ($rows as $r): $sent = !empty($r['sent_req']); ?>
@@ -266,18 +266,16 @@ table.spr-t tr.sent td{background:#f8fafc;color:#94a3b8;} table.spr-t tr.sel td{
         <td><b><?php echo htmlspecialchars($r['bill_no']); ?></b></td>
         <td><?php echo spr_d($r['bill_date']); ?></td>
         <td><?php echo htmlspecialchars($r['party_name'] ?? ''); ?></td>
-        <td class="n"><?php echo spr_n($r['bill_value']); ?></td>
         <td class="n"><?php echo spr_n($r['secondary_value']); ?></td>
         <td><?php echo spr_d($r['act_delivery_date']); ?></td>
         <td><?php echo spr_d($r['grn_date']); ?></td>
-        <td><?php echo spr_d($r['grn_date2']); ?></td>
         <td class="n"><?php echo spr_n($r['grn_value']); ?></td>
         <td><?php echo $r['grn_date'] ? date('d/m/Y', strtotime($r['grn_date'] . ' +21 days')) : '—'; ?></td>
         <td><?php echo $r['cheque_date'] ? '<span class="pill ok">' . spr_d($r['cheque_date']) . '</span>' : '<span class="pill pe">Pending</span>'; ?></td>
         <td><?php echo $sent ? '<a class="pill ok" href="sampath_payment_requests_sent.php?open=' . (int)$r['sent_req'] . '">Sent #' . (int)$r['sent_req'] . '</a>' : '—'; ?></td>
       </tr>
     <?php endforeach; ?>
-    <?php if (!$rows): ?><tr><td colspan="13" style="text-align:center;padding:30px;color:#94a3b8;">No invoices for this filter.</td></tr><?php endif; ?>
+    <?php if (!$rows): ?><tr><td colspan="11" style="text-align:center;padding:30px;color:#94a3b8;">No invoices for this filter.</td></tr><?php endif; ?>
     </tbody>
   </table>
   </div>

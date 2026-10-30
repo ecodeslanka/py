@@ -144,11 +144,11 @@ function spsLoad(id){
               + '<button class="sps-b r" onclick="spsDelItems(' + id + ')"><i class="fa-solid fa-trash"></i> Remove selected</button>'
               + '<span style="font-size:12px;color:#64748b;">Tick invoices to generate the Excel from them, or to remove them from this request.</span></div>'
               + '<div class="sps-wrap"><table class="sps-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll(\'#body' + id + ' .ic\').forEach(c=>c.checked=this.checked)"></th>'
-              + '<th>Bill Number</th><th>Bill Date</th><th>Party Name</th><th class="n">Bill Mention</th><th class="n">Secondary Final</th><th>ACT Delivery</th><th>GRN Date</th><th>GRN Date 2</th><th class="n">GRN Value</th><th>Sched. Chq</th></tr></thead><tbody>';
+              + '<th>Bill Number</th><th>Bill Date</th><th>Party Name</th><th class="n">Secondary Final</th><th>ACT Delivery</th><th>GRN Date</th><th class="n">GRN Value</th><th>Sched. Chq</th></tr></thead><tbody>';
         d.items.forEach(i => {
             const sc = i.grn_date ? fd(new Date(Date.UTC(+i.grn_date.substr(0,4), +i.grn_date.substr(5,2)-1, +i.grn_date.substr(8,2)+21)).toISOString().substr(0,10)) : '—';
             h += '<tr><td><input type="checkbox" class="ic" value="' + i.id + '"></td><td><b>' + esc(i.bill_no) + '</b></td><td>' + fd(i.bill_date) + '</td><td>' + esc(i.party_name) + '</td>'
-               + '<td class="n">' + fmt(i.bill_value) + '</td><td class="n">' + fmt(i.secondary_value) + '</td><td>' + fd(i.act_delivery_date) + '</td><td>' + fd(i.grn_date) + '</td><td>' + fd(i.grn_date2) + '</td>'
+               + '<td class="n">' + fmt(i.secondary_value) + '</td><td>' + fd(i.act_delivery_date) + '</td><td>' + fd(i.grn_date) + '</td>'
                + '<td class="n">' + fmt(i.grn_value) + '</td><td>' + sc + '</td></tr>';
         });
         b.innerHTML = h + '</tbody></table></div>';
@@ -252,7 +252,11 @@ async function buildPaymentExcel(items, sendDate, filename){
     ws.getCell('E' + (L + 6)).value = 'All the invoices received correctly';
     ws.getCell('E' + (L + 7)).value = '(Officer in charge - SST)';
     [['E', L + 6], ['E', L + 7]].forEach(([c, rr]) => { const x = ws.getCell(c + rr); x.font = FONT(); x.alignment = {vertical:'middle', horizontal:'center'}; });
-    ws.getCell('A' + (L + 7)).border = {bottom:dd};
+    ws.getCell('A' + (L + 7)).border = {bottom:dd}; ws.getCell('B' + (L + 7)).border = {bottom:dd};
+    // boxes next to 'Amended TAX invoices' and 'Operation Manager stamp' (as in the original)
+    ws.getCell('B' + (L + 3)).border = BORD; ws.getCell('B' + (L + 5)).border = BORD;
+    // dash-dot line above the date
+    ws.getCell('F' + (L + 9)).border = {top:dd}; ws.getCell('G' + (L + 9)).border = {top:dd};
     ws.getCell('A' + (L + 8)).value = 'Signature (Operation Manager)';
     ws.getCell('A' + (L + 8)).font = FONT(); ws.getCell('A' + (L + 8)).alignment = {horizontal:'center'};
     ws.getCell('A' + (L + 8)).border = {top:dd}; ws.getCell('B' + (L + 8)).border = {top:dd};
