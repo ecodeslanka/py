@@ -9,6 +9,8 @@
 //    • tick-box in the modal (ON by default): ticked = the units are taken OUT of GOOD stock (an automatic minus adjustment in
 //      stock_manual_adjustments, shown on Item Adjustment too) AND added to DAMAGED stock. Unticked = the lines are only saved
 //      (not applied, no stock effect); use Apply on the import later to apply them, or Remove from stock to undo.
+//  Price: damages are valued at the item's TUR (same price as the good stock). The file's SIP rate is NOT the TUR, so it is used only
+//  when the item has no TUR yet.
 //  After the file is read a modal asks for the DATE and a REASON / REMARK. A whole import or single lines can be deleted,
 //  which also removes the good-stock deduction.
 // ============================================================
@@ -136,7 +138,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $turmap = im_load_tur($conn);
         $ok = []; $skipped = 0; $dups = 0;
         foreach ($rows as $r) {
-            $r['rate'] = im_price_fill($r['rate'], $turmap, $r['sku_code']);      // SIP rate missing -> system TUR
+            $r['sip'] = $r['rate'];
+            $r['rate'] = (float)($turmap[$r['sku_code']] ?? 0) ?: $r['rate'];      // damage is valued at the item's TUR (the good stock price); the file's SIP rate only if the item has no TUR
             if (!$r['is_damage']) { $skipped++; continue; }
             $rf = mysqli_real_escape_string($conn, $r['txn_ref']); $sk = mysqli_real_escape_string($conn, $r['sku_code']);
             $d = mysqli_query($conn, "SELECT 1 FROM sampath_damage_import_items WHERE outlet_code='TRANSFER' AND bill_number='$rf' AND product_code='$sk' AND damage_qty=" . (float)$r['qty'] . " LIMIT 1");
