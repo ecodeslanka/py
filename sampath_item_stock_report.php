@@ -115,8 +115,8 @@ function isr_ledger_events($conn, $have, $ce, $upc, $loc, $f_cust, $cust_sql, $d
             $q = mysqli_query($conn, "SELECT damage_date AS d, bill_number, outlet_code, outlet_name, product_description, damage_qty AS q
                 FROM sampath_damage_import_items WHERE product_code = '$ce' AND damage_date BETWEEN '$d1' AND '$d2'" . ($have['sdii_applied'] ? ' AND applied = 1' : ''));
             while ($q && $r = mysqli_fetch_assoc($q))
-                $ev[] = ['d'=>$r['d'], 't'=>($r['outlet_code'] === 'TRANSFER' ? 'Damage Transfer' : 'Imported Damage'), 'ref'=>trim(($r['outlet_code'] === 'TRANSFER' ? 'Ref ' : 'Bill ') . $r['bill_number'] . ' · ' . ($r['outlet_name'] ?? '')),
-                         'in'=>(float)$r['q'], 'out'=>0, 'qty'=>(float)$r['q'], 'uom'=>'units'];
+                $ev[] = ['d'=>$r['d'], 't'=>($r['outlet_code'] === 'TRANSFER' ? 'Damage Transfer' : ($r['outlet_code'] === 'DMGSYNC' ? 'Damage Stock Sync' : 'Imported Damage')), 'ref'=>trim(($r['outlet_code'] === 'TRANSFER' ? 'Ref ' : ($r['outlet_code'] === 'DMGSYNC' ? 'Sync ' : 'Bill ')) . $r['bill_number'] . ' · ' . ($r['outlet_name'] ?? '')),
+                         'in'=>max(0, (float)$r['q']), 'out'=>max(0, -(float)$r['q']), 'qty'=>abs((float)$r['q']), 'uom'=>'units'];     // a minus damage line (sync down) is an OUT
         }
         return $ev;
     }
