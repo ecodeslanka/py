@@ -9,7 +9,8 @@
 //  2. The invoice is looked up in the Age Analysis data (secondary_invoice_import_details by bill no) and shows the same fields
 //     as the Sampath Age Analysis report: secondary amount, GRN value / date (sampath_grn_summary), credit note, cheque.
 //  2b. "Download invoice as Excel" converts the whole PDF (header, every invoice line, the bill statement lines, totals) to an Excel
-//     file EXACTLY as printed - it is a read-only conversion, nothing is changed.
+//     file EXACTLY as printed - it is a read-only conversion, nothing is changed. The PDF is read in the browser (pdf.js) first - instant, no
+//     server / Gemini wait - and Gemini is only the fallback when the layout is not recognised.
 //  3. "GRN Adjustment Note" opens a black & white printable note (Save as PDF) that REFERS to the original tax invoice and shows
 //     the original taxable / VAT / bill value, the GRN accepted value with its tax split, and the difference. It is a separate
 //     document - it is not a tax invoice and does not replace the original.
@@ -277,6 +278,7 @@ $has_key = im_gemini_key() !== '';
 include 'header.php';
 ?>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 .ig{padding:0 4px;}
 .ig h2{font-size:22px;font-weight:800;margin:0 0 4px;}
@@ -326,6 +328,81 @@ table.ig-t td.k{color:#6b7280;font-size:11px;text-transform:uppercase;letter-spa
 <script>
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fm = v => v === null || v === undefined || v === '' || isNaN(v) ? '—' : Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+/* Reads a LeverEDGE tax invoice PDF in the browser (pdf.js) and returns {header, lines, statement, totals}. Read-only. */
+async function igParseInvoicePdf(pdfjsLib, buf) {
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    const text = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+        const content = await (await pdf.getPage(p)).getTextContent();
+        const rows = new Map();
+        content.items.forEach(it => {
+            if (!it.str || !it.str.trim()) return;
+            const y = Math.round(it.transform[5] / 3);
+            (rows.get(y) || rows.set(y, []).get(y)).push({x: it.transform[4], w: it.width, s: it.str});
+        });
+        [...rows.keys()].sort((a, b) => b - a).forEach(k => {
+            const items = rows.get(k).sort((a, b) => a.x - b.x);
+            let line = '', prevEnd = null;
+            items.forEach(it => {
+                if (prevEnd !== null) { const gap = it.x - prevEnd; line += gap > 6 ? '   ' : (gap > 0.6 ? ' ' : ''); }
+                line += it.s; prevEnd = it.x + it.w;
+            });
+            text.push(line.trim());
+        });
+        text.push('@@PAGE');
+    }
+    const num = s => parseFloat(String(s).replace(/,/g, ''));
+    const header = {};
+    text.forEach(l => {
+        let m;
+        if (!header.tax_invoice_no && (m = l.match(/Tax Invoice No\.?\s*:?\s*(\S+)/))) header.tax_invoice_no = m[1];
+        if (m = l.match(/Date of Invoice\s*:?\s*(\S+)/)) header.date_of_invoice = m[1];
+        if (m = l.match(/Date of Supply\s*:?\s*(\S+)/)) header.date_of_supply = m[1];
+        if (m = l.match(/Supplier's Name\s*:?\s*(.+?)\s{2,}Purchaser's Name\s*:?\s*(.+)$/)) { header.supplier_name = m[1].trim(); header.purchaser_name = m[2].trim(); }
+        if (m = l.match(/Supplier's TIN\s*:?\s*(\d+)\s+Purchaser's TIN\s*:?\s*(\d+)/)) { header.supplier_tin = m[1]; header.purchaser_tin = m[2]; }
+        if (!header.invoice_no && (m = l.match(/Invoice No\s*:?\s*(\d+)\s*$/))) header.invoice_no = m[1];
+    });
+    const lines = [], statement = [];
+    let cur = null;
+    const LINE = /^(\d{1,3})\s+(\d{7}-.+?)\s{2,}(\d+)\s+([\d,]+\.\d\d)\s+([\d,]+\.\d\d)$/;
+    const STMT = /^(\d{1,3})\s+(\d{7}-.+?)\s{2,}(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d,]+\.\d\d)\s+([\d,]+\.\d\d)\s+([\d,]+\.\d\d)\s+([\d,]+\.\d\d)$/;
+    const SKIP = /^(Page |@@PAGE|Purchaser's|Retailer|Reference|Sl No|Sale Qty|Supplier|Date of|Telephone|Address|Place of|CS |\*\*|I certify|Signature|Date:|Total|No of SKUs|Gross|Scheme|Std|Bill Value|Return|Net Amount|VAT|\(TUR\)|\d+\s*$)/;
+    text.forEach(l => {
+        let m;
+        if ((m = l.match(STMT))) { const g = m.slice(1); statement.push([+g[0], g[1].trim(), +g[2], +g[3], +g[4], +g[5], +g[6], num(g[7]), num(g[8]), num(g[9]), num(g[10])]); cur = statement[statement.length - 1]; return; }
+        if ((m = l.match(LINE))) { lines.push([+m[1], m[2].trim(), +m[3], num(m[4]), num(m[5])]); cur = lines[lines.length - 1]; return; }
+        if (cur && !SKIP.test(l) && !/\d{3,}\.\d\d/.test(l) && l.length < 80) { cur[1] += ' ' + l; return; }
+        cur = null;
+    });
+    const all = text.join('\n'), totals = {};
+    const t = (re, i) => { const m = all.match(re); return m ? num(m[i || 1]) : null; };
+    totals.total_taxable_value = t(/Total Taxable Value\s*:?\s*([\d,]+\.\d\d)/);
+    totals.vat_rate = t(/VAT Value\s*(\d+)\s*%/);
+    totals.vat_value = t(/VAT Value\s*\d+\s*%\s*:?\s*([\d,]+\.\d\d)/);
+    totals.gross_amount = t(/Gross Amount\s+([\d,]+\.\d\d)/);
+    totals.scheme_discount = t(/Scheme Discount\s+([\d,]+\.\d\d)/);
+    totals.std_discount = t(/Std Discount\s+([\d,]+\.\d\d)/);
+    totals.bill_value = t(/Bill Value\s+([\d,]+\.\d\d)/);
+    totals.return_damages = t(/Return \/ Damages\s+([\d,]+\.\d\d)/);
+    totals.net_amount = t(/Net Amount \( To Be Collected \)\s+([\d,]+\.\d\d)/);
+    totals.no_of_skus = t(/No of SKUs\s*-?\s*(\d+)/);
+    return {header, lines, statement, totals, _text: text};
+}
+
+/* Read the PDF in the browser first (instant, no server / Gemini wait). Returns null if the layout is not recognised. */
+async function igClientParse(file){
+    try {
+        if (typeof pdfjsLib === 'undefined') return null;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const work = igParseInvoicePdf(pdfjsLib, new Uint8Array(await file.arrayBuffer()));
+        const r = await Promise.race([work, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 25000))]);   // never hang: fall back to Gemini
+        return (r.header.tax_invoice_no && r.lines.length) ? r : null;
+    } catch (e) { return null; }
+}
+async function igFetchJson(url, opts){            // readable errors instead of "Unexpected token <"
+    const r = await fetch(url, opts), t = await r.text();
+    try { return JSON.parse(t); } catch (e) { throw new Error('Server answered with HTTP ' + r.status + (t ? ': ' + t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 220) : ' (empty answer - the request may have timed out on the server)')); }
+}
 let igScanData = null, igRows = [], igSel = 0;
 function msg(h, c){ document.getElementById('igMsgs').innerHTML = h ? `<div class="ig-msg ${c || 'ok'}">${h}</div>` : ''; }
 
@@ -336,24 +413,39 @@ document.getElementById('igFile').addEventListener('change', e => {
 
 async function igScan(){
     const f = document.getElementById('igFile').files[0]; if (!f) return;
-    const btn = document.getElementById('igScan'), orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gemini is reading the invoice…'; msg('');
+    const btn = document.getElementById('igScan'), orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Reading the invoice…'; msg('');
     try {
-        const fd = new FormData(); fd.append('pdf', f);
-        const r = await fetch('invoice_grn_check.php?ajax=scan', {method:'POST', body: fd}); const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Scan failed.');
-        igScanData = d.data;
+        const cp = await igClientParse(f);
+        if (cp) {
+            const h = cp.header, t = cp.totals;
+            igScanData = {tax_invoice_no: h.tax_invoice_no, invoice_no: h.invoice_no || '', invoice_date: h.date_of_invoice || '', supplier_name: h.supplier_name || '', purchaser_name: h.purchaser_name || '',
+                          purchaser_tin: h.purchaser_tin || '', taxable_value: t.total_taxable_value, vat_rate: t.vat_rate, vat_value: t.vat_value, gross_amount: t.gross_amount,
+                          std_discount: t.std_discount, bill_value: t.bill_value, net_amount: t.net_amount, sku_count: t.no_of_skus};
+            msg('Invoice read in the browser: tax invoice no <strong>' + esc(h.tax_invoice_no) + '</strong>, ' + cp.lines.length + ' lines.', 'ok');
+        } else {
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gemini is reading the invoice…';
+            const fd = new FormData(); fd.append('pdf', f);
+            const d = await igFetchJson('invoice_grn_check.php?ajax=scan', {method:'POST', body: fd});
+            if (!d.ok) throw new Error(d.error || 'Scan failed.');
+            igScanData = d.data;
+        }
         await igLookup(igScanData.tax_invoice_no, igScanData.invoice_no);
     } catch (e) { msg(esc(e.message), 'err'); }
     btn.disabled = false; btn.innerHTML = orig;
 }
 async function igExcel(){
     const f = document.getElementById('igFile').files[0]; if (!f) return;
-    const btn = document.getElementById('igXls'), orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Reading every line (can take a minute)…'; msg('');
+    const btn = document.getElementById('igXls'), orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Converting…'; msg('');
     try {
-        const fd = new FormData(); fd.append('pdf', f);
-        const r = await fetch('invoice_grn_check.php?ajax=excel', {method:'POST', body: fd}); const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Conversion failed.');
-        const x = d.data, h = x.header || {}, t = x.totals || {};
+        let x = await igClientParse(f);        // read in the browser - instant
+        if (!x) {                               // layout not recognised -> let Gemini read it
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gemini is reading every line (can take a minute)…';
+            const fd = new FormData(); fd.append('pdf', f);
+            const d = await igFetchJson('invoice_grn_check.php?ajax=excel', {method:'POST', body: fd});
+            if (!d.ok) throw new Error(d.error || 'Conversion failed.');
+            x = d.data;
+        }
+        const h = x.header || {}, t = x.totals || {};
         const wb = new ExcelJS.Workbook(), bold = c => { c.font = {bold:true}; c.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FFFBE5D6'}}; };
         const w1 = wb.addWorksheet('Header & totals');
         [['Tax Invoice No', h.tax_invoice_no],['Invoice No (statement)', h.invoice_no],['Date of Invoice', h.date_of_invoice],['Date of Supply', h.date_of_supply],['Supplier', h.supplier_name],['Supplier TIN', h.supplier_tin],
@@ -381,8 +473,8 @@ async function igManual(){
     await igLookup(v, '');
 }
 async function igLookup(a, b){
-    const r = await fetch('invoice_grn_check.php?ajax=lookup&a=' + encodeURIComponent(a || '') + '&b=' + encodeURIComponent(b || ''));
-    const d = await r.json(); igRows = d.found || []; igSel = 0; igRender(d.by);
+    const d = await igFetchJson('invoice_grn_check.php?ajax=lookup&a=' + encodeURIComponent(a || '') + '&b=' + encodeURIComponent(b || ''));
+    igRows = d.found || []; igSel = 0; igRender(d.by);
 }
 function igRender(by){
     const s = igScanData || {}, row = igRows[igSel] || null;
