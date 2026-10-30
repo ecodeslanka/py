@@ -283,7 +283,7 @@ if ($have['invoice_wise_sales_data']) {
 }
 
 $rows = [];
-$tot = ['dmg'=>0,'open'=>0,'pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,'val'=>0];
+$tot = ['dmg'=>0,'open'=>0,'pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,'val'=>0,'dval'=>0];
 $tur_map = im_load_tur($conn);      // latest invoice TUR, or the TUR set on Stock Sync
 $add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m, $open = 0.0, $dmg_q = 0.0) use (&$rows, &$tot, $tur_map) {
     $upc_v = (float)($m['upc'] ?? 0);
@@ -293,8 +293,8 @@ $add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m, $ope
            Secondary Inv or Closing Balance - the qty is only in the Damaged Stock column. */
         $dm = $open + $a['so'];            // ($a['so'] carries the damage movement in the period; $open = damage before it)
         $rows[] = ['basepack'=>$bp, 'open'=>0, 'sku7'=>$code, 'base'=>$base, 'name'=>$name, 'location'=>$loc_label, 'is_dmg'=>1, 'upc'=>$upc_v,
-            'pc'=>0, 'rc'=>0, 'so'=>0, 'so_s'=>0, 'rej'=>0, 'adj'=>0, 'close'=>0, 'dmg'=>round($dm,2), 'value'=>$value, 'cval'=>0];
-        $tot['dmg'] += $dm;
+            'pc'=>0, 'rc'=>0, 'so'=>0, 'so_s'=>0, 'rej'=>0, 'adj'=>0, 'close'=>0, 'dmg'=>round($dm,2), 'dval'=>round($dm * $value, 2), 'value'=>$value, 'cval'=>0];
+        $tot['dmg'] += $dm; $tot['dval'] += $dm * $value;      // Damaged value = damaged units x the TUR of the same (good) item
         return;
     }
     // Good Stock: Opening + Primary Purchase - Primary Returned - Secondary Inv - Good Rejected + Adjustment
@@ -303,8 +303,8 @@ $add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m, $ope
     $close = $open + $a['pc'] - $a['rc'] - $a['so'] - $a['rej'] + $a['adj'];
     $rows[] = ['basepack'=>$bp, 'open'=>round($open,2), 'sku7'=>$code, 'base'=>$base, 'name'=>$name, 'location'=>$loc_label, 'is_dmg'=>0, 'upc'=>$upc_v,
         'pc'=>round($a['pc'],2), 'rc'=>round($a['rc'],2), 'so'=>round($a['so'],2), 'so_s'=>round($so_s,2), 'rej'=>round($a['rej'],2), 'adj'=>round($a['adj'],2),
-        'close'=>round($close,2), 'dmg'=>round($dmg_q,2), 'value'=>$value, 'cval'=>round($close * $value, 2)];
-    $tot['dmg'] += $dmg_q;
+        'close'=>round($close,2), 'dmg'=>round($dmg_q,2), 'dval'=>round($dmg_q * $value, 2), 'value'=>$value, 'cval'=>round($close * $value, 2)];
+    $tot['dmg'] += $dmg_q; $tot['dval'] += $dmg_q * $value;
     $tot['open'] += $open; $tot['pc'] += $a['pc']; $tot['rc'] += $a['rc']; $tot['so'] += $so_s; $tot['rej'] += $a['rej']; $tot['adj'] += $a['adj'];
     $tot['close'] += $close; $tot['val'] += $close * $value;
 };
@@ -478,6 +478,7 @@ table.isr-t thead th{position:sticky;top:0;z-index:2;}
         $boxes[] = ['Adjustment', sgn($tot['adj']), 'units', '#0e7490'];
         $boxes[] = ['Closing Balance', sgn($tot['close']), 'units · good stock', '#15803d'];
         if ($show_dcol || $f_loc === 'damaged') $boxes[] = ['Damaged Stock', sgn($tot['dmg']), 'units · confirmed damage entries', '#c2410c'];
+        if ($show_dcol || $f_loc === 'damaged') $boxes[] = ['Damaged Stock Value', number_format($tot['dval'], 2), 'Rs. at the item\'s TUR (good item price)', '#9a3412'];
         $boxes[] = ['Closing Stock Value', number_format($tot['val'], 2), 'Rs. at TUR', '#0f766e'];
         foreach ($boxes as $b): ?>
         <div class="isr-sbox" style="--c:<?php echo $b[3]; ?>">
@@ -493,7 +494,7 @@ table.isr-t thead th{position:sticky;top:0;z-index:2;}
         <thead><tr>
             <th>Basepack Code</th><th>SKU7</th><th style="text-align:left">Product Name</th><th>Location</th><th>UPC</th>
             <th>Opening Units<br><small>units</small></th><th>Primary Purchase<br><small>units</small></th><th>Primary Returned<br><small>units</small></th><th>Secondary Inv<br><small>units</small></th><th>Good Rejected<br><small>units</small></th><th>Adjustment<br><small>units</small></th>
-            <th>Closing Balance<br><small>units</small></th><?php if ($show_dcol): ?><th style="background:#fed7aa">Damaged Stock<br><small>units</small></th><?php endif; ?><th>Item Value<br><small>TUR</small></th><th>Closing Stock Value</th>
+            <th>Closing Balance<br><small>units</small></th><?php if ($show_dcol): ?><th style="background:#fed7aa">Damaged Stock<br><small>units</small></th><th style="background:#fed7aa">Damaged Value<br><small>units × TUR</small></th><?php endif; ?><th>Item Value<br><small>TUR</small></th><th>Closing Stock Value</th>
         </tr></thead>
         <tbody>
         <?php foreach ($rows as $i => $r): ?>
@@ -511,12 +512,13 @@ table.isr-t thead th{position:sticky;top:0;z-index:2;}
             <td class="n"><?php echo qcell($r['adj'], 0); ?></td>
             <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo $r['is_dmg'] ? '—' : qn($r['close']); ?></strong></td>
             <?php if ($show_dcol): ?><td class="n" style="background:#fff7ed;color:#9a3412;font-weight:700;cursor:pointer;<?php echo round($r['dmg']) != 0 ? 'text-decoration:underline dotted;' : ''; ?>"
-                <?php if (!$r['is_dmg']): ?>onclick="event.stopPropagation();isrLedger(<?php echo htmlspecialchars(json_encode($r['base']), ENT_QUOTES); ?>, 'damaged')" title="Damaged Stock ledger"<?php endif; ?>><?php echo sgn($r['dmg']); ?></td><?php endif; ?>
+                <?php if (!$r['is_dmg']): ?>onclick="event.stopPropagation();isrLedger(<?php echo htmlspecialchars(json_encode($r['base']), ENT_QUOTES); ?>, 'damaged')" title="Damaged Stock ledger"<?php endif; ?>><?php echo sgn($r['dmg']); ?></td>
+            <td class="n" style="background:#fff7ed;color:#9a3412;"><?php echo round($r['dval'], 2) != 0 ? number_format($r['dval'], 2) : '—'; ?></td><?php endif; ?>
             <td class="n"><?php echo $r['value'] ? number_format($r['value'], 2) : '—'; ?></td>
             <td class="n <?php echo $r['cval'] < 0 ? 'neg' : ''; ?>"><?php echo $r['is_dmg'] ? '—' : number_format($r['cval'], 2); ?></td>
         </tr>
         <?php endforeach; ?>
-        <?php if (!$rows): ?><tr><td colspan="<?php echo 14 + ($show_dcol ? 1 : 0); ?>" style="text-align:center;padding:24px;color:#8892a4;">No stock records found up to this date.</td></tr><?php endif; ?>
+        <?php if (!$rows): ?><tr><td colspan="<?php echo 14 + ($show_dcol ? 2 : 0); ?>" style="text-align:center;padding:24px;color:#8892a4;">No stock records found up to this date.</td></tr><?php endif; ?>
         </tbody>
         <tfoot><tr>
             <td colspan="5" style="text-align:right;">TOTAL — <?php echo count($rows); ?> items</td>
@@ -527,7 +529,7 @@ table.isr-t thead th{position:sticky;top:0;z-index:2;}
             <td class="n"><?php echo qn(-$tot['rej']); ?></td>
             <td class="n"><?php echo qn($tot['adj']); ?></td>
             <td class="n"><?php echo qn($tot['close']); ?></td>
-            <?php if ($show_dcol): ?><td class="n" style="background:#ffedd5;color:#9a3412"><?php echo sgn($tot['dmg']); ?></td><?php endif; ?>
+            <?php if ($show_dcol): ?><td class="n" style="background:#ffedd5;color:#9a3412"><?php echo sgn($tot['dmg']); ?></td><td class="n" style="background:#ffedd5;color:#9a3412"><?php echo number_format($tot['dval'], 2); ?></td><?php endif; ?>
             <td></td>
             <td class="n"><?php echo number_format($tot['val'], 2); ?></td>
         </tr></tfoot>
@@ -606,12 +608,12 @@ function isrHead(row){ row.eachCell(c => { c.font = {bold:true}; c.fill = {type:
 async function isrExport(){
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Item Stock');
     ws.addRow(['Sampath Inventory Report — ' + ISR_PERIOD]).font = {bold:true, size:14};
-    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Opening Units','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)'].concat(ISR_DCOL ? ['Damaged Stock (units)'] : [], ['Item Value (TUR)','Closing Stock Value'])));
-    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.open, r.pc, -r.rc, r.so_s, -r.rej, r.adj, r.close].concat(ISR_DCOL ? [r.dmg] : [], [r.value, r.cval])));
-    const nq = ISR_DCOL ? 13 : 12;
+    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Opening Units','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)'].concat(ISR_DCOL ? ['Damaged Stock (units)','Damaged Value (TUR)'] : [], ['Item Value (TUR)','Closing Stock Value'])));
+    ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.open, r.pc, -r.rc, r.so_s, -r.rej, r.adj, r.close].concat(ISR_DCOL ? [r.dmg, r.dval] : [], [r.value, r.cval])));
+    const nq = ISR_DCOL ? 13 : 12;   // (the Damaged Value column keeps its money format below)
     for (let c = 5; c <= nq; c++) ws.getColumn(c).numFmt = '#,##0';
-    [nq + 1, nq + 2].forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
-    [14,12,40,14,8,12,14,14,14,14,12,14,14,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
+    (ISR_DCOL ? [nq + 1, nq + 2, nq + 3] : [nq + 1, nq + 2]).forEach(c => ws.getColumn(c).numFmt = '#,##0.00');
+    [14,12,40,14,8,12,14,14,14,14,12,14,14,16,12,18].forEach((w,i) => ws.getColumn(i+1).width = w);
     await isrSave(wb, 'sampath_item_stock_' + new Date().toISOString().slice(0,10) + '.xlsx');
 }
 async function isrLedgerExport(){
