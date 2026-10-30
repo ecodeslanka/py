@@ -281,9 +281,9 @@ if (isset($_GET['ajax'])) {
         $count_sql  = "SELECT COUNT(*) AS cnt FROM ($sql) x";
         $total_res  = mysqli_query($conn, $count_sql);
         $total      = $total_res ? (int) mysqli_fetch_assoc($total_res)['cnt'] : 0;
-        $pages      = $total ? (int) ceil($total / $limit) : 0;
+        $pages      = $total ? 1 : 0;
 
-        $sql .= " ORDER BY d.bill_date ASC, d.bill_no ASC LIMIT $limit OFFSET $offset";
+        $sql .= " ORDER BY d.bill_date ASC, d.bill_no ASC";   // no paging: all rows in one go
         $result = mysqli_query($conn, $sql);
 
         if (!$result) { echo json_encode(['error' => mysqli_error($conn)]); exit; }
@@ -778,7 +778,7 @@ function renderKpis(rows) {
         else unsettled++;
     });
     document.getElementById('kpiSec').textContent = fmtNum(gSec);
-    document.getElementById('kpiSecSub').textContent = rows.length + ' invoice(s) — this page';
+    document.getElementById('kpiSecSub').textContent = rows.length + ' invoice(s)';
     document.getElementById('kpiGrn').textContent = fmtNum(gGrn);
     document.getElementById('kpiCn').textContent = fmtNum(gCn);
     document.getElementById('kpiChq').textContent = fmtNum(gChq);
