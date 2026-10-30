@@ -123,7 +123,7 @@ function isr_ledger_events($conn, $have, $ce, $upc, $loc, $f_cust, $cust_sql, $d
     if (!$f_cust && $have['unilever_purchase_items'] && $have['unilever_purchase_batches']) {
         $q = mysqli_query($conn, "SELECT COALESCE(p.invoice_date, b.received_date) AS d, p.invoice_number, p.supplier_invoice_no, p.purchase_qty_cases AS q
             FROM unilever_purchase_items p JOIN unilever_purchase_batches b ON b.id = p.batch_id
-            WHERE p.item_code = '$ce' AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$d1' AND '$d2'");
+            WHERE p.item_code = '$ce' AND p.purchase_qty_cases <> 0 AND COALESCE(p.invoice_date, b.received_date) BETWEEN '$d1' AND '$d2'");
         while ($q && $r = mysqli_fetch_assoc($q))
             $ev[] = ((float)$r['q'] >= 0)
                 ? ['d'=>$r['d'], 't'=>'Primary Purchase', 'ref'=>trim(($r['invoice_number'] ?: '') . ' ' . ($r['supplier_invoice_no'] ? '('.$r['supplier_invoice_no'].')' : '')),

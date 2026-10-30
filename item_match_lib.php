@@ -116,6 +116,39 @@ function im_load_masters($conn) {
     return $items;
 }
 
+/* ── create items that are not in the system yet ──
+   The system has no separate item master: an item exists when it has a row in unilever_purchase_items (latest row per item_code
+   gives its name / basepack / UPC / price) or sales data. A missing SKU is therefore created as a ZERO-quantity row in a batch
+   called "AUTO-NEW-ITEMS" (no stock effect). When a real purchase for that item is imported later, its newer row takes over.
+   $items = [sku => ['name' => .., 'basepack' => ..]]; returns how many items were created. */
+function im_create_missing_items($conn, $items, $who = 'System') {
+    if (!$items || !im_table($conn, 'unilever_purchase_items') || !im_table($conn, 'unilever_purchase_batches')) return 0;
+    $bid = 0;
+    $q = mysqli_query($conn, "SELECT id FROM unilever_purchase_batches WHERE batch_no = 'AUTO-NEW-ITEMS' LIMIT 1");
+    if ($q && ($r = mysqli_fetch_assoc($q))) $bid = (int)$r['id'];
+    if (!$bid) {
+        $who_e = mysqli_real_escape_string($conn, (string)$who);
+        mysqli_query($conn, "INSERT INTO unilever_purchase_batches (batch_no, filename, received_date, total_rows, imported_by, note)
+            VALUES ('AUTO-NEW-ITEMS', 'Auto-created items (bulk imports)', CURDATE(), 0, '$who_e', 'Items created automatically from bulk adjustment / damage imports. Zero quantity - no stock effect.')");
+        $bid = (int)mysqli_insert_id($conn);
+    }
+    if (!$bid) return 0;
+    $n = 0;
+    foreach ($items as $sku => $it) {
+        $sku = trim((string)$sku);
+        if ($sku === '') continue;
+        $sk = mysqli_real_escape_string($conn, $sku);
+        $x = mysqli_query($conn, "SELECT 1 FROM unilever_purchase_items WHERE item_code = '$sk' LIMIT 1");
+        if ($x && mysqli_num_rows($x) > 0) continue;
+        $nm = mysqli_real_escape_string($conn, mb_substr(trim((string)($it['name'] ?? '')) ?: $sku, 0, 300));
+        $bp = mysqli_real_escape_string($conn, mb_substr(trim((string)($it['basepack'] ?? '')), 0, 30));
+        if (mysqli_query($conn, "INSERT INTO unilever_purchase_items (batch_id, item_code, item_name, basepack_code, purchase_qty_cases, returned_qty)
+            VALUES ($bid, '$sk', '$nm', " . ($bp === '' ? 'NULL' : "'$bp'") . ", 0, 0)")) $n++;
+    }
+    if ($n) mysqli_query($conn, "UPDATE unilever_purchase_batches SET total_rows = total_rows + $n WHERE id = $bid");
+    return $n;
+}
+
 /* ── Gemini: pick the best candidate per weak row (small batches; thinking off for speed; one retry) ── */
 function im_gemini_pick($key, $batch, &$err) {
     // $batch: list of ['ref'=>..,'name'=>..,'price'=>..,'cands'=>[['i'=>0,'name'=>..,'price'=>..],..]]

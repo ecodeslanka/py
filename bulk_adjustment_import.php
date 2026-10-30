@@ -186,6 +186,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $dd = trim($_POST['adj_date'] ?? ''); $reason = trim($_POST['reason'] ?? '');
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dd) || !checkdate((int)substr($dd, 5, 2), (int)substr($dd, 8, 2), (int)substr($dd, 0, 4))) bai_json(['ok' => false, 'msg' => 'Please select a valid adjustment date.']);
         if (!$ok) bai_json(['ok' => false, 'msg' => 'There is nothing new to import in this file (already imported or unknown transaction types).']);
+        $new_items = [];
+        foreach ($ok as $r) if (!isset($masters[$r['sku_code']])) $new_items[$r['sku_code']] = ['name' => $r['item_name'], 'basepack' => $r['basepack_code']];
+        $created = im_create_missing_items($conn, $new_items, $who);      // SKU not in the system -> new item
         $name = mb_substr($f['name'], 0, 255);
         $st = mysqli_prepare($conn, "INSERT INTO stock_adjustment_imports (adj_date, reason, filename, created_by) VALUES (?,?,?,?)");
         mysqli_stmt_bind_param($st, 'ssss', $dd, $reason, $name, $who); mysqli_stmt_execute($st);
@@ -201,7 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             mysqli_stmt_bind_param($il, 'iisssssssdddd', $iid, $aid, $r['sku_code'], $r['basepack_code'], $r['item_name'], $r['transaction_type'], $r['txn_ref'], $r['txn_date'], $r['party_name'], $r['qty_units'], $signed, $r['tur'], $r['line_value']);
             mysqli_stmt_execute($il);
         }
-        bai_json(['ok' => true, 'id' => $iid, 'rows' => count($ok), 'dups' => $dups]);
+        bai_json(['ok' => true, 'id' => $iid, 'rows' => count($ok), 'dups' => $dups, 'created' => $created]);
     }
     if ($act === 'delete_import') {
         $id = (int)($_POST['id'] ?? 0);
@@ -355,7 +358,7 @@ function idmPick(f){
         let h = '<b>' + d.rows + '</b> adjustment line(s) · <span class="pos">+' + fmt(d.in) + ' units in</span> · <span class="negq">−' + fmt(d.out) + ' units out</span>';
         if (d.dups) h += '<div style="color:#92400e;margin-top:4px;">' + d.dups + ' line(s) were already imported and will be skipped.</div>';
         if (d.unknown.length) h += '<div style="color:#991b1b;margin-top:4px;">Skipped — unknown transaction type: ' + esc(d.unknown.join(', ')) + '</div>';
-        h += d.notfound ? '<div style="color:#991b1b;margin-top:4px;">' + d.notfound + ' SKU code(s) are not in the inventory items: ' + esc(d.notfound_list.join(', ')) + '</div>' : '<div style="color:#166534;margin-top:4px;">All SKU codes match the inventory items.</div>';
+        h += d.notfound ? '<div style="color:#991b1b;margin-top:4px;">' + d.notfound + ' SKU code(s) are not in the system yet — <b>they will be created as new items</b>: ' + esc(d.notfound_list.join(', ')) + '</div>' : '<div style="color:#166534;margin-top:4px;">All SKU codes match the inventory items.</div>';
         $i('idmSummary').innerHTML = h; $i('idmDate').value = d.date; $i('idmReason').value = ''; $i('idmMMsg').className = 'idm-msg';
         $i('idmGo').disabled = false; $i('idmGo').innerHTML = '<i class="fa-solid fa-file-import"></i> Import'; $i('idmModal').classList.add('open');
     }).catch(e => idmMsg($i('idmMsg'), 'err', 'Upload failed: ' + e.message));
@@ -366,7 +369,7 @@ function idmImport(){
     const f = new FormData(); f.append('action', 'import'); f.append('xlsx_file', idmFile); f.append('adj_date', $i('idmDate').value); f.append('reason', $i('idmReason').value);
     fetch('bulk_adjustment_import.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()).then(d => {
         if (!d.ok) { idmMsg($i('idmMMsg'), 'err', d.msg); $i('idmGo').disabled = false; $i('idmGo').innerHTML = '<i class="fa-solid fa-file-import"></i> Import'; return; }
-        idmMsg($i('idmMMsg'), 'ok', d.rows + ' adjustment line(s) imported.'); setTimeout(() => location.reload(), 700);
+        idmMsg($i('idmMMsg'), 'ok', d.rows + ' adjustment line(s) imported' + (d.created ? ', ' + d.created + ' new item(s) created' : '') + '.'); setTimeout(() => location.reload(), 700);
     }).catch(e => { idmMsg($i('idmMMsg'), 'err', 'Import failed: ' + e.message); $i('idmGo').disabled = false; });
 }
 function idmPost(data){ const f = new FormData(); Object.keys(data).forEach(k => f.append(k, data[k])); return fetch('bulk_adjustment_import.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()); }
