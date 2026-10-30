@@ -241,6 +241,7 @@ $q = mysqli_query($conn, "SELECT i.*, COUNT(a.id) AS n, COALESCE(SUM(CASE WHEN l
     FROM stock_adjustment_imports i
     LEFT JOIN stock_adjustment_import_lines l ON l.import_id = i.id
     LEFT JOIN stock_manual_adjustments a ON a.id = l.adjustment_id
+    WHERE NOT EXISTS (SELECT 1 FROM stock_adjustment_import_lines v WHERE v.import_id = i.id AND v.transaction_type LIKE 'Variance%')
     GROUP BY i.id ORDER BY i.adj_date DESC, i.id DESC");
 if ($q) while ($r = mysqli_fetch_assoc($q)) $imports[] = $r;
 $sum = ['n' => count($imports), 'rows' => 0, 'in' => 0, 'out' => 0];
