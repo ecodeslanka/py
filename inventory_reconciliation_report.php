@@ -234,6 +234,7 @@ function irr_pcell($q, $v) {
     return '<td class="n"><b>' . irr_pf($v) . '</b><i>' . ($q < 0 ? '(' : '') . number_format(abs($q), 0) . ($q < 0 ? ')' : '') . ' u</i></td>';
 }
 if (isset($_GET['print'])) {
+    $summary = isset($_GET['summary']);   // summary-only print: no item detail, with sign-off boxes
     $title_p = $snap_row ? $snap_row['title'] : 'Inventory Reconciliation Report';
     $scd = $sc ? substr((string)$sc['count_date'], 0, 10) : null;
     $grp = [['open','Opening Inventory'],['pc','Primary Purchase'],['rc','Primary Return'],['pre','Pre Secondary'],['sec','Secondary'],['diff','Diff (Pre − Sec)'],['oth','Rejected / Adj.'],['g','Good Stock'],['d','Damaged Stock']];
@@ -286,10 +287,16 @@ table{border-collapse:collapse;width:100%;}
 .cols2{display:flex;gap:6mm;align-items:flex-start}
 .note{font-size:7.5pt;border:1pt solid #000;padding:3mm;flex:1;line-height:1.5}
 .note b{text-transform:uppercase;letter-spacing:1pt;font-size:6.8pt}
+.sigbox{display:flex;gap:8mm;margin-top:10mm;page-break-inside:avoid}
+.sigbox .b{flex:1;border:1.5pt solid #000}
+.sigbox .b h4{margin:0;background:#000;color:#fff;font:700 8pt Arial,sans-serif;letter-spacing:2pt;text-transform:uppercase;text-align:center;padding:2mm}
+.sigbox .b .sp{height:20mm;border-bottom:.6pt dashed #000}
+.sigbox .b .ln{padding:1.5mm 3mm;font-size:7pt;letter-spacing:1pt;text-transform:uppercase;border-top:0;display:flex;justify-content:space-between}
+.sigbox .b .ln+.ln{border-top:.4pt solid #000}
 .sign{display:flex;gap:10mm;margin-top:12mm;page-break-inside:avoid}
 .sign div{flex:1;border-top:1.2pt solid #000;padding-top:1.5mm;font-size:7pt;letter-spacing:1.5pt;text-transform:uppercase;text-align:center}
 </style></head><body>
-<div class="bar"><b>Inventory Reconciliation Report — print / PDF preview</b>
+<div class="bar"><b>Inventory Reconciliation Report<?php echo $summary ? ' — SUMMARY' : ''; ?> — print / PDF preview</b>
   <button onclick="window.print()">Print / Save as PDF</button><button onclick="window.close()">Close</button>
   <span style="opacity:.7">Choose “Save as PDF” as the printer destination to get the PDF. Landscape A4.</span></div>
 <div class="wrap">
@@ -340,6 +347,7 @@ table{border-collapse:collapse;width:100%;}
   Diff = Pre Secondary − Secondary. Figures in ( ) are negative.<?php if ($sc): ?> Physical count is the saved stock count of <?php echo htmlspecialchars($scd); ?>; items it has no qty for are not compared (<?php echo (int)$tot['uncounted']; ?> in this report).<?php endif; ?></div>
 </div>
 
+<?php if (!$summary): ?>
 <h2>Item detail</h2>
 <table class="det">
   <thead><tr><th>SKU7</th><th style="text-align:left">Product</th><th>UPC</th><th>TUR</th><?php foreach ($grp as $g): ?><th><?php echo $g[1]; ?></th><?php endforeach; ?></tr></thead>
@@ -354,6 +362,16 @@ table{border-collapse:collapse;width:100%;}
     <?php foreach ($grp as $g): echo irr_pcell($tot[$g[0].'_q'], $tot[$g[0].'_v']); endforeach; ?></tr></tfoot>
 </table>
 <div class="sign"><div>Prepared by</div><div>Checked by</div><div>Approved by</div></div>
+<?php else: ?>
+<div class="sigbox">
+  <?php foreach (['Stock Keeper', 'Sales Executive', 'Operation Manager'] as $role): ?>
+  <div class="b"><h4><?php echo $role; ?></h4><div class="sp"></div>
+    <div class="ln"><span>Name</span><span>………………………………</span></div>
+    <div class="ln"><span>Signature</span><span>………………………………</span></div>
+    <div class="ln"><span>Date</span><span>………… / ………… / …………</span></div></div>
+  <?php endforeach; ?>
+</div>
+<?php endif; ?>
 </div>
 <script>window.addEventListener('load', function(){ setTimeout(function(){ window.print(); }, 500); });</script>
 </body></html><?php
@@ -421,6 +439,7 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <div style="font-size:12px;opacity:.75"><?php echo htmlspecialchars($period); ?> · saved <?php echo htmlspecialchars(substr((string)$snap_row['created_at'], 0, 16) . ' by ' . $snap_row['created_by']); ?><?php echo $snap_row['note'] ? ' · ' . htmlspecialchars($snap_row['note']) : ''; ?></div></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <a class="irr-b" style="background:#fff;color:#000" href="javascript:void(0)" onclick="irrPrint()"><i class="fa-solid fa-file-pdf"></i> PDF / Print</a>
+            <a class="irr-b" style="background:#fff;color:#000" href="javascript:void(0)" onclick="irrPrint(true)"><i class="fa-solid fa-signature"></i> Summary + Sign</a>
             <a class="irr-b" style="background:#334155" href="inventory_reconciliation_report.php">Back to live report</a>
         </div>
     </div>
@@ -465,6 +484,7 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
             <a class="irr-b l" href="inventory_reconciliation_report.php">Reset</a>
             <button class="irr-b g" type="button" onclick="irrExport()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
             <button class="irr-b l" type="button" onclick="irrPrint()"><i class="fa-solid fa-file-pdf"></i> PDF / Print</button>
+            <button class="irr-b l" type="button" onclick="irrPrint(true)"><i class="fa-solid fa-signature"></i> Summary + Sign</button>
             <button class="irr-b" type="button" style="background:#6d28d9" onclick="irrSave()"><i class="fa-solid fa-floppy-disk"></i> Save Report</button>
         </div>
     </form>
@@ -603,6 +623,7 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                     <td style="white-space:nowrap">
                         <a class="irr-b" style="padding:4px 10px;font-size:11px" href="?saved=<?php echo (int)$sv['id']; ?>">View</a>
                         <a class="irr-b l" style="padding:4px 10px;font-size:11px" target="_blank" href="?saved=<?php echo (int)$sv['id']; ?>&print=1"><i class="fa-solid fa-file-pdf"></i> PDF</a>
+                        <a class="irr-b l" style="padding:4px 10px;font-size:11px" target="_blank" href="?saved=<?php echo (int)$sv['id']; ?>&print=1&summary=1" title="Summary only with sign boxes"><i class="fa-solid fa-signature"></i> Summary</a>
                         <form method="POST" style="display:inline" onsubmit="return confirm('Delete this saved report?')"><input type="hidden" name="action" value="delete_saved"><input type="hidden" name="id" value="<?php echo (int)$sv['id']; ?>">
                             <button class="irr-b" style="padding:4px 10px;font-size:11px;background:#dc2626" type="submit"><i class="fa-solid fa-trash"></i></button></form>
                     </td>
@@ -692,7 +713,7 @@ async function irrDExport(){
     a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
     a.download = 'inventory_difference_items_' + new Date().toISOString().slice(0,10) + '.xlsx'; a.click(); URL.revokeObjectURL(a.href);
 }
-function irrPrint(){ window.open(location.pathname + (location.search ? location.search + '&' : '?') + 'print=1', '_blank'); }
+function irrPrint(summary){ window.open(location.pathname + (location.search ? location.search + '&' : '?') + 'print=1' + (summary ? '&summary=1' : ''), '_blank'); }
 function irrSave(){
     const t = prompt('Name for this saved report:', 'Inventory Reconciliation ' + IRR_PERIOD);
     if (t === null) return;
