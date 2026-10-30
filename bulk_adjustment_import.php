@@ -162,8 +162,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         $masters = [];
         foreach (im_load_masters($conn) as $m) $masters[(string)$m['code']] = $m['name'];
+        $turmap = im_load_tur($conn);
         $ok = []; $unknown = []; $dups = 0;
         foreach ($rows as $r) {
+            $r['tur'] = im_price_fill($r['tur'], $turmap, $r['sku_code']);       // price missing in the file -> system TUR
+            if ((float)$r['line_value'] == 0 && $r['tur'] > 0) $r['line_value'] = round($r['qty_units'] * $r['tur'], 4);
             if ($r['sign'] === 0) { $unknown[$r['transaction_type'] ?: '(blank)'] = 1; continue; }
             $rf = mysqli_real_escape_string($conn, $r['txn_ref']); $sk = mysqli_real_escape_string($conn, $r['sku_code']); $tt = mysqli_real_escape_string($conn, $r['transaction_type']);
             $d = mysqli_query($conn, "SELECT 1 FROM stock_adjustment_import_lines l JOIN stock_manual_adjustments a ON a.id = l.adjustment_id
@@ -245,7 +248,7 @@ $q = mysqli_query($conn, "SELECT i.*, COUNT(a.id) AS n, COALESCE(SUM(CASE WHEN l
     LEFT JOIN stock_adjustment_import_lines l ON l.import_id = i.id
     LEFT JOIN stock_manual_adjustments a ON a.id = l.adjustment_id
     WHERE NOT EXISTS (SELECT 1 FROM stock_adjustment_import_lines v WHERE v.import_id = i.id AND (v.transaction_type LIKE 'Variance%' OR v.transaction_type LIKE 'Stock Sync%'))
-      AND NOT EXISTS (SELECT 1 FROM item_tur_overrides t WHERE t.import_id = i.id)
+      AND NOT EXISTS (SELECT 1 FROM item_tur_overrides t WHERE t.import_id = i.id AND t.source = 'adj')
     GROUP BY i.id ORDER BY i.adj_date DESC, i.id DESC");
 if ($q) while ($r = mysqli_fetch_assoc($q)) $imports[] = $r;
 $sum = ['n' => count($imports), 'rows' => 0, 'in' => 0, 'out' => 0];

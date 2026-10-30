@@ -8,6 +8,9 @@
 //  Stock equals the Excel:  Excel higher -> + damage units;  Excel lower -> − damage units.
 //      SKU not in our system -> the item is CREATED and its damaged stock is set to the Excel units
 //      item with damaged stock of ours but NOT in the Excel -> taken to 0 (tick-box, ON by default)
+//  TUR: damage lines carry the Excel TUR (or the item's system TUR when the Excel has none), so every damage has a value. Tick-box
+//  "Update TUR prices": where the Excel TUR differs from our current TUR it becomes the new TUR (item_tur_overrides, source 'dmg');
+//  the old TUR is kept and comes back when the sync (or a TUR line) is deleted.
 //  Only DAMAGED stock changes (the MAIN GODOWN / Good stock is handled by Stock Sync). Lines are saved in
 //  sampath_damage_import_items (outlet_code = 'DMGSYNC'), so the Sampath Inventory Report (Damaged Stock column, "-D" rows, damaged
 //  ledger) and the Inventory Reconciliation Report pick them up. A whole sync or single lines can be deleted.
@@ -140,6 +143,7 @@ function bds_read($tmp) {
 
 /** Compare the Excel damage stock with ours as at $date */
 function bds_compare($conn, $rows, $date, $include_missing) {
+    $turmap = im_load_tur($conn);
     $masters = [];
     foreach (im_load_masters($conn) as $m) $masters[(string)$m['code']] = $m['name'];
     $our = bds_damaged($conn, $date);
@@ -148,11 +152,12 @@ function bds_compare($conn, $rows, $date, $include_missing) {
         $c = $r['sku_code']; $seen[$c] = 1;
         $sys = isset($our[$c]) ? $our[$c]['q'] : 0.0;
         $cmp[] = ['sku' => $c, 'name' => $r['item_name'], 'basepack' => $r['basepack_code'], 'excel' => $r['units'], 'system' => $sys, 'diff' => round($r['units'] - $sys, 2),
-                  'tur' => $r['tur'], 'new_item' => !isset($masters[$c]), 'missing' => false];
+                  'tur' => im_price_fill($r['tur'], $turmap, $c), 'tur_old' => (float)($turmap[$c] ?? 0), 'tur_new' => (float)$r['tur'],
+                  'tur_changed' => $r['tur'] > 0 && abs($r['tur'] - (float)($turmap[$c] ?? 0)) > 0.004, 'new_item' => !isset($masters[$c]), 'missing' => false];
     }
     if ($include_missing) foreach ($our as $c => $o) {
         if (isset($seen[$c]) || round($o['q'], 2) == 0) continue;
-        $cmp[] = ['sku' => $c, 'name' => $o['name'] ?: ($masters[$c] ?? ''), 'basepack' => '', 'excel' => 0.0, 'system' => $o['q'], 'diff' => round(-$o['q'], 2), 'tur' => 0.0, 'new_item' => false, 'missing' => true];
+        $cmp[] = ['sku' => $c, 'name' => $o['name'] ?: ($masters[$c] ?? ''), 'basepack' => '', 'excel' => 0.0, 'system' => $o['q'], 'diff' => round(-$o['q'], 2), 'tur' => (float)($turmap[$c] ?? 0), 'tur_old' => (float)($turmap[$c] ?? 0), 'tur_new' => 0.0, 'tur_changed' => false, 'new_item' => false, 'missing' => true];
     }
     return $cmp;
 }
@@ -173,9 +178,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $cmp = bds_compare($conn, $rows, $date, $inc_missing);
 
         if ($act === 'preview') {
-            $in = $out = 0; $same = 0; $new = 0; $miss = 0; $list = [];
+            $upd = !empty($_POST['update_tur']);
+            $in = $out = 0; $same = 0; $new = 0; $miss = 0; $list = []; $turc = 0;
             foreach ($cmp as $c) {
-                if (round($c['diff'], 2) == 0) { $same++; continue; }
+                if ($c['tur_changed']) $turc++;
+                if (round($c['diff'], 2) == 0 && !($upd && $c['tur_changed'])) { $same++; continue; }
                 if ($c['diff'] > 0) $in += $c['diff']; else $out += -$c['diff'];
                 if ($c['new_item']) $new++;
                 if ($c['missing']) $miss++;
@@ -183,34 +190,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             usort($list, function ($a, $b) { return strcmp($a['sku'], $b['sku']); });
             bds_json(['ok' => true, 'date' => $date, 'file_loc' => $floc, 'excel_items' => count($rows), 'excel_units' => array_sum(array_column($rows, 'units')), 'same' => $same,
-                      'new' => $new, 'missing' => $miss, 'in' => $in, 'out' => $out, 'rows' => $list]);
+                      'new' => $new, 'missing' => $miss, 'in' => $in, 'out' => $out, 'tur_changes' => $turc, 'rows' => $list]);
         }
         $reason = trim($_POST['reason'] ?? '');
         $pick = json_decode($_POST['skus'] ?? '[]', true); $pick = is_array($pick) ? array_flip(array_map('strval', $pick)) : [];
         $todo = [];
-        foreach ($cmp as $c) if (round($c['diff'], 2) != 0 && isset($pick[$c['sku']])) $todo[] = $c;
-        if (!$todo) bds_json(['ok' => false, 'msg' => 'Nothing to post — the damaged stock already tallies, or no line is selected.']);
+        $upd = !empty($_POST['update_tur']);
+        foreach ($cmp as $c) if (isset($pick[$c['sku']]) && (round($c['diff'], 2) != 0 || ($upd && $c['tur_changed']))) $todo[] = $c;
+        if (!$todo) bds_json(['ok' => false, 'msg' => 'Nothing to post — the damaged stock (and TUR) already tally, or no line is selected.']);
         $new_items = [];
         foreach ($todo as $c) if ($c['new_item']) $new_items[$c['sku']] = ['name' => $c['name'], 'basepack' => $c['basepack']];
         $created = im_create_missing_items($conn, $new_items, $who);
-        $name = mb_substr($f['name'], 0, 255); $n = count($todo);
-        $tq = 0; $tv = 0; foreach ($todo as $c) { $tq += $c['diff']; $tv += $c['diff'] * $c['tur']; }
+        $name = mb_substr($f['name'], 0, 255);
+        $dl = array_values(array_filter($todo, function ($c) { return round($c['diff'], 2) != 0; }));      // lines that change the damaged stock
+        $n = count($dl);
+        $tq = 0; $tv = 0; foreach ($dl as $c) { $tq += $c['diff']; $tv += $c['diff'] * $c['tur']; }
         $st = mysqli_prepare($conn, "INSERT INTO sampath_damage_imports (damage_date, remark, filename, total_rows, total_qty, total_value, created_by) VALUES (?,?,?,?,?,?,?)");
         mysqli_stmt_bind_param($st, 'sssidds', $date, $reason, $name, $n, $tq, $tv, $who); mysqli_stmt_execute($st);
         $iid = mysqli_insert_id($conn);
         $ii = mysqli_prepare($conn, "INSERT INTO sampath_damage_import_items (import_id, damage_date, bill_number, bill_date, delivery_date, outlet_code, outlet_name, basepack_code, product_code, product_description, batch_code, tur, damage_qty, damage_value, reason, applied, system_qty, excel_qty) VALUES (?,?,?,?,?,'DMGSYNC','Damage Stock Sync',?,?,?,'',?,?,?,?,1,?,?)");
         $ref = 'SYNC-' . $iid;
+        $to = mysqli_prepare($conn, "INSERT INTO item_tur_overrides (item_code, item_name, tur, old_tur, import_id, created_by, source) VALUES (?,?,?,?,?,?,'dmg')");
+        $turn = 0;
         foreach ($todo as $c) {
+            if ($upd && $c['tur_changed']) { mysqli_stmt_bind_param($to, 'ssddis', $c['sku'], $c['name'], $c['tur_new'], $c['tur_old'], $iid, $who); mysqli_stmt_execute($to); $turn++; }
+            if (round($c['diff'], 2) == 0) continue;          // TUR-only row: no damage line
             $d = $c['diff']; $val = $d * $c['tur'];
             $rs = mb_substr('Damage stock sync · ours ' . round($c['system'], 2) . ' → Excel ' . round($c['excel'], 2) . ($c['new_item'] ? ' · new item' : '') . ($c['missing'] ? ' · not in Excel' : '') . ($reason !== '' ? ' · ' . $reason : ''), 0, 255);
             mysqli_stmt_bind_param($ii, 'isssssssdddsdd', $iid, $date, $ref, $date, $date, $c['basepack'], $c['sku'], $c['name'], $c['tur'], $d, $val, $rs, $c['system'], $c['excel']);
             mysqli_stmt_execute($ii);
         }
-        bds_json(['ok' => true, 'id' => $iid, 'rows' => $n, 'created' => $created]);
+        bds_json(['ok' => true, 'id' => $iid, 'rows' => $n, 'tur' => $turn, 'created' => $created]);
     }
     if ($act === 'delete_import') {
         $id = (int)($_POST['id'] ?? 0);
         mysqli_query($conn, "DELETE FROM sampath_damage_import_items WHERE import_id=$id AND outlet_code='DMGSYNC'");
+        mysqli_query($conn, "DELETE FROM item_tur_overrides WHERE import_id=$id AND source='dmg'");      // TUR goes back to the old price
         mysqli_query($conn, "DELETE FROM sampath_damage_imports WHERE id=$id");
         bds_json(['ok' => true]);
     }
@@ -218,10 +233,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $id = (int)($_POST['id'] ?? 0);
         $ids = array_filter(array_map('intval', explode(',', $_POST['ids'] ?? '')));
         if (!$ids) bds_json(['ok' => false, 'msg' => 'Nothing selected.']);
-        mysqli_query($conn, "DELETE FROM sampath_damage_import_items WHERE import_id=$id AND outlet_code='DMGSYNC' AND id IN (" . implode(',', $ids) . ")");
-        $t = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) c, COALESCE(SUM(damage_qty),0) q, COALESCE(SUM(damage_value),0) v FROM sampath_damage_import_items WHERE import_id=$id"));
-        if ((int)$t['c'] === 0) mysqli_query($conn, "DELETE FROM sampath_damage_imports WHERE id=$id");
+        $inl = implode(',', $ids);
+        mysqli_query($conn, "DELETE o FROM item_tur_overrides o JOIN sampath_damage_import_items x ON x.product_code = o.item_code AND x.import_id = o.import_id WHERE o.source='dmg' AND x.import_id=$id AND x.outlet_code='DMGSYNC' AND x.id IN ($inl)");
+        mysqli_query($conn, "DELETE FROM sampath_damage_import_items WHERE import_id=$id AND outlet_code='DMGSYNC' AND id IN ($inl)");
+        $t = mysqli_fetch_assoc(mysqli_query($conn, "SELECT (SELECT COUNT(*) FROM item_tur_overrides WHERE import_id=$id AND source='dmg') AS tc, COUNT(*) c, COALESCE(SUM(damage_qty),0) q, COALESCE(SUM(damage_value),0) v FROM sampath_damage_import_items WHERE import_id=$id"));
+        if ((int)$t['c'] === 0 && (int)$t['tc'] === 0) mysqli_query($conn, "DELETE FROM sampath_damage_imports WHERE id=$id");
         else mysqli_query($conn, "UPDATE sampath_damage_imports SET total_rows=" . (int)$t['c'] . ", total_qty=" . (float)$t['q'] . ", total_value=" . (float)$t['v'] . " WHERE id=$id");
+        bds_json(['ok' => true]);
+    }
+    if ($act === 'revert_tur') {
+        $oid = (int)($_POST['id'] ?? 0); $iid = (int)($_POST['import_id'] ?? 0);
+        mysqli_query($conn, "DELETE FROM item_tur_overrides WHERE id=$oid AND import_id=$iid AND source='dmg'");
         bds_json(['ok' => true]);
     }
     bds_json(['ok' => false, 'msg' => 'Unknown action.']);
@@ -230,13 +252,18 @@ if (($_GET['ajax'] ?? '') === 'items') {
     $id = (int)($_GET['id'] ?? 0); $items = [];
     $q = mysqli_query($conn, "SELECT * FROM sampath_damage_import_items WHERE import_id=$id AND outlet_code='DMGSYNC' ORDER BY product_code");
     if ($q) while ($r = mysqli_fetch_assoc($q)) $items[] = $r;
-    bds_json(['ok' => true, 'items' => $items]);
+    $turs = [];
+    $q = mysqli_query($conn, "SELECT id, item_code, item_name, tur, old_tur FROM item_tur_overrides WHERE import_id=$id AND source='dmg' ORDER BY item_code");
+    if ($q) while ($r = mysqli_fetch_assoc($q)) $turs[] = $r;
+    bds_json(['ok' => true, 'items' => $items, 'turs' => $turs]);
 }
 
 $imports = [];
 $q = mysqli_query($conn, "SELECT i.*, COALESCE((SELECT SUM(CASE WHEN x.damage_qty > 0 THEN x.damage_qty ELSE 0 END) FROM sampath_damage_import_items x WHERE x.import_id = i.id),0) AS q_in,
         COALESCE((SELECT SUM(CASE WHEN x.damage_qty < 0 THEN -x.damage_qty ELSE 0 END) FROM sampath_damage_import_items x WHERE x.import_id = i.id),0) AS q_out
-    FROM sampath_damage_imports i WHERE EXISTS (SELECT 1 FROM sampath_damage_import_items y WHERE y.import_id = i.id AND y.outlet_code='DMGSYNC') ORDER BY i.damage_date DESC, i.id DESC");
+    , (SELECT COUNT(*) FROM item_tur_overrides t WHERE t.import_id = i.id AND t.source='dmg') AS n_tur
+    FROM sampath_damage_imports i WHERE EXISTS (SELECT 1 FROM sampath_damage_import_items y WHERE y.import_id = i.id AND y.outlet_code='DMGSYNC')
+       OR EXISTS (SELECT 1 FROM item_tur_overrides t2 WHERE t2.import_id = i.id AND t2.source='dmg') ORDER BY i.damage_date DESC, i.id DESC");
 if ($q) while ($r = mysqli_fetch_assoc($q)) $imports[] = $r;
 $sum = ['n' => count($imports), 'rows' => 0, 'in' => 0, 'out' => 0];
 foreach ($imports as $r) { $sum['rows'] += $r['total_rows']; $sum['in'] += $r['q_in']; $sum['out'] += $r['q_out']; }
@@ -284,7 +311,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
   <h3 style="font-size:15px;margin:6px 0 8px;">Imported damage stock syncs</h3>
   <div class="idm-wrap">
   <table class="idm-t">
-    <thead><tr><th>#</th><th>As at / damage date</th><th>Reason / remark</th><th>File</th><th class="n">Items</th><th class="n">Units +</th><th class="n">Units −</th><th>Imported by</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>As at / damage date</th><th>Reason / remark</th><th>File</th><th class="n">Items</th><th class="n">Units +</th><th class="n">Units −</th><th class="n">TUR updated</th><th>Imported by</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($imports as $r): $id = (int)$r['id']; ?>
       <tr>
@@ -292,6 +319,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
         <td style="white-space:normal;max-width:260px;"><?php echo htmlspecialchars($r['remark'] ?: '—'); ?></td>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="<?php echo htmlspecialchars($r['filename']); ?>"><?php echo htmlspecialchars($r['filename']); ?></td>
         <td class="n"><?php echo (int)$r['total_rows']; ?></td><td class="n pos">+<?php echo number_format($r['q_in'], 0); ?></td><td class="n negq">−<?php echo number_format($r['q_out'], 0); ?></td>
+        <td class="n"><?php echo (int)$r['n_tur'] > 0 ? '<span style="color:#6d28d9;font-weight:700;">' . (int)$r['n_tur'] . '</span>' : '—'; ?></td>
         <td><?php echo htmlspecialchars($r['created_by'] ?? ''); ?><div style="font-size:10.5px;color:#94a3b8;"><?php echo htmlspecialchars(substr((string)$r['created_at'], 0, 16)); ?></div></td>
         <td style="white-space:nowrap;">
           <button class="idm-b l s" onclick="idmView(<?php echo $id; ?>)"><i class="fa-solid fa-eye"></i> View</button>
@@ -299,7 +327,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
         </td>
       </tr>
     <?php endforeach; ?>
-    <?php if (!$imports): ?><tr><td colspan="9" style="text-align:center;padding:30px;color:#94a3b8;">Nothing imported yet.</td></tr><?php endif; ?>
+    <?php if (!$imports): ?><tr><td colspan="10" style="text-align:center;padding:30px;color:#94a3b8;">Nothing imported yet.</td></tr><?php endif; ?>
     </tbody>
   </table>
   </div>
@@ -313,8 +341,9 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
       <div class="fld" style="margin:0"><label>As at / damage date</label><input class="idm-in" type="date" id="idmDate" onchange="idmPreview()" style="width:170px"></div>
       <div class="fld" style="margin:0;flex:1;min-width:220px"><label>Reason / remark</label><input class="idm-in" type="text" id="idmReason" maxlength="400" placeholder="e.g. Damage godown stock sync with LeverEDGE"></div>
     </div>
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-bottom:8px;background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px;padding:8px 10px;"><input type="checkbox" id="idmTur" checked onchange="idmPreview()" style="margin-top:3px;"> <span><b>Update TUR prices</b> from this Excel where the TUR has changed. The old TUR is kept — deleting this sync (or a TUR line) puts it back.</span></label>
     <label style="display:flex;gap:8px;font-size:13px;margin-bottom:8px;"><input type="checkbox" id="idmMissing" checked onchange="idmPreview()"> <span>Also take our damaged items that are <b>not in the Excel</b> to 0</span></label>
-    <div class="idm-wrap" style="max-height:44vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" id="idmAll" checked onclick="document.querySelectorAll('.idm-pc').forEach(c=>c.checked=this.checked);idmCount()"></th><th>SKU7</th><th>Item</th><th class="n">Our damaged stock</th><th class="n">Excel units</th><th class="n">Difference (imported)</th><th>Note</th></tr></thead><tbody id="idmPB"></tbody></table></div>
+    <div class="idm-wrap" style="max-height:44vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" id="idmAll" checked onclick="document.querySelectorAll('.idm-pc').forEach(c=>c.checked=this.checked);idmCount()"></th><th>SKU7</th><th>Item</th><th class="n">Our damaged stock</th><th class="n">Excel units</th><th class="n">Difference (imported)</th><th class="n">TUR old → new</th><th>Note</th></tr></thead><tbody id="idmPB"></tbody></table></div>
     <div class="idm-msg" id="idmMMsg"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px;">
       <span id="idmSel" style="margin-right:auto;font-size:12.5px;color:#475569;"></span>
@@ -329,7 +358,9 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><h3 style="margin:0;" id="idmVT">Damage lines</h3>
       <button class="idm-b r s" style="margin-left:auto;" onclick="idmDelLines()"><i class="fa-solid fa-trash"></i> Delete selected</button>
       <button class="idm-b l s" onclick="idmClose('idmView')">Close</button></div>
-    <div class="idm-wrap" style="max-height:62vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.idm-ic').forEach(c=>c.checked=this.checked)"></th><th>SKU7</th><th>Item</th><th class="n">Our damaged (then)</th><th class="n">Excel units</th><th class="n">Imported</th></tr></thead><tbody id="idmVB"></tbody></table></div>
+    <div class="idm-wrap" style="max-height:62vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.idm-ic').forEach(c=>c.checked=this.checked)"></th><th>SKU7</th><th>Item</th><th class="n">Our damaged (then)</th><th class="n">Excel units</th><th class="n">Imported</th><th class="n">TUR</th><th class="n">Value</th></tr></thead><tbody id="idmVB"></tbody></table></div>
+    <div id="idmTurBox" style="display:none;margin-top:12px;"><div style="font-weight:800;font-size:13px;margin-bottom:6px;color:#6d28d9;"><i class="fa-solid fa-tags"></i> TUR price updates (old TUR comes back when reverted)</div>
+      <div class="idm-wrap" style="max-height:26vh;"><table class="idm-t"><thead><tr><th>SKU7</th><th>Item</th><th class="n">Old TUR</th><th class="n">New TUR</th><th></th></tr></thead><tbody id="idmTB"></tbody></table></div></div>
   </div>
 </div>
 
@@ -349,8 +380,8 @@ function idmPick(f){
     idmPreview(true);
 }
 function idmPreview(first){
-    const fd_ = new FormData(); fd_.append('action', 'preview'); fd_.append('xlsx_file', idmFile); fd_.append('adj_date', $i('idmDate').value); fd_.append('include_missing', $i('idmMissing').checked ? '1' : '0');
-    $i('idmPB').innerHTML = '<tr><td colspan="7" style="padding:16px;color:#94a3b8;">Tallying…</td></tr>';
+    const fd_ = new FormData(); fd_.append('action', 'preview'); fd_.append('xlsx_file', idmFile); fd_.append('adj_date', $i('idmDate').value); fd_.append('include_missing', $i('idmMissing').checked ? '1' : '0'); if ($i('idmTur').checked) fd_.append('update_tur', '1');
+    $i('idmPB').innerHTML = '<tr><td colspan="8" style="padding:16px;color:#94a3b8;">Tallying…</td></tr>';
     if (!first) $i('idmGo').disabled = true;
     fetch('bulk_damage_import2.php', {method:'POST', body:fd_, credentials:'same-origin'}).then(r => r.json()).then(d => {
         $i('idmDropTxt').textContent = idmFile.name;
@@ -360,9 +391,10 @@ function idmPreview(first){
         $i('idmSummary').innerHTML = (d.file_loc && !/damage/i.test(d.file_loc) ? '<div style="color:#991b1b;font-weight:700;margin-bottom:4px;">⚠ This Excel is for location "' + esc(d.file_loc) + '", not the DAMAGE GODOWN. Use Stock Sync for the main godown.</div>' : '')
             + '<b>' + d.excel_items + '</b> SKU(s) in the Excel · <b>' + fmt(d.excel_units) + '</b> damaged units · <b>' + d.same + '</b> already tally'
             + '<br><b>' + d.rows.length + '</b> difference(s): <span class="pos">+' + fmt(d.in) + ' units to add</span> · <span class="negq">−' + fmt(d.out) + ' units to remove</span>'
+            + (d.tur_changes ? '<br><span style="color:#6d28d9;"><b>' + d.tur_changes + '</b> item(s) have a changed TUR' + ($i('idmTur').checked ? ' — will be updated.' : ' — not updated (tick the option).') + '</span>' : '')
             + (d.new ? '<br><span style="color:#991b1b;"><b>' + d.new + '</b> SKU(s) are not in our system and will be <b>created as new items</b>.</span>' : '')
             + (d.missing ? '<br><span style="color:#92400e;"><b>' + d.missing + '</b> of our damaged items are not in the Excel and will be taken to 0.</span>' : '');
-        $i('idmPB').innerHTML = d.rows.map(r => '<tr><td><input type="checkbox" class="idm-pc" value="' + esc(r.sku) + '" data-d="' + r.diff + '" checked onchange="idmCount()"></td><td><b>' + esc(r.sku) + '</b></td><td>' + esc(r.name) + '</td><td class="n">' + fmt(r.system, 2) + '</td><td class="n">' + fmt(r.excel, 0) + '</td><td class="n ' + (r.diff < 0 ? 'negq' : 'pos') + '">' + (r.diff < 0 ? '−' : '+') + fmt(Math.abs(r.diff), 2) + '</td><td>' + (r.new_item ? '<span style="color:#991b1b;font-weight:700;">new item</span>' : (r.missing ? '<span style="color:#92400e;font-weight:700;">not in Excel</span>' : '')) + '</td></tr>').join('') || '<tr><td colspan="7" style="padding:18px;color:#166534;font-weight:700;">Everything already tallies — nothing to import.</td></tr>';
+        $i('idmPB').innerHTML = d.rows.map(r => '<tr><td><input type="checkbox" class="idm-pc" value="' + esc(r.sku) + '" data-d="' + r.diff + '" checked onchange="idmCount()"></td><td><b>' + esc(r.sku) + '</b></td><td>' + esc(r.name) + '</td><td class="n">' + fmt(r.system, 2) + '</td><td class="n">' + fmt(r.excel, 0) + '</td><td class="n ' + (r.diff < 0 ? 'negq' : 'pos') + '">' + (r.diff < 0 ? '−' : '+') + fmt(Math.abs(r.diff), 2) + '</td><td class="n">' + (r.tur_changed ? '<span style="color:#6d28d9;font-weight:700;">' + (r.tur_old ? fmt(r.tur_old, 2) : '—') + ' → ' + fmt(r.tur_new, 2) + '</span>' : '<span style="color:#94a3b8">' + (r.tur ? fmt(r.tur, 2) : '<span style="color:#991b1b">no TUR</span>') + '</span>') + '</td><td>' + (r.new_item ? '<span style="color:#991b1b;font-weight:700;">new item</span>' : (r.missing ? '<span style="color:#92400e;font-weight:700;">not in Excel</span>' : (+r.diff === 0 ? '<span style="color:#6d28d9;font-weight:700;">TUR only</span>' : ''))) + '</td></tr>').join('') || '<tr><td colspan="8" style="padding:18px;color:#166534;font-weight:700;">Everything already tallies — nothing to import or update.</td></tr>';
         $i('idmAll').checked = true; idmCount();
         $i('idmGo').innerHTML = '<i class="fa-solid fa-scale-balanced"></i> Import damage stock'; $i('idmModal').classList.add('open');
     }).catch(e => idmMsg($i('idmMsg'), 'err', 'Upload failed: ' + e.message));
@@ -379,10 +411,10 @@ function idmImport(){
     if (!confirm('Import ' + skus.length + ' damage line(s) so our Damaged Stock matches the Excel?')) return;
     $i('idmGo').disabled = true; $i('idmGo').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing…';
     const f = new FormData(); f.append('action', 'import'); f.append('xlsx_file', idmFile); f.append('adj_date', $i('idmDate').value); f.append('reason', $i('idmReason').value);
-    f.append('skus', JSON.stringify(skus)); if ($i('idmMissing').checked) f.append('include_missing', '1');
+    f.append('skus', JSON.stringify(skus)); if ($i('idmMissing').checked) f.append('include_missing', '1'); if ($i('idmTur').checked) f.append('update_tur', '1');
     fetch('bulk_damage_import2.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()).then(d => {
         if (!d.ok) { idmMsg($i('idmMMsg'), 'err', d.msg); $i('idmGo').disabled = false; $i('idmGo').innerHTML = '<i class="fa-solid fa-scale-balanced"></i> Import damage stock'; return; }
-        idmMsg($i('idmMMsg'), 'ok', d.rows + ' damage line(s) imported' + (d.created ? ', ' + d.created + ' new item(s) created' : '') + '.'); setTimeout(() => location.reload(), 800);
+        idmMsg($i('idmMMsg'), 'ok', d.rows + ' damage line(s) imported' + (d.tur ? ', ' + d.tur + ' TUR price(s) updated' : '') + (d.created ? ', ' + d.created + ' new item(s) created' : '') + '.'); setTimeout(() => location.reload(), 800);
     }).catch(e => { idmMsg($i('idmMMsg'), 'err', 'Import failed: ' + e.message); $i('idmGo').disabled = false; });
 }
 function idmPost(data){ const f = new FormData(); Object.keys(data).forEach(k => f.append(k, data[k])); return fetch('bulk_damage_import2.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()); }
@@ -393,8 +425,14 @@ function idmDel(id){
 function idmView(id){
     idmViewId = id; $i('idmVT').textContent = 'Damage lines — sync #' + id; $i('idmVB').innerHTML = '<tr><td colspan="6" style="padding:18px;color:#94a3b8;">Loading…</td></tr>'; $i('idmView').classList.add('open');
     fetch('bulk_damage_import2.php?ajax=items&id=' + id, {credentials:'same-origin'}).then(r => r.json()).then(d => {
-        $i('idmVB').innerHTML = d.items.map(i => { const s = +i.damage_qty; return '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td><b>' + esc(i.product_code) + '</b></td><td>' + esc(i.product_description) + '</td><td class="n">' + (i.system_qty == null ? '—' : fmt(i.system_qty, 2)) + '</td><td class="n">' + (i.excel_qty == null ? '—' : fmt(i.excel_qty, 0)) + '</td><td class="n ' + (s < 0 ? 'negq' : 'pos') + '">' + (s < 0 ? '−' : '+') + fmt(Math.abs(s), 2) + '</td></tr>'; }).join('') || '<tr><td colspan="6" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
+        $i('idmVB').innerHTML = d.items.map(i => { const s = +i.damage_qty; return '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td><b>' + esc(i.product_code) + '</b></td><td>' + esc(i.product_description) + '</td><td class="n">' + (i.system_qty == null ? '—' : fmt(i.system_qty, 2)) + '</td><td class="n">' + (i.excel_qty == null ? '—' : fmt(i.excel_qty, 0)) + '</td><td class="n ' + (s < 0 ? 'negq' : 'pos') + '">' + (s < 0 ? '−' : '+') + fmt(Math.abs(s), 2) + '</td><td class="n">' + (+i.tur ? fmt(i.tur, 2) : '<span style="color:#991b1b">no TUR</span>') + '</td><td class="n">' + (+i.damage_value ? fmt(i.damage_value, 2) : '—') + '</td></tr>'; }).join('') || '<tr><td colspan="8" style="padding:18px;color:#94a3b8;">No damage lines (TUR update only).</td></tr>';
+        $i('idmTurBox').style.display = d.turs.length ? 'block' : 'none';
+        $i('idmTB').innerHTML = d.turs.map(t => '<tr><td><b>' + esc(t.item_code) + '</b></td><td>' + esc(t.item_name) + '</td><td class="n">' + (t.old_tur == null || +t.old_tur === 0 ? '—' : fmt(t.old_tur, 2)) + '</td><td class="n" style="color:#6d28d9;font-weight:700;">' + fmt(t.tur, 2) + '</td><td><button class="idm-b l s" onclick="idmRevertTur(' + t.id + ')"><i class="fa-solid fa-rotate-left"></i> Revert to old</button></td></tr>').join('');
     });
+}
+function idmRevertTur(oid){
+    if (!confirm('Put the old TUR back for this item?')) return;
+    idmPost({action:'revert_tur', id:oid, import_id:idmViewId}).then(d => { if (d.ok) idmView(idmViewId); else alert(d.msg); });
 }
 function idmDelLines(){
     const ids = Array.from(document.querySelectorAll('.idm-ic:checked')).map(c => c.value);

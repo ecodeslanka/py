@@ -78,6 +78,13 @@ if (isset($conn) && $conn) {
         old_tur DECIMAL(15,4) NULL, import_id INT NULL, created_by VARCHAR(100) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_item (item_code), INDEX idx_import (import_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $cx = mysqli_query($conn, "SHOW COLUMNS FROM item_tur_overrides LIKE 'source'");      // 'adj' = Stock Sync, 'dmg' = Damage Stock Sync
+    if ($cx && mysqli_num_rows($cx) === 0) mysqli_query($conn, "ALTER TABLE item_tur_overrides ADD COLUMN source VARCHAR(10) NOT NULL DEFAULT 'adj'");
+}
+/* price to store on an adjustment / damage line: the price in the file when it has one, else the item's system TUR */
+function im_price_fill($given, $turmap, $code) {
+    $g = (float)$given;
+    return $g > 0 ? $g : (float)($turmap[trim((string)$code)] ?? 0);
 }
 function im_load_tur($conn) {
     $tur = [];

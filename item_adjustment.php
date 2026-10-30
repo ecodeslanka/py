@@ -74,11 +74,13 @@ if ($f_from)   $w[] = "entry_date >= '" . $e($f_from) . "'";
 if ($f_to)     $w[] = "entry_date <= '" . $e($f_to) . "'";
 if ($f_items)  $w[] = "item_code IN ('" . implode("','", array_map($e, $f_items)) . "')";
 if ($f_search) $w[] = "(note LIKE '%" . $e($f_search) . "%' OR item_code LIKE '%" . $e($f_search) . "%' OR created_by LIKE '%" . $e($f_search) . "%')";
+$turmap = im_load_tur($conn);      // TUR price per item (incl. Stock Sync TUR updates)
 $rows = []; $net = 0.0; $plus = 0.0; $minus = 0.0;
 $q = mysqli_query($conn, "SELECT id, item_code, entry_date, rejected_qty, adjustment_qty, note, created_by, created_at
     FROM stock_manual_adjustments WHERE " . implode(' AND ', $w) . " ORDER BY entry_date DESC, id DESC LIMIT 1000");
 while ($q && $r = mysqli_fetch_assoc($q)) {
     $r['item_name'] = $items[$r['item_code']] ?? '';
+    $r['tur'] = (float)($turmap[trim($r['item_code'])] ?? 0);
     $rows[] = $r;
     $a = (float)$r['adjustment_qty']; $net += $a; if ($a > 0) $plus += $a; else $minus += $a;
 }
@@ -163,7 +165,7 @@ table.ia-t td.n{text-align:right;font-family:monospace;white-space:nowrap;}
     </form>
 
     <div class="ia-wrap"><table class="ia-t">
-        <thead><tr><th>Date</th><th>Item</th><th class="n" style="text-align:right">Adjustment (units)</th><th>Note</th><th>By</th><th>Saved at</th><th></th></tr></thead>
+        <thead><tr><th>Date</th><th>Item</th><th class="n" style="text-align:right">Adjustment (units)</th><th class="n" style="text-align:right">TUR</th><th class="n" style="text-align:right">Value (TUR)</th><th>Note</th><th>By</th><th>Saved at</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($rows as $r): $a = (float)$r['adjustment_qty']; ?>
             <tr>
@@ -171,6 +173,8 @@ table.ia-t td.n{text-align:right;font-family:monospace;white-space:nowrap;}
                 <td><strong><?php echo htmlspecialchars($r['item_code']); ?></strong> <?php echo htmlspecialchars($r['item_name']); ?>
                     <?php if ((float)$r['rejected_qty'] != 0): ?><div style="font-size:10.5px;color:#92400e">also rejected qty on this entry: <?php echo number_format((float)$r['rejected_qty'], 2); ?></div><?php endif; ?></td>
                 <td class="n <?php echo $a < 0 ? 'negq' : 'pos'; ?>"><?php echo $a == 0 ? '—' : ia_n($a); ?></td>
+                <td class="n"><?php echo $r['tur'] ? number_format($r['tur'], 2) : '<span style="color:#991b1b">no TUR</span>'; ?></td>
+                <td class="n <?php echo $a < 0 ? 'negq' : 'pos'; ?>"><?php echo ($a == 0 || !$r['tur']) ? '—' : ia_n($a * $r['tur']); ?></td>
                 <td><?php echo htmlspecialchars($r['note'] ?? ''); ?></td>
                 <td><?php echo htmlspecialchars($r['created_by'] ?? ''); ?></td>
                 <td style="white-space:nowrap;color:#8892a4"><?php echo htmlspecialchars(substr((string)$r['created_at'], 0, 16)); ?></td>
@@ -182,7 +186,7 @@ table.ia-t td.n{text-align:right;font-family:monospace;white-space:nowrap;}
                 </td>
             </tr>
         <?php endforeach; ?>
-        <?php if (!$rows): ?><tr><td colspan="7" style="text-align:center;padding:30px;color:#8892a4;">No adjustments found.</td></tr><?php endif; ?>
+        <?php if (!$rows): ?><tr><td colspan="9" style="text-align:center;padding:30px;color:#8892a4;">No adjustments found.</td></tr><?php endif; ?>
         </tbody>
     </table></div>
 </div>

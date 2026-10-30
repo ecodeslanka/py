@@ -168,14 +168,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         mysqli_stmt_bind_param($st, 'ssss', $dd, $reason, $name, $who); mysqli_stmt_execute($st);
         $iid = mysqli_insert_id($conn);
         $ia = mysqli_prepare($conn, "INSERT INTO stock_manual_adjustments (item_code, entry_date, adjustment_qty, note, created_by) VALUES (?,?,?,?,?)");
-        $il = mysqli_prepare($conn, "INSERT INTO stock_adjustment_import_lines (import_id, adjustment_id, sku_code, basepack_code, item_name, transaction_type, txn_ref, txn_date, party_name, qty_units, signed_qty, tur, line_value) VALUES (?,?,?,?,?,?,'',?, '',?,?,0,0)");
+        $il = mysqli_prepare($conn, "INSERT INTO stock_adjustment_import_lines (import_id, adjustment_id, sku_code, basepack_code, item_name, transaction_type, txn_ref, txn_date, party_name, qty_units, signed_qty, tur, line_value) VALUES (?,?,?,?,?,?,'',?, '',?,?,?,?)");
+        $turmap = im_load_tur($conn);
         foreach ($rows as $r) {
             $signed = -$r['signed'];     // REVERSED: Excel minus = plus to inventory, Excel plus = minus from inventory
             $abs = abs($signed); $tt = $signed > 0 ? 'Variance (−) → in' : 'Variance (+) → out';
             $note = mb_substr('Variance import #' . $iid . ' · Excel ' . ($r['signed'] > 0 ? '+' : '−') . abs($r['signed']) . ' · ' . ($signed > 0 ? 'plus to inventory' : 'minus from inventory') . ($reason !== '' ? ' · ' . $reason : ''), 0, 255);
             mysqli_stmt_bind_param($ia, 'ssdss', $r['sku_code'], $dd, $signed, $note, $who); mysqli_stmt_execute($ia);
             $aid = mysqli_insert_id($conn);
-            mysqli_stmt_bind_param($il, 'iisssssdd', $iid, $aid, $r['sku_code'], $r['basepack_code'], $r['item_name'], $tt, $dd, $abs, $signed);
+            $tur = im_price_fill(0, $turmap, $r['sku_code']); $lval = round($abs * $tur, 4);      // no price in this Excel -> the item's system TUR
+            mysqli_stmt_bind_param($il, 'iisssssdddd', $iid, $aid, $r['sku_code'], $r['basepack_code'], $r['item_name'], $tt, $dd, $abs, $signed, $tur, $lval);
             mysqli_stmt_execute($il);
         }
         bai_json(['ok' => true, 'id' => $iid, 'rows' => count($rows), 'dups' => 0, 'created' => $created]);
@@ -307,7 +309,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><h3 style="margin:0;" id="idmVT">Adjustment lines</h3>
       <button class="idm-b r s" style="margin-left:auto;" onclick="idmDelLines()"><i class="fa-solid fa-trash"></i> Delete selected</button>
       <button class="idm-b l s" onclick="idmClose('idmView')">Close</button></div>
-    <div class="idm-wrap" style="max-height:62vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.idm-ic').forEach(c=>c.checked=this.checked)"></th><th>Type</th><th>SKU7</th><th>Basepack</th><th>Item</th><th class="n">Variance</th><th>Inventory item</th></tr></thead><tbody id="idmVB"></tbody></table></div>
+    <div class="idm-wrap" style="max-height:62vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.idm-ic').forEach(c=>c.checked=this.checked)"></th><th>Type</th><th>SKU7</th><th>Basepack</th><th>Item</th><th class="n">Variance</th><th class="n">TUR</th><th class="n">Value</th><th>Inventory item</th></tr></thead><tbody id="idmVB"></tbody></table></div>
   </div>
 </div>
 
@@ -352,9 +354,9 @@ function idmDel(id){
     idmPost({action:'delete_import', id:id}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
 }
 function idmView(id){
-    idmViewId = id; $i('idmVT').textContent = 'Adjustment lines — import #' + id; $i('idmVB').innerHTML = '<tr><td colspan="7" style="padding:18px;color:#94a3b8;">Loading…</td></tr>'; $i('idmView').classList.add('open');
+    idmViewId = id; $i('idmVT').textContent = 'Adjustment lines — import #' + id; $i('idmVB').innerHTML = '<tr><td colspan="9" style="padding:18px;color:#94a3b8;">Loading…</td></tr>'; $i('idmView').classList.add('open');
     fetch('bulk_adjustment_import2.php?ajax=items&id=' + id, {credentials:'same-origin'}).then(r => r.json()).then(d => {
-        $i('idmVB').innerHTML = d.items.map(i => { const s = +i.signed_qty; return '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td>' + esc(i.transaction_type) + '</td><td>' + esc(i.txn_ref) + '</td><td><b>' + esc(i.sku_code) + '</b></td><td>' + esc(i.item_name) + '</td><td>' + esc(i.party_name) + '</td><td class="n ' + (s < 0 ? 'negq' : 'pos') + '">' + (s < 0 ? '−' : '+') + fmt(Math.abs(s)) + '</td><td>' + (i.in_report == 1 ? '<span style="color:#166534;font-weight:700;">&#10003; matched</span>' : '<span style="color:#991b1b;font-weight:700;">&#10007; not in items</span>') + '</td></tr>'; }).join('') || '<tr><td colspan="7" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
+        $i('idmVB').innerHTML = d.items.map(i => { const s = +i.signed_qty; return '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td>' + esc(i.transaction_type) + '</td><td>' + esc(i.txn_ref) + '</td><td><b>' + esc(i.sku_code) + '</b></td><td>' + esc(i.item_name) + '</td><td>' + esc(i.party_name) + '</td><td class="n ' + (s < 0 ? 'negq' : 'pos') + '">' + (s < 0 ? '−' : '+') + fmt(Math.abs(s)) + '</td><td class="n">' + (+i.tur ? fmt(i.tur, 2) : '<span style="color:#991b1b">no TUR</span>') + '</td><td class="n">' + (+i.line_value ? fmt(i.line_value, 2) : '—') + '</td><td>' + (i.in_report == 1 ? '<span style="color:#166534;font-weight:700;">&#10003; matched</span>' : '<span style="color:#991b1b;font-weight:700;">&#10007; not in items</span>') + '</td></tr>'; }).join('') || '<tr><td colspan="9" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
     });
 }
 function idmDelLines(){

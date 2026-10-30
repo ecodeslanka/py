@@ -133,8 +133,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         $masters = [];
         foreach (im_load_masters($conn) as $m) $masters[(string)$m['code']] = $m['name'];
+        $turmap = im_load_tur($conn);
         $ok = []; $skipped = 0; $dups = 0;
         foreach ($rows as $r) {
+            $r['rate'] = im_price_fill($r['rate'], $turmap, $r['sku_code']);      // SIP rate missing -> system TUR
             if (!$r['is_damage']) { $skipped++; continue; }
             $rf = mysqli_real_escape_string($conn, $r['txn_ref']); $sk = mysqli_real_escape_string($conn, $r['sku_code']);
             $d = mysqli_query($conn, "SELECT 1 FROM sampath_damage_import_items WHERE outlet_code='TRANSFER' AND bill_number='$rf' AND product_code='$sk' AND damage_qty=" . (float)$r['qty'] . " LIMIT 1");

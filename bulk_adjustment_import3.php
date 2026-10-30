@@ -164,12 +164,12 @@ function bsi_compare($conn, $rows, $date, $include_missing) {
         $c = $r['sku_code']; $seen[$c] = 1;
         $sys = isset($our[$c]) ? $our[$c]['close'] : 0.0;
         $cmp[] = ['sku' => $c, 'name' => $r['item_name'], 'basepack' => $r['basepack_code'], 'excel' => $r['units'], 'system' => $sys, 'diff' => round($r['units'] - $sys, 2),
-                  'tur' => $r['tur'], 'tur_old' => (float)($turmap[$c] ?? 0), 'tur_new' => (float)$r['tur'],
+                  'tur' => im_price_fill($r['tur'], $turmap, $c), 'tur_old' => (float)($turmap[$c] ?? 0), 'tur_new' => (float)$r['tur'],
                   'tur_changed' => $r['tur'] > 0 && abs($r['tur'] - (float)($turmap[$c] ?? 0)) > 0.004, 'new_item' => !isset($masters[$c]), 'missing' => false];
     }
     if ($include_missing) foreach ($our as $c => $o) {
         if (isset($seen[$c]) || round($o['close'], 2) == 0) continue;
-        $cmp[] = ['sku' => $c, 'name' => $o['name'] ?: ($masters[$c] ?? ''), 'basepack' => '', 'excel' => 0.0, 'system' => $o['close'], 'diff' => round(-$o['close'], 2), 'tur' => 0.0, 'tur_old' => (float)($turmap[$c] ?? 0), 'tur_new' => 0.0, 'tur_changed' => false, 'new_item' => false, 'missing' => true];
+        $cmp[] = ['sku' => $c, 'name' => $o['name'] ?: ($masters[$c] ?? ''), 'basepack' => '', 'excel' => 0.0, 'system' => $o['close'], 'diff' => round(-$o['close'], 2), 'tur' => (float)($turmap[$c] ?? 0), 'tur_old' => (float)($turmap[$c] ?? 0), 'tur_new' => 0.0, 'tur_changed' => false, 'new_item' => false, 'missing' => true];
     }
     return $cmp;
 }
@@ -239,7 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $id = (int)($_POST['id'] ?? 0);
         mysqli_query($conn, "DELETE a FROM stock_manual_adjustments a JOIN stock_adjustment_import_lines l ON l.adjustment_id = a.id WHERE l.import_id=$id");
         mysqli_query($conn, "DELETE FROM stock_adjustment_import_lines WHERE import_id=$id");
-        mysqli_query($conn, "DELETE FROM item_tur_overrides WHERE import_id=$id");      // TUR goes back to the old price
+        mysqli_query($conn, "DELETE FROM item_tur_overrides WHERE import_id=$id AND source='adj'");      // TUR goes back to the old price
         mysqli_query($conn, "DELETE FROM stock_adjustment_imports WHERE id=$id");
         bsi_json(['ok' => true]);
     }
@@ -248,16 +248,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $ids = array_filter(array_map('intval', explode(',', $_POST['ids'] ?? '')));
         if (!$ids) bsi_json(['ok' => false, 'msg' => 'Nothing selected.']);
         $in = implode(',', $ids);
-        mysqli_query($conn, "DELETE o FROM item_tur_overrides o JOIN stock_adjustment_import_lines l ON l.sku_code = o.item_code AND l.import_id = o.import_id WHERE l.import_id=$id AND l.id IN ($in)");
+        mysqli_query($conn, "DELETE o FROM item_tur_overrides o JOIN stock_adjustment_import_lines l ON l.sku_code = o.item_code AND l.import_id = o.import_id WHERE o.source='adj' AND l.import_id=$id AND l.id IN ($in)");
         mysqli_query($conn, "DELETE a FROM stock_manual_adjustments a JOIN stock_adjustment_import_lines l ON l.adjustment_id = a.id WHERE l.import_id=$id AND l.id IN ($in)");
         mysqli_query($conn, "DELETE FROM stock_adjustment_import_lines WHERE import_id=$id AND id IN ($in)");
-        $c = mysqli_fetch_assoc(mysqli_query($conn, "SELECT (SELECT COUNT(*) FROM stock_adjustment_import_lines WHERE import_id=$id) + (SELECT COUNT(*) FROM item_tur_overrides WHERE import_id=$id) c"));
+        $c = mysqli_fetch_assoc(mysqli_query($conn, "SELECT (SELECT COUNT(*) FROM stock_adjustment_import_lines WHERE import_id=$id) + (SELECT COUNT(*) FROM item_tur_overrides WHERE import_id=$id AND source='adj') c"));
         if ((int)$c['c'] === 0) mysqli_query($conn, "DELETE FROM stock_adjustment_imports WHERE id=$id");
         bsi_json(['ok' => true]);
     }
     if ($act === 'revert_tur') {
         $oid = (int)($_POST['id'] ?? 0); $iid = (int)($_POST['import_id'] ?? 0);
-        mysqli_query($conn, "DELETE FROM item_tur_overrides WHERE id=$oid AND import_id=$iid");
+        mysqli_query($conn, "DELETE FROM item_tur_overrides WHERE id=$oid AND import_id=$iid AND source='adj'");
         bsi_json(['ok' => true]);
     }
     bsi_json(['ok' => false, 'msg' => 'Unknown action.']);
@@ -267,7 +267,7 @@ if (($_GET['ajax'] ?? '') === 'items') {
     $q = mysqli_query($conn, "SELECT l.* FROM stock_adjustment_import_lines l JOIN stock_manual_adjustments a ON a.id = l.adjustment_id WHERE l.import_id=$id ORDER BY l.sku_code");
     if ($q) while ($r = mysqli_fetch_assoc($q)) $items[] = $r;
     $turs = [];
-    $q = mysqli_query($conn, "SELECT id, item_code, item_name, tur, old_tur FROM item_tur_overrides WHERE import_id=$id ORDER BY item_code");
+    $q = mysqli_query($conn, "SELECT id, item_code, item_name, tur, old_tur FROM item_tur_overrides WHERE import_id=$id AND source='adj' ORDER BY item_code");
     if ($q) while ($r = mysqli_fetch_assoc($q)) $turs[] = $r;
     bsi_json(['ok' => true, 'items' => $items, 'turs' => $turs]);
 }
@@ -275,12 +275,12 @@ if (($_GET['ajax'] ?? '') === 'items') {
 $imports = [];
 $q = mysqli_query($conn, "SELECT i.*, COUNT(a.id) AS n, COALESCE(SUM(CASE WHEN l.signed_qty > 0 THEN l.signed_qty ELSE 0 END),0) AS q_in,
         COALESCE(SUM(CASE WHEN l.signed_qty < 0 THEN -l.signed_qty ELSE 0 END),0) AS q_out,
-        (SELECT COUNT(*) FROM item_tur_overrides t WHERE t.import_id = i.id) AS n_tur
+        (SELECT COUNT(*) FROM item_tur_overrides t WHERE t.import_id = i.id AND t.source='adj') AS n_tur
     FROM stock_adjustment_imports i
     LEFT JOIN stock_adjustment_import_lines l ON l.import_id = i.id
     LEFT JOIN stock_manual_adjustments a ON a.id = l.adjustment_id
     WHERE EXISTS (SELECT 1 FROM stock_adjustment_import_lines v WHERE v.import_id = i.id AND v.transaction_type LIKE 'Stock Sync%')
-       OR EXISTS (SELECT 1 FROM item_tur_overrides t2 WHERE t2.import_id = i.id)
+       OR EXISTS (SELECT 1 FROM item_tur_overrides t2 WHERE t2.import_id = i.id AND t2.source='adj')
     GROUP BY i.id ORDER BY i.adj_date DESC, i.id DESC");
 if ($q) while ($r = mysqli_fetch_assoc($q)) $imports[] = $r;
 $sum = ['n' => count($imports), 'rows' => 0, 'in' => 0, 'out' => 0];

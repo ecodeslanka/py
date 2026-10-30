@@ -12,6 +12,7 @@
 // ============================================================
 include 'config.php';
 include_once 'auth.php';
+require_once 'item_match_lib.php';     // im_load_tur(), im_price_fill()
 requireLogin();
 if (session_status() === PHP_SESSION_NONE) session_start();
 mysqli_report(MYSQLI_REPORT_OFF);
@@ -163,6 +164,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         };
         $new = []; $dups = 0;
         foreach ($rows as $r) { if ($dupe($r)) $dups++; else $new[] = $r; }
+        $turmap = im_load_tur($conn);
+        foreach ($new as &$rr) {            // price missing in the file -> the item's system TUR; value follows
+            $rr['tur'] = im_price_fill($rr['tur'], $turmap, $rr['product_code']);
+            if ((float)$rr['damage_value'] == 0 && $rr['tur'] > 0) $rr['damage_value'] = round($rr['damage_qty'] * $rr['tur'], 4);
+        }
+        unset($rr);
         $tq = 0; $tv = 0; $dates = [];
         foreach ($new as $r) { $tq += $r['damage_qty']; $tv += $r['damage_value']; if ($r['delivery_date']) $dates[$r['delivery_date']] = 1; }
         ksort($dates);
@@ -217,7 +224,7 @@ if (($_GET['ajax'] ?? '') === 'items') {
 }
 
 $imports = [];
-$q = mysqli_query($conn, "SELECT i.* FROM sampath_damage_imports i WHERE NOT EXISTS (SELECT 1 FROM sampath_damage_import_items x WHERE x.import_id = i.id AND x.outlet_code IN ('TRANSFER','DMGSYNC')) ORDER BY i.damage_date DESC, i.id DESC");   // transfer imports are on Bulk Damage Import
+$q = mysqli_query($conn, "SELECT i.* FROM sampath_damage_imports i WHERE NOT EXISTS (SELECT 1 FROM sampath_damage_import_items x WHERE x.import_id = i.id AND x.outlet_code IN ('TRANSFER','DMGSYNC')) AND NOT EXISTS (SELECT 1 FROM item_tur_overrides t WHERE t.import_id = i.id AND t.source = 'dmg') ORDER BY i.damage_date DESC, i.id DESC");   // transfer imports are on Bulk Damage Import
 if ($q) while ($r = mysqli_fetch_assoc($q)) $imports[] = $r;
 $sum = ['n' => count($imports), 'rows' => 0, 'qty' => 0, 'val' => 0];
 foreach ($imports as $r) { $sum['rows'] += $r['total_rows']; $sum['qty'] += $r['total_qty']; $sum['val'] += $r['total_value']; }
