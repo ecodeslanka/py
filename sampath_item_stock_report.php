@@ -485,8 +485,8 @@ table.isr-t thead th{position:sticky;top:0;z-index:2;}
             <td class="n"><?php echo qcell($r['rej'], $r['upc'], true); ?></td>
             <td class="n"><?php echo qcell($r['adj'], 0); ?></td>
             <td class="n <?php echo $r['close'] < 0 ? 'neg' : ''; ?>"><strong><?php echo $r['is_dmg'] ? '—' : qn($r['close']); ?></strong></td>
-            <?php if ($show_dcol): ?><td class="n" style="background:#fff7ed;color:#9a3412;font-weight:700;<?php echo round($r['dmg']) != 0 ? 'cursor:pointer;text-decoration:underline dotted;' : ''; ?>"
-                <?php if (round($r['dmg']) != 0 && !$r['is_dmg']): ?>onclick="event.stopPropagation();isrLedger(<?php echo htmlspecialchars(json_encode($r['base']), ENT_QUOTES); ?>, 'damaged')" title="Damaged Stock ledger"<?php endif; ?>><?php echo sgn($r['dmg']); ?></td><?php endif; ?>
+            <?php if ($show_dcol): ?><td class="n" style="background:#fff7ed;color:#9a3412;font-weight:700;cursor:pointer;<?php echo round($r['dmg']) != 0 ? 'text-decoration:underline dotted;' : ''; ?>"
+                <?php if (!$r['is_dmg']): ?>onclick="event.stopPropagation();isrLedger(<?php echo htmlspecialchars(json_encode($r['base']), ENT_QUOTES); ?>, 'damaged')" title="Damaged Stock ledger"<?php endif; ?>><?php echo sgn($r['dmg']); ?></td><?php endif; ?>
             <td class="n"><?php echo $r['value'] ? number_format($r['value'], 2) : '—'; ?></td>
             <td class="n <?php echo $r['cval'] < 0 ? 'neg' : ''; ?>"><?php echo $r['is_dmg'] ? '—' : number_format($r['cval'], 2); ?></td>
         </tr>
@@ -564,7 +564,7 @@ function isrLedger(code, loc){
                  <td class="n">${d.upc ? fm0(d.upc) : '—'}</td>
                  <td class="n">${r.in ? fm(r.in) : '—'}</td><td class="n">${r.out ? fm(r.out) : '—'}</td>
                  <td class="n ${r.bal < 0 ? 'neg' : ''}"><strong>${fm(r.bal)}</strong></td></tr>`).join('')
-                : '<tr><td colspan="7" style="text-align:center;padding:20px;color:#8892a4">No movements up to this date.</td></tr>';
+                : '<tr><td colspan="7" style="text-align:center;padding:20px;color:#8892a4">' + (loc === 'damaged' ? 'No damage entries for this item.' : 'No movements up to this date.') + '</td></tr>';
         }).catch(e => { document.getElementById('isrMSub').textContent = 'Failed to load: ' + e.message; });
 }
 function isrClose(){ document.getElementById('isrModal').classList.remove('open'); }
