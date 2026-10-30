@@ -1053,6 +1053,9 @@ if (isset($conn) && $conn) {
     <a href="sampath_damage_batches.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_damage_batches.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-truck-loading"></i><span>Sampath Damage Entry</span>
     </a>
+    <a href="import_sampath_damages.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'import_sampath_damages.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-file-import"></i><span>Import Sampath Damages</span>
+    </a>
     <a href="physical_stock_count_upload.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'physical_stock_count_upload.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-clipboard-check"></i><span>Import Physical Stock</span>
     </a>
