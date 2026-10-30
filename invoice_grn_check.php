@@ -8,6 +8,8 @@
 //     (taxable value, VAT, bill value). The PDF itself is NOT stored on the server and is NOT edited.
 //  2. The invoice is looked up in the Age Analysis data (secondary_invoice_import_details by bill no) and shows the same fields
 //     as the Sampath Age Analysis report: secondary amount, GRN value / date (sampath_grn_summary), credit note, cheque.
+//  2b. "Download invoice as Excel" converts the whole PDF (header, every invoice line, the bill statement lines, totals) to an Excel
+//     file EXACTLY as printed - it is a read-only conversion, nothing is changed.
 //  3. "GRN Adjustment Note" opens a black & white printable note (Save as PDF) that REFERS to the original tax invoice and shows
 //     the original taxable / VAT / bill value, the GRN accepted value with its tax split, and the difference. It is a separate
 //     document - it is not a tax invoice and does not replace the original.
@@ -54,6 +56,34 @@ function ig_scan($key, $pdf_bytes, &$err) {
     if (!is_array($d)) { $err = 'Gemini returned an unreadable answer.'; return null; }
     foreach (['taxable_value','vat_rate','vat_value','gross_amount','std_discount','bill_value','net_amount','sku_count'] as $k) $d[$k] = isset($d[$k]) && $d[$k] !== null ? ig_num($d[$k]) : null;
     foreach (['tax_invoice_no','invoice_no','invoice_date','supplier_name','purchaser_name','purchaser_tin'] as $k) $d[$k] = trim((string)($d[$k] ?? ''));
+    return $d;
+}
+
+/* ── Gemini: read EVERY line of the invoice (for the as-printed Excel export) ── */
+function ig_scan_full($key, $pdf_bytes, &$err) {
+    $prompt = "This PDF is a Sri Lankan 'TAX INVOICE' printed from LeverEDGE. Read it completely and reply with JSON only: "
+        . "{\"header\": {\"tax_invoice_no\":str,\"invoice_no\":str,\"date_of_invoice\":str,\"date_of_supply\":str,\"supplier_name\":str,\"supplier_tin\":str,\"purchaser_name\":str,\"purchaser_tin\":str}, "
+        . "\"lines\": [[ref(int), sku_code_and_description(str), quantity(int), unit_price(num), amount_excl_vat(num)], ...] (every row of the 'Reference / Description of Goods or Services' table on all pages), "
+        . "\"statement\": [[sl_no(int), sku_code_and_description(str), sale_cs(int), sale_pcs(int), free_cs(int), free_pcs(int), case_config(int), price_per_unit_tur(num), gross_amount(num), scheme_disc(num), mrp(num)], ...] (every row of the bill statement table), "
+        . "\"totals\": {\"total_taxable_value\":num,\"vat_rate\":num,\"vat_value\":num,\"gross_amount\":num,\"scheme_discount\":num,\"std_discount\":num,\"bill_value\":num,\"return_damages\":num,\"net_amount\":num,\"no_of_skus\":int}}. "
+        . "Copy the numbers exactly as printed (plain numbers, no commas). Do not skip, merge or invent rows. Descriptions that wrap onto a second line belong to the same row.";
+    $body = json_encode([
+        'contents' => [['parts' => [['inline_data' => ['mime_type' => 'application/pdf', 'data' => base64_encode($pdf_bytes)]], ['text' => $prompt]]]],
+        'generationConfig' => ['temperature' => 0, 'maxOutputTokens' => 60000, 'responseMimeType' => 'application/json', 'thinkingConfig' => ['thinkingBudget' => 0]],
+    ]);
+    $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode(GEMINI_MODEL) . ':generateContent';
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body, CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 170,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-goog-api-key: ' . $key]]);
+    $res = curl_exec($ch); $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    if ($res === false) { $err = 'Gemini request failed: ' . curl_error($ch); curl_close($ch); return null; }
+    curl_close($ch);
+    $j = json_decode($res, true);
+    if ($http >= 400) { $err = 'Gemini error ' . $http . ': ' . ($j['error']['message'] ?? 'unknown'); return null; }
+    $txt = '';
+    foreach (($j['candidates'][0]['content']['parts'] ?? []) as $p) $txt .= $p['text'] ?? '';
+    $d = json_decode(trim($txt), true);
+    if (!is_array($d) || !isset($d['lines'])) { $err = 'Gemini returned an unreadable or cut-off answer. Try again.'; return null; }
     return $d;
 }
 
@@ -119,6 +149,20 @@ if ($ajax === 'scan' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (substr($bytes, 0, 4) !== '%PDF') { echo json_encode(['ok' => false, 'error' => 'That file is not a PDF.']); exit; }
     $err = '';
     $d = ig_scan($key, $bytes, $err);
+    echo json_encode($d ? ['ok' => true, 'data' => $d] : ['ok' => false, 'error' => $err], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+if ($ajax === 'excel' && $_SERVER['REQUEST_METHOD'] === 'POST') {      // read-only conversion of the invoice to rows for Excel
+    header('Content-Type: application/json; charset=utf-8');
+    @set_time_limit(220);
+    $key = im_gemini_key();
+    if ($key === '') { echo json_encode(['ok' => false, 'error' => 'No Gemini API key is saved in AI Settings.']); exit; }
+    $f = $_FILES['pdf'] ?? null;
+    if (!$f || $f['error'] !== UPLOAD_ERR_OK) { echo json_encode(['ok' => false, 'error' => 'Upload failed (code ' . (int)($f['error'] ?? -1) . ').']); exit; }
+    $bytes = file_get_contents($f['tmp_name']);
+    if (substr($bytes, 0, 4) !== '%PDF' || $f['size'] > 12 * 1024 * 1024) { echo json_encode(['ok' => false, 'error' => 'Upload a PDF under 12 MB.']); exit; }
+    $err = '';
+    $d = ig_scan_full($key, $bytes, $err);
     echo json_encode($d ? ['ok' => true, 'data' => $d] : ['ok' => false, 'error' => $err], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -232,6 +276,7 @@ table{border-collapse:collapse;width:100%}
 $has_key = im_gemini_key() !== '';
 include 'header.php';
 ?>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
 .ig{padding:0 4px;}
 .ig h2{font-size:22px;font-weight:800;margin:0 0 4px;}
@@ -263,6 +308,7 @@ table.ig-t td.k{color:#6b7280;font-size:11px;text-transform:uppercase;letter-spa
         <div class="ig-f">
             <input type="file" id="igFile" accept="application/pdf,.pdf">
             <button class="ig-b" id="igScan" type="button" onclick="igScan()" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Scan &amp; Check</button>
+            <button class="ig-b g" id="igXls" type="button" onclick="igExcel()" disabled title="Converts the whole PDF to Excel exactly as printed (nothing is changed)"><i class="fa-solid fa-file-excel"></i> Invoice to Excel (as printed)</button>
             <span style="color:#8892a4;font-size:12px">or</span>
             <input class="ig-in" id="igManual" type="text" placeholder="type a tax invoice / bill no" style="min-width:230px">
             <button class="ig-b l" type="button" onclick="igManual()"><i class="fa-solid fa-magnifying-glass"></i> Check number</button>
@@ -284,7 +330,7 @@ let igScanData = null, igRows = [], igSel = 0;
 function msg(h, c){ document.getElementById('igMsgs').innerHTML = h ? `<div class="ig-msg ${c || 'ok'}">${h}</div>` : ''; }
 
 document.getElementById('igFile').addEventListener('change', e => {
-    const f = e.target.files[0]; document.getElementById('igScan').disabled = !f;
+    const f = e.target.files[0]; document.getElementById('igScan').disabled = !f; document.getElementById('igXls').disabled = !f;
     if (f) { document.getElementById('igPdf').src = URL.createObjectURL(f); document.getElementById('igGrid').style.display = ''; document.getElementById('igRes').innerHTML = ''; }
 });
 
@@ -297,6 +343,34 @@ async function igScan(){
         if (!d.ok) throw new Error(d.error || 'Scan failed.');
         igScanData = d.data;
         await igLookup(igScanData.tax_invoice_no, igScanData.invoice_no);
+    } catch (e) { msg(esc(e.message), 'err'); }
+    btn.disabled = false; btn.innerHTML = orig;
+}
+async function igExcel(){
+    const f = document.getElementById('igFile').files[0]; if (!f) return;
+    const btn = document.getElementById('igXls'), orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Reading every line (can take a minute)…'; msg('');
+    try {
+        const fd = new FormData(); fd.append('pdf', f);
+        const r = await fetch('invoice_grn_check.php?ajax=excel', {method:'POST', body: fd}); const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Conversion failed.');
+        const x = d.data, h = x.header || {}, t = x.totals || {};
+        const wb = new ExcelJS.Workbook(), bold = c => { c.font = {bold:true}; c.fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FFFBE5D6'}}; };
+        const w1 = wb.addWorksheet('Header & totals');
+        [['Tax Invoice No', h.tax_invoice_no],['Invoice No (statement)', h.invoice_no],['Date of Invoice', h.date_of_invoice],['Date of Supply', h.date_of_supply],['Supplier', h.supplier_name],['Supplier TIN', h.supplier_tin],
+         ['Purchaser', h.purchaser_name],['Purchaser TIN', h.purchaser_tin],[],['Total Taxable Value', t.total_taxable_value],['VAT %', t.vat_rate],['VAT Value', t.vat_value],['Gross Amount', t.gross_amount],
+         ['Scheme Discount', t.scheme_discount],['Std Discount', t.std_discount],['Bill Value', t.bill_value],['Return / Damages', t.return_damages],['Net Amount (To Be Collected)', t.net_amount],[],
+         ['No of SKUs (printed)', t.no_of_skus],['Invoice lines read', (x.lines || []).length],['Statement lines read', (x.statement || []).length],['Sum of invoice line amounts (check)', Math.round((x.lines || []).reduce((a, r) => a + (+r[4] || 0), 0) * 100) / 100]]
+            .forEach(r => { const row = w1.addRow(r); if (r.length) row.getCell(1).font = {bold:true}; });
+        w1.getColumn(1).width = 38; w1.getColumn(2).width = 46;
+        const w2 = wb.addWorksheet('Invoice lines'); w2.addRow(['Ref','SKU code - Description','Quantity','Unit Price','Amount Excl. VAT (Rs.)']).eachCell(bold);
+        (x.lines || []).forEach(r => w2.addRow(r)); w2.getColumn(2).width = 52; [4,5].forEach(n => { w2.getColumn(n).numFmt = '#,##0.00'; w2.getColumn(n).width = 18; }); w2.views = [{state:'frozen', ySplit:1}];
+        const w3 = wb.addWorksheet('Bill statement'); w3.addRow(['Sl No','SKU Code + Description','Sale Qty CS','Sale Qty Pcs','Free Qty CS','Free Qty Pcs','Case Config','Price Per Unit (TUR)','Gross Amount','Scheme Disc','MRP']).eachCell(bold);
+        (x.statement || []).forEach(r => w3.addRow(r)); w3.getColumn(2).width = 52; [8,9,10,11].forEach(n => { w3.getColumn(n).numFmt = '#,##0.00'; w3.getColumn(n).width = 16; }); w3.views = [{state:'frozen', ySplit:1}];
+        const buf = await wb.xlsx.writeBuffer(), a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+        a.download = 'invoice_' + String(h.tax_invoice_no || 'scan').replace(/[^A-Za-z0-9_-]/g, '') + '_as_printed.xlsx'; a.click(); URL.revokeObjectURL(a.href);
+        const n1 = (x.lines || []).length, n2 = (x.statement || []).length;
+        msg('Excel downloaded — ' + n1 + ' invoice lines, ' + n2 + ' statement lines' + (t.no_of_skus && (+t.no_of_skus !== n1 || +t.no_of_skus !== n2) ? ' (the invoice prints ' + t.no_of_skus + ' SKUs — check the counts)' : ' (matches the printed SKU count)') + '. The file is exactly as printed.', (t.no_of_skus && (+t.no_of_skus !== n1 || +t.no_of_skus !== n2)) ? 'warn' : 'ok');
     } catch (e) { msg(esc(e.message), 'err'); }
     btn.disabled = false; btn.innerHTML = orig;
 }
