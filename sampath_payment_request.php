@@ -298,20 +298,21 @@ table.spr-t tr.sent td{background:#f8fafc;color:#94a3b8;} table.spr-t tr.sel td{
   </form>
 </div>
 <script>
-function sprCbs(){ return Array.from(document.querySelectorAll('.spr-cb')).filter(c => c.closest('tr').style.display !== 'none'); }
+function sprCbs(){ return Array.from(document.querySelectorAll('.spr-cb')); }   // every ticked invoice counts, even if the search hides/changes the list
+function sprVis(){ return sprCbs().filter(c => c.closest('tr').style.display !== 'none'); }
 function sprFilter(){
     const q = document.getElementById('sprSearch').value.trim().toLowerCase();
     let n = 0;
     document.querySelectorAll('.spr-t tbody tr[data-bill]').forEach(tr => {
-        const show = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
+        const c = tr.querySelector('.spr-cb');
+        const show = !q || tr.textContent.toLowerCase().indexOf(q) !== -1 || (c && c.checked);   // ticked rows stay listed
         tr.style.display = show ? '' : 'none';
-        if (!show) { const c = tr.querySelector('.spr-cb'); if (c) c.checked = false; }
         if (show) n++;
     });
     document.getElementById('sprShown').textContent = n;
     sprUpd();
 }
-function sprAll(on){ sprCbs().forEach(c => c.checked = on); const h = document.getElementById('sprHead'); if (h) h.checked = on; sprUpd(); }
+function sprAll(on){ (on ? sprVis() : sprCbs()).forEach(c => c.checked = on); const h = document.getElementById('sprHead'); if (h) h.checked = on; sprUpd(); }
 function sprUpd(){
     let n = 0, v = 0;
     sprCbs().forEach(c => { const tr = c.closest('tr'); tr.classList.toggle('sel', c.checked); if (c.checked) { n++; v += parseFloat(tr.dataset.val) || 0; } });
