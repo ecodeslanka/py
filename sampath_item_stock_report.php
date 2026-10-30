@@ -14,12 +14,15 @@
 //    Good Rejected           -> stock_manual_adjustments.rejected_qty             (units, Sampath Goods Rejected)
 //    Adjustment              -> stock_manual_adjustments.adjustment_qty           (units)
 //    Closing Balance         = Primary Purchase - Primary Returned - Secondary Inv - Good Rejected + Adjustment
-//    Closing Stock Value     = Closing Balance x Item Value (price per case / UPC)
+//    Item Value (TUR)        = latest TUR (invoice data / Stock Sync TUR update) - same price as the Inventory Reconciliation Report;
+//                              items with no TUR use price per case / UPC
+//    Closing Stock Value     = Closing Balance x Item Value (TUR)
 //    Damaged Stock          -> column after Closing Balance (option); source = confirmed Sampath Damage Entry lines ONLY
 //                              (NOT the secondary Dmg/Exp qty). Stock Location 'Damaged Stock items' lists them as <code>-D rows.
 //  Click an item to open its ledger (every movement + running balance).
 // ============================================================
 include 'config.php';
+require_once 'item_match_lib.php';     // im_load_tur(): the same TUR price the Inventory Reconciliation Report uses
 
 function isr_table_exists($conn, $t) {
     $q = mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $t) . "'");
@@ -281,9 +284,10 @@ if ($have['invoice_wise_sales_data']) {
 
 $rows = [];
 $tot = ['dmg'=>0,'open'=>0,'pc'=>0,'rc'=>0,'so'=>0,'rej'=>0,'adj'=>0,'close'=>0,'val'=>0];
-$add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m, $open = 0.0, $dmg_q = 0.0) use (&$rows, &$tot) {
+$tur_map = im_load_tur($conn);      // latest invoice TUR, or the TUR set on Stock Sync
+$add_row = function ($code, $base, $name, $bp, $loc_label, $is_dmg, $a, $m, $open = 0.0, $dmg_q = 0.0) use (&$rows, &$tot, $tur_map) {
     $upc_v = (float)($m['upc'] ?? 0);
-    $value = (float)($m['value'] ?? 0);
+    $value = (float)($tur_map[$base] ?? $tur_map[$code] ?? ($m['value'] ?? 0));      // Item Value = TUR (falls back to price per case / UPC)
     if ($is_dmg) {
         /* Damaged Stock item (<code>-D): its own log from the confirmed Sampath damage entries. It never shows in Opening Units,
            Secondary Inv or Closing Balance - the qty is only in the Damaged Stock column. */
@@ -474,7 +478,7 @@ table.isr-t thead th{position:sticky;top:0;z-index:2;}
         $boxes[] = ['Adjustment', sgn($tot['adj']), 'units', '#0e7490'];
         $boxes[] = ['Closing Balance', sgn($tot['close']), 'units · good stock', '#15803d'];
         if ($show_dcol || $f_loc === 'damaged') $boxes[] = ['Damaged Stock', sgn($tot['dmg']), 'units · confirmed damage entries', '#c2410c'];
-        $boxes[] = ['Closing Stock Value', number_format($tot['val'], 2), 'Rs. at item value', '#0f766e'];
+        $boxes[] = ['Closing Stock Value', number_format($tot['val'], 2), 'Rs. at TUR', '#0f766e'];
         foreach ($boxes as $b): ?>
         <div class="isr-sbox" style="--c:<?php echo $b[3]; ?>">
             <div class="l"><?php echo $b[0]; ?></div>
@@ -489,7 +493,7 @@ table.isr-t thead th{position:sticky;top:0;z-index:2;}
         <thead><tr>
             <th>Basepack Code</th><th>SKU7</th><th style="text-align:left">Product Name</th><th>Location</th><th>UPC</th>
             <th>Opening Units<br><small>units</small></th><th>Primary Purchase<br><small>units</small></th><th>Primary Returned<br><small>units</small></th><th>Secondary Inv<br><small>units</small></th><th>Good Rejected<br><small>units</small></th><th>Adjustment<br><small>units</small></th>
-            <th>Closing Balance<br><small>units</small></th><?php if ($show_dcol): ?><th style="background:#fed7aa">Damaged Stock<br><small>units</small></th><?php endif; ?><th>Item Value</th><th>Closing Stock Value</th>
+            <th>Closing Balance<br><small>units</small></th><?php if ($show_dcol): ?><th style="background:#fed7aa">Damaged Stock<br><small>units</small></th><?php endif; ?><th>Item Value<br><small>TUR</small></th><th>Closing Stock Value</th>
         </tr></thead>
         <tbody>
         <?php foreach ($rows as $i => $r): ?>
@@ -602,7 +606,7 @@ function isrHead(row){ row.eachCell(c => { c.font = {bold:true}; c.fill = {type:
 async function isrExport(){
     const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet('Item Stock');
     ws.addRow(['Sampath Inventory Report — ' + ISR_PERIOD]).font = {bold:true, size:14};
-    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Opening Units','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)'].concat(ISR_DCOL ? ['Damaged Stock (units)'] : [], ['Item Value','Closing Stock Value'])));
+    isrHead(ws.addRow(['Basepack Code','SKU7','Product Name','Location','UPC','Opening Units','Primary Purchase (units)','Primary Returned (units)','Secondary Inv (units)','Good Rejected (units)','Adjustment (units)','Closing Balance (units)'].concat(ISR_DCOL ? ['Damaged Stock (units)'] : [], ['Item Value (TUR)','Closing Stock Value'])));
     ISR_ROWS.forEach(r => ws.addRow([r.basepack, r.sku7, r.name, r.location, r.upc, r.open, r.pc, -r.rc, r.so_s, -r.rej, r.adj, r.close].concat(ISR_DCOL ? [r.dmg] : [], [r.value, r.cval])));
     const nq = ISR_DCOL ? 13 : 12;
     for (let c = 5; c <= nq; c++) ws.getColumn(c).numFmt = '#,##0';

@@ -9,7 +9,8 @@
 //
 //  Per item (qty in units; value = qty x TUR):
 //    TUR                    -> latest TUR per item: invoice_wise_sales_data.tur, else primary_invoice_wise_sales_data.tur,
-//                              else unit price from the purchase import (price per case / UPC)
+//                              else unit price from the purchase import (price per case / UPC). A TUR updated on Stock Sync
+//                              (item_tur_overrides) wins over these - the Sampath Inventory Report's Item Value uses the same TUR.
 //    Opening Inventory      -> closing good stock as at the From date (range mode)
 //    Primary Purchase       -> unilever_purchase_items.purchase_qty_cases x UPC (PLUS qty rows only)
 //    Primary Return         -> unilever_item_return_items.qty x UPC + the MINUS qty rows of the purchase import
