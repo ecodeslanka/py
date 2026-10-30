@@ -386,6 +386,8 @@ async function igParseInvoicePdf(pdfjsLib, buf) {
     totals.return_damages = t(/Return \/ Damages\s+([\d,]+\.\d\d)/);
     totals.net_amount = t(/Net Amount \( To Be Collected \)\s+([\d,]+\.\d\d)/);
     totals.no_of_skus = t(/No of SKUs\s*-?\s*(\d+)/);
+    totals.total_incl_vat = t(/Total Amount\/consideration including VAT\s*:?\s*([\d,]+\.\d\d)/);   // the tax invoice's own total (the bill statement shows Bill Value separately)
+    totals.total_value_of_supply = t(/Total Value of Supply\s*:?\s*([\d,]+\.\d\d)/);
     return {header, lines, statement, totals, _text: text};
 }
 
@@ -419,8 +421,8 @@ async function igScan(){
         if (cp) {
             const h = cp.header, t = cp.totals;
             igScanData = {tax_invoice_no: h.tax_invoice_no, invoice_no: h.invoice_no || '', invoice_date: h.date_of_invoice || '', supplier_name: h.supplier_name || '', purchaser_name: h.purchaser_name || '',
-                          purchaser_tin: h.purchaser_tin || '', taxable_value: t.total_taxable_value, vat_rate: t.vat_rate, vat_value: t.vat_value, gross_amount: t.gross_amount,
-                          std_discount: t.std_discount, bill_value: t.bill_value, net_amount: t.net_amount, sku_count: t.no_of_skus};
+                          purchaser_tin: h.purchaser_tin || '', taxable_value: t.total_value_of_supply ?? t.total_taxable_value, vat_rate: t.vat_rate, vat_value: t.vat_value, gross_amount: t.gross_amount,
+                          std_discount: t.std_discount, bill_value: t.total_incl_vat ?? t.bill_value, net_amount: t.net_amount, sku_count: t.no_of_skus, statement_bill_value: t.bill_value};
             msg('Invoice read in the browser: tax invoice no <strong>' + esc(h.tax_invoice_no) + '</strong>, ' + cp.lines.length + ' lines.', 'ok');
         } else {
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gemini is reading the invoice…';
@@ -450,7 +452,7 @@ async function igExcel(){
         const w1 = wb.addWorksheet('Header & totals');
         [['Tax Invoice No', h.tax_invoice_no],['Invoice No (statement)', h.invoice_no],['Date of Invoice', h.date_of_invoice],['Date of Supply', h.date_of_supply],['Supplier', h.supplier_name],['Supplier TIN', h.supplier_tin],
          ['Purchaser', h.purchaser_name],['Purchaser TIN', h.purchaser_tin],[],['Total Taxable Value', t.total_taxable_value],['VAT %', t.vat_rate],['VAT Value', t.vat_value],['Gross Amount', t.gross_amount],
-         ['Scheme Discount', t.scheme_discount],['Std Discount', t.std_discount],['Bill Value', t.bill_value],['Return / Damages', t.return_damages],['Net Amount (To Be Collected)', t.net_amount],[],
+         ['Scheme Discount', t.scheme_discount],['Std Discount', t.std_discount],['Bill Value (bill statement)', t.bill_value],['Total Amount incl. VAT (tax invoice)', t.total_incl_vat],['Total Value of Supply (tax invoice)', t.total_value_of_supply],['Return / Damages', t.return_damages],['Net Amount (To Be Collected)', t.net_amount],[],
          ['No of SKUs (printed)', t.no_of_skus],['Invoice lines read', (x.lines || []).length],['Statement lines read', (x.statement || []).length],['Sum of invoice line amounts (check)', Math.round((x.lines || []).reduce((a, r) => a + (+r[4] || 0), 0) * 100) / 100]]
             .forEach(r => { const row = w1.addRow(r); if (r.length) row.getCell(1).font = {bold:true}; });
         w1.getColumn(1).width = 38; w1.getColumn(2).width = 46;
