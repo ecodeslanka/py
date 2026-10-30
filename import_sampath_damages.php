@@ -217,7 +217,7 @@ if (($_GET['ajax'] ?? '') === 'items') {
 }
 
 $imports = [];
-$q = mysqli_query($conn, "SELECT * FROM sampath_damage_imports ORDER BY damage_date DESC, id DESC");
+$q = mysqli_query($conn, "SELECT i.* FROM sampath_damage_imports i WHERE NOT EXISTS (SELECT 1 FROM sampath_damage_import_items x WHERE x.import_id = i.id AND x.outlet_code='TRANSFER') ORDER BY i.damage_date DESC, i.id DESC");   // transfer imports are on Bulk Damage Import
 if ($q) while ($r = mysqli_fetch_assoc($q)) $imports[] = $r;
 $sum = ['n' => count($imports), 'rows' => 0, 'qty' => 0, 'val' => 0];
 foreach ($imports as $r) { $sum['rows'] += $r['total_rows']; $sum['qty'] += $r['total_qty']; $sum['val'] += $r['total_value']; }

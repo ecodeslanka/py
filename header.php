@@ -1007,6 +1007,9 @@ if (isset($conn) && $conn) {
     <a href="bulk_adjustment_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bulk_adjustment_import.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-boxes-packing"></i><span>Bulk Adjustment Import</span>
     </a>
+    <a href="bulk_damage_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bulk_damage_import.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-triangle-exclamation"></i><span>Bulk Damage Import</span>
+    </a>
 
     <a href="invoice_grn_check.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'invoice_grn_check.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-circle-check"></i><span>Invoice GRN Check</span>
