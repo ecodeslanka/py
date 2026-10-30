@@ -186,7 +186,7 @@ $from  = $_GET['from'] ?? date('Y-m-d', strtotime('-60 days'));
 $to    = $_GET['to']   ?? $today;
 $q     = trim($_GET['q'] ?? '');
 $show  = in_array($_GET['show'] ?? '', ['notsent', 'sent', 'all'], true) ? $_GET['show'] : 'notsent';
-$chq   = in_array($_GET['chq'] ?? '', ['all', 'unsettled'], true) ? $_GET['chq'] : 'all';
+$chq   = 'unsettled';   // only payment-pending invoices (no cheque date yet)
 [$rows, $qerr] = spr_rows($conn, $from, $to, $q, $show, $chq, $grn_date_col);
 $flash = $_SESSION['spr_flash'] ?? null; unset($_SESSION['spr_flash']);
 function spr_n($v) { return number_format((float)$v, 2); }
@@ -226,27 +226,28 @@ table.spr-t tr.sent td{background:#f8fafc;color:#94a3b8;} table.spr-t tr.sel td{
     <div class="spr-f">
       <div><label>Bill date from</label><input class="spr-in" type="date" name="from" value="<?php echo htmlspecialchars($from); ?>"></div>
       <div><label>to</label><input class="spr-in" type="date" name="to" value="<?php echo htmlspecialchars($to); ?>"></div>
-      <div><label>Search</label><input class="spr-in" type="text" name="q" placeholder="Bill no / party / T-code" value="<?php echo htmlspecialchars($q); ?>"></div>
       <div><label>Request status</label>
         <select class="spr-in" name="show">
           <option value="notsent" <?php echo $show === 'notsent' ? 'selected' : ''; ?>>Not sent yet</option>
           <option value="sent" <?php echo $show === 'sent' ? 'selected' : ''; ?>>Already sent</option>
           <option value="all" <?php echo $show === 'all' ? 'selected' : ''; ?>>All</option>
         </select></div>
-      <div><label>Cheque</label>
-        <select class="spr-in" name="chq">
-          <option value="all" <?php echo $chq === 'all' ? 'selected' : ''; ?>>All</option>
-          <option value="unsettled" <?php echo $chq === 'unsettled' ? 'selected' : ''; ?>>Unsettled (no cheque date)</option>
-        </select></div>
       <div><button class="spr-b" type="submit"><i class="fa-solid fa-filter"></i> Filter</button></div>
     </div>
   </form>
 
+  <div class="spr-bar" style="margin-bottom:6px;">
+    <div style="position:relative;flex:1 1 260px;max-width:420px;">
+      <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:11px;top:11px;color:#94a3b8;font-size:13px;"></i>
+      <input class="spr-in" type="search" id="sprSearch" placeholder="Search bill no / party / date / amount…" autocomplete="off" oninput="sprFilter()" style="width:100%;box-sizing:border-box;padding-left:32px;">
+    </div>
+    <span style="color:#6b7280;font-size:12px;">Payment-pending invoices only (no cheque date yet)</span>
+  </div>
   <div class="spr-bar">
     <button type="button" class="spr-b l" onclick="sprAll(true)"><i class="fa-solid fa-check-double"></i> Select all</button>
     <button type="button" class="spr-b l" onclick="sprAll(false)">Clear</button>
     <span><b id="sprCnt">0</b> selected · GRN value <b id="sprVal">0.00</b></span>
-    <span style="color:#6b7280;"><?php echo count($rows); ?> invoice(s) listed</span>
+    <span style="color:#6b7280;"><b id="sprShown"><?php echo count($rows); ?></b> of <?php echo count($rows); ?> invoice(s) shown</span>
     <button type="button" class="spr-b g" id="sprSendBtn" onclick="sprOpen()" disabled style="margin-left:auto;"><i class="fa-solid fa-paper-plane"></i> Send selected to Payments</button>
   </div>
 
@@ -297,7 +298,19 @@ table.spr-t tr.sent td{background:#f8fafc;color:#94a3b8;} table.spr-t tr.sel td{
   </form>
 </div>
 <script>
-function sprCbs(){ return Array.from(document.querySelectorAll('.spr-cb')); }
+function sprCbs(){ return Array.from(document.querySelectorAll('.spr-cb')).filter(c => c.closest('tr').style.display !== 'none'); }
+function sprFilter(){
+    const q = document.getElementById('sprSearch').value.trim().toLowerCase();
+    let n = 0;
+    document.querySelectorAll('.spr-t tbody tr[data-bill]').forEach(tr => {
+        const show = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
+        tr.style.display = show ? '' : 'none';
+        if (!show) { const c = tr.querySelector('.spr-cb'); if (c) c.checked = false; }
+        if (show) n++;
+    });
+    document.getElementById('sprShown').textContent = n;
+    sprUpd();
+}
 function sprAll(on){ sprCbs().forEach(c => c.checked = on); const h = document.getElementById('sprHead'); if (h) h.checked = on; sprUpd(); }
 function sprUpd(){
     let n = 0, v = 0;
