@@ -70,6 +70,15 @@ function im_overall($name, $price) {
 function im_status($o) { return $o >= 85 ? 'Matched' : ($o >= 60 ? 'Review' : 'No Match'); }
 
 /* ── latest TUR (trade unit rate) per item from the Sampath sales data: secondary first, pre-secondary as fallback ── */
+/* TUR price changes made on Stock Sync (bulk_adjustment_import3.php). The newest row per item wins; deleting the sync deletes its rows,
+   so the TUR goes back to the previous override or to the latest invoice TUR. */
+if (isset($conn) && $conn) {
+    mysqli_query($conn, "CREATE TABLE IF NOT EXISTS item_tur_overrides (
+        id INT AUTO_INCREMENT PRIMARY KEY, item_code VARCHAR(100) NOT NULL, item_name VARCHAR(300) NULL, tur DECIMAL(15,4) NOT NULL,
+        old_tur DECIMAL(15,4) NULL, import_id INT NULL, created_by VARCHAR(100) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_item (item_code), INDEX idx_import (import_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
 function im_load_tur($conn) {
     $tur = [];
     foreach (['primary_invoice_wise_sales_data', 'invoice_wise_sales_data'] as $t) {   // secondary loaded last so it wins
@@ -77,6 +86,10 @@ function im_load_tur($conn) {
         $q = mysqli_query($conn, "SELECT d.product_code, d.tur FROM $t d
             INNER JOIN (SELECT product_code, MAX(id) AS mid FROM $t WHERE product_code <> '' AND tur IS NOT NULL AND tur > 0 GROUP BY product_code) l ON l.mid = d.id");
         while ($q && $r = mysqli_fetch_assoc($q)) $tur[trim($r['product_code'])] = (float)$r['tur'];
+    }
+    if (im_table($conn, 'item_tur_overrides')) {       // Stock Sync TUR updates win over the invoice TUR
+        $q = mysqli_query($conn, "SELECT o.item_code, o.tur FROM item_tur_overrides o INNER JOIN (SELECT item_code, MAX(id) AS mid FROM item_tur_overrides GROUP BY item_code) l ON l.mid = o.id");
+        while ($q && $r = mysqli_fetch_assoc($q)) $tur[trim($r['item_code'])] = (float)$r['tur'];
     }
     return $tur;
 }
