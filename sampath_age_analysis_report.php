@@ -66,6 +66,19 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sampath_age_manual_entries (
     INDEX idx_bill_no (bill_no)
 )");
 
+/* Payment requests (Send to Payments) — used to flag invoices already issued */
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sampath_pay_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY, send_date DATE NOT NULL, remark VARCHAR(500) NULL,
+    item_count INT NOT NULL DEFAULT 0, total_value DECIMAL(16,2) NOT NULL DEFAULT 0,
+    created_by VARCHAR(100) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX idx_send_date (send_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sampath_pay_request_items (
+    id INT AUTO_INCREMENT PRIMARY KEY, request_id INT NOT NULL, bill_no VARCHAR(100) NOT NULL, bill_date DATE NULL,
+    party_name VARCHAR(255) NULL, bill_value DECIMAL(16,2) DEFAULT 0, secondary_value DECIMAL(16,2) DEFAULT 0,
+    act_delivery_date DATE NULL, grn_date DATE NULL, grn_date2 DATE NULL, grn_value DECIMAL(16,4) DEFAULT 0,
+    UNIQUE KEY uq_bill (bill_no), INDEX idx_req (request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
 /* GRN <-> invoice links and manual adjustments (same tables as the Balancing Report) */
 mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sampath_grn_invoice_links (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -239,7 +252,9 @@ if (isset($_GET['ajax'])) {
             ame.act_delivery_date           AS act_delivery_date,
             ame.doc_submit_date             AS doc_submit_date,
             ame.chq_clearing_date           AS chq_clearing_date,
-            ame.chq_clearing_account        AS chq_clearing_account
+            ame.chq_clearing_account        AS chq_clearing_account,
+            pr.id                           AS pay_req_id,
+            pr.send_date                    AS pay_req_date
         FROM secondary_invoice_import_details d
         JOIN secondary_invoice_imports i ON i.id = d.import_id
         LEFT JOIN (
@@ -268,6 +283,9 @@ if (isset($_GET['ajax'])) {
             JOIN sampath_super_payments sp ON sp.id = spi.payment_id
             GROUP BY spi.bill_no
         ) pay ON pay.bill_no COLLATE utf8mb4_general_ci = d.bill_no COLLATE utf8mb4_general_ci
+        LEFT JOIN sampath_pay_request_items pri
+            ON pri.bill_no COLLATE utf8mb4_general_ci = d.bill_no COLLATE utf8mb4_general_ci
+        LEFT JOIN sampath_pay_requests pr ON pr.id = pri.request_id
         LEFT JOIN sampath_age_manual_entries ame
             ON ame.bill_no COLLATE utf8mb4_general_ci = d.bill_no COLLATE utf8mb4_general_ci
         WHERE d.bill_date BETWEEN '$date_from_esc' AND '$date_to_esc'
@@ -337,6 +355,8 @@ if (isset($_GET['ajax'])) {
                 'chq_clearing_date'    => $r['chq_clearing_date'],
                 'chq_clearing_account' => $r['chq_clearing_account'],
                 'is_settled'           => $has_chq_date,
+                'pay_req_id'           => $r['pay_req_id'],
+                'pay_req_date'         => $r['pay_req_date'],
             ];
         }
 
@@ -728,7 +748,7 @@ function renderTable(rows) {
         return `
         <tr class="${r.is_settled ? '' : 'unsettled-row'}">
             <td>${esc(r.t_code || '—')}</td>
-            <td class="left">${esc(r.invoice_no)}</td>
+            <td class="left">${esc(r.invoice_no)}${r.pay_req_id ? ' <a href="sampath_payment_requests_sent.php?open=' + r.pay_req_id + '" title="Issued: sent to payments on ' + esc(r.pay_req_date || '') + ' (request #' + r.pay_req_id + ')" style="color:#16a34a;text-decoration:none"><i class="fa-solid fa-paper-plane"></i></a>' : ''}</td>
             <td>${fmtDate(r.bill_date)}</td>
             <td class="left" style="font-family:inherit;font-weight:400">${esc(r.party_name || '—')}</td>
             <td>${fmtNum(r.secondary)}</td>

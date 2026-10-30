@@ -195,13 +195,13 @@ async function buildPaymentExcel(items, sendDate, filename){
     const FONT = (o) => Object.assign({name:'Courier New', size:9}, o || {});
     const thin = {style:'thin'}, BORD = {top:thin, left:thin, bottom:thin, right:thin};
     const ACC = '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)';
-    [24.09, 10.82, 41.91, 14.91, 14.91, 10.82, 10.82, 6.82, 15.91, 10.82].forEach((w, i) => ws.getColumn(i + 1).width = w);
+    [24.09, 10.82, 41.91, 14.91, 10.82, 10.82, 15.91, 10.82].forEach((w, i) => ws.getColumn(i + 1).width = w);
 
     ws.getCell('A1').value = 'Yelo Distributors Pvt Ltd';           ws.getCell('A1').font = FONT({size:16, bold:true});
     ws.getCell('A2').value = 'Payments request Acknowledgement';    ws.getCell('A2').font = FONT({size:12, bold:true});
     ws.getRow(1).height = 21.5; ws.getRow(2).height = 16; ws.getRow(3).height = 48;
 
-    const HEAD = ['Bill Number','Bill Date','Party Name','Bill Mention value','Secondary Final Bill Amount(To be collected)','ACT Delivery Date','GRN date SST','GRN date 2 SST','GRN Value','Scheduled cheque date'];
+    const HEAD = ['Bill Number','Bill Date','Party Name','Secondary Final Bill Amount(To be collected)','ACT Delivery Date','GRN date SST','GRN Value','Scheduled cheque date'];
     HEAD.forEach((t, i) => {
         const c = ws.getCell(3, i + 1);
         c.value = t; c.font = FONT({color:{argb:'FFFFFFFF'}});
@@ -223,21 +223,19 @@ async function buildPaymentExcel(items, sendDate, filename){
         put(1, it.bill_no, null, 'left');
         put(2, utc(it.bill_date), 'dd/mm/yyyy');
         put(3, it.party_name || '');
-        put(4, +it.bill_value, ACC);
-        put(5, +it.secondary_value, ACC);
-        put(6, utc(it.act_delivery_date), 'mm-dd-yy');
-        put(7, utc(it.grn_date), 'mm-dd-yy');
-        put(8, utc(it.grn_date2), 'mm-dd-yy');
-        put(9, +it.grn_value, ACC);
+        put(4, +it.secondary_value, ACC);
+        put(5, utc(it.act_delivery_date), 'mm-dd-yy');
+        put(6, utc(it.grn_date), 'mm-dd-yy');
+        put(7, +it.grn_value, ACC);
         if (it.grn_date) {
             const g = utc(it.grn_date); const res = new Date(g.getTime() + 21 * 86400000);
-            put(10, {formula:'G' + r + '+21', result:res}, 'mm-dd-yy');
-        } else put(10, null, 'mm-dd-yy');
+            put(8, {formula:'F' + r + '+21', result:res}, 'mm-dd-yy');
+        } else put(8, null, 'mm-dd-yy');
         r++;
     });
     const last = r - 1, tot = r;
-    const tc = ws.getCell(tot, 9);
-    tc.value = {formula:'SUM(I4:I' + last + ')', result: items.reduce((a, i) => a + (+i.grn_value || 0), 0)};
+    const tc = ws.getCell(tot, 7);
+    tc.value = {formula:'SUM(G4:G' + last + ')', result: items.reduce((a, i) => a + (+i.grn_value || 0), 0)};
     tc.font = FONT({bold:true}); tc.numFmt = ACC; tc.border = {top:thin, bottom:{style:'double'}};
     ws.getRow(tot).height = 15;
 
@@ -247,18 +245,18 @@ async function buildPaymentExcel(items, sendDate, filename){
     ws.getCell('A' + (L + 5)).value = 'Operation Manager stamp'; ws.getCell('A' + (L + 5)).font = FONT();
     ws.getCell('A' + (L + 5)).alignment = {horizontal:'left'};
     const dd = {style:'dashDot'};
-    ws.mergeCells('F' + (L + 6) + ':I' + (L + 6));
-    ws.mergeCells('F' + (L + 7) + ':I' + (L + 7));
+    ws.mergeCells('E' + (L + 6) + ':G' + (L + 6));
+    ws.mergeCells('E' + (L + 7) + ':G' + (L + 7));
     ws.mergeCells('A' + (L + 8) + ':B' + (L + 8));
-    ['F', 'G', 'H', 'I'].forEach(col => ws.getCell(col + (L + 6)).border = {top:dd});
-    ws.getCell('F' + (L + 6)).value = 'All the invoices received correctly';
-    ws.getCell('F' + (L + 7)).value = '(Officer in charge - SST)';
-    [['F', L + 6], ['F', L + 7]].forEach(([c, rr]) => { const x = ws.getCell(c + rr); x.font = FONT(); x.alignment = {vertical:'middle', horizontal:'center'}; });
+    ['E', 'F', 'G'].forEach(col => ws.getCell(col + (L + 6)).border = {top:dd});
+    ws.getCell('E' + (L + 6)).value = 'All the invoices received correctly';
+    ws.getCell('E' + (L + 7)).value = '(Officer in charge - SST)';
+    [['E', L + 6], ['E', L + 7]].forEach(([c, rr]) => { const x = ws.getCell(c + rr); x.font = FONT(); x.alignment = {vertical:'middle', horizontal:'center'}; });
     ws.getCell('A' + (L + 7)).border = {bottom:dd};
     ws.getCell('A' + (L + 8)).value = 'Signature (Operation Manager)';
     ws.getCell('A' + (L + 8)).font = FONT(); ws.getCell('A' + (L + 8)).alignment = {horizontal:'center'};
     ws.getCell('A' + (L + 8)).border = {top:dd}; ws.getCell('B' + (L + 8)).border = {top:dd};
-    ws.getCell('F' + (L + 8)).value = 'Date -:'; ws.getCell('F' + (L + 8)).font = FONT({size:11});
+    ws.getCell('E' + (L + 8)).value = 'Date -:'; ws.getCell('E' + (L + 8)).font = FONT({size:11});
     const dc = ws.getCell('A' + (L + 9));
     dc.value = utc(sendDate); dc.numFmt = 'mm-dd-yy'; dc.font = FONT(); dc.alignment = {vertical:'middle', horizontal:'right'};
 
