@@ -1009,6 +1009,12 @@ if (isset($conn) && $conn) {
         <i class="fa-solid fa-file-circle-check"></i><span>Invoice GRN Check</span>
     </a>
 
+    <a href="sampath_payment_request.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_payment_request.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-paper-plane"></i><span>Send to Payments</span>
+    </a>
+    <a href="sampath_payment_requests_sent.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sampath_payment_requests_sent.php') ? 'active' : ''; ?>">
+        <i class="fa-solid fa-list-check"></i><span>Sent Payment Requests</span>
+    </a>
     <a href="pdf_to_excel.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'pdf_to_excel.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-file-excel"></i><span>PDF to Excel</span>
     </a>
