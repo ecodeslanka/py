@@ -235,6 +235,70 @@ function irr_pcell($q, $v) {
 }
 if (isset($_GET['print'])) {
     $summary = isset($_GET['summary']);   // summary-only print: no item detail, with sign-off boxes
+    if ($summary) {
+        /* SIMPLE one-page A4 summary (black & white) with sign-off boxes */
+        $title_p = $snap_row ? $snap_row['title'] : 'Inventory Reconciliation Report';
+        $scd = $sc ? substr((string)$sc['count_date'], 0, 10) : null;
+        $nq = function ($q) { return ($q < 0 ? '(' : '') . number_format(abs($q), 0) . ($q < 0 ? ')' : ''); };
+        $lines = [['Opening Inventory', 'open', 'dopen'], ['+ Primary Purchase', 'pc', null], ['− Primary Return', 'rc', null], ['Pre Secondary', 'pre', null],
+                  ['− Secondary', 'sec', null], ['Diff (Pre − Sec)', 'diff', null], ['± Rejected / Adjustment', 'oth', null], ['+ Damage entries', null, 'dmov']];
+        header('Content-Type: text/html; charset=utf-8');
+        ?><!doctype html><html lang="en"><head><meta charset="utf-8"><title><?php echo htmlspecialchars($title_p); ?></title>
+<style>
+@page{size:A4 portrait;margin:14mm 14mm 12mm}
+*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{margin:0;font:10pt/1.35 Arial,Helvetica,sans-serif;color:#000;background:#fff}
+.bar{position:sticky;top:0;background:#000;color:#fff;padding:8px 14px;display:flex;gap:10px;align-items:center;font-size:12px}
+.bar button{background:#fff;color:#000;border:0;padding:6px 14px;font-weight:700;cursor:pointer}
+@media print{.bar{display:none}}
+h1{font-size:15pt;margin:0 0 1mm}
+.meta{font-size:8.5pt;border-top:1.5pt solid #000;border-bottom:.5pt solid #000;padding:1.5mm 0;margin-bottom:4mm;display:flex;flex-wrap:wrap;gap:1mm 8mm}
+table{width:100%;border-collapse:collapse;font-size:9pt}
+th{background:#000;color:#fff;padding:1.6mm 2mm;text-align:right;font-size:8pt}
+th:first-child{text-align:left}
+td{padding:1.3mm 2mm;border-bottom:.4pt solid #000;text-align:right;font-variant-numeric:tabular-nums}
+td:first-child{text-align:left}
+tr.b td{font-weight:700;background:#e8e8e8}
+tr.t td{font-weight:700;border-top:1.5pt solid #000;border-bottom:1.5pt double #000}
+.note{font-size:7.5pt;margin-top:3mm}
+.sig{display:flex;gap:6mm;margin-top:16mm}
+.sig div{flex:1;border:1pt solid #000;height:34mm;position:relative;text-align:center;font-size:8.5pt;font-weight:700;padding-top:1.5mm}
+.sig div span{position:absolute;left:3mm;right:3mm;bottom:4mm;border-top:.6pt solid #000;font-weight:400;font-size:7.5pt;padding-top:1mm}
+.sig div i{position:absolute;left:3mm;bottom:12mm;font-style:normal;font-weight:400;font-size:7.5pt}
+</style></head><body>
+<div class="bar"><b>Summary — print / PDF preview (one A4 page)</b><button onclick="window.print()">Print / Save as PDF</button><button onclick="window.close()">Close</button></div>
+<h1>Inventory Reconciliation — Summary</h1>
+<div class="meta"><span><b>Report:</b> <?php echo htmlspecialchars($title_p); ?></span><span><b>Period:</b> <?php echo htmlspecialchars($period); ?></span>
+  <?php if ($scd): ?><span><b>Stock count:</b> <?php echo htmlspecialchars($scd); ?></span><?php endif; ?>
+  <span><b>Items:</b> <?php echo count($rows); ?></span><span><b>Values at TUR (Rs.)</b></span>
+  <span><b><?php echo $snap_row ? 'Saved:' : 'Printed:'; ?></b> <?php echo htmlspecialchars($snap_row ? substr((string)$snap_row['created_at'], 0, 16) : date('Y-m-d H:i')); ?></span></div>
+<table>
+  <thead><tr><th>Particulars</th><th>Good units</th><th>Good value</th><th>Damaged units</th><th>Damaged value</th></tr></thead>
+  <tbody>
+  <?php foreach ($lines as $x):
+      $gq = $x[1] ? $tot[$x[1] . '_q'] : null; $gv = $x[1] ? $tot[$x[1] . '_v'] : null;
+      $dq = $x[2] ? $tot[$x[2] . '_q'] : null; $dv = $x[2] ? $tot[$x[2] . '_v'] : null; ?>
+    <tr><td><?php echo $x[0]; ?></td>
+      <td><?php echo $gq === null ? '–' : $nq($gq); ?></td><td><?php echo $gv === null ? '–' : irr_pf($gv); ?></td>
+      <td><?php echo $dq === null ? '–' : $nq($dq); ?></td><td><?php echo $dv === null ? '–' : irr_pf($dv); ?></td></tr>
+  <?php endforeach; ?>
+    <tr class="b"><td>Closing Inventory</td><td><?php echo $nq($tot['g_q']); ?></td><td><?php echo irr_pf($tot['g_v']); ?></td><td><?php echo $nq($tot['d_q']); ?></td><td><?php echo irr_pf($tot['d_v']); ?></td></tr>
+  <?php if ($sc): ?>
+    <tr><td>System good stock (counted items)</td><td><?php echo $nq($tot['scsys_q']); ?></td><td><?php echo irr_pf($tot['scsys_v']); ?></td><td>–</td><td>–</td></tr>
+    <tr><td>Physical count</td><td><?php echo $nq($tot['ph_q']); ?></td><td><?php echo irr_pf($tot['ph_v']); ?></td><td>–</td><td>–</td></tr>
+    <tr><td>Good Short (physical below system)</td><td><?php echo $nq($tot['short_q']); ?></td><td><?php echo irr_pf($tot['short_v']); ?></td><td>–</td><td>–</td></tr>
+    <tr><td>Good Excess (physical above system)</td><td><?php echo $nq($tot['excess_q']); ?></td><td><?php echo irr_pf($tot['excess_v']); ?></td><td>–</td><td>–</td></tr>
+    <tr class="b"><td>Difference (Physical − System)</td><td><?php echo $nq($tot['pd_q']); ?></td><td><?php echo irr_pf($tot['pd_v']); ?></td><td>–</td><td>–</td></tr>
+  <?php endif; ?>
+    <tr class="t"><td>Total Closing (Good + Damaged)</td><td colspan="2"><?php echo $nq($tot['g_q'] + $tot['d_q']); ?> units</td><td colspan="2">Rs. <?php echo irr_pf($tot['g_v'] + $tot['d_v']); ?></td></tr>
+  </tbody>
+</table>
+<div class="note">Values = units × latest TUR. Figures in ( ) are negative.</div>
+<div class="sig"><?php foreach (['Stock Keeper', 'Sales Executive', 'Operation Manager'] as $role): ?><div><?php echo $role; ?><i>Name:</i><span>Signature &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Date</span></div><?php endforeach; ?></div>
+<script>window.addEventListener('load', function(){ setTimeout(function(){ window.print(); }, 500); });</script>
+</body></html><?php
+        exit;
+    }
     $title_p = $snap_row ? $snap_row['title'] : 'Inventory Reconciliation Report';
     $scd = $sc ? substr((string)$sc['count_date'], 0, 10) : null;
     $grp = [['open','Opening Inventory'],['pc','Primary Purchase'],['rc','Primary Return'],['pre','Pre Secondary'],['sec','Secondary'],['diff','Diff (Pre − Sec)'],['oth','Rejected / Adj.'],['g','Good Stock'],['d','Damaged Stock']];
