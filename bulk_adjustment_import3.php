@@ -10,7 +10,8 @@
 //      Excel higher  -> + adjustment (units added)      Excel lower -> − adjustment (units taken out)
 //      SKU not in our system -> the item is CREATED and its stock is set to the Excel units
 //      item in our system but NOT in the Excel -> its Excel stock is 0, so it is taken to 0 (tick-box, ON by default)
-//  TUR prices: tick-box "Update TUR prices" - where the Excel TUR differs from our current TUR it is saved as the new TUR
+//  TUR prices: the TUR update option is now ONLY on Damage Stock Sync (bulk_damage_import2.php); this page no longer changes TUR.
+//  (older syncs that did update TUR can still be reverted / deleted here.)  [old note:] where the Excel TUR differs from our current TUR it is saved as the new TUR
 //  (item_tur_overrides, used by im_load_tur => Inventory Reconciliation Report value, Item Match). The OLD TUR is kept with it;
 //  deleting the sync (or a TUR line) puts the old TUR back.
 //  After the date is chosen, a re-upload of the same file shows no difference (the stock already tallies).
@@ -165,7 +166,7 @@ function bsi_compare($conn, $rows, $date, $include_missing) {
         $sys = isset($our[$c]) ? $our[$c]['close'] : 0.0;
         $cmp[] = ['sku' => $c, 'name' => $r['item_name'], 'basepack' => $r['basepack_code'], 'excel' => $r['units'], 'system' => $sys, 'diff' => round($r['units'] - $sys, 2),
                   'tur' => im_price_fill($r['tur'], $turmap, $c), 'tur_old' => (float)($turmap[$c] ?? 0), 'tur_new' => (float)$r['tur'],
-                  'tur_changed' => $r['tur'] > 0 && abs($r['tur'] - (float)($turmap[$c] ?? 0)) > 0.004, 'new_item' => !isset($masters[$c]), 'missing' => false];
+                  'tur_changed' => false, 'new_item' => !isset($masters[$c]), 'missing' => false];
     }
     if ($include_missing) foreach ($our as $c => $o) {
         if (isset($seen[$c]) || round($o['close'], 2) == 0) continue;
@@ -359,7 +360,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
       <div class="fld" style="margin:0"><label>As at / adjustment date</label><input class="idm-in" type="date" id="idmDate" onchange="idmPreview()" style="width:170px"></div>
       <div class="fld" style="margin:0;flex:1;min-width:220px"><label>Reason / remark</label><input class="idm-in" type="text" id="idmReason" maxlength="400" placeholder="e.g. Stock sync with LeverEDGE current stock"></div>
     </div>
-    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-bottom:8px;background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px;padding:8px 10px;"><input type="checkbox" id="idmTur" checked onchange="idmPreview()" style="margin-top:3px;"> <span><b>Update TUR prices</b> from this Excel where the TUR has changed. The old TUR is kept — deleting this sync (or a TUR line) puts the old TUR back.</span></label>
+    <input type="checkbox" id="idmTur" style="display:none">   <!-- TUR update lives on Damage Stock Sync only -->
     <label style="display:flex;gap:8px;font-size:13px;margin-bottom:8px;"><input type="checkbox" id="idmMissing" checked onchange="idmPreview()"> <span>Also take our items that are <b>not in the Excel</b> to 0 (LeverEDGE shows no stock for them)</span></label>
     <div class="idm-wrap" style="max-height:44vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" id="idmAll" checked onclick="document.querySelectorAll('.idm-pc').forEach(c=>c.checked=this.checked);idmCount()"></th><th>SKU7</th><th>Item</th><th class="n">Our closing</th><th class="n">Excel units</th><th class="n">Difference (adjustment)</th><th class="n">TUR old → new</th><th>Note</th></tr></thead><tbody id="idmPB"></tbody></table></div>
     <div class="idm-msg" id="idmMMsg"></div>
