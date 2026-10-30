@@ -328,8 +328,8 @@ table{border-collapse:collapse;width:100%;}
   <?php if ($sc): ?>
     <tr><td>System good stock (counted items)</td><td class="n"><?php echo irr_pu($tot['scsys_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['scsys_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
     <tr><td>Physical stock count — <?php echo htmlspecialchars($scd); ?></td><td class="n"><?php echo irr_pu($tot['ph_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['ph_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
-    <tr><td>Short (physical below system)</td><td class="n">(<?php echo number_format(abs($tot['short_q']), 0); ?>)</td><td class="n"><b><?php echo irr_pf($tot['short_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
-    <tr><td>Excess (physical above system)</td><td class="n"><?php echo irr_pu($tot['excess_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['excess_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
+    <tr><td>Good Short (physical below system)</td><td class="n">(<?php echo number_format(abs($tot['short_q']), 0); ?>)</td><td class="n"><b><?php echo irr_pf($tot['short_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
+    <tr><td>Good Excess (physical above system)</td><td class="n"><?php echo irr_pu($tot['excess_q']); ?></td><td class="n"><b><?php echo irr_pf($tot['excess_v']); ?></b></td><td class="n">–</td><td class="n">–</td></tr>
     <tr class="sub"><td>Difference (Physical − System)</td><td class="n"><?php echo ($tot['pd_q'] < 0 ? '(' : '') . number_format(abs($tot['pd_q']), 0) . ($tot['pd_q'] < 0 ? ')' : ''); ?></td><td class="n"><?php echo irr_pf($tot['pd_v']); ?></td><td class="n">–</td><td class="n">–</td></tr>
   <?php endif; ?>
     <tr class="tot"><td>Total Closing Inventory (Good + Damaged)</td><td class="n" colspan="2"><?php echo irr_pu($tot['g_q'] + $tot['d_q']); ?> units</td><td class="n" colspan="2">Rs. <?php echo irr_pf($tot['g_v'] + $tot['d_v']); ?></td></tr>
@@ -514,8 +514,8 @@ table.irr-t tfoot td{background:#fbe5d6;font-weight:800;border-top:2px solid #11
                 <tr style="background:#f5f3ff"><td colspan="5" style="font-weight:800;color:#5b21b6">Stock Count — <?php echo htmlspecialchars(substr((string)$sc['count_date'], 0, 10)); ?> (good stock, <?php echo (int)$tot['counted']; ?> item(s) counted<?php echo $tot['uncounted'] ? ', ' . (int)$tot['uncounted'] . ' in the report not in the count' : ''; ?>)</td></tr>
                 <tr><td>System good stock (counted items)</td><?php echo $dcells($tot['scsys_q'], $tot['scsys_v']); ?><?php echo $dash; ?></tr>
                 <tr style="background:#f5f3ff"><td><strong>Physical Stock Count</strong></td><?php echo $dcells($tot['ph_q'], $tot['ph_v']); ?><?php echo $dash; ?></tr>
-                <tr style="cursor:pointer" onclick="irrDiff('short')" class="clk" title="Click to see the items with details"><td style="color:#dc2626">Short (physical below system) <span class="vi">view items ▸</span></td><?php echo $dcells($tot['short_q'], $tot['short_v']); ?><?php echo $dash; ?></tr>
-                <tr style="cursor:pointer" onclick="irrDiff('excess')" class="clk" title="Click to see the items with details"><td style="color:#15803d">Excess (physical above system) <span class="vi">view items ▸</span></td><?php echo $dcells($tot['excess_q'], $tot['excess_v']); ?><?php echo $dash; ?></tr>
+                <tr style="cursor:pointer" onclick="irrDiff('short')" class="clk" title="Click to see the items with details"><td style="color:#dc2626">Good Short (physical below system) <span class="vi">view items ▸</span></td><?php echo $dcells($tot['short_q'], $tot['short_v']); ?><?php echo $dash; ?></tr>
+                <tr style="cursor:pointer" onclick="irrDiff('excess')" class="clk" title="Click to see the items with details"><td style="color:#15803d">Good Excess (physical above system) <span class="vi">view items ▸</span></td><?php echo $dcells($tot['excess_q'], $tot['excess_v']); ?><?php echo $dash; ?></tr>
                 <tr style="background:#ede9fe;cursor:pointer" onclick="irrDiff('count')" class="clk" title="Click to see the items with details"><td><strong>Difference (Physical − System)</strong> <span class="vi">view items ▸</span></td><?php echo $dcells($tot['pd_q'], $tot['pd_v']); ?><?php echo $dash; ?></tr>
                 <?php endif; ?>
                 <tr style="background:#e2e8f0"><td><strong>Total Closing Inventory (Good + Damaged)</strong></td>
@@ -664,7 +664,7 @@ function irrDRender(){
     const c = irrDCur; let rows = c.rows;
     if (c.type !== 'presec') {
         if (c.filter === 'short') rows = rows.filter(r => r.dq < 0); else if (c.filter === 'excess') rows = rows.filter(r => r.dq > 0);
-        document.getElementById('irrDChips').innerHTML = ['all','short','excess'].map(k => `<button type="button" class="dchip ${c.filter === k ? 'on' : ''}" onclick="irrDCur.filter='${k}';irrDRender()">${k === 'all' ? 'All' : k === 'short' ? 'Short' : 'Excess'}</button>`).join(' ');
+        document.getElementById('irrDChips').innerHTML = ['all','short','excess'].map(k => `<button type="button" class="dchip ${c.filter === k ? 'on' : ''}" onclick="irrDCur.filter='${k}';irrDRender()">${k === 'all' ? 'All' : k === 'short' ? 'Good Short' : 'Good Excess'}</button>`).join(' ');
     } else document.getElementById('irrDChips').innerHTML = '';
     rows = rows.slice().sort((x, y) => Math.abs(y.dv) - Math.abs(x.dv));
     c.shown = rows;
@@ -674,7 +674,7 @@ function irrDRender(){
     let tq = 0, tv = 0;
     document.getElementById('irrDBody').innerHTML = rows.length ? rows.map(r => { tq += r.dq; tv += r.dv; const k = r.dq < 0 ? 'dsh' : 'dex';
         return `<tr><td><strong>${r.sku7}</strong></td><td>${(r.name || '').replace(/</g,'&lt;')}</td><td class="n">${irrFm(r.tur, 2)}</td><td class="n">${irrFm(r.a, 0)}</td><td class="n">${irrFm(r.b, 0)}</td>
-            <td class="n ${k}">${irrSg(r.dq)}</td><td class="n ${k}">${r.dv < 0 ? '-' : '+'}${irrFm(Math.abs(r.dv), 2)}</td><td class="${k}">${r.dq < 0 ? (c.type === 'presec' ? 'less loaded than sold' : 'Short') : (c.type === 'presec' ? 'more loaded than sold' : 'Excess')}</td></tr>`; }).join('')
+            <td class="n ${k}">${irrSg(r.dq)}</td><td class="n ${k}">${r.dv < 0 ? '-' : '+'}${irrFm(Math.abs(r.dv), 2)}</td><td class="${k}">${r.dq < 0 ? (c.type === 'presec' ? 'less loaded than sold' : 'Good Short') : (c.type === 'presec' ? 'more loaded than sold' : 'Good Excess')}</td></tr>`; }).join('')
         : '<tr><td colspan="8" style="text-align:center;padding:24px;color:#8892a4">No items with a difference.</td></tr>';
     document.getElementById('irrDFoot').innerHTML = rows.length ? `<tr><td colspan="5" style="text-align:right">TOTAL — ${rows.length} items</td><td class="n">${irrSg(tq)}</td><td class="n">${tv < 0 ? '-' : '+'}${irrFm(Math.abs(tv), 2)}</td><td></td></tr>` : '';
 }
