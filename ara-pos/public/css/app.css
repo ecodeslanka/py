@@ -135,7 +135,7 @@ body.pos .bottomnav .fab{visibility:hidden}
  .list>.card:only-child{padding:0}
  .list>.empty{padding:40px}
  .hero{padding:26px 30px;border-radius:20px}.hero .big{font-size:38px}.hero .row div{font-size:13px}.hero .row b{font-size:18px}
- .hero + .grid{grid-template-columns:repeat(6,1fr)}
+ .hero + .grid{grid-template-columns:repeat(3,1fr)}
  .stat{padding:16px}.stat .v{font-size:19px}
  .g2d{grid-template-columns:1fr 1fr;gap:16px}
  .tiles{grid-template-columns:repeat(6,1fr)}
@@ -213,3 +213,6 @@ body.pos .bottomnav .fab{visibility:hidden}
 }
 @media(min-width:1024px){#app>.login{grid-column:1/-1;min-height:100vh}}
 .login .login-side .ls-sub{color:#fff;text-align:left;opacity:.9}
+
+@media(min-width:1500px){.hero + .grid{grid-template-columns:repeat(6,1fr)}.tiles{grid-template-columns:repeat(6,1fr)}}
+@media(min-width:1024px) and (max-width:1499px){.hero + .grid{grid-template-columns:repeat(3,1fr)!important}}
