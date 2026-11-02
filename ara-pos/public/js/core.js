@@ -135,9 +135,11 @@ async function refreshBell() { if (!S.user) return; try { const n = await api('G
 
 /* ---------- auth ---------- */
 function loginView() {
-  $('#app').innerHTML = `<div class="login"><form class="box" id="lf"><div class="mark">A</div><h1>ARA GROUP</h1><p>POS & Store Management</p>
+  $('#app').innerHTML = `<div class="login"><div class="login-side"><div class="ls-in"><div class="mark">A</div><h2>ARA GROUP</h2><p class="ls-sub">POS & Store Management System</p>
+      <ul class="ls-list"><li>${ic('file')}<span><b>Sales & invoices</b><br>Split cash, cheque and credit payments</span></li><li>${ic('box')}<span><b>Stock & GRN</b><br>Colours, suppliers and goods received</span></li><li>${ic('card')}<span><b>Cheque reminders</b><br>Daily WhatsApp alerts for cheques due</span></li><li>${ic('chart')}<span><b>Reports</b><br>Daily to yearly profit and loss, PDF & Excel</span></li></ul></div></div>
+    <div class="login-main"><form class="box" id="lf"><div class="mark">A</div><h1>ARA GROUP</h1><p>POS & Store Management</p><h3 class="lg-h">Welcome back</h3><div class="lg-s">Sign in to continue</div>
     ${F('Username', '<input name="username" autocomplete="username" autocapitalize="off" required>')}${F('Password', '<input name="password" type="password" autocomplete="current-password" required>')}
-    <button class="btn block" style="margin-top:6px">Sign in</button><div class="hint" style="text-align:center;margin-top:14px">Authorised staff only</div></form></div>`;
+    <button class="btn block" style="margin-top:6px">Sign in</button><div class="hint" style="text-align:center;margin-top:14px">Authorised staff only</div></form></div></div>`;
   $('#lf').onsubmit = async e => { e.preventDefault(); const b = $('button', e.target); b.disabled = true; try { const r = await api('POST', '/auth/login', fd(e.target)); S.token = r.token; localStorage.setItem('ara_token', r.token); await start(); } catch (x) { fail(x); b.disabled = false; } };
 }
 function logout(silent) { S.token = null; S.user = null; localStorage.removeItem('ara_token'); loginView(); if (!silent) toast('Logged out'); }

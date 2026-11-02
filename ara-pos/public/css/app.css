@@ -194,3 +194,22 @@ body.pos .bottomnav .fab{visibility:hidden}
  #tb>.card{max-width:980px}
 }
 @media(min-width:1024px) and (max-width:1250px){.formgrid{grid-template-columns:minmax(0,1fr) 400px}.detail-grid{gap:20px}}
+
+/* ---- login: split layout on desktop ---- */
+.login-side{display:none}.login-main{width:100%;display:grid;place-items:center}.lg-h,.lg-s{display:none}
+@media(min-width:1024px){
+ .login{display:grid;grid-template-columns:1.1fr 1fr;padding:0;background:var(--bg);place-items:stretch}
+ .login-side{display:flex;align-items:center;justify-content:center;padding:64px;color:#fff;position:relative;overflow:hidden;background:radial-gradient(900px 500px at 0% 0%,#14b8a6 0,transparent 60%),linear-gradient(160deg,#0a3f3b,#0f766e 60%,#115e59)}
+ .login-side:after{content:"";position:absolute;right:-120px;bottom:-120px;width:420px;height:420px;border-radius:50%;background:rgba(255,255,255,.07)}
+ .ls-in{max-width:480px;position:relative;z-index:1}
+ .ls-in .mark{width:72px;height:72px;border-radius:22px;background:rgba(255,255,255,.18);display:grid;place-items:center;font-size:32px;font-weight:900;margin-bottom:22px}
+ .ls-in h2{font-size:44px;letter-spacing:-1px}.ls-sub{font-size:19px;opacity:.9;margin:6px 0 40px}
+ .ls-list{list-style:none;margin:0;padding:0;display:grid;gap:22px}.ls-list li{display:flex;gap:16px;align-items:flex-start;line-height:1.4;opacity:.95}
+ .ls-list li svg{width:44px;height:44px;padding:11px;border-radius:14px;background:rgba(255,255,255,.16);flex:none}.ls-list span{font-size:15px}.ls-list b{font-size:16px}
+ .login-main{padding:40px;background:var(--bg)}
+ .login .box{max-width:420px;box-shadow:var(--sh);padding:40px 36px}
+ .login .box .mark,.login .box h1,.login .box>p{display:none}
+ .lg-h{display:block;font-size:26px;letter-spacing:-.4px}.lg-s{display:block;color:var(--ink2);margin:4px 0 26px}
+}
+@media(min-width:1024px){#app>.login{grid-column:1/-1;min-height:100vh}}
+.login .login-side .ls-sub{color:#fff;text-align:left;opacity:.9}
