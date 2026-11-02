@@ -1,0 +1,227 @@
+/* POS, invoices, payments, pending, customers */
+const METHODS = [['cash', '💵 Cash'], ['bank', '🏦 Bank transfer'], ['cheque', '🧾 Cheque']];
+const mLabel = m => ({ cash: 'Cash', bank: 'Bank transfer', cheque: 'Cheque' }[m] || m);
+const chequeFields = (p = '', c = {}) => `<div class="row2">${F('Cheque number', inp(p + 'cheque_no', c.cheque_no, 'placeholder="e.g. 004512"'))}${F('Bank', inp(p + 'bank', c.bank, 'placeholder="e.g. Bank of Ceylon"'))}</div>
+  <div class="row2">${F('Cheque date', inp(p + 'cheque_date', c.cheque_date || todayS(), 'type=date'))}${F('Expected deposit date', inp(p + 'deposit_date', c.deposit_date || todayS(), 'type=date'))}</div>`;
+const newPOS = () => ({ customer: null, items: [], discount: 0, date: todayS(), due_date: '', notes: '', editId: null });
+let POS = newPOS();
+
+/* ---------------- POS ---------------- */
+route('pos', async (args) => {
+  if (args[0] && (!POS.editId || POS.editId !== +args[0])) { // edit mode
+    const inv = await api('GET', '/invoices/' + args[0]);
+    POS = { customer: inv.customer_id ? { id: inv.customer_id, name: inv.cname, type: inv.ctype, phone: inv.phone, email: inv.email } : null, editId: inv.id, no: inv.invoice_no, date: inv.date, due_date: inv.due_date || '', discount: inv.discount, notes: inv.notes || '',
+      items: inv.items.filter(i => i.variant_id).map(i => ({ variant_id: i.variant_id, name: i.description, colour: i.colour, qty: i.qty, price: i.price, discount: i.discount, stock: null })) };
+  } else if (!args[0] && POS.editId) POS = newPOS();
+  const prods = await api('GET', '/products' + qs({ active: 1 })); let term = '';
+  const flat = prods.flatMap(p => p.variants.map(v => ({ ...v, name: p.name, code: p.code, price: p.selling_price, wprice: p.wholesale_price })));
+  const priceFor = v => (POS.customer?.type === 'wholesale' && v.wprice) ? v.wprice : v.price;
+  const calc = () => { const sub = POS.items.reduce((a, i) => a + i.qty * i.price - (+i.discount || 0), 0); const d = Math.min(+POS.discount || 0, sub); return { sub, d, total: sub - d, qty: POS.items.reduce((a, i) => a + i.qty, 0) }; };
+  const stockOf = vid => (flat.find(v => v.id === vid) || {}).qty;
+
+  const draw = () => {
+    const t = calc();
+    view().innerHTML = `
+    <div class="card" id="cust" style="cursor:pointer;display:flex;gap:12px;align-items:center"><div class="av item" style="width:42px;height:42px;padding:0;justify-content:center;color:#fff;background:linear-gradient(135deg,var(--brand),var(--brand2));box-shadow:none">${ic('user')}</div>
+      <div style="flex:1;min-width:0"><div style="font-size:12px;color:var(--ink2);font-weight:700">CUSTOMER</div><div style="font-weight:800">${esc(POS.customer ? POS.customer.name : 'Walk-in customer')}</div>${POS.customer ? `<div class="s mut">${esc(POS.customer.phone || '')} ${POS.customer.type === 'wholesale' ? '• <b>Wholesale prices</b>' : ''}</div>` : '<div class="s mut">Tap to choose or add a customer (needed for credit / WhatsApp / email)</div>'}</div><span class="btn sec sm">Change</span></div>
+    ${POS.editId ? `<div class="card" style="background:color-mix(in srgb,var(--accent) 14%,var(--card))"><b>Editing ${esc(POS.no)}</b><div class="s ink2">Payments already recorded stay as they are. Stock is adjusted automatically.</div></div>` : ''}
+    <div class="card"><h3>Cart <span class="pill">${t.qty} pairs</span></h3><div id="cart">${POS.items.length ? POS.items.map((it, n) => `<div class="cart"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">${esc(it.name)}</div><div class="s mut">${esc(it.colour || '')}${stockOf(it.variant_id) != null ? ` • ${stockOf(it.variant_id)} in stock` : ''}</div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:6px"><span class="mut" style="font-size:12px">Rs.</span><input data-f="price" data-n="${n}" type="number" inputmode="decimal" value="${it.price}" style="width:92px;min-height:34px;padding:6px 8px"><span class="mut" style="font-size:12px">disc</span><input data-f="discount" data-n="${n}" type="number" inputmode="decimal" value="${it.discount || ''}" placeholder="0" style="width:70px;min-height:34px;padding:6px 8px"></div></div>
+      <div style="text-align:right"><div class="qty"><button data-dec="${n}">−</button><input data-f="qty" data-n="${n}" type="number" inputmode="numeric" value="${it.qty}"><button data-inc="${n}">+</button></div><b style="display:block;margin-top:6px">${rs(it.qty * it.price - (+it.discount || 0))}</b></div>
+      <button class="btn ghost sm" data-del="${n}" style="padding:6px">${ic('trash')}</button></div>`).join('') : empty('Cart is empty – tap a product below', 'box')}</div></div>
+    <div class="card"><h3>Add products</h3>${search('Search name or code…', term)}<div class="grid g2 g3d" id="plist"></div></div>
+    <div class="pbar"><div style="flex:1"><div class="s ink2" style="font-size:12px">${t.qty} pairs ${t.d ? `• discount ${rs(t.d)}` : ''}</div><div style="font-size:20px;font-weight:800">${rs(t.total)}</div></div>
+      <button class="btn sec" id="disc">${ic('tag')} Discount</button><button class="btn amber" id="pay" ${POS.items.length ? '' : 'disabled'}>${POS.editId ? 'Save changes' : 'Pay & Save'} ${ic('check')}</button></div>`;
+    const list = () => { const x = term.toLowerCase(); const ps = prods.filter(p => !x || p.name.toLowerCase().includes(x) || p.code.toLowerCase().includes(x)).slice(0, 60);
+      $('#plist').innerHTML = ps.map(p => `<div class="prod" data-p="${p.id}"><b>${esc(p.name)}</b><small>${esc(p.code)} • ${p.variants.length} colour${p.variants.length > 1 ? 's' : ''}</small><div style="display:flex;justify-content:space-between;align-items:center"><b class="good">${rs(p.selling_price)}</b><span class="pill ${p.stock <= 0 ? 'bad' : ''}">${p.stock} left</span></div></div>`).join('') || '<div class="mut">No products found</div>';
+      $$('.prod', view()).forEach(el => el.onclick = () => pick(prods.find(p => p.id === +el.dataset.p))); };
+    list(); $('#q').oninput = e => { term = e.target.value; list(); };
+    $('#cust').onclick = pickCustomer;
+    $$('[data-inc]').forEach(b => b.onclick = () => { POS.items[b.dataset.inc].qty++; draw(); }); $$('[data-dec]').forEach(b => b.onclick = () => { const i = POS.items[b.dataset.dec]; if (i.qty > 1) i.qty--; draw(); });
+    $$('[data-del]').forEach(b => b.onclick = () => { POS.items.splice(b.dataset.del, 1); draw(); });
+    $$('[data-f]').forEach(i => i.onchange = () => { const it = POS.items[i.dataset.n]; it[i.dataset.f] = i.dataset.f === 'qty' ? Math.max(1, parseInt(i.value) || 1) : (+i.value || 0); draw(); });
+    $('#disc').onclick = () => formSheet({ title: 'Invoice discount', body: F('Discount amount (Rs.)', inp('d', POS.discount || '', 'type=number inputmode=decimal placeholder=0')), onSubmit: d => { POS.discount = +d.d || 0; draw(); } });
+    $('#pay').onclick = () => POS.editId ? saveEdit() : paySheet(calc());
+  };
+  const pick = p => {
+    const add = v => { const ex = POS.items.find(i => i.variant_id === v.id); if (ex) ex.qty++; else POS.items.push({ variant_id: v.id, name: `${p.name} (${p.code})`, colour: v.colour, qty: 1, price: priceFor({ price: p.selling_price, wprice: p.wholesale_price }), discount: 0 }); toast(`Added ${p.name} – ${v.colour}`, 'ok'); draw(); };
+    if (p.variants.length === 1) return add(p.variants[0]);
+    sheet({ title: esc(p.name) + ' – choose colour', body: `<div class="list">${p.variants.map(v => `<div class="item" data-v="${v.id}"><div class="av" style="background:var(--ink2)">${esc(v.colour.slice(0, 2))}</div><div class="mid"><div class="t">${esc(v.colour)}</div><div class="s">${v.qty} in stock</div></div>${v.qty <= 0 ? '<span class="badge b-danger">out</span>' : ''}</div>`).join('')}</div>`,
+      onMount: s => $$('.item', s.el).forEach(el => el.onclick = () => { add(p.variants.find(v => v.id === +el.dataset.v)); s.close(); }) });
+  };
+  const pickCustomer = () => sheet({ title: 'Select customer', body: `<button class="btn sec block" id="nc">${ic('plus')} New customer</button><div style="height:10px"></div><button class="btn ghost block" id="wk">Walk-in customer (no account)</button><div style="height:10px"></div>${search('Search customers…')}<div class="list" id="cl"></div>`,
+    onMount: async s => { let cs = await api('GET', '/customers'); const l = () => { const x = $('#q', s.el).value.toLowerCase(); $('#cl', s.el).innerHTML = cs.filter(c => !x || (c.name + (c.phone || '')).toLowerCase().includes(x)).slice(0, 50).map(c => `<div class="item" data-c="${c.id}"><div class="av">${esc(ini(c.name))}</div><div class="mid"><div class="t">${esc(c.name)}</div><div class="s">${esc(c.phone || '')}${c.type === 'wholesale' ? ' • Wholesale' : ''}</div></div>${c.outstanding > 0 ? `<div class="end warn"><small>owes</small><b>${rs(c.outstanding)}</b></div>` : ''}</div>`).join('') || '<div class="mut">No customers</div>'; $$('[data-c]', s.el).forEach(el => el.onclick = () => { POS.customer = cs.find(c => c.id === +el.dataset.c); if (POS.customer.type === 'wholesale') POS.items.forEach(i => { const v = flat.find(f => f.id === i.variant_id); if (v && v.wprice) i.price = v.wprice; }); s.close(); draw(); }); };
+      l(); $('#q', s.el).oninput = l; $('#wk', s.el).onclick = () => { POS.customer = null; s.close(); draw(); }; $('#nc', s.el).onclick = () => { s.close(); customerForm(null, c => { POS.customer = c; draw(); }); }; } });
+
+  const saveEdit = guard(async () => { const t = calc();
+    await api('PUT', '/invoices/' + POS.editId, { customer_id: POS.customer?.id || null, items: POS.items.map(i => ({ variant_id: i.variant_id, qty: i.qty, price: i.price, discount: i.discount })), discount: POS.discount, date: POS.date, due_date: POS.due_date, notes: POS.notes });
+    const id = POS.editId; POS = newPOS(); toast('Invoice updated', 'ok'); go('#/invoice/' + id); });
+
+  const paySheet = t => {
+    const total = Math.round(t.total * 100) / 100; let rows = [{ method: 'cash', amount: total }]; const c = POS.customer; const hasEmail = !!c?.email, hasWa = !!(c?.whatsapp || c?.phone);
+    let s; sheet({ title: 'Payment', wide: true, body: '', footer: [{ label: `${ic('check')} Create invoice`, fn: create }], onMount: x => { s = x; draw2(); } });
+    function paid() { return rows.reduce((a, r) => a + (+r.amount || 0), 0); } function pendAmt() { return Math.round((total - paid()) * 100) / 100; }
+    function draw2() {
+      $('.body', s.el).innerHTML = `<div class="hero" style="padding:14px;margin-bottom:12px"><small>Invoice total</small><div class="big" style="margin:0">${rs(total)}</div></div>
+      <div class="chips"><button class="chip" data-q="cash">100% Cash</button><button class="chip" data-q="credit">100% Credit</button><button class="chip" data-q="5030">50% Cash / 50% Credit</button><button class="chip" data-q="253045">20% Cash • 50% Cheque • 30% Pending</button></div>
+      <div id="rows">${rows.map((r, n) => `<div class="paybox"><div class="row3" style="grid-template-columns:1.3fr 1fr 70px">${sel('m' + n, METHODS, r.method, `data-m="${n}"`)}<input data-a="${n}" type="number" inputmode="decimal" value="${r.amount}" placeholder="Amount"><div style="position:relative"><input data-pc="${n}" type="number" inputmode="decimal" value="${total ? Math.round(r.amount / total * 10000) / 100 : 0}" style="padding-right:18px"><span style="position:absolute;right:8px;top:12px;color:var(--mut)">%</span></div></div>
+        ${r.method === 'cheque' ? `<div style="margin-top:10px" data-ch="${n}">${chequeFields('c' + n + '_', r.cheque || { cheque_date: todayS(), deposit_date: todayS() })}<div class="hint">A cheque is NOT counted as received money until you mark it Cleared.</div></div>` : ''}
+        ${rows.length > 1 ? `<button class="btn ghost sm" data-rm="${n}" style="margin-top:8px">${ic('trash')} Remove</button>` : ''}</div>`).join('')}</div>
+      <button class="btn sec block" id="addm">${ic('plus')} Add payment method</button>
+      <div class="paybox pend" style="margin-top:10px"><div style="display:flex;justify-content:space-between"><b>⏳ Pending (pay later)</b><b id="pendv" class="${pendAmt() > 0 ? 'warn' : ''}">${rs(Math.max(0, pendAmt()))}</b></div><div class="hint" id="pendh"></div></div>
+      <div class="row2" style="margin-top:12px">${F('Invoice date', inp('date', POS.date, 'type=date'))}<div id="duew">${F('Payment due date', inp('due_date', POS.due_date || addD(todayS(), 30), 'type=date'))}</div></div>
+      ${F('Note (printed on invoice)', inp('notes', POS.notes))}
+      <div class="card" style="box-shadow:none;border:1px solid var(--line)"><h3>Send invoice to customer</h3>
+        <label class="perm"><input type="checkbox" name="s_wa" ${hasWa ? 'checked' : 'disabled'}> ${ic('wa')} WhatsApp ${hasWa ? '' : '<span class="mut">(no phone)</span>'}</label>
+        <label class="perm"><input type="checkbox" name="s_em" ${hasEmail ? 'checked' : 'disabled'}> ${ic('mail')} Email ${hasEmail ? '' : '<span class="mut">(no email)</span>'}</label></div>`;
+      sync(); bind();
+    }
+    function sync() { const p = pendAmt(); const el = $('#pendv', s.el); if (!el) return; el.textContent = rs(Math.max(0, p)); el.className = p > 0.004 ? 'warn' : ''; $('#pendh', s.el).innerHTML = p < -0.004 ? `<span class="bad">Payments exceed total by ${rs(-p)}</span>` : p > 0.004 ? 'Unpaid amount stays as the customer\'s outstanding balance.' : 'Fully paid ✔'; $('#duew', s.el).style.display = p > 0.004 ? '' : 'none'; }
+    function bind() {
+      $$('[data-q]', s.el).forEach(b => b.onclick = () => { const q = b.dataset.q; rows = q === 'cash' ? [{ method: 'cash', amount: total }] : q === 'credit' ? [] : q === '5030' ? [{ method: 'cash', amount: round(total * .5) }] : [{ method: 'cash', amount: round(total * .2) }, { method: 'cheque', amount: round(total * .5) }]; if (!rows.length) rows = [{ method: 'cash', amount: 0 }]; draw2(); });
+      $$('[data-m]', s.el).forEach(x => x.onchange = () => { rows[x.dataset.m].method = x.value; keep(); draw2(); });
+      $$('[data-a]', s.el).forEach(x => x.oninput = () => { const r = rows[x.dataset.a]; r.amount = +x.value || 0; const pc = $(`[data-pc="${x.dataset.a}"]`, s.el); pc.value = total ? round(r.amount / total * 100) : 0; sync(); });
+      $$('[data-pc]', s.el).forEach(x => x.oninput = () => { const r = rows[x.dataset.pc]; r.amount = round(total * (+x.value || 0) / 100); $(`[data-a="${x.dataset.pc}"]`, s.el).value = r.amount; sync(); });
+      $$('[data-rm]', s.el).forEach(b => b.onclick = () => { keep(); rows.splice(b.dataset.rm, 1); draw2(); });
+      $('#addm', s.el).onclick = () => { keep(); rows.push({ method: 'bank', amount: Math.max(0, pendAmt()) }); draw2(); };
+    }
+    function round(n) { return Math.round(n * 100) / 100; }
+    function keep() { rows.forEach((r, n) => { const box = $(`[data-ch="${n}"]`, s.el); if (box) r.cheque = { cheque_no: $(`[name=c${n}_cheque_no]`, box).value, bank: $(`[name=c${n}_bank]`, box).value, cheque_date: $(`[name=c${n}_cheque_date]`, box).value, deposit_date: $(`[name=c${n}_deposit_date]`, box).value }; }); POS.date = $('[name=date]', s.el).value; POS.notes = $('[name=notes]', s.el).value; }
+    async function create(close) {
+      keep(); const p = pendAmt(); if (p < -0.004) throw new Error('Payments exceed the invoice total');
+      const pays = rows.filter(r => +r.amount > 0).map(r => ({ method: r.method, amount: +r.amount, cheque: r.method === 'cheque' ? r.cheque : undefined }));
+      for (const r of pays) if (r.method === 'cheque' && !(r.cheque?.cheque_no || '').trim()) throw new Error('Enter the cheque number');
+      if (p > 0.004 && !c && !(await confirmDlg('No customer selected – the pending balance of ' + rs(p) + ' will not be tracked against any customer. Continue?', 'Continue', ''))) return;
+      const dd = $('[name=due_date]', s.el); const r = await api('POST', '/invoices', { customer_id: c?.id || null, items: POS.items.map(i => ({ variant_id: i.variant_id, qty: i.qty, price: i.price, discount: i.discount })), discount: POS.discount, date: POS.date, due_date: p > 0.004 ? dd.value : null, notes: POS.notes, payments: pays, send: { email: $('[name=s_em]', s.el).checked, whatsapp: $('[name=s_wa]', s.el).checked } });
+      close(); POS = newPOS(); done(r);
+    }
+  };
+  const done = r => { const lines = (r.delivery || []).map(d => `<div class="kv"><span>${d.channel === 'whatsapp' ? ic('wa') : ic('mail')} ${d.channel} → ${esc(d.to || '')}</span><b class="${d.ok ? 'good' : d.manual ? 'warn' : 'bad'}">${d.ok ? 'Sent ✔' : esc(d.manual ? 'Use the button below' : d.error)}</b></div>`).join('');
+    sheet({ title: '✅ Invoice created', body: `<div style="text-align:center;padding:6px 0 12px"><div style="font-size:26px;font-weight:800">${esc(r.invoice_no)}</div></div>${lines}`, footer: [{ label: `${ic('file')} Open invoice`, fn: c => { c(); go('#/invoice/' + r.id); } }, ...(r.wa_link ? [{ label: `${ic('wa')} WhatsApp`, cls: 'wa', fn: () => window.open(r.wa_link, '_blank') }] : []), { label: `${ic('plus')} New sale`, cls: 'ghost', fn: c => { c(); go('#/pos'); reload(); } }] }); };
+  draw();
+}, { title: a => a[0] ? 'Edit invoice' : 'New Sale', nav: 'pos', perm: ['invoices.create', 'invoices.edit'] });
+
+/* ---------------- invoices list ---------------- */
+route('invoices', async (a, q) => {
+  const f = { status: q.status || '', search: q.search || '', customer: q.customer || '', from: q.from || '', to: q.to || '' };
+  const rows = await api('GET', '/invoices' + qs(f)); const tot = rows.reduce((s, r) => s + r.total, 0), bal = rows.reduce((s, r) => s + r.balance, 0);
+  view().innerHTML = `${search('Search invoice no. or customer…', f.search)}${chips([['', 'All'], ['unpaid', 'Unpaid'], ['partial', 'Partial'], ['pending', 'Pending'], ['cheque_pending', 'Cheque pending'], ['paid', 'Paid']], f.status)}
+  <div class="row2" style="margin-bottom:12px"><input type="date" id="f1" value="${f.from}"><input type="date" id="f2" value="${f.to}"></div>
+  ${f.customer ? `<div class="chip on" id="clr" style="margin-bottom:10px;display:inline-block">Customer filter ✕</div>` : ''}
+  <div class="grid g2" style="margin-bottom:12px">${stat('Invoices', rows.length + ' • ' + rs(tot), { i: 'file' })}${stat('Outstanding', rs(bal), { i: 'clock', c: '#d97706' })}</div>
+  <div class="list">${rows.length ? rows.map(i => `<div class="item" data-id="${i.id}"><div class="av">${esc(ini(i.cname))}</div><div class="mid"><div class="t">${esc(i.cname)}</div><div class="s">${esc(i.invoice_no)} • ${dshort(i.date)}</div></div><div class="end"><b>${rs(i.total)}</b>${badge(i.status)}</div></div>`).join('') : empty('No invoices found')}</div>`;
+  const apply = o => go('#/invoices' + qs({ ...f, ...o }));
+  $('#q').onkeydown = e => { if (e.key === 'Enter') apply({ search: e.target.value }); }; $('#q').onchange = e => apply({ search: e.target.value });
+  $$('.chip[data-k]').forEach(c => c.onclick = () => apply({ status: c.dataset.k })); $('#f1').onchange = e => apply({ from: e.target.value }); $('#f2').onchange = e => apply({ to: e.target.value });
+  const clr = $('#clr'); if (clr) clr.onclick = () => apply({ customer: '' });
+  $$('.item[data-id]').forEach(el => el.onclick = () => go('#/invoice/' + el.dataset.id));
+}, { title: 'Invoices', nav: 'invoices', perm: 'invoices.view' });
+
+/* ---------------- payment sheet (shared) ---------------- */
+function paymentSheet(inv, after) {
+  let method = 'cash';
+  formSheet({ title: `Add payment – ${esc(inv.invoice_no)}`, submit: 'Record payment', wide: true,
+    body: `<div class="card" style="box-shadow:none;border:1px solid var(--line)"><div class="kv"><span>Invoice total</span><b>${rs(inv.total)}</b></div><div class="kv"><span>Already paid</span><b class="good">${rs(inv.paid)}</b></div>${inv.cheque_pending ? `<div class="kv"><span>Cheques not cleared</span><b class="info">${rs(inv.cheque_pending)}</b></div>` : ''}<div class="kv"><span>Outstanding</span><b class="bad">${rs(inv.balance)}</b></div></div>
+    <div class="seg" id="ms">${METHODS.map(([k, l]) => `<button type="button" data-m="${k}" class="${k === 'cash' ? 'on' : ''}">${l.slice(3)}</button>`).join('')}</div>
+    <div class="row2">${F('Amount (Rs.)', inp('amount', Math.max(0, inv.balance - inv.cheque_pending), 'type=number inputmode=decimal'))}${F('Payment date', inp('date', todayS(), 'type=date'))}</div>
+    <div id="chq" style="display:none">${chequeFields('')}<div class="hint">Cheque stays "Cheque Pending" until you mark it cleared in the Cheques section.</div></div>
+    ${F('Note', inp('note', ''))}${can('invoices.send') ? `<label class="perm"><input type="checkbox" name="notify" ${inv.whatsapp || inv.phone ? 'checked' : 'disabled'}> ${ic('wa')} Send “payment received” WhatsApp to customer</label>` : ''}`,
+    onMount: s => $$('#ms button', s.el).forEach(b => b.onclick = () => { method = b.dataset.m; $$('#ms button', s.el).forEach(x => x.classList.toggle('on', x === b)); $('#chq', s.el).style.display = method === 'cheque' ? '' : 'none'; }),
+    onSubmit: async d => { const body = { method, amount: +d.amount, date: d.date, note: d.note, notify: d.notify }; if (method === 'cheque') body.cheque = { cheque_no: d.cheque_no, bank: d.bank, cheque_date: d.cheque_date, deposit_date: d.deposit_date };
+      const r = await api('POST', `/invoices/${inv.id}/payments`, body); toast('Payment recorded – ' + (STATUS[r.status] || r.status), 'ok'); after && after(); } });
+}
+
+/* ---------------- invoice detail ---------------- */
+route('invoice', async ([id]) => {
+  const i = await api('GET', '/invoices/' + id); const cu = i.cname || i.customer_name || 'Walk-in';
+  view().innerHTML = `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><div style="font-size:12px;color:var(--ink2);font-weight:700">INVOICE</div><div style="font-size:22px;font-weight:800">${esc(i.invoice_no)}</div></div>${badge(i.status)}</div>
+    <div class="sep"></div><div class="kv"><span>Customer</span><b>${i.customer_id && can('customers.view') ? `<a href="#/customer/${i.customer_id}">${esc(cu)}</a>` : esc(cu)}</b></div>${i.phone ? `<div class="kv"><span>Phone</span><b>${esc(i.phone)}</b></div>` : ''}${i.email ? `<div class="kv"><span>Email</span><b>${esc(i.email)}</b></div>` : ''}
+    <div class="kv"><span>Date</span><b>${dshort(i.date)}</b></div>${i.due_date ? `<div class="kv"><span>Due date</span><b class="${i.balance > 0 && i.due_date < todayS() ? 'bad' : ''}">${dshort(i.due_date)}</b></div>` : ''}${i.notes ? `<div class="kv"><span>Note</span><b>${esc(i.notes)}</b></div>` : ''}
+    <div class="kv"><span>Created by</span><b>${esc(i.created_by_name || '-')}</b></div>${i.updated_by_name ? `<div class="kv"><span>Last edited by</span><b>${esc(i.updated_by_name)}</b></div>` : ''}</div>
+  <div class="card"><h3>Items</h3>${i.items.map(it => `<div class="kv"><span>${esc(it.description)}<br><small class="mut">${esc(it.colour || '')} • ${it.qty} × ${fmt(it.price)}${it.discount ? ' − ' + fmt(it.discount) : ''}</small></span><b>${rs(it.total)}</b></div>`).join('')}
+    <div class="sep"></div><div class="kv"><span>Subtotal</span><b>${rs(i.subtotal)}</b></div>${i.discount ? `<div class="kv"><span>Discount</span><b>− ${rs(i.discount)}</b></div>` : ''}<div class="kv tot"><span><b>Total</b></span><b>${rs(i.total)}</b></div>
+    <div class="kv"><span>Paid</span><b class="good">${rs(i.paid)}</b></div>${i.cheque_pending ? `<div class="kv"><span>Cheque (not cleared)</span><b class="info">${rs(i.cheque_pending)}</b></div>` : ''}<div class="kv tot"><span><b>Balance due</b></span><b class="${i.balance > 0 ? 'bad' : 'good'}">${rs(i.balance)}</b></div></div>
+  <div class="card"><h3>Payments ${can('payments.manage') && i.balance - i.cheque_pending > 0.004 ? `<button class="btn sm" id="addp">${ic('plus')} Add payment</button>` : ''}</h3>
+    ${i.payments.length ? i.payments.map(p => `<div class="kv"><span>${dshort(p.date)} • ${mLabel(p.method)} ${p.method === 'cheque' ? `<br><small class="mut">#${esc(p.cheque_no || '')} ${esc(p.bank || '')} • deposit ${dshort(p.deposit_date)}</small> ${badge(p.cheque_status || 'received')}` : ''}${p.note ? `<br><small class="mut">${esc(p.note)}</small>` : ''}</span><b>${rs(p.amount)}${can('payments.manage') ? `<br><span style="white-space:nowrap"><button class="btn ghost sm" data-ep="${p.id}" style="padding:2px 8px;min-height:28px">${ic('edit')}</button> <button class="btn ghost sm" data-dp="${p.id}" style="padding:2px 8px;min-height:28px">${ic('trash')}</button></span>` : ''}</b></div>`).join('') : '<div class="mut">No payments recorded yet</div>'}</div>
+  <div class="card"><h3>Actions</h3><div class="grid g2">
+    <button class="btn sec" id="pdf">${ic('download')} PDF</button>
+    ${can('invoices.send') ? `<button class="btn wa" id="wa">${ic('wa')} WhatsApp</button><button class="btn sec" id="em">${ic('mail')} Email</button>` : ''}
+    ${can('invoices.edit') ? `<button class="btn sec" id="ed">${ic('edit')} Edit</button>` : ''}${can('invoices.delete') ? `<button class="btn ghost" id="dl" style="color:var(--bad)">${ic('trash')} Delete</button>` : ''}</div></div>
+  <div class="card"><h3>Delivery log</h3>${i.messages.length ? i.messages.map(m => `<div class="kv"><span>${m.channel === 'whatsapp' ? ic('wa') : ic('mail')} ${esc(m.recipient || '-')}<br><small class="mut">${dshort(m.created_at)} ${m.created_at.slice(11, 16)} • ${esc(m.kind)}${m.error ? ' • ' + esc(m.error) : ''}</small></span>${badge(m.status)}</div>`).join('') : '<div class="mut">Not sent yet</div>'}</div>`;
+  $('#pdf').onclick = () => openPdf(`/invoices/${id}/pdf`);
+  if ($('#addp')) $('#addp').onclick = () => paymentSheet(i, reload);
+  $$('[data-dp]').forEach(b => b.onclick = guard(async () => { if (await confirmDlg('Delete this payment? The invoice balance will increase.')) { await api('DELETE', '/payments/' + b.dataset.dp); toast('Payment deleted'); reload(); } }));
+  $$('[data-ep]').forEach(b => b.onclick = () => { const p = i.payments.find(x => x.id === +b.dataset.ep); formSheet({ title: 'Edit payment', body: `<div class="row2">${F('Amount', inp('amount', p.amount, 'type=number'))}${F('Date', inp('date', p.date, 'type=date'))}</div>${F('Note', inp('note', p.note || ''))}`, onSubmit: async d => { await api('PUT', '/payments/' + p.id, { amount: +d.amount, date: d.date, note: d.note }); toast('Payment updated', 'ok'); reload(); } }); });
+  if ($('#ed')) $('#ed').onclick = () => { POS = newPOS(); go('#/pos/' + id); };
+  if ($('#dl')) $('#dl').onclick = guard(async () => { if (await confirmDlg(`Delete invoice ${i.invoice_no}? Stock will be restored and its payments removed.`)) { await api('DELETE', '/invoices/' + id); toast('Invoice deleted'); go('#/invoices'); } });
+  if ($('#wa')) $('#wa').onclick = () => sendSheet(i, 'whatsapp'); if ($('#em')) $('#em').onclick = () => sendSheet(i, 'email');
+}, { title: 'Invoice', back: true, nav: 'invoices', perm: 'invoices.view' });
+
+async function sendSheet(i, channel) {
+  const tpls = (await api('GET', '/templates')).filter(t => t.active && !t.code.startsWith('admin_')); let prev = {};
+  const load = async code => { prev = await api('GET', `/invoices/${i.id}/wa-preview?template=${code}`); $('#pv').textContent = prev.message; };
+  sheet({ title: channel === 'whatsapp' ? 'Send on WhatsApp' : 'Send by email', wide: true,
+    body: `${F('Message template', sel('tpl', tpls.map(t => [t.code, t.name]), 'invoice'))}<div class="pre" id="pv">Loading…</div><div class="hint">To: ${esc(channel === 'whatsapp' ? (i.whatsapp || i.phone || 'no phone number') : (i.email || 'no email address'))}</div>`,
+    footer: [{ label: `${ic('send')} Send now`, fn: async close => { const r = await api('POST', `/invoices/${i.id}/send`, { [channel]: true, template: $('[name=tpl]').value }); const x = r[0]; if (x?.ok) toast('Sent ✔', 'ok'); else if (x?.manual) toast('Gateway not configured – use "Open WhatsApp"', 'err'); else toast(x?.error || 'Failed', 'err'); close(); reload(); } },
+      ...(channel === 'whatsapp' ? [{ label: `${ic('wa')} Open WhatsApp`, cls: 'wa', fn: () => window.open(prev.link, '_blank') }] : [])],
+    onMount: s => { load('invoice'); $('[name=tpl]', s.el).onchange = e => load(e.target.value); } });
+}
+
+/* ---------------- pending payments ---------------- */
+route('pending', async (a, q) => {
+  const f = { customer: q.customer || '', from: q.from || '', to: q.to || '', min: q.min || '', overdue: q.overdue || '' };
+  const [r, custs] = await Promise.all([api('GET', '/pending' + qs(f)), canAny('customers.view') ? api('GET', '/customers?owing=1') : []]);
+  view().innerHTML = `<div class="hero"><small>Total pending from customers</small><div class="big">${rs(r.total)}</div><div class="row"><div>Invoices<b>${r.rows.length}</b></div><div>Overdue<b>${r.rows.filter(x => x.days_overdue > 0).length}</b></div></div></div>
+  <div class="card"><div class="row2">${F('Customer', sel('customer', [['', 'All customers'], ...custs.map(c => [c.id, c.name])], f.customer))}${F('Min. outstanding', inp('min', f.min, 'type=number placeholder=0'))}</div><div class="row2">${F('From', inp('from', f.from, 'type=date'))}${F('To', inp('to', f.to, 'type=date'))}</div>
+    <label class="perm"><input type="checkbox" name="overdue" ${f.overdue ? 'checked' : ''}> Overdue only</label><button class="btn sec block" id="ap" style="margin-top:6px">Apply filters</button></div>
+  <div class="list">${r.rows.length ? r.rows.map(x => { const pct = Math.min(100, Math.round((x.paid / x.total) * 100)); return `<div class="card" style="margin:0"><div style="display:flex;justify-content:space-between;gap:8px"><div><b>${esc(x.cname)}</b><div class="s ink2"><a href="#/invoice/${x.id}">${esc(x.invoice_no)}</a> • ${dshort(x.date)}</div></div><div style="text-align:right"><b class="bad">${rs(x.balance)}</b><div>${badge(x.status)}</div></div></div>
+    <div style="height:7px;background:var(--bg);border-radius:6px;margin:10px 0 6px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--good)"></div></div>
+    <div class="s ink2" style="display:flex;justify-content:space-between"><span>Invoice ${rs(x.total)} • Paid ${rs(x.paid)}${x.cheque_pending ? ' • Chq ' + rs(x.cheque_pending) : ''}</span><span class="${x.days_overdue > 0 ? 'bad' : ''}">${x.due_date ? (x.days_overdue > 0 ? `Overdue ${x.days_overdue}d` : 'Due ' + dshort(x.due_date)) : ''}</span></div>
+    ${x.payments.length ? `<details style="margin-top:6px"><summary class="s ink2" style="cursor:pointer">Payment history (${x.payments.length})</summary>${x.payments.map(p => `<div class="kv"><span>${dshort(p.date)} • ${mLabel(p.method)}${p.method === 'cheque' && !p.cleared ? ' (not cleared)' : ''}</span><b>${rs(p.amount)}</b></div>`).join('')}</details>` : ''}
+    <div style="display:flex;gap:8px;margin-top:10px">${can('payments.manage') ? `<button class="btn sm" data-pay="${x.id}">${ic('plus')} Add payment</button>` : ''}${can('invoices.send') ? `<button class="btn wa sm" data-rem="${x.id}">${ic('wa')} Remind</button>` : ''}</div></div>`; }).join('') : empty('No pending payments 🎉', 'check')}</div>`;
+  $('#ap').onclick = () => { const d = fd(view()); go('#/pending' + qs({ ...d, overdue: d.overdue ? 1 : '' })); };
+  $$('[data-pay]').forEach(b => b.onclick = guard(async () => paymentSheet(await api('GET', '/invoices/' + b.dataset.pay), reload)));
+  $$('[data-rem]').forEach(b => b.onclick = guard(async () => { const r = await api('POST', `/invoices/${b.dataset.rem}/remind`, {}); const x = r[0]; if (x?.ok) toast('Reminder sent ✔', 'ok'); else if (x?.link) { toast('Gateway off – opening WhatsApp'); const pv = await api('GET', `/invoices/${b.dataset.rem}/wa-preview?template=overdue_reminder`); window.open(pv.link, '_blank'); } else toast(x?.error || 'Failed', 'err'); }));
+}, { title: 'Pending Payments', nav: 'more', perm: ['invoices.view', 'payments.manage'] });
+
+/* ---------------- customers ---------------- */
+function customerForm(c, after) {
+  c = c || {}; formSheet({ title: c.id ? 'Edit customer' : 'New customer', wide: true, body: `${F('Name *', inp('name', c.name))}<div class="row2">${F('Customer type', sel('type', [['retail', 'Retail'], ['wholesale', 'Wholesale']], c.type))}${F('Credit limit (Rs.)', inp('credit_limit', c.credit_limit || '', 'type=number'))}</div>
+    <div class="row2">${F('Phone', inp('phone', c.phone, 'type=tel'))}${F('WhatsApp number', inp('whatsapp', c.whatsapp, 'type=tel'), 'Leave empty to use phone')}</div>${F('Email', inp('email', c.email, 'type=email'), 'Invoices are emailed here automatically')}${F('Address', inp('address', c.address))}${F('Notes', inp('notes', c.notes))}`,
+    onSubmit: async d => { if (!d.name.trim()) throw new Error('Name is required'); if (c.id) { await api('PUT', '/customers/' + c.id, { ...d, active: 1 }); toast('Customer updated', 'ok'); after && after(); } else { const r = await api('POST', '/customers', d); toast('Customer added', 'ok'); after && after({ id: r.id, ...d }); } } });
+}
+route('customers', async (a, q) => {
+  let owing = q.owing === '1', term = q.search || ''; const rows = await api('GET', '/customers' + qs({ owing: owing ? 1 : '' })); const tot = rows.reduce((s, c) => s + c.outstanding, 0);
+  view().innerHTML = `${search('Search name, phone, email…', term)}${chips([['', 'All'], ['1', 'Owing money']], owing ? '1' : '')}<div class="grid g2" style="margin-bottom:12px">${stat('Customers', rows.length, { i: 'users' })}${stat('Total outstanding', rs(tot), { i: 'clock', c: '#d97706' })}</div><div class="list" id="cl"></div>
+  ${can('customers.manage') ? `<button class="btn amber" id="add" style="position:fixed;right:16px;bottom:calc(var(--nav) + 22px + var(--safe));border-radius:20px;box-shadow:0 8px 22px rgba(0,0,0,.25);z-index:20">${ic('plus')} Customer</button>` : ''}`;
+  const l = () => { const x = term.toLowerCase(); const f = rows.filter(c => !x || (c.name + ' ' + (c.phone || '') + ' ' + (c.email || '')).toLowerCase().includes(x)); $('#cl').innerHTML = f.length ? f.map(c => `<div class="item" data-id="${c.id}"><div class="av">${esc(ini(c.name))}</div><div class="mid"><div class="t">${esc(c.name)} ${c.type === 'wholesale' ? '<span class="pill">W</span>' : ''}</div><div class="s">${esc(c.phone || c.email || '-')} • ${c.invoice_count} invoices</div></div><div class="end"><small class="mut">${c.outstanding > 0 ? 'owes' : 'sales'}</small><b class="${c.outstanding > 0 ? 'warn' : ''}">${rs(c.outstanding > 0 ? c.outstanding : c.total_sales)}</b></div></div>`).join('') : empty('No customers found', 'users'); $$('#cl .item').forEach(el => el.onclick = () => go('#/customer/' + el.dataset.id)); };
+  l(); $('#q').oninput = e => { term = e.target.value; l(); }; $$('.chip[data-k]').forEach(c => c.onclick = () => go('#/customers' + qs({ owing: c.dataset.k }))); if ($('#add')) $('#add').onclick = () => customerForm(null, reload);
+}, { title: 'Customers', nav: 'more', perm: 'customers.view' });
+
+route('customer', async ([id], q) => {
+  const c = await api('GET', '/customers/' + id); const tab = q.tab || 'invoices'; const wa = (c.whatsapp || c.phone || '').replace(/\D/g, '');
+  const per = (l, p) => `<div class="stat"><div class="l">${l}</div><div class="v">${rs(p.sales)}</div><div class="n">${p.invoices} inv • ${num(p.qty)} pairs</div></div>`;
+  view().innerHTML = `<div class="card"><div class="item" style="box-shadow:none;padding:0;cursor:default"><div class="av" style="width:54px;height:54px;font-size:18px">${esc(ini(c.name))}</div><div class="mid"><div class="t" style="font-size:17px">${esc(c.name)}</div><div class="s">${c.type === 'wholesale' ? 'Wholesale' : 'Retail'} customer${c.active ? '' : ' • inactive'}</div></div></div>
+    <div class="sep"></div>${c.phone ? `<div class="kv"><span>Phone</span><b><a href="tel:${esc(c.phone)}">${esc(c.phone)}</a></b></div>` : ''}${c.email ? `<div class="kv"><span>Email</span><b>${esc(c.email)}</b></div>` : ''}${c.address ? `<div class="kv"><span>Address</span><b>${esc(c.address)}</b></div>` : ''}${c.credit_limit ? `<div class="kv"><span>Credit limit</span><b>${rs(c.credit_limit)}</b></div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">${can('invoices.create') ? '<button class="btn sm" id="ns">' + ic('plus') + ' New sale</button>' : ''}${wa ? `<a class="btn wa sm" target="_blank" href="https://wa.me/${wa.startsWith('0') ? '94' + wa.slice(1) : wa}">${ic('wa')} Chat</a>` : ''}${can('customers.manage') ? `<button class="btn sec sm" id="ec">${ic('edit')} Edit</button><button class="btn ghost sm" id="dc" style="color:var(--bad)">${ic('trash')}</button>` : ''}</div></div>
+  <div class="grid g2 g4" style="margin-bottom:12px">${stat('Total sales', rs(c.total_sales), { i: 'trend' })}${stat('Pairs purchased', num(c.total_qty), { i: 'box', c: '#7c3aed' })}${stat('Outstanding', rs(c.outstanding), { i: 'clock', c: '#d97706', cls: c.outstanding > 0 ? 'bad' : 'good' })}${stat('Last purchase', dshort(c.last_purchase), { i: 'calendar', c: '#2563eb' })}</div>
+  <div class="grid g3" style="margin-bottom:12px;font-size:12px">${per('Last 7 days', c.periods.week)}${per('This month', c.periods.month)}${per('This year', c.periods.year)}</div>
+  ${seg([['invoices', 'Invoices'], ['payments', 'Payments'], ['cheques', 'Cheques'], ['products', 'Products'], ['statement', 'Statement']], tab)}<div id="tb"></div>`;
+  if ($('#ns')) $('#ns').onclick = () => { POS = newPOS(); POS.customer = c; go('#/pos'); }; if ($('#ec')) $('#ec').onclick = () => customerForm(c, reload);
+  if ($('#dc')) $('#dc').onclick = guard(async () => { if (await confirmDlg('Delete this customer? (If they have invoices they will be deactivated instead)')) { const r = await api('DELETE', '/customers/' + id); toast(r.deactivated ? 'Customer deactivated' : 'Deleted'); go('#/customers'); } });
+  $$('[data-seg]').forEach(b => b.onclick = () => go(`#/customer/${id}?tab=${b.dataset.seg}`));
+  const T = $('#tb');
+  if (tab === 'invoices') T.innerHTML = `<div class="list">${c.invoices.length ? c.invoices.map(i => `<div class="item" data-i="${i.id}"><div class="mid"><div class="t">${esc(i.invoice_no)}</div><div class="s">${dshort(i.date)}${i.balance > 0 ? ' • owes ' + rs(i.balance) : ''}</div></div><div class="end"><b>${rs(i.total)}</b>${badge(i.status)}</div></div>`).join('') : empty('No invoices')}</div>`;
+  if (tab === 'payments') T.innerHTML = `<div class="card">${c.payments.length ? c.payments.map(p => `<div class="kv"><span>${dshort(p.date)} • ${mLabel(p.method)}<br><small class="mut">${esc(p.invoice_no)}${p.cheque_no ? ' • chq #' + esc(p.cheque_no) : ''}</small></span><b>${rs(p.amount)}<br>${p.method === 'cheque' ? badge(p.cheque_status || 'received') : ''}</b></div>`).join('') : empty('No payments')}</div>`;
+  if (tab === 'cheques') T.innerHTML = `<div class="card">${c.cheques.length ? c.cheques.map(k => `<div class="kv"><span>#${esc(k.cheque_no)} • ${esc(k.bank || '')}<br><small class="mut">${esc(k.invoice_no || '')} • deposit ${dshort(k.deposit_date)}</small></span><b>${rs(k.amount)}<br>${badge(k.status)}</b></div>`).join('') : empty('No cheques')}</div>`;
+  if (tab === 'products') T.innerHTML = `<div class="card">${c.products.length ? c.products.map(p => `<div class="kv"><span>${esc(p.description)}<br><small class="mut">${esc(p.colour || '')}</small></span><b>${num(p.qty)} pairs<br><small class="mut">${rs(p.value)}</small></b></div>`).join('') : empty('Nothing purchased yet')}</div>`;
+  if (tab === 'statement') {
+    T.innerHTML = `<div class="card"><div class="row2">${F('From', inp('from', q.from || addD(todayS(), -30), 'type=date'))}${F('To', inp('to', q.to || todayS(), 'type=date'))}</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec sm" id="sv">${ic('refresh')} Show</button><button class="btn sm" id="sp">${ic('download')} PDF</button>${can('invoices.send') ? `<button class="btn wa sm" id="sw">${ic('wa')} WhatsApp</button><button class="btn sec sm" id="se">${ic('mail')} Email</button>` : ''}</div></div><div id="st"></div>`;
+    const range = () => ({ from: $('[name=from]').value, to: $('[name=to]').value });
+    const show = guard(async () => { const d = await api('GET', `/customers/${id}/statement` + qs(range())); $('#st').innerHTML = `<div class="grid g3" style="margin-bottom:10px">${stat('Invoiced', rs(d.totalDebit))}${stat('Paid', rs(d.totalCredit), { cls: 'good' })}${stat('Balance', rs(d.closing), { cls: d.closing > 0 ? 'bad' : 'good' })}</div><div class="tscroll card" style="padding:0"><table class="tbl"><thead><tr><th>Date</th><th>Ref</th><th>Description</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>${d.rows.map(r => `<tr class="${r._bold ? 'bold' : ''}"><td>${r.date ? dshort(r.date) : ''}</td><td>${esc(r.ref)}</td><td>${esc(r.description)}</td><td class="r">${r.debit !== '' ? fmt(r.debit) : ''}</td><td class="r">${r.credit !== '' ? fmt(r.credit) : ''}</td><td class="r">${fmt(r.balance)}</td></tr>`).join('')}</tbody></table></div>`; });
+    $('#sv').onclick = show; $('#sp').onclick = () => openPdf(`/customers/${id}/statement` + qs({ ...range(), format: 'pdf' }));
+    const snd = ch => guard(async () => { const r = await api('POST', `/customers/${id}/send-statement`, { ...range(), [ch]: true }); const x = r[0]; if (x?.ok) toast('Statement sent ✔', 'ok'); else if (x?.link) { window.open(x.link, '_blank'); toast('Gateway off – opened WhatsApp'); } else toast(x?.error || 'Failed', 'err'); });
+    if ($('#sw')) { $('#sw').onclick = snd('whatsapp'); $('#se').onclick = snd('email'); } show();
+  }
+  $$('[data-i]').forEach(el => el.onclick = () => go('#/invoice/' + el.dataset.i));
+}, { title: 'Customer', back: true, nav: 'more', perm: 'customers.view' });
