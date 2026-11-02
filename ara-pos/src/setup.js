@@ -20,9 +20,9 @@ const SETTINGS = {
   payment_terms_days: '30', allow_negative_stock: '0', default_country_code: '94', remind_days_before: '3',
   smtp_host: '', smtp_port: '587', smtp_secure: '0', smtp_user: '', smtp_pass: '', smtp_from: '',
   auto_email_invoice: '1', auto_whatsapp_invoice: '1',
-  wa_enabled: '0', wa_api_url: 'https://ecodes.online', wa_send_path: '/api/send', wa_method: 'POST',
+  wa_enabled: '0', wa_api_url: 'https://ecodes.online', wa_send_path: '/api/send-message', wa_method: 'POST',
   wa_api_key: '', wa_sender: '', wa_headers: '{}',
-  wa_body: '{"api_key":"{{api_key}}","sender":"{{sender}}","number":"{{to}}","message":"{{message}}","media_url":"{{media_url}}","filename":"{{filename}}"}',
+  wa_body: '',
   notify_whatsapp_to: '', notify_email_to: '', notify_via_whatsapp: '0', notify_via_email: '0', remind_customers_whatsapp: '0',
   backup_enabled: '1', backup_keep: '14',
 };
@@ -52,6 +52,7 @@ async function setup(log = console.log) {
   }
   for (const [k, v] of Object.entries(SETTINGS)) await q('INSERT IGNORE INTO settings (k,v) VALUES (?,?)', [k, v]);
   for (const [code, name, body, subj] of TEMPLATES) await q('INSERT IGNORE INTO wa_templates (code,name,body,email_subject) VALUES (?,?,?,?)', [code, name, body, subj]);
+  await q("UPDATE settings SET v='/api/send-message' WHERE k='wa_send_path' AND v='/api/send'"); // upgrade old default
   for (const c of EXP_CATS) await q('INSERT IGNORE INTO expense_categories (name) VALUES (?)', [c]);
   for (const c of ['Slippers - Men', 'Slippers - Women', 'Slippers - Kids', 'Sandals']) await q('INSERT IGNORE INTO categories (name) VALUES (?)', [c]);
   log('Database ready.');

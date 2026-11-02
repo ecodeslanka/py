@@ -55,11 +55,11 @@ The same app adapts automatically: **under 1024px** it is a mobile app (bottom t
 
 ## WhatsApp (ecodes.online) & Email
 
-**Settings → WhatsApp**: enter your ecodes.online API key / sender. Because gateway APIs differ, the request is built from an
-editable **JSON body template** with placeholders `{{api_key}} {{sender}} {{to}} {{message}} {{media_url}} {{filename}}`,
-plus configurable endpoint path, HTTP method and headers – match them to the API documentation in your ecodes.online account
-and press **Send test**. Invoices are sent as a message with a secure PDF link (`{{media_url}}` is the same link for gateways that attach files).
-If the gateway is off or fails, every WhatsApp button falls back to opening **wa.me** with the message pre-filled, so staff can still send manually.
+**Settings → WhatsApp**: tick *Enable*, paste your ecodes.online **API key**, save, then press **Check status** (shows whether your number is connected and today's usage) and **Send test**.
+The system calls `POST https://ecodes.online/api/send-message` with `Authorization: Bearer <key>` and the fields `to`, `text`, and for invoices `documentUrl` + `fileName` (the PDF).
+Documented errors are shown in plain words (401 wrong key, 403 blocked, 409 number not connected - rescan the QR, 422 invalid / not on WhatsApp, 429 daily limit).
+The PDF is attached only when **Public URL** (Settings → Company) is a real internet address; otherwise the message contains the text only.
+If the gateway is off or fails, every WhatsApp button falls back to opening **wa.me** with the message pre-filled.
 
 **Settings → Templates**: edit every message (invoice, payment received, overdue reminder, statement, bounced cheque, admin alerts) or add custom ones.
 **Settings → Email**: SMTP host/port/user/password. Invoices are emailed automatically with the PDF attached.

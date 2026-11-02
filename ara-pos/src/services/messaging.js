@@ -29,29 +29,39 @@ async function companyVars() {
   return { company: s.company_name, company_phone: s.company_phone, company_email: s.company_email };
 }
 
-// Send through the configured gateway. Body is a user-editable JSON template with {{placeholders}}.
+// ---- WhatsApp via ecodes.online ----
+// POST {base}/api/send-message   Authorization: Bearer <key>   body: {to, text, documentUrl?, fileName?}
+const WA_ERRORS = { 401: 'Wrong or missing API key', 403: 'Account or WhatsApp number is blocked', 409: 'WhatsApp number not connected - scan the QR code again in your ecodes account', 422: 'Invalid number, or the number is not on WhatsApp', 429: 'Daily message limit reached (resets at midnight)' };
+const isLocalUrl = u => /^https?:\/\/(localhost|127\.|0\.0\.0\.0|192\.168\.|10\.)/i.test(u || '');
+async function waRequest(method, path, body) {
+  const s = await settings(); const base = (s.wa_api_url || 'https://ecodes.online').replace(/\/$/, '');
+  const headers = { Authorization: 'Bearer ' + s.wa_api_key, Accept: 'application/json' };
+  if (body) headers['Content-Type'] = 'application/json';
+  try { Object.assign(headers, JSON.parse(s.wa_headers && s.wa_headers !== '{}' ? s.wa_headers.replace(/\{\{\s*api_key\s*\}\}/g, s.wa_api_key) : '{}')); } catch { }
+  const r = await fetch(base + path, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(25000) });
+  const txt = await r.text(); let j = null; try { j = JSON.parse(txt); } catch { }
+  return { status: r.status, ok: r.ok && !(j && j.success === false), json: j, text: txt };
+}
 async function sendWhatsApp({ to, message, mediaUrl = '', filename = '' }) {
   const s = await settings(); const number = normPhone(to, s.default_country_code || '94');
   const link = waLink(to, message, s.default_country_code);
   if (!number) return { ok: false, manual: true, error: 'No phone number', link };
   if (s.wa_enabled !== '1' || !s.wa_api_key) return { ok: false, manual: true, error: 'WhatsApp gateway not configured', link };
   try {
-    const esc = v => JSON.stringify(String(v ?? '')).slice(1, -1); // safe inside JSON strings
-    const vars = { api_key: esc(s.wa_api_key), sender: esc(s.wa_sender), to: esc(number), message: esc(message), media_url: esc(mediaUrl), filename: esc(filename) };
-    let bodyTxt = render(s.wa_body || '{}', vars);
-    let headers = { 'Content-Type': 'application/json' };
-    try { Object.assign(headers, JSON.parse(s.wa_headers || '{}')); } catch { }
-    const method = (s.wa_method || 'POST').toUpperCase();
-    let url = (s.wa_api_url || 'https://ecodes.online').replace(/\/$/, '') + (s.wa_send_path || '/api/send');
-    const opt = { method, headers, signal: AbortSignal.timeout(20000) };
-    if (method === 'GET') { const o = JSON.parse(bodyTxt); url += (url.includes('?') ? '&' : '?') + new URLSearchParams(o).toString(); }
-    else opt.body = bodyTxt;
-    const r = await fetch(url, opt); const txt = await r.text();
-    let j; try { j = JSON.parse(txt); } catch { j = null; }
-    const failed = !r.ok || (j && (j.status === false || j.success === false || j.error));
-    if (failed) return { ok: false, error: `Gateway: ${(j && (j.message || j.error)) || txt.slice(0, 200) || r.status}`, link };
-    return { ok: true, response: txt.slice(0, 300), link };
-  } catch (e) { return { ok: false, error: 'Gateway error: ' + e.message, link }; }
+    const body = { to: '+' + number, text: message };
+    if (mediaUrl && !isLocalUrl(mediaUrl)) { body.documentUrl = mediaUrl; if (filename) body.fileName = filename; }
+    const r = await waRequest('POST', s.wa_send_path || '/api/send-message', body);
+    if (!r.ok) return { ok: false, error: WA_ERRORS[r.status] || (r.json && (r.json.message || r.json.error)) || ('Gateway error ' + r.status + ': ' + r.text.slice(0, 150)), link };
+    return { ok: true, response: r.json?.data?.msgId || '', link };
+  } catch (e) { return { ok: false, error: 'Gateway unreachable: ' + e.message, link }; }
+}
+async function waStatus() {
+  const s = await settings(); if (!s.wa_api_key) return { ok: false, error: 'Enter the API key first' };
+  try {
+    const st = await waRequest('GET', '/api/status'); if (!st.ok) return { ok: false, error: WA_ERRORS[st.status] || ('HTTP ' + st.status) };
+    const us = await waRequest('GET', '/api/usage').catch(() => null);
+    return { ok: true, status: st.json, usage: us?.json || null };
+  } catch (e) { return { ok: false, error: e.message }; }
 }
 
 async function transporter() {
@@ -73,4 +83,4 @@ async function logMsg(o) {
   await q('INSERT INTO message_log (channel,kind,invoice_id,customer_id,recipient,subject,body,status,error,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)',
     [o.channel, o.kind || 'invoice', o.invoice_id || null, o.customer_id || null, o.recipient || null, o.subject || null, (o.body || '').slice(0, 4000), o.status, (o.error || '').slice(0, 480) || null, o.user_id || null]);
 }
-module.exports = { normPhone, waLink, publicLink, verifySig, getTemplate, companyVars, sendWhatsApp, sendEmail, logMsg };
+module.exports = { normPhone, waLink, publicLink, verifySig, getTemplate, companyVars, sendWhatsApp, waStatus, sendEmail, logMsg };

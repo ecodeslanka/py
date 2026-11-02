@@ -131,6 +131,7 @@ router.post('/settings/test-whatsapp', auth, can('settings.manage'), wrap(async 
   const s = await settings(); const r = await M.sendWhatsApp({ to: req.body.to, message: render(req.body.message || '✅ Test message from {{company}}', { company: s.company_name }) });
   res.json(r);
 }));
+router.get('/settings/wa-status', auth, can('settings.manage'), wrap(async (req, res) => res.json(await M.waStatus())));
 router.post('/settings/test-email', auth, can('settings.manage'), wrap(async (req, res) => {
   const r = await M.sendEmail({ to: req.body.to, subject: 'Test email', text: 'SMTP is working ✔' }); res.json(r);
 }));
