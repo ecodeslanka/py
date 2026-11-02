@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const { SUP_BAL } = require('../sql');
 const path = require('path'), fs = require('fs');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
@@ -55,7 +56,7 @@ router.get('/dashboard', can('dashboard.view'), wrap(async (req, res) => {
     stock_value: await sum('SELECT COALESCE(SUM(v.qty*p.cost_price),0) v FROM product_variants v JOIN products p ON p.id=v.product_id WHERE p.active=1'),
     stock_qty: await sum('SELECT COALESCE(SUM(v.qty),0) v FROM product_variants v JOIN products p ON p.id=v.product_id WHERE p.active=1'),
     customer_outstanding: await sum('SELECT COALESCE(SUM(balance),0) v FROM invoices'),
-    supplier_balance: await sum(`SELECT COALESCE(SUM(s.opening_balance + COALESCE((SELECT SUM(total) FROM goods_receipts g WHERE g.supplier_id=s.id),0) - COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.supplier_id=s.id),0) - COALESCE((SELECT SUM(amount) FROM supplier_cheques sc WHERE sc.supplier_id=s.id AND sc.status='cleared'),0)),0) v FROM suppliers s`),
+    supplier_balance: await sum(`SELECT COALESCE(SUM(${SUP_BAL}),0) v FROM suppliers s`),
   };
   out.month_profit = round2(out.month_sales - out.month_expenses);
   out.upcoming_customer_cheques = await q(`SELECT k.id,k.cheque_no,k.bank,k.amount,k.deposit_date,k.status,c.name cname,DATEDIFF(k.deposit_date,CURDATE()) days_left FROM customer_cheques k LEFT JOIN customers c ON c.id=k.customer_id WHERE k.status IN ('received','pending','deposited') AND (k.deposit_date IS NULL OR k.deposit_date<=?) ORDER BY k.deposit_date LIMIT 8`, [soon]);
@@ -82,7 +83,7 @@ const REPORTS = {
     const qty = (await one('SELECT COALESCE(SUM(ii.qty),0) v, COALESCE(SUM(ii.qty*ii.cost),0) cogs FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE i.date BETWEEN ? AND ?', [f, t]));
     const inc = await q("SELECT method, COALESCE(SUM(amount),0) v FROM payments WHERE cleared=1 AND date BETWEEN ? AND ? GROUP BY method", [f, t]);
     const exp = await q('SELECT COALESCE(c.name,"Uncategorised") name, COALESCE(SUM(e.amount),0) v, e.method FROM expenses e LEFT JOIN expense_categories c ON c.id=e.category_id WHERE e.date BETWEEN ? AND ? GROUP BY c.name, e.method', [f, t]);
-    const supPaid = (await one('SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE date BETWEEN ? AND ?', [f, t])).v + (await one("SELECT COALESCE(SUM(amount),0) v FROM supplier_cheques WHERE status='cleared' AND status_date BETWEEN ? AND ?", [f, t])).v;
+    const supPaid = (await one('SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE cleared=1 AND date BETWEEN ? AND ?', [f, t])).v + (await one("SELECT COALESCE(SUM(amount),0) v FROM supplier_cheques WHERE status='cleared' AND payment_id IS NULL AND status_date BETWEEN ? AND ?", [f, t])).v;
     const income = round2(inc.reduce((a, r) => a + r.v, 0)), expenses = round2(exp.reduce((a, r) => a + r.v, 0));
     const cheq = (await one("SELECT COALESCE(SUM(amount),0) v FROM customer_cheques WHERE status IN ('received','pending','deposited') AND created_at<=?", [t + ' 23:59:59'])).v;
     const cash = inc.find(r => r.method === 'cash')?.v || 0, bank = inc.find(r => r.method === 'bank')?.v || 0, chq = inc.find(r => r.method === 'cheque')?.v || 0;
@@ -113,7 +114,7 @@ const REPORTS = {
   async cashbook(f, t) {
     const rows = await q(`SELECT date, 'Receipt' type, CONCAT(method,' - ',(SELECT invoice_no FROM invoices WHERE id=invoice_id)) description, method, amount, 0 paid FROM payments WHERE cleared=1 AND date BETWEEN ? AND ?
       UNION ALL SELECT date,'Expense', CONCAT((SELECT name FROM expense_categories WHERE id=category_id),' - ',COALESCE(description,'')), method, 0, amount FROM expenses WHERE date BETWEEN ? AND ?
-      UNION ALL SELECT date,'Supplier payment', 'Supplier payment', method, 0, amount FROM supplier_payments WHERE date BETWEEN ? AND ? ORDER BY date, type`, [f, t, f, t, f, t]);
+      UNION ALL SELECT date,'Supplier payment', 'Supplier payment', method, 0, amount FROM supplier_payments WHERE cleared=1 AND date BETWEEN ? AND ? ORDER BY date, type`, [f, t, f, t, f, t]);
     let bal = 0; rows.forEach(r => { bal = round2(bal + r.amount - r.paid); r.balance = bal; r.in = r.amount || ''; r.out = r.paid || ''; });
     return { title: 'Cash & Bank Transactions', columns: [C('date', 'Date', { w: 75 }), C('type', 'Type', { w: 95 }), C('description', 'Description'), C('method', 'Method', { w: 60 }), C('in', 'Money In', { money: 1 }), C('out', 'Money Out', { money: 1 }), C('balance', 'Net', { money: 1 })], rows };
   },
@@ -135,10 +136,9 @@ const REPORTS = {
   },
   async suppliers(f, t) {
     const rows = await q(`SELECT s.name supplier, s.type, COALESCE((SELECT SUM(total) FROM goods_receipts WHERE supplier_id=s.id AND date BETWEEN ? AND ?),0) purchases,
-      COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id=s.id AND date BETWEEN ? AND ?),0)+COALESCE((SELECT SUM(amount) FROM supplier_cheques WHERE supplier_id=s.id AND status='cleared' AND status_date BETWEEN ? AND ?),0) paid,
-      s.opening_balance + COALESCE((SELECT SUM(total) FROM goods_receipts WHERE supplier_id=s.id),0) - COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id=s.id),0) - COALESCE((SELECT SUM(amount) FROM supplier_cheques WHERE supplier_id=s.id AND status='cleared'),0) balance
-      FROM suppliers s ORDER BY balance DESC`, [f, t, f, t, f, t]);
-    return { title: 'Supplier Transactions & Balances', columns: [C('supplier', 'Supplier'), C('type', 'Type', { w: 60 }), C('purchases', 'Goods received', { money: 1 }), C('paid', 'Paid', { money: 1 }), C('balance', 'Balance owed', { money: 1 })], rows };
+      COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id=s.id AND cleared=1 AND date BETWEEN ? AND ?),0)+COALESCE((SELECT SUM(amount) FROM supplier_cheques WHERE supplier_id=s.id AND status='cleared' AND payment_id IS NULL AND status_date BETWEEN ? AND ?),0) paid,
+      ${SUP_BAL} balance FROM suppliers s ORDER BY balance DESC`, [f, t, f, t, f, t]);
+    return { title: 'Supplier Transactions & Balances', columns: [C('supplier', 'Supplier'), C('type', 'Type', { w: 60 }), C('purchases', 'Goods received (GRN)', { money: 1 }), C('paid', 'Paid', { money: 1 }), C('balance', 'Balance owed', { money: 1 })], rows };
   },
   async expenses(f, t) {
     const rows = await q(`SELECT e.date, COALESCE(c.name,'-') category, e.description, COALESCE(s.name,e.payee,'') payee, e.method, e.amount FROM expenses e LEFT JOIN expense_categories c ON c.id=e.category_id LEFT JOIN suppliers s ON s.id=e.supplier_id WHERE e.date BETWEEN ? AND ? ORDER BY e.date, e.id`, [f, t]);

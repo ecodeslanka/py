@@ -106,10 +106,29 @@ CREATE TABLE IF NOT EXISTS goods_receipts (
   date DATE NOT NULL,
   ref VARCHAR(60) NULL,
   note VARCHAR(255) NULL,
+  due_date DATE NULL,
   total DECIMAL(14,2) NOT NULL DEFAULT 0,
-  created_by INT NULL,
+  paid DECIMAL(14,2) NOT NULL DEFAULT 0,
+  cheque_pending DECIMAL(14,2) NOT NULL DEFAULT 0,
+  balance DECIMAL(14,2) NOT NULL DEFAULT 0,
+  status ENUM('unpaid','partial','cheque_pending','paid') NOT NULL DEFAULT 'unpaid',
+  created_by INT NULL, updated_by INT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX (supplier_id), INDEX (date)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS grn_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  grn_id INT NOT NULL,
+  product_id INT NULL,
+  variant_id INT NULL,
+  description VARCHAR(255) NOT NULL,
+  colour VARCHAR(50) NULL,
+  qty INT NOT NULL,
+  cost DECIMAL(12,2) NOT NULL DEFAULT 0,
+  total DECIMAL(14,2) NOT NULL DEFAULT 0,
+  INDEX (grn_id),
+  FOREIGN KEY (grn_id) REFERENCES goods_receipts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS stock_movements (
@@ -224,6 +243,8 @@ CREATE TABLE IF NOT EXISTS supplier_cheques (
   cheque_date DATE NULL,
   present_date DATE NULL,
   status ENUM('issued','presented','cleared','returned') NOT NULL DEFAULT 'issued',
+  payment_id INT NULL,
+  grn_id INT NULL,
   status_date DATE NULL,
   note VARCHAR(255) NULL,
   created_by INT NULL,
@@ -237,10 +258,13 @@ CREATE TABLE IF NOT EXISTS supplier_payments (
   supplier_id INT NOT NULL,
   date DATE NOT NULL,
   amount DECIMAL(14,2) NOT NULL,
-  method ENUM('cash','bank') NOT NULL DEFAULT 'cash',
+  method ENUM('cash','bank','cheque') NOT NULL DEFAULT 'cash',
+  grn_id INT NULL,
+  cleared TINYINT NOT NULL DEFAULT 1,
   note VARCHAR(255) NULL,
   created_by INT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (grn_id),
   FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 

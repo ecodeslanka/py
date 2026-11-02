@@ -52,6 +52,23 @@ const rejects = async (fn, m) => { try { await fn(); ok(false, m); } catch (e) {
   const d = await api('GET', '/dashboard'); ok(d.stock_value > 0 && d.customer_outstanding >= 1950, 'dashboard ok');
   for (const type of ['summary', 'daily', 'cashbook', 'sales', 'products', 'customers', 'suppliers', 'expenses', 'stock', 'cheques']) { const r = await api('GET', `/reports?type=${type}&from=2026-01-01&to=2026-12-31`); ok(Array.isArray(r.rows), 'report ' + type + ' (' + r.rows.length + ' rows)'); }
   const x = await api('GET', '/reports/export?type=summary&format=xlsx&period=monthly'); ok(x.slice(0, 2).toString() === 'PK', 'Excel export'); const pp = await api('GET', '/reports/export?type=sales&format=pdf&period=yearly'); ok(pp.slice(0, 4).toString() === '%PDF', 'PDF export');
+  // ---- GRN (supplier purchases) with payments, like the customer side
+  const TD = new Date().toISOString().slice(0, 10);
+  const grn = await api('POST', '/grn', { supplier_id: sup.id, ref: 'DN-77', items: [{ variant_id: black.id, qty: 10, cost: 400 }], payments: [{ method: 'cash', amount: 1000 }, { method: 'cheque', amount: 2000, cheque: { cheque_no: 'G-1', bank: 'NSB', cheque_date: TD, present_date: TD } }] });
+  let G = await api('GET', '/grn/' + grn.id); ok(/^GRN-\d{4}-\d{4}$/.test(G.grn_no) && G.total === 4000 && G.paid === 1000 && G.cheque_pending === 2000 && G.balance === 3000 && G.status === 'cheque_pending', `GRN ${G.grn_no}: total 4000, paid 1000, cheque pending 2000, status ${G.status}`);
+  p = await api('GET', '/products/' + prod.id); const stockBefore = p.stock;
+  const sbal = await api('GET', '/suppliers/' + sup.id); ok(sbal.balance === 3000, 'supplier balance 3000 (cheque not counted until cleared) got ' + sbal.balance);
+  const dg = await api('POST', '/notifications/digest', { preview: true }); ok(/TODAY/.test(dg.text) && /G-1/.test(dg.text), 'daily digest lists supplier cheque due TODAY');
+  const sch = (await api('GET', '/cheques/supplier?status=issued')).find(c => c.cheque_no === 'G-1'); ok(!!sch && sch.grn_id === grn.id, 'GRN cheque appears in supplier cheques');
+  await api('PUT', '/cheques/supplier/' + sch.id, { ...sch, status: 'cleared' }); G = await api('GET', '/grn/' + grn.id); ok(G.paid === 3000 && G.balance === 1000 && G.status === 'partial', 'cheque cleared -> paid 3000, balance 1000');
+  const sp = await api('GET', '/supplier-pending?supplier=' + sup.id); ok(sp.rows.some(r => r.id === grn.id), 'supplier dues list shows GRN');
+  await api('POST', `/grn/${grn.id}/payments`, { method: 'bank', amount: 1000, notify: true }); G = await api('GET', '/grn/' + grn.id); ok(G.status === 'paid' && G.balance === 0, 'later bank payment settles GRN -> paid');
+  await rejects(() => api('POST', `/grn/${grn.id}/payments`, { method: 'cash', amount: 5 }), 'overpaying GRN rejected');
+  const ss = await api('GET', `/suppliers/${sup.id}/statement`); ok(typeof ss.closing === 'number' && ss.rows.length > 3, 'supplier statement closing ' + ss.closing); const spdf = await api('GET', `/suppliers/${sup.id}/statement?format=pdf`); ok(spdf.slice(0, 4).toString() === '%PDF', 'supplier statement PDF');
+  await rejects(() => api('PUT', '/grn/' + grn.id, { items: [{ variant_id: black.id, qty: 5, cost: 400 }] }), 'cannot reduce GRN total below payments already made');
+  await api('PUT', '/grn/' + grn.id, { items: [{ variant_id: black.id, qty: 10, cost: 450 }] }); G = await api('GET', '/grn/' + grn.id); ok(G.total === 4500 && G.status === 'partial' && G.balance === 500, 'edit GRN cost -> total 4500, balance 500');
+  const gpdf = await api('GET', `/grn/${grn.id}/pdf`); ok(gpdf.slice(0, 4).toString() === '%PDF', 'GRN PDF');
+  await api('DELETE', '/grn/' + grn.id); p = await api('GET', '/products/' + prod.id); ok(p.stock === stockBefore - 10, 'delete GRN reverses stock');
   // roles & permissions
   const role = await api('POST', '/roles', { name: 'Tester' + sfx, permissions: ['invoices.view', 'products.view', 'customers.view'] });
   await api('POST', '/users', { name: 'Test User', username: 'u' + sfx, password: 'secret1', role_id: role.id });

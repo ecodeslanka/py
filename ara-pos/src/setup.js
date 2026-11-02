@@ -12,6 +12,8 @@ const TEMPLATES = [
   ['cheque_bounced', 'Bounced cheque notice', `Dear {{customer}},\n\nYour cheque *{{cheque_no}}* ({{bank}}) for *{{amount}}* was returned unpaid. Invoice {{invoice_no}} balance is now *{{balance}}*.\nPlease contact us to settle this.\n\n{{company}} | {{company_phone}}`, 'Returned cheque {{cheque_no}}'],
   ['admin_customer_cheque', 'Alert: customer cheque', `🔔 *Customer cheque alert*\n{{title}}\nCheque {{cheque_no}} ({{bank}}) - {{amount}}\nCustomer: {{customer}}\nDeposit date: {{deposit_date}}`, null],
   ['admin_supplier_cheque', 'Alert: supplier cheque', `🔔 *Supplier cheque alert*\n{{title}}\nCheque {{cheque_no}} ({{bank}}) - {{amount}}\nSupplier: {{supplier}}\nPresent date: {{present_date}}`, null],
+  ['supplier_payment', 'Payment made to supplier', `Dear {{supplier}},\n\nWe have made a payment of *{{amount}}* ({{method}}) for {{grn_no}} on {{date}}.{{cheque_line}}\nBalance remaining with us: *{{balance}}*\n\nThank you,\n{{company}} | {{company_phone}}`, 'Payment made - {{grn_no}}'],
+  ['admin_daily_digest', 'Daily cheque reminder (to you)', `🔔 *{{company}} - Daily reminder ({{date}})*\n{{today_customer}}{{today_supplier}}{{due_supplier}}{{overdue}}{{upcoming}}`, null],
   ['admin_low_stock', 'Alert: low stock', `⚠️ *Low stock alert*\n{{message}}`, null],
 ];
 const SETTINGS = {
@@ -24,8 +26,14 @@ const SETTINGS = {
   wa_api_key: '', wa_sender: '', wa_headers: '{}',
   wa_body: '',
   notify_whatsapp_to: '', notify_email_to: '', notify_via_whatsapp: '0', notify_via_email: '0', remind_customers_whatsapp: '0',
+  digest_enabled: '1', digest_time: '08:00', digest_whatsapp_to: '', digest_email_to: '', digest_last: '',
   backup_enabled: '1', backup_keep: '14',
 };
+const MIGRATIONS = [
+  ['goods_receipts', 'due_date', 'DATE NULL'], ['goods_receipts', 'paid', 'DECIMAL(14,2) NOT NULL DEFAULT 0'], ['goods_receipts', 'cheque_pending', 'DECIMAL(14,2) NOT NULL DEFAULT 0'],
+  ['goods_receipts', 'balance', 'DECIMAL(14,2) NOT NULL DEFAULT 0'], ['goods_receipts', 'status', "ENUM('unpaid','partial','cheque_pending','paid') NOT NULL DEFAULT 'unpaid'"], ['goods_receipts', 'updated_by', 'INT NULL'],
+  ['supplier_payments', 'grn_id', 'INT NULL'], ['supplier_payments', 'cleared', 'TINYINT NOT NULL DEFAULT 1'], ['supplier_cheques', 'payment_id', 'INT NULL'], ['supplier_cheques', 'grn_id', 'INT NULL'],
+];
 const EXP_CATS = ['Factory Material Purchases', 'Employee Salaries & Wages', 'Factory Expenses', 'Electricity & Water Bills', 'Transport & Delivery', 'Repairs & Maintenance', 'Rent', 'Other / Miscellaneous'];
 
 async function setup(log = console.log) {
@@ -40,6 +48,12 @@ async function setup(log = console.log) {
   for (const stmt of sql.split(/;\s*\n/).map(s => s.trim()).filter(s => s && !s.startsWith('--') || /CREATE/.test(s))) {
     const s = stmt.replace(/^--.*\n/gm, '').trim(); if (s) await q(s);
   }
+  for (const [t, c, ddl] of MIGRATIONS) {
+    const ex = await one('SELECT 1 x FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?', [t, c]);
+    if (!ex) await q(`ALTER TABLE \`${t}\` ADD COLUMN \`${c}\` ${ddl}`);
+  }
+  await q("ALTER TABLE supplier_payments MODIFY method ENUM('cash','bank','cheque') NOT NULL DEFAULT 'cash'");
+  await q('UPDATE goods_receipts SET balance=total WHERE paid=0 AND balance=0 AND total>0'); // legacy receipts
   for (const r of DEFAULT_ROLES) {
     const ex = await one('SELECT id FROM roles WHERE name=?', [r.name]);
     if (!ex) await q('INSERT INTO roles (name,description,permissions,is_system) VALUES (?,?,?,?)', [r.name, r.description, JSON.stringify(r.permissions), r.is_system || 0]);

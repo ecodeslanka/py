@@ -161,3 +161,36 @@ body.pos .bottomnav .fab{visibility:hidden}
 }
 @media(min-width:1024px) and (max-width:1250px){.hero + .grid{grid-template-columns:repeat(3,1fr)}.tiles{grid-template-columns:repeat(4,1fr)}.posgrid{grid-template-columns:minmax(0,1fr) 380px}}
 @media(min-width:1024px){#view>.row2{max-width:480px}}
+
+.fabadd{position:fixed;right:16px;bottom:calc(var(--nav) + 22px + var(--safe));border-radius:20px;box-shadow:0 8px 22px rgba(0,0,0,.25);z-index:20}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}.filters select{grid-column:1/-1}
+.formgrid,.detail-grid{display:block}
+@media(min-width:1024px){
+ /* roomier desktop */
+ body{font-size:15.5px}
+ #app{grid-template-columns:268px 1fr}
+ .side{padding:26px 16px}.side a{padding:12px 16px;margin-bottom:3px}.side .sec{padding-top:18px}
+ .topbar{padding:20px 44px}.topbar h1{font-size:24px}
+ #view{max-width:1760px;padding:34px 44px 72px}
+ .card{padding:24px;margin-bottom:22px}.card h3{margin-bottom:16px;font-size:15px}
+ .grid{gap:20px}.hero + .grid{gap:20px;margin-bottom:22px!important}.stat{padding:20px 22px;gap:4px}.stat .v{font-size:21px}.stat .l{font-size:12.5px}.stat .ico{width:36px;height:36px;margin-bottom:10px}
+ .hero{padding:32px 36px;margin-bottom:22px}.hero .big{font-size:42px;margin:6px 0 16px}.hero .row{gap:40px}
+ .g2d{gap:22px}
+ .list>.item{padding:18px 26px;gap:16px}.item .av{width:46px;height:46px}.item .t{font-size:15.5px}.item .s{font-size:13.5px}
+ .tbl th{padding:15px 18px}.tbl td{padding:17px 18px}
+ .kv{padding:10px 0}
+ .field{margin-bottom:16px}input,select,textarea{padding:12px 14px;min-height:46px}
+ .chips{padding-bottom:16px}.chip{padding:9px 18px}
+ .filters{grid-template-columns:minmax(220px,320px) 190px 190px;margin-bottom:20px}.filters select{grid-column:auto}
+ #view>.row2{max-width:560px;margin-bottom:18px}
+ .search{margin-bottom:18px}
+ .sheet .body{padding:8px 28px 22px}.sheet header{padding:18px 28px 10px}.sheet footer{padding:16px 28px}
+ button.fabadd{bottom:32px;right:44px}
+ .list.cards{background:none;box-shadow:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:22px;overflow:visible}
+ .list.cards>.card{border-radius:var(--r);box-shadow:var(--sh);border:0!important;padding:22px}
+ .formgrid{display:grid;grid-template-columns:minmax(0,1fr) 460px;gap:28px;align-items:start}.fg-sum{position:sticky;top:104px}
+ .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start}
+ .tiles{gap:20px}.tile{padding:24px 10px}
+ #tb>.card{max-width:980px}
+}
+@media(min-width:1024px) and (max-width:1250px){.formgrid{grid-template-columns:minmax(0,1fr) 400px}.detail-grid{gap:20px}}

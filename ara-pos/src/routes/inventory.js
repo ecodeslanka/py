@@ -102,25 +102,6 @@ router.get('/stock/movements', can('products.view'), wrap(async (req, res) => {
   res.json(await q(`SELECT m.*, p.name, p.code, v.colour, u.name user_name FROM stock_movements m JOIN products p ON p.id=m.product_id JOIN product_variants v ON v.id=m.variant_id
     LEFT JOIN users u ON u.id=m.user_id WHERE ${w.join(' AND ')} ORDER BY m.id DESC LIMIT 300`, p));
 }));
-router.post('/stock/receive', can('stock.manage'), wrap(async (req, res) => {
-  const b = req.body; const items = (b.items || []).filter(i => i.variant_id && +i.qty > 0);
-  if (!items.length) bad('Add at least one item with quantity');
-  const id = await tx(async c => {
-    const grn = await nextNumber(c, 'grn', 'GRN-', 4);
-    let total = 0; const r = await q('INSERT INTO goods_receipts (grn_no,supplier_id,date,ref,note,created_by) VALUES (?,?,?,?,?,?)', [grn, b.supplier_id || null, b.date || today(), b.ref || null, b.note || null, req.user.id], c);
-    for (const it of items) {
-      const cost = it.cost !== undefined && it.cost !== '' ? +it.cost : null; const qty = parseInt(it.qty);
-      const v = await one('SELECT p.id,p.cost_price FROM product_variants v JOIN products p ON p.id=v.product_id WHERE v.id=?', [it.variant_id], c);
-      await moveStock(c, { variant_id: it.variant_id, type: 'receive', qty, unit_cost: cost ?? v.cost_price, ref_type: 'grn', ref_id: r.insertId, note: `${grn}${b.ref ? ' / ' + b.ref : ''}`, user_id: req.user.id });
-      if (cost != null && cost !== v.cost_price && b.update_cost) await q('UPDATE products SET cost_price=? WHERE id=?', [cost, v.id], c);
-      total += qty * (cost ?? v.cost_price);
-    }
-    await q('UPDATE goods_receipts SET total=? WHERE id=?', [round2(total), r.insertId], c); return r.insertId;
-  });
-  await log(req, 'receive', 'stock', id, `${items.length} item(s)`); res.json({ id });
-}));
-router.get('/stock/receipts', can('products.view'), wrap(async (req, res) => res.json(await q(
-  `SELECT g.*, s.name supplier, u.name user_name FROM goods_receipts g LEFT JOIN suppliers s ON s.id=g.supplier_id LEFT JOIN users u ON u.id=g.created_by ORDER BY g.id DESC LIMIT 100`))));
 // returns / damages / adjustments
 router.post('/stock/adjust', can('stock.manage'), wrap(async (req, res) => {
   const { variant_id, type, qty, note } = req.body; const n = parseInt(qty);
@@ -133,9 +114,7 @@ router.post('/stock/adjust', can('stock.manage'), wrap(async (req, res) => {
 }));
 
 // ---- suppliers ----
-const supBal = `s.opening_balance + COALESCE((SELECT SUM(total) FROM goods_receipts g WHERE g.supplier_id=s.id),0)
-  - COALESCE((SELECT SUM(amount) FROM supplier_payments sp WHERE sp.supplier_id=s.id),0)
-  - COALESCE((SELECT SUM(amount) FROM supplier_cheques sc WHERE sc.supplier_id=s.id AND sc.status='cleared'),0)`;
+const supBal = require('../sql').SUP_BAL;
 router.get('/suppliers', can('suppliers.view', 'products.view', 'expenses.view', 'products.manage', 'stock.manage', 'cheques.view'), wrap(async (req, res) => {
   const { type, search } = req.query; const w = ['1=1'], p = [];
   if (type) { w.push('s.type=?'); p.push(type); } if (search) { w.push('(s.name LIKE ? OR s.phone LIKE ?)'); p.push(`%${search}%`, `%${search}%`); }
@@ -143,8 +122,8 @@ router.get('/suppliers', can('suppliers.view', 'products.view', 'expenses.view',
 }));
 router.get('/suppliers/:id', can('suppliers.view'), wrap(async (req, res) => {
   const s = await one(`SELECT s.*, ${supBal} balance FROM suppliers s WHERE s.id=?`, [req.params.id]); if (!s) bad('Not found', 404);
-  s.receipts = await q('SELECT * FROM goods_receipts WHERE supplier_id=? ORDER BY date DESC, id DESC LIMIT 50', [s.id]);
-  s.payments = await q('SELECT * FROM supplier_payments WHERE supplier_id=? ORDER BY date DESC, id DESC LIMIT 100', [s.id]);
+  s.receipts = await q('SELECT * FROM goods_receipts WHERE supplier_id=? ORDER BY date DESC, id DESC LIMIT 100', [s.id]);
+  s.payments = await q(`SELECT p.*, g.grn_no, c.cheque_no, c.status cheque_status FROM supplier_payments p LEFT JOIN goods_receipts g ON g.id=p.grn_id LEFT JOIN supplier_cheques c ON c.payment_id=p.id WHERE p.supplier_id=? ORDER BY p.date DESC, p.id DESC LIMIT 150`, [s.id]);
   s.cheques = await q('SELECT * FROM supplier_cheques WHERE supplier_id=? ORDER BY id DESC', [s.id]);
   s.expenses = await q('SELECT e.*, c.name category FROM expenses e LEFT JOIN expense_categories c ON c.id=e.category_id WHERE e.supplier_id=? ORDER BY date DESC LIMIT 50', [s.id]);
   res.json(s);
@@ -166,9 +145,13 @@ router.delete('/suppliers/:id', can('suppliers.manage'), wrap(async (req, res) =
   await q('DELETE FROM suppliers WHERE id=?', [id]); await log(req, 'delete', 'supplier', +id); res.json({ ok: true });
 }));
 router.post('/suppliers/:id/payments', can('suppliers.manage'), wrap(async (req, res) => {
-  const b = req.body; if (!(+b.amount > 0)) bad('Enter a valid amount');
-  const r = await q('INSERT INTO supplier_payments (supplier_id,date,amount,method,note,created_by) VALUES (?,?,?,?,?,?)', [req.params.id, b.date || today(), +b.amount, b.method === 'bank' ? 'bank' : 'cash', b.note || null, req.user.id]);
-  await log(req, 'create', 'supplier_payment', r.insertId, `${b.amount} to supplier ${req.params.id}`); res.json({ id: r.insertId });
+  const b = req.body; if (!(+b.amount > 0)) bad('Enter a valid amount'); let id;
+  await tx(async c => { id = await require('../services/grn').addSupplierPayment(c, req, { supplier_id: +req.params.id, grn_id: null }, b); });
+  await log(req, 'create', 'supplier_payment', id, `${b.amount} to supplier ${req.params.id}`); res.json({ id });
 }));
-router.delete('/supplier-payments/:id', can('suppliers.manage'), wrap(async (req, res) => { await q('DELETE FROM supplier_payments WHERE id=?', [req.params.id]); await log(req, 'delete', 'supplier_payment', +req.params.id); res.json({ ok: true }); }));
+router.delete('/supplier-payments/:id', can('suppliers.manage'), wrap(async (req, res) => {
+  const { recalcGrn } = require('../services/grn'); const id = +req.params.id;
+  await tx(async c => { const p = await one('SELECT * FROM supplier_payments WHERE id=?', [id], c); if (!p) bad('Not found', 404); await q('DELETE FROM supplier_cheques WHERE payment_id=?', [id], c); await q('DELETE FROM supplier_payments WHERE id=?', [id], c); if (p.grn_id) await recalcGrn(p.grn_id, c); });
+  await log(req, 'delete', 'supplier_payment', id); res.json({ ok: true });
+}));
 module.exports = router;

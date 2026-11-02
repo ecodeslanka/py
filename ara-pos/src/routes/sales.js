@@ -291,7 +291,9 @@ router.put('/cheques/supplier/:id', can('cheques.manage'), wrap(async (req, res)
   const b = req.body, k = await one('SELECT * FROM supplier_cheques WHERE id=?', [req.params.id]); if (!k) bad('Not found', 404);
   if (!(+b.amount > 0)) bad('Invalid amount');
   await q('UPDATE supplier_cheques SET supplier_id=?,cheque_no=?,bank=?,amount=?,cheque_date=?,present_date=?,status=?,note=?,status_date=? WHERE id=?', [b.supplier_id || k.supplier_id, ...scVals(b), b.status !== k.status ? today() : k.status_date, k.id]);
-  await log(req, 'update', 'supplier_cheque', k.id, b.status); res.json({ ok: true });
+  const st = scVals(b)[5];
+  if (k.payment_id) { await q('UPDATE supplier_payments SET cleared=? WHERE id=?', [st === 'cleared' ? 1 : 0, k.payment_id]); if (k.grn_id) await require('../services/grn').recalcGrn(k.grn_id); }
+  await log(req, 'update', 'supplier_cheque', k.id, st); require('../services/reminders').scan().catch(() => { }); res.json({ ok: true });
 }));
-router.delete('/cheques/supplier/:id', can('cheques.manage'), wrap(async (req, res) => { await q('DELETE FROM supplier_cheques WHERE id=?', [req.params.id]); await log(req, 'delete', 'supplier_cheque', +req.params.id); res.json({ ok: true }); }));
+router.delete('/cheques/supplier/:id', can('cheques.manage'), wrap(async (req, res) => { const k = await one('SELECT * FROM supplier_cheques WHERE id=?', [req.params.id]); if (k?.payment_id) { await q('DELETE FROM supplier_payments WHERE id=?', [k.payment_id]); if (k.grn_id) { await q('DELETE FROM supplier_cheques WHERE id=?', [k.id]); await require('../services/grn').recalcGrn(k.grn_id); } } await q('DELETE FROM supplier_cheques WHERE id=?', [req.params.id]); await log(req, 'delete', 'supplier_cheque', +req.params.id); res.json({ ok: true }); }));
 module.exports = router;

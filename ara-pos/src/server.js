@@ -36,6 +36,7 @@ app.get('/p/statement/:id/:sig.pdf', wrap(async (req, res) => {
 }));
 app.use('/api', require('./routes/admin'));
 app.use('/api', require('./routes/inventory'));
+app.use('/api', require('./routes/grn'));
 app.use('/api', salesRouter);
 app.use('/api', require('./routes/finance'));
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
@@ -56,5 +57,6 @@ setup().then(() => {
   app.listen(cfg.port, () => console.log(`ARA POS running on http://localhost:${cfg.port}`));
   cron.schedule('*/30 * * * *', () => reminders.scan().catch(e => console.error('reminder', e.message)));
   cron.schedule('0 2 * * *', async () => { if ((await settings()).backup_enabled === '1') backup.createBackup().then(n => console.log('Backup', n)).catch(e => console.error(e)); });
+  cron.schedule('* * * * *', () => reminders.digestTick().catch(e => console.error('digest', e.message)));
   setTimeout(() => reminders.scan().catch(() => { }), 3000);
 }).catch(e => { console.error('Startup failed:', e.message); process.exit(1); });

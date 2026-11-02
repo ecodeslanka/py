@@ -27,7 +27,8 @@ The same app adapts automatically: **under 1024px** it is a mobile app (bottom t
 | Area | Features |
 |---|---|
 | **Products** | Add / edit / delete. Name, code, category, brand, **supplier (select or add new)**, colour variants, cost / wholesale / selling price, **opening quantity per colour**, low-stock level |
-| **Stock** | Goods received (GRN) → auto-increase; sales auto-deduct; customer returns, supplier returns, damages, adjustments; stock by product & colour; full movement history; stock value |
+| **GRN / Purchases** | Supplier-wise goods received notes (items, unit costs, due date) → stock goes up; **pay suppliers in cash / bank / cheque, now or later, in parts**; GRN status (Unpaid / Partial / Cheque Pending / Paid); Supplier Dues page; supplier statements (PDF); edit / delete (stock reversed) |
+| **Stock** | Receive via GRN → auto-increase; sales auto-deduct; customer returns, supplier returns, damages, adjustments; stock by product & colour; full movement history; stock value |
 | **POS / Invoices** | Mobile POS, automatic invoice numbers (`ARA-2026-00001`), wholesale/retail pricing, line + invoice discounts, edit / delete (stock restored), PDF invoice with ARA branding |
 | **Flexible payments** | One invoice can be split across **Cash + Bank + Cheque + Pending** (amounts or %), later payments any date, multiple payments per invoice, auto status: Unpaid / Partially Paid / Pending / Cheque Pending / Paid |
 | **Cheques** | Customer cheques (received → deposited → cleared / bounced) – *never counted as money until Cleared*. Supplier cheques (issued → presented → cleared / returned). Automatic reminders |
@@ -38,7 +39,7 @@ The same app adapts automatically: **under 1024px** it is a mobile app (bottom t
 | **Reports** | Daily / weekly / monthly / yearly / custom: Profit & Loss, day-by-day, cash & bank book, sales, products, customers, suppliers, expenses, cheques, stock → **PDF & Excel** |
 | **Dashboard** | Today / month sales, income, expenses, profit-loss, stock value, customer & supplier balances, upcoming cheques, low stock, 7-day chart |
 | **Users & security** | Unlimited users, custom **roles with 25+ permissions**, deactivate accounts, activity log of every action, login rate-limit, hashed passwords, JWT sessions |
-| **Notifications** | In-app bell + optional forwarding to your WhatsApp / email. Checked every 30 min |
+| **Notifications** | In-app bell (checked every 30 min) + **daily WhatsApp / email "cheques today" digest** (customer cheques to deposit, supplier cheques to present, supplier payments due, overdue) at a time you choose; optional instant forwarding |
 | **Backups** | Automatic nightly SQL backup (no `mysqldump` needed), manual backup + download |
 
 ### Payment status rules

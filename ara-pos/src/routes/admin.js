@@ -41,6 +41,7 @@ router.post('/notifications/read', auth, wrap(async (req, res) => {
   if (req.body.id) await q('UPDATE notifications SET is_read=1 WHERE id=?', [req.body.id]); else await q('UPDATE notifications SET is_read=1');
   res.json({ ok: true });
 }));
+router.post('/notifications/digest', auth, can('settings.manage'), wrap(async (req, res) => res.json(await reminders.digest({ preview: !!req.body.preview, force: true }))));
 router.post('/notifications/scan', auth, wrap(async (req, res) => res.json(await reminders.scan())));
 
 // ---------- users ----------
