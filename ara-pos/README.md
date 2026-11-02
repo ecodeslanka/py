@@ -3,7 +3,7 @@
 Mobile-app-style web system (PWA) built with **Node.js + Express + MySQL**. Works on phones, tablets and desktops.
 On a phone it behaves like an app (bottom tab bar, bottom sheets, add-to-home-screen); on a desktop it becomes a sidebar dashboard.
 
-User manual (PDF): [docs/ARA-POS-User-Manual.pdf](docs/ARA-POS-User-Manual.pdf)
+User manuals (PDF): [Desktop edition](docs/ARA-POS-Desktop-User-Manual.pdf) · [Phone edition](docs/ARA-POS-Phone-User-Manual.pdf)
 
 ## Quick start
 
