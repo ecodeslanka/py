@@ -1,7 +1,7 @@
 const mysql = require('mysql2/promise');
 const cfg = require('./config');
 const pool = mysql.createPool({
-  ...cfg.db, waitForConnections: true, connectionLimit: 10,
+  ...cfg.db, waitForConnections: true, connectionLimit: cfg.dbPool,
   decimalNumbers: true, dateStrings: true, multipleStatements: false, charset: 'utf8mb4',
 });
 const q = async (sql, params = [], conn) => (await (conn || pool).query(sql, params))[0];

@@ -29,9 +29,12 @@ const SETTINGS = {
 const EXP_CATS = ['Factory Material Purchases', 'Employee Salaries & Wages', 'Factory Expenses', 'Electricity & Water Bills', 'Transport & Delivery', 'Repairs & Maintenance', 'Rent', 'Other / Miscellaneous'];
 
 async function setup(log = console.log) {
-  const root = await mysql.createConnection({ host: cfg.db.host, port: cfg.db.port, user: cfg.db.user, password: cfg.db.password });
-  await root.query(`CREATE DATABASE IF NOT EXISTS \`${cfg.db.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-  await root.end();
+  // On shared hosting (Hostinger) the DB already exists and the user cannot create databases - that's fine.
+  try {
+    const root = await mysql.createConnection({ host: cfg.db.host, port: cfg.db.port, user: cfg.db.user, password: cfg.db.password });
+    await root.query(`CREATE DATABASE IF NOT EXISTS \`${cfg.db.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    await root.end();
+  } catch (e) { log('Skipping CREATE DATABASE (' + e.code + ') - using existing database ' + cfg.db.database); }
   const { pool, q, one } = require('./db');
   const sql = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
   for (const stmt of sql.split(/;\s*\n/).map(s => s.trim()).filter(s => s && !s.startsWith('--') || /CREATE/.test(s))) {
@@ -51,8 +54,6 @@ async function setup(log = console.log) {
   for (const [code, name, body, subj] of TEMPLATES) await q('INSERT IGNORE INTO wa_templates (code,name,body,email_subject) VALUES (?,?,?,?)', [code, name, body, subj]);
   for (const c of EXP_CATS) await q('INSERT IGNORE INTO expense_categories (name) VALUES (?)', [c]);
   for (const c of ['Slippers - Men', 'Slippers - Women', 'Slippers - Kids', 'Sandals']) await q('INSERT IGNORE INTO categories (name) VALUES (?)', [c]);
-  fs.mkdirSync(path.join(__dirname, '../uploads'), { recursive: true });
-  fs.mkdirSync(path.join(__dirname, '../backups'), { recursive: true });
   log('Database ready.');
   return pool;
 }

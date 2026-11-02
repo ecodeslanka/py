@@ -9,7 +9,7 @@ const { tablePdf } = require('../services/pdf');
 router.use(auth);
 
 // ================= EXPENSES =================
-const UP = path.join(__dirname, '../../uploads');
+const UP = require('../config').uploadsDir;
 const upload = multer({ storage: multer.diskStorage({ destination: UP, filename: (r, f, cb) => cb(null, Date.now() + '-' + f.originalname.replace(/[^\w.\-]/g, '_')) }),
   limits: { fileSize: 8 * 1024 * 1024 }, fileFilter: (r, f, cb) => /\.(jpe?g|png|gif|webp|pdf)$/i.test(f.originalname) ? cb(null, true) : cb(new Error('Only images or PDF files are allowed')) });
 router.get('/expense-categories', can('expenses.view', 'expenses.manage'), wrap(async (req, res) => res.json(await q('SELECT * FROM expense_categories ORDER BY id'))));

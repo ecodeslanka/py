@@ -66,9 +66,10 @@ Defaults: Administrator, Manager, Cashier, Store Keeper, Accountant. Create your
 (view/create/edit/delete invoices, payments, stock, expenses, reports, settings …). Menu items and API calls are both permission-checked.
 
 ## Deployment notes
+* **Hostinger:** see [HOSTINGER.md](HOSTINGER.md) (upload `ARA-POS-Hostinger.zip`, set env vars, deploy).
 * Run behind HTTPS (nginx / Hostinger Node.js hosting) and set a strong `JWT_SECRET`.
 * Keep the `uploads/` and `backups/` folders on persistent storage.
-* `npm start` (or `pm2 start src/server.js --name ara-pos`).
+* `npm start` (or `pm2 start server.js --name ara-pos`). Set `DATA_DIR` to keep uploads/backups outside the app folder.
 * Smoke test (server running): `node test/smoke.js` – 49 end-to-end checks of stock, split payments, cheques, reports and permissions.
 
 ## Folder layout

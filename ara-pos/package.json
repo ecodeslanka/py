@@ -2,9 +2,9 @@
   "name": "ara-pos",
   "version": "1.0.0",
   "description": "ARA Group - POS & Store Management System",
-  "main": "src/server.js",
-  "scripts": { "start": "node src/server.js", "setup": "node src/setup.js" },
-  "engines": { "node": ">=18" },
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "setup": "node src/setup.js" },
+  "engines": { "node": ">=18 <25" },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.5",

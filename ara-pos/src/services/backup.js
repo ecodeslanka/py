@@ -2,7 +2,7 @@
 const fs = require('fs'), path = require('path');
 const { q } = require('../db');
 const { settings, fmtDate } = require('../util');
-const DIR = path.join(__dirname, '../../backups');
+const DIR = require('../config').backupsDir;
 
 const esc = v => v === null || v === undefined ? 'NULL' : typeof v === 'number' ? String(v) : "'" + String(v).replace(/[\\']/g, m => '\\' + m).replace(/\n/g, '\\n').replace(/\r/g, '\\r') + "'";
 async function createBackup() {
