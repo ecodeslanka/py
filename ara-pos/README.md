@@ -19,6 +19,9 @@ On first start the app creates the database, all tables, default roles, WhatsApp
 (the MySQL user needs `CREATE` rights, or create an empty database named in `DB_NAME` first).
 `db/schema.sql` is included if you prefer to import the tables manually.
 
+## Responsive design
+The same app adapts automatically: **under 1024px** it is a mobile app (bottom tab bar, bottom sheets, floating buttons); **1024px and wider** it is a desktop app (dark sidebar, top bar with user, data tables, wide dashboard, two-panel POS with sticky cart).
+
 ## What's included
 
 | Area | Features |

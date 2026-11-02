@@ -78,6 +78,9 @@ const daysTxt = d => d == null ? '' : d < 0 ? `${-d}d overdue` : d === 0 ? 'toda
 function chips(items, cur, attr = 'data-k') { return `<div class="chips">${items.map(([k, l]) => `<button class="chip ${String(k) === String(cur) ? 'on' : ''}" ${attr}="${esc(k)}">${l}</button>`).join('')}</div>`; }
 function seg(items, cur) { return `<div class="seg">${items.map(([k, l]) => `<button data-seg="${k}" class="${k === cur ? 'on' : ''}">${l}</button>`).join('')}</div>`; }
 const view = () => $('#view');
+const isDesk = () => matchMedia('(min-width:1024px)').matches;
+function dtable(cols, rows) { return `<div class="card" style="padding:0"><div class="tscroll"><table class="tbl dt"><thead><tr>${cols.map(c => `<th class="${c.r ? 'r' : ''}">${c.h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr data-id="${r.id}">${cols.map(c => `<td class="${c.r ? 'r' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`; }
+let _desk = isDesk(); window.addEventListener('resize', debounce(() => { const d = isDesk(); if (d !== _desk) { _desk = d; if (S.user) render(); } }, 250));
 const guard = fn => async (...a) => { try { await fn(...a); } catch (e) { fail(e); } };
 async function download(path, name) { try { const r = await api('GET', path, null, true); const b = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); } catch (e) { fail(e); } }
 
@@ -117,7 +120,7 @@ function shell() {
     ${NAV.filter(allowed).map(n => `<a href="${n.h}" data-nav="${n.k}">${ic(n.i)}<span>${n.l}</span></a>`).join('')}
     <div style="flex:1"></div><a href="#" id="lo">${ic('logout')}<span>Logout (${esc(S.user.name)})</span></a></aside>
   <div class="main"><div class="topbar"><button class="ib" id="bk" style="display:none">${ic('back')}</button><h1 id="ttl">ARA</h1>
-    <button class="ib" id="bell">${ic('bell')}<span class="dot" id="bdot" style="display:none"></span></button></div>
+    <div class="uchip"><div class="a">${esc(ini(S.user.name))}</div><div><b>${esc(S.user.name)}</b><small>${esc(S.user.role_name)}</small></div></div><button class="ib" id="bell">${ic('bell')}<span class="dot" id="bdot" style="display:none"></span></button></div>
   <div id="view"></div></div>
   <nav class="bottomnav">${tabs.filter(t => navOK(t[0])).map(([k, l, i]) => k === 'pos' ? `<a href="#/pos" class="fab" data-nav="pos">${ic('plus')}</a>` : `<a href="${k === 'more' ? '#/more' : NAV.find(n => n.k === k).h}" data-nav="${k}">${ic(i)}<span>${l}</span></a>`).join('')}</nav>`;
   $('#lo').onclick = e => { e.preventDefault(); logout(); }; $('#bell').onclick = () => go('#/notifications'); $('#bk').onclick = () => back();
