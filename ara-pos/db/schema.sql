@@ -94,8 +94,11 @@ CREATE TABLE IF NOT EXISTS product_variants (
   id INT AUTO_INCREMENT PRIMARY KEY,
   product_id INT NOT NULL,
   colour VARCHAR(50) NOT NULL DEFAULT 'Default',
+  size VARCHAR(30) NOT NULL DEFAULT '',
+  location VARCHAR(60) NOT NULL DEFAULT '',
+  label VARCHAR(160) NOT NULL DEFAULT '',
   qty INT NOT NULL DEFAULT 0,
-  UNIQUE KEY uq_pv (product_id, colour),
+  UNIQUE KEY uq_pv2 (product_id, colour, size, location),
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -269,7 +272,8 @@ CREATE TABLE IF NOT EXISTS supplier_payments (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS expense_categories (
-  id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(80) NOT NULL UNIQUE
+  id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(80) NOT NULL UNIQUE,
+  kind VARCHAR(12) NOT NULL DEFAULT 'general'
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS expenses (
@@ -281,11 +285,12 @@ CREATE TABLE IF NOT EXISTS expenses (
   method ENUM('cash','bank','cheque') NOT NULL DEFAULT 'cash',
   supplier_id INT NULL,
   payee VARCHAR(120) NULL,
+  item VARCHAR(100) NULL,
   attachment VARCHAR(255) NULL,
   created_by INT NULL, updated_by INT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX (date), INDEX (category_id),
+  INDEX (date), INDEX (category_id), INDEX (payee), INDEX (item),
   FOREIGN KEY (category_id) REFERENCES expense_categories(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 

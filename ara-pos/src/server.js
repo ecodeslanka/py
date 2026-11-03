@@ -39,6 +39,7 @@ app.use('/api', require('./routes/inventory'));
 app.use('/api', require('./routes/grn'));
 app.use('/api', salesRouter);
 app.use('/api', require('./routes/finance'));
+app.use('/api', require('./routes/reports'));
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
 app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));

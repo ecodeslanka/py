@@ -216,3 +216,16 @@ body.pos .bottomnav .fab{visibility:hidden}
 
 @media(min-width:1500px){.hero + .grid{grid-template-columns:repeat(6,1fr)}.tiles{grid-template-columns:repeat(6,1fr)}}
 @media(min-width:1024px) and (max-width:1499px){.hero + .grid{grid-template-columns:repeat(3,1fr)!important}}
+
+/* ---- advanced filters ---- */
+.fpanel{padding:12px 16px}.fpanel summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none}.fpanel summary::-webkit-details-marker{display:none}.fpanel summary b{display:flex;align-items:center;gap:8px}.grow{flex:1}
+.fp-grid{display:grid;grid-template-columns:1fr;gap:0 14px;margin-top:14px}
+.expbar{display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap}.pnav{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;margin-bottom:12px}.pcustom{margin-bottom:6px}
+.sumtbl td{cursor:pointer}.cap{font-size:12px;color:var(--ink2);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 8px}
+.appl{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}.appl .badge{background:color-mix(in srgb,var(--brand) 12%,transparent);color:var(--brand)}
+@media(min-width:600px){.fp-grid{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1024px){.fp-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}.fpanel{padding:16px 22px}}
+
+.vrow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.vrow>span{display:none}
+@media(min-width:700px){.vrow{grid-template-columns:1.2fr .7fr 1fr .9fr 38px}}
+.rhead{margin:4px 0 10px;font-size:16px}

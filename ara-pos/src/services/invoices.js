@@ -23,7 +23,7 @@ async function moveStock(conn, { variant_id, type, qty, unit_cost = null, ref_ty
   const v = await one('SELECT v.*, p.name FROM product_variants v JOIN products p ON p.id=v.product_id WHERE v.id=? FOR UPDATE', [variant_id], conn);
   if (!v) bad('Product variant not found');
   const after = v.qty + qty;
-  if (after < 0 && !allowNegative) bad(`Not enough stock for ${v.name} (${v.colour}): available ${v.qty}, needed ${-qty}`);
+  if (after < 0 && !allowNegative) bad(`Not enough stock for ${v.name} (${v.label || v.colour}): available ${v.qty}, needed ${-qty}`);
   await q('UPDATE product_variants SET qty=? WHERE id=?', [after, variant_id], conn);
   await q('INSERT INTO stock_movements (product_id,variant_id,type,qty,balance_after,unit_cost,ref_type,ref_id,note,user_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
     [v.product_id, variant_id, type, qty, after, unit_cost, ref_type, ref_id, note, user_id], conn);

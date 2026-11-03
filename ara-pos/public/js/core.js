@@ -79,7 +79,7 @@ function chips(items, cur, attr = 'data-k') { return `<div class="chips">${items
 function seg(items, cur) { return `<div class="seg">${items.map(([k, l]) => `<button data-seg="${k}" class="${k === cur ? 'on' : ''}">${l}</button>`).join('')}</div>`; }
 const view = () => $('#view');
 const isDesk = () => matchMedia('(min-width:1024px)').matches;
-function dtable(cols, rows) { return `<div class="card" style="padding:0"><div class="tscroll"><table class="tbl dt"><thead><tr>${cols.map(c => `<th class="${c.r ? 'r' : ''}">${c.h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr data-id="${r.id}">${cols.map(c => `<td class="${c.r ? 'r' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`; }
+function dtable(cols, rows) { return `<div class="card" style="padding:0"><div class="tscroll"><table class="tbl dt"><thead><tr>${cols.map(c => `<th class="${c.r ? 'r' : ''}">${c.h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr data-id="${esc(r.id)}">${cols.map(c => `<td class="${c.r ? 'r' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`; }
 let _desk = isDesk(); window.addEventListener('resize', debounce(() => { const d = isDesk(); if (d !== _desk) { _desk = d; if (S.user) render(); } }, 250));
 const guard = fn => async (...a) => { try { await fn(...a); } catch (e) { fail(e); } };
 async function download(path, name) { try { const r = await api('GET', path, null, true); const b = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); } catch (e) { fail(e); } }
@@ -108,7 +108,7 @@ const NAV = [
   { k: 'stock', h: '#/stock', l: 'Stock', i: 'box', perm: 'products.view' }, { k: 'grn', h: '#/grn', l: 'GRN / Purchases', i: 'download', perm: ['products.view', 'suppliers.view', 'stock.manage'] },
   { k: 'suppliers', h: '#/suppliers', l: 'Suppliers', i: 'truck', perm: 'suppliers.view' }, { k: 'supplier-dues', h: '#/supplier-dues', l: 'Supplier Dues', i: 'wallet', perm: 'suppliers.view' },
   { k: 'cheques', h: '#/cheques', l: 'Cheques', i: 'card', perm: 'cheques.view' }, { k: 'expenses', h: '#/expenses', l: 'Expenses', i: 'wallet', perm: 'expenses.view' },
-  { k: 'reports', h: '#/reports', l: 'Reports', i: 'chart', perm: 'reports.view' }, { k: 'notifications', h: '#/notifications', l: 'Notifications', i: 'bell' },
+  { k: 'reports', h: '#/reports', l: 'Reports', i: 'chart', perm: ['reports.view', 'expenses.view', 'cheques.view', 'products.view', 'suppliers.view', 'customers.view'] }, { k: 'notifications', h: '#/notifications', l: 'Notifications', i: 'bell' },
   { k: 'users', h: '#/users', l: 'Users & Roles', i: 'shield', perm: ['users.manage', 'roles.manage'] }, { k: 'settings', h: '#/settings', l: 'Settings', i: 'settings', perm: 'settings.manage' },
   { k: 'logs', h: '#/logs', l: 'Activity Log', i: 'activity', perm: 'logs.view' },
 ];

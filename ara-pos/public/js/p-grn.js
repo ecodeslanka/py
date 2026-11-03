@@ -27,7 +27,7 @@ route('grn-form', async ([id], q) => {
   if (id && GF.id !== +id) { const g = await api('GET', '/grn/' + id); GF = { id: g.id, supplier_id: g.supplier_id || '', date: g.date, ref: g.ref || '', due_date: g.due_date || '', note: g.note || '', update_cost: false, payments: [], items: g.items.filter(i => i.variant_id).map(i => ({ variant_id: i.variant_id, qty: i.qty, cost: i.cost })) }; if (!GF.items.length) GF.items = [{ variant_id: '', qty: '', cost: '' }]; }
   else if (!id && GF.id) GF = newGF();
   if (!id && q.supplier && !GF.supplier_id) GF.supplier_id = +q.supplier; if (!id && q.variant && GF.items.length === 1 && !GF.items[0].variant_id) { const v = stock.find(s => s.variant_id === +q.variant); if (v) GF.items[0] = { variant_id: v.variant_id, qty: '', cost: v.cost_price }; }
-  const vopts = [['', '— select product / colour —'], ...stock.map(s => [s.variant_id, `${s.name} – ${s.colour}  (in stock ${s.qty})`])];
+  const vopts = [['', '— select product / colour —'], ...stock.map(s => [s.variant_id, `${s.name} (${s.code}) – ${s.label}  (in stock ${s.qty})`])];
   const total = () => Math.round(GF.items.reduce((a, i) => a + (+i.qty || 0) * (+i.cost || 0), 0) * 100) / 100;
   const paid = () => GF.payments.reduce((a, p) => a + (+p.amount || 0), 0); const round = n => Math.round(n * 100) / 100;
   const sync = () => { const r = view(); const g = n => { const e = $(`[name=${n}]`, r); return e ? e.value : undefined; };

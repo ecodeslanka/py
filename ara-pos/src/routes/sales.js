@@ -101,12 +101,12 @@ async function resolveItems(conn, items, isWholesale) {
   const out = [];
   for (const it of items) {
     const qty = parseInt(it.qty); if (!(qty > 0)) bad('Quantity must be at least 1');
-    const v = await one(`SELECT v.id,v.colour,v.qty,p.id pid,p.name,p.code,p.cost_price,p.selling_price,p.wholesale_price FROM product_variants v JOIN products p ON p.id=v.product_id WHERE v.id=?`, [it.variant_id], conn);
+    const v = await one(`SELECT v.id,v.colour,v.label,v.qty,p.id pid,p.name,p.code,p.cost_price,p.selling_price,p.wholesale_price FROM product_variants v JOIN products p ON p.id=v.product_id WHERE v.id=?`, [it.variant_id], conn);
     if (!v) bad('A product in the cart no longer exists');
     const price = it.price !== undefined && it.price !== '' ? +it.price : (isWholesale && v.wholesale_price ? v.wholesale_price : v.selling_price);
     if (isNaN(price) || price < 0) bad('Invalid price'); const disc = Math.max(0, +it.discount || 0);
     const total = round2(qty * price - disc); if (total < 0) bad('Line discount is more than the line value');
-    out.push({ variant_id: v.id, product_id: v.pid, description: `${v.name} (${v.code})`, colour: v.colour, qty, price, cost: v.cost_price, discount: disc, total });
+    out.push({ variant_id: v.id, product_id: v.pid, description: `${v.name} (${v.code})`, colour: v.label || v.colour, qty, price, cost: v.cost_price, discount: disc, total });
   }
   return out;
 }
@@ -250,11 +250,13 @@ router.post('/invoices/:id/remind', can('invoices.send'), wrap(async (req, res) 
 }));
 
 // ================= CHEQUES =================
+// cheque filters: customer / supplier (id or name text), status, cheque no, date range on cheque date or deposit/present date
 router.get('/cheques/customer', can('cheques.view'), wrap(async (req, res) => {
-  const { status, from, to, customer } = req.query; const w = ['1=1'], p = [];
-  if (status) { w.push('k.status IN (?)'); p.push(status.split(',')); } if (customer) { w.push('k.customer_id=?'); p.push(customer); }
-  if (from) { w.push('k.deposit_date>=?'); p.push(from); } if (to) { w.push('k.deposit_date<=?'); p.push(to); }
-  res.json(await q(`SELECT k.*, c.name cname, i.invoice_no, DATEDIFF(k.deposit_date, CURDATE()) days_left FROM customer_cheques k LEFT JOIN customers c ON c.id=k.customer_id LEFT JOIN invoices i ON i.id=k.invoice_id WHERE ${w.join(' AND ')} ORDER BY k.status IN ('cleared') , k.deposit_date IS NULL, k.deposit_date LIMIT 500`, p));
+  const F = req.query, w = ['1=1'], p = [], dc = F.datefield === 'cheque' ? 'k.cheque_date' : 'k.deposit_date';
+  if (F.status) { w.push('k.status IN (?)'); p.push(String(F.status).split(',')); } if (F.customer) { w.push('k.customer_id=?'); p.push(F.customer); }
+  if (F.name) { w.push('c.name LIKE ?'); p.push(`%${F.name}%`); } if (F.cheque_no) { w.push('k.cheque_no LIKE ?'); p.push(`%${F.cheque_no}%`); } if (F.bank) { w.push('k.bank LIKE ?'); p.push(`%${F.bank}%`); }
+  if (F.from) { w.push(`${dc}>=?`); p.push(F.from); } if (F.to) { w.push(`${dc}<=?`); p.push(F.to); }
+  res.json(await q(`SELECT k.*, c.name cname, i.invoice_no, DATEDIFF(k.deposit_date, CURDATE()) days_left FROM customer_cheques k LEFT JOIN customers c ON c.id=k.customer_id LEFT JOIN invoices i ON i.id=k.invoice_id WHERE ${w.join(' AND ')} ORDER BY k.status IN ('cleared') , k.deposit_date IS NULL, k.deposit_date LIMIT 1000`, p));
 }));
 router.put('/cheques/customer/:id', can('cheques.manage'), wrap(async (req, res) => {
   const b = req.body, id = +req.params.id; let bounced = null;
@@ -276,10 +278,11 @@ router.put('/cheques/customer/:id', can('cheques.manage'), wrap(async (req, res)
   res.json({ ok: true });
 }));
 router.get('/cheques/supplier', can('cheques.view'), wrap(async (req, res) => {
-  const { status, from, to, supplier } = req.query; const w = ['1=1'], p = [];
-  if (status) { w.push('k.status IN (?)'); p.push(status.split(',')); } if (supplier) { w.push('k.supplier_id=?'); p.push(supplier); }
-  if (from) { w.push('k.present_date>=?'); p.push(from); } if (to) { w.push('k.present_date<=?'); p.push(to); }
-  res.json(await q(`SELECT k.*, s.name sname, s.type stype, DATEDIFF(k.present_date, CURDATE()) days_left FROM supplier_cheques k JOIN suppliers s ON s.id=k.supplier_id WHERE ${w.join(' AND ')} ORDER BY k.status IN ('cleared','returned'), k.present_date IS NULL, k.present_date LIMIT 500`, p));
+  const F = req.query, w = ['1=1'], p = [], dc = F.datefield === 'cheque' ? 'k.cheque_date' : 'k.present_date';
+  if (F.status) { w.push('k.status IN (?)'); p.push(String(F.status).split(',')); } if (F.supplier) { w.push('k.supplier_id=?'); p.push(F.supplier); }
+  if (F.name) { w.push('s.name LIKE ?'); p.push(`%${F.name}%`); } if (F.cheque_no) { w.push('k.cheque_no LIKE ?'); p.push(`%${F.cheque_no}%`); } if (F.bank) { w.push('k.bank LIKE ?'); p.push(`%${F.bank}%`); }
+  if (F.from) { w.push(`${dc}>=?`); p.push(F.from); } if (F.to) { w.push(`${dc}<=?`); p.push(F.to); }
+  res.json(await q(`SELECT k.*, s.name sname, s.type stype, g.grn_no, DATEDIFF(k.present_date, CURDATE()) days_left FROM supplier_cheques k JOIN suppliers s ON s.id=k.supplier_id LEFT JOIN goods_receipts g ON g.id=k.grn_id WHERE ${w.join(' AND ')} ORDER BY k.status IN ('cleared','returned'), k.present_date IS NULL, k.present_date LIMIT 1000`, p));
 }));
 const scVals = b => [b.cheque_no, b.bank || null, +b.amount, b.cheque_date || null, b.present_date || b.cheque_date || null, ['issued', 'presented', 'cleared', 'returned'].includes(b.status) ? b.status : 'issued', b.note || null];
 router.post('/cheques/supplier', can('cheques.manage'), wrap(async (req, res) => {

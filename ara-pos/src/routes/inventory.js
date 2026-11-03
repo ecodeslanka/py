@@ -3,6 +3,7 @@ const { q, one, tx } = require('../db');
 const { auth, can } = require('../auth');
 const { wrap, bad, log, today, settings, nextNumber, round2 } = require('../util');
 const { moveStock } = require('../services/invoices');
+const { stockWhere, has, mkLabel, like } = require('../filters');
 router.use(auth);
 
 // ---- categories & brands (quick add from product form) ----
@@ -29,21 +30,23 @@ router.get('/products', can('products.view', 'invoices.create'), wrap(async (req
   if (category) { w.push('p.category_id=?'); p.push(category); } if (brand) { w.push('p.brand_id=?'); p.push(brand); } if (supplier) { w.push('p.supplier_id=?'); p.push(supplier); }
   const rows = await q(`${productSelect} WHERE ${w.join(' AND ')} GROUP BY p.id ${low ? 'HAVING stock<=p.low_stock_level' : ''} ORDER BY p.name LIMIT 500`, p);
   if (rows.length) {
-    const vs = await q('SELECT * FROM product_variants WHERE product_id IN (?) ORDER BY colour', [rows.map(r => r.id)]);
+    const vs = await q('SELECT * FROM product_variants WHERE product_id IN (?) ORDER BY colour, size, location', [rows.map(r => r.id)]);
     rows.forEach(r => r.variants = vs.filter(v => v.product_id === r.id));
   }
   res.json(rows);
 }));
 router.get('/products/:id', can('products.view'), wrap(async (req, res) => {
   const p = await one(`${productSelect} WHERE p.id=? GROUP BY p.id`, [req.params.id]); if (!p) bad('Not found', 404);
-  p.variants = await q('SELECT * FROM product_variants WHERE product_id=? ORDER BY colour', [p.id]); res.json(p);
+  p.variants = await q('SELECT * FROM product_variants WHERE product_id=? ORDER BY colour, size, location', [p.id]); res.json(p);
 }));
 async function saveVariants(conn, req, pid, variants, creating) {
   const seen = new Set();
   for (const v of variants || []) {
-    const colour = String(v.colour || 'Default').trim() || 'Default'; if (seen.has(colour.toLowerCase())) bad(`Duplicate colour "${colour}"`); seen.add(colour.toLowerCase());
-    if (v.id) { await q('UPDATE product_variants SET colour=? WHERE id=? AND product_id=?', [colour, v.id, pid], conn); continue; }
-    const r = await q('INSERT INTO product_variants (product_id,colour,qty) VALUES (?,?,0)', [pid, colour], conn);
+    const colour = String(v.colour || 'Default').trim() || 'Default', size = String(v.size || '').trim(), location = String(v.location || '').trim();
+    const key = [colour, size, location].join('|').toLowerCase(); if (seen.has(key)) bad(`Duplicate line "${mkLabel(colour, size, location)}" - each colour / size / location can appear once`); seen.add(key);
+    const label = mkLabel(colour, size, location);
+    if (v.id) { await q('UPDATE product_variants SET colour=?,size=?,location=?,label=? WHERE id=? AND product_id=?', [colour, size, location, label, v.id, pid], conn); continue; }
+    const r = await q('INSERT INTO product_variants (product_id,colour,size,location,label,qty) VALUES (?,?,?,?,?,0)', [pid, colour, size, location, label], conn);
     const oq = Math.max(0, parseInt(v.opening_qty) || 0);
     if (oq > 0) await moveStock(conn, { variant_id: r.insertId, type: 'opening', qty: oq, unit_cost: v.cost, note: 'Opening quantity', user_id: req.user.id });
   }
@@ -87,20 +90,23 @@ router.delete('/variants/:id', can('products.manage'), wrap(async (req, res) => 
 
 // ---- stock ----
 router.get('/stock', can('products.view'), wrap(async (req, res) => {
-  const { search, low, supplier } = req.query; const w = ['p.active=1'], p = [];
-  if (search) { w.push('(p.name LIKE ? OR p.code LIKE ? OR v.colour LIKE ?)'); p.push(`%${search}%`, `%${search}%`, `%${search}%`); }
-  if (supplier) { w.push('p.supplier_id=?'); p.push(supplier); }
-  if (low) w.push('v.qty<=p.low_stock_level');
-  res.json(await q(`SELECT v.id variant_id, v.colour, v.qty, p.id product_id, p.code, p.name, p.cost_price, p.selling_price, p.low_stock_level, v.qty*p.cost_price value,
+  const w = ['p.active=1'], p = []; stockWhere(req.query, w, p);
+  if (req.query.low === '1') w.push('v.qty<=p.low_stock_level');
+  res.json(await q(`SELECT v.id variant_id, v.colour, v.size, v.location, v.label, v.qty, p.id product_id, p.code, p.name, p.cost_price, p.selling_price, p.low_stock_level, v.qty*p.cost_price value,
     c.name category, s.name supplier FROM product_variants v JOIN products p ON p.id=v.product_id LEFT JOIN categories c ON c.id=p.category_id LEFT JOIN suppliers s ON s.id=p.supplier_id
-    WHERE ${w.join(' AND ')} ORDER BY p.name, v.colour LIMIT 1000`, p));
+    WHERE ${w.join(' AND ')} ORDER BY p.name, v.colour, v.size, v.location LIMIT 2000`, p));
 }));
+// complete movement history (filterable, paged)
 router.get('/stock/movements', can('products.view'), wrap(async (req, res) => {
-  const { product_id, variant_id, type, from, to } = req.query; const w = ['1=1'], p = [];
-  if (product_id) { w.push('m.product_id=?'); p.push(product_id); } if (variant_id) { w.push('m.variant_id=?'); p.push(variant_id); } if (type) { w.push('m.type=?'); p.push(type); }
-  if (from) { w.push('DATE(m.created_at)>=?'); p.push(from); } if (to) { w.push('DATE(m.created_at)<=?'); p.push(to); }
-  res.json(await q(`SELECT m.*, p.name, p.code, v.colour, u.name user_name FROM stock_movements m JOIN products p ON p.id=m.product_id JOIN product_variants v ON v.id=m.variant_id
-    LEFT JOIN users u ON u.id=m.user_id WHERE ${w.join(' AND ')} ORDER BY m.id DESC LIMIT 300`, p));
+  const F = req.query, w = ['1=1'], p = []; stockWhere(F, w, p);
+  if (has(F.product_id)) { w.push('m.product_id=?'); p.push(F.product_id); } if (has(F.variant_id)) { w.push('m.variant_id=?'); p.push(F.variant_id); }
+  if (has(F.type)) { w.push('m.type IN (?)'); p.push(String(F.type).split(',')); } if (has(F.user)) { w.push('m.user_id=?'); p.push(F.user); }
+  if (has(F.from)) { w.push('DATE(m.created_at)>=?'); p.push(F.from); } if (has(F.to)) { w.push('DATE(m.created_at)<=?'); p.push(F.to); }
+  const from = `FROM stock_movements m JOIN products p ON p.id=m.product_id JOIN product_variants v ON v.id=m.variant_id LEFT JOIN users u ON u.id=m.user_id WHERE ${w.join(' AND ')}`;
+  const total = await one(`SELECT COUNT(*) n, COALESCE(SUM(CASE WHEN m.qty>0 THEN m.qty END),0) qin, COALESCE(SUM(CASE WHEN m.qty<0 THEN -m.qty END),0) qout ${from}`, p);
+  const limit = Math.min(+F.limit || 300, 2000), offset = Math.max(+F.offset || 0, 0);
+  const rows = await q(`SELECT m.*, p.name, p.code, v.colour, v.size, v.location, v.label, u.name user_name ${from} ORDER BY m.id DESC LIMIT ? OFFSET ?`, [...p, limit, offset]);
+  res.json({ rows, total: total.n, qin: total.qin, qout: total.qout });
 }));
 // returns / damages / adjustments
 router.post('/stock/adjust', can('stock.manage'), wrap(async (req, res) => {

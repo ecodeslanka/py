@@ -13,10 +13,10 @@ async function resolveItems(conn, items) {
   const out = [];
   for (const it of (items || [])) {
     const qty = parseInt(it.qty); if (!it.variant_id || !(qty > 0)) continue;
-    const v = await one('SELECT v.id,v.colour,p.id pid,p.name,p.code,p.cost_price FROM product_variants v JOIN products p ON p.id=v.product_id WHERE v.id=?', [it.variant_id], conn);
+    const v = await one('SELECT v.id,v.colour,v.label,p.id pid,p.name,p.code,p.cost_price FROM product_variants v JOIN products p ON p.id=v.product_id WHERE v.id=?', [it.variant_id], conn);
     if (!v) bad('A product in the list no longer exists');
     const cost = it.cost !== undefined && it.cost !== '' && it.cost !== null ? +it.cost : v.cost_price; if (isNaN(cost) || cost < 0) bad('Invalid cost');
-    out.push({ variant_id: v.id, product_id: v.pid, description: `${v.name} (${v.code})`, colour: v.colour, qty, cost, total: round2(qty * cost) });
+    out.push({ variant_id: v.id, product_id: v.pid, description: `${v.name} (${v.code})`, colour: v.label || v.colour, qty, cost, total: round2(qty * cost) });
   }
   if (!out.length) bad('Add at least one item with a quantity');
   return out;

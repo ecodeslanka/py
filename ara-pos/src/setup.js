@@ -32,6 +32,8 @@ const SETTINGS = {
 const MIGRATIONS = [
   ['goods_receipts', 'due_date', 'DATE NULL'], ['goods_receipts', 'paid', 'DECIMAL(14,2) NOT NULL DEFAULT 0'], ['goods_receipts', 'cheque_pending', 'DECIMAL(14,2) NOT NULL DEFAULT 0'],
   ['goods_receipts', 'balance', 'DECIMAL(14,2) NOT NULL DEFAULT 0'], ['goods_receipts', 'status', "ENUM('unpaid','partial','cheque_pending','paid') NOT NULL DEFAULT 'unpaid'"], ['goods_receipts', 'updated_by', 'INT NULL'],
+  ['product_variants', 'size', "VARCHAR(30) NOT NULL DEFAULT ''"], ['product_variants', 'location', "VARCHAR(60) NOT NULL DEFAULT ''"], ['product_variants', 'label', "VARCHAR(160) NOT NULL DEFAULT ''"],
+  ['expense_categories', 'kind', "VARCHAR(12) NOT NULL DEFAULT 'general'"], ['expenses', 'item', 'VARCHAR(100) NULL'],
   ['supplier_payments', 'grn_id', 'INT NULL'], ['supplier_payments', 'cleared', 'TINYINT NOT NULL DEFAULT 1'], ['supplier_cheques', 'payment_id', 'INT NULL'], ['supplier_cheques', 'grn_id', 'INT NULL'],
 ];
 const EXP_CATS = ['Factory Material Purchases', 'Employee Salaries & Wages', 'Factory Expenses', 'Electricity & Water Bills', 'Transport & Delivery', 'Repairs & Maintenance', 'Rent', 'Other / Miscellaneous'];
@@ -52,6 +54,12 @@ async function setup(log = console.log) {
     const ex = await one('SELECT 1 x FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?', [t, c]);
     if (!ex) await q(`ALTER TABLE \`${t}\` ADD COLUMN \`${c}\` ${ddl}`);
   }
+  // variants: colour + size + location is the unique key (replaces the old colour-only key)
+  const hasIdx = async n => !!(await one("SELECT 1 x FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='product_variants' AND INDEX_NAME=?", [n]));
+  if (!(await hasIdx('uq_pv2'))) await q('ALTER TABLE product_variants ADD UNIQUE KEY uq_pv2 (product_id, colour, size, location)');
+  if (await hasIdx('uq_pv')) await q('ALTER TABLE product_variants DROP INDEX uq_pv');
+  await q("UPDATE product_variants SET label=colour WHERE label=''");
+  for (const [t, c] of [['expenses', 'payee'], ['expenses', 'item']]) { const ix = await one("SELECT 1 x FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?", [t, c]); if (!ix) await q(`ALTER TABLE \`${t}\` ADD INDEX (\`${c}\`)`); }
   await q("ALTER TABLE supplier_payments MODIFY method ENUM('cash','bank','cheque') NOT NULL DEFAULT 'cash'");
   await q('UPDATE goods_receipts SET balance=total WHERE paid=0 AND balance=0 AND total>0'); // legacy receipts
   for (const r of DEFAULT_ROLES) {
@@ -68,6 +76,8 @@ async function setup(log = console.log) {
   for (const [code, name, body, subj] of TEMPLATES) await q('INSERT IGNORE INTO wa_templates (code,name,body,email_subject) VALUES (?,?,?,?)', [code, name, body, subj]);
   await q("UPDATE settings SET v='/api/send-message' WHERE k='wa_send_path' AND v='/api/send'"); // upgrade old default
   for (const c of EXP_CATS) await q('INSERT IGNORE INTO expense_categories (name) VALUES (?)', [c]);
+  await q("UPDATE expense_categories SET kind='salary' WHERE kind='general' AND name LIKE '%Salar%'");
+  await q("UPDATE expense_categories SET kind='material' WHERE kind='general' AND name LIKE '%Material%'");
   for (const c of ['Slippers - Men', 'Slippers - Women', 'Slippers - Kids', 'Sandals']) await q('INSERT IGNORE INTO categories (name) VALUES (?)', [c]);
   log('Database ready.');
   return pool;
