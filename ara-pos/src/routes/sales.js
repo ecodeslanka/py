@@ -6,7 +6,7 @@ const { recalc, moveStock, fullInvoice } = require('../services/invoices');
 const { deliverInvoice, invoiceVars } = require('../services/delivery');
 const { invoicePdf, tablePdf } = require('../services/pdf');
 const M = require('../services/messaging');
-const { addLedger, setDepositStatus, balance: depBalance } = require('../services/ledger');
+const { addLedger, addDeposit, setDepositStatus, balance: depBalance } = require('../services/ledger');
 router.use(auth);
 
 // ================= CUSTOMERS =================
@@ -112,6 +112,18 @@ async function resolveItems(conn, items, isWholesale) {
   }
   return out;
 }
+// Split payments into "what the invoice needs" and "the extra" (overpayment). Deposit payments can never exceed what is due.
+function planPayments(total, committed, pays) {
+  let need = Math.max(round2(total - committed), 0), take = 0, excess = 0;
+  const items = pays.map(p => { const amt = round2(p.amount), t = Math.min(amt, need); need = round2(need - t); const e = round2(amt - t);
+    if (p.method === 'deposit' && e > 0.004) bad(`The customer deposit used (${money(amt)}) is more than the amount due (${money(t)})`); take += t; excess += e; return { p, amt, take: t, excess: e }; });
+  return { items, take: round2(take), excess: round2(excess) };
+}
+// the extra money is kept in the customer's account as an advance (cheque extras stay pending until the cheque clears)
+async function keepOverpayment(conn, req, inv, p, payment_id) {
+  const receipt = await nextNumber(conn, 'dep', 'DEP-', 5);
+  return addDeposit(conn, { user_id: req.user.id, customer_id: inv.customer_id, date: p.date || today(), receipt_no: receipt, method: p.method, amount: p.amount, reference: p.method === 'cheque' ? p.cheque.cheque_no : (p.reference || null), note: `Overpayment on invoice ${inv.invoice_no}`, cheque: p.cheque, payment_id });
+}
 async function addPaymentTx(conn, req, inv, p) {
   const amount = round2(p.amount); if (!(amount > 0)) return null;
   const method = ['cash', 'bank', 'cheque', 'deposit'].includes(p.method) ? p.method : bad('Invalid payment method');
@@ -122,7 +134,7 @@ async function addPaymentTx(conn, req, inv, p) {
   if (method === 'deposit') await addLedger(conn, { customer_id: inv.customer_id, date: p.date || today(), type: 'used', amount: -amount, ref_type: 'payment', ref_id: r.insertId, description: `Used for invoice ${inv.invoice_no}`, user_id: req.user.id });
   if (method === 'cheque') {
     const c = p.cheque; await q('INSERT INTO customer_cheques (customer_id,invoice_id,payment_id,cheque_no,bank,cheque_date,amount,deposit_date,status,status_date,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-      [inv.customer_id, inv.id, r.insertId, c.cheque_no.trim(), c.bank || null, c.cheque_date || null, amount, c.deposit_date || c.cheque_date || null, 'received', today(), req.user.id], conn);
+      [inv.customer_id, inv.id, r.insertId, c.cheque_no.trim(), c.bank || null, c.cheque_date || null, p.cheque_amount ? round2(p.cheque_amount) : amount, c.deposit_date || c.cheque_date || null, 'received', today(), req.user.id], conn);
   }
   return r.insertId;
 }
@@ -134,8 +146,9 @@ router.post('/invoices', can('invoices.create'), wrap(async (req, res) => {
     if (customerId) { const cu = await one('SELECT * FROM customers WHERE id=?', [customerId], c); if (!cu) bad('Customer not found'); cname = cu.name; wholesale = cu.type === 'wholesale'; }
     const items = await resolveItems(c, b.items, b.wholesale ?? wholesale);
     const subtotal = round2(items.reduce((a, i) => a + i.total, 0)); const discount = Math.min(Math.max(0, round2(b.discount || 0)), subtotal); const total = round2(subtotal - discount);
-    const pays = (b.payments || []).filter(p => +p.amount > 0); const paying = round2(pays.reduce((a, p) => a + +p.amount, 0));
-    if (paying > total + 0.004) bad(`Payments (${money(paying)}) exceed the invoice total (${money(total)})`);
+    const pays = (b.payments || []).filter(p => +p.amount > 0).sort((x, y) => (y.method === 'deposit') - (x.method === 'deposit'));
+    const plan = planPayments(total, 0, pays), paying = plan.take;
+    if (plan.excess > 0.004 && !customerId) bad(`Payments (${money(paying + plan.excess)}) are more than the invoice total (${money(total)}). Select a customer so the extra ${money(plan.excess)} can be saved as their advance balance.`);
     const date = b.date || today(), due = b.due_date || (total - paying > 0.004 ? addDays(date, +s.payment_terms_days || 30) : null);
     const no = await nextNumber(c, 'inv', s.invoice_prefix || 'INV-', 5);
     const r = await q('INSERT INTO invoices (invoice_no,customer_id,customer_name,date,due_date,subtotal,discount,total,balance,had_credit,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -145,10 +158,14 @@ router.post('/invoices', can('invoices.create'), wrap(async (req, res) => {
       await q('INSERT INTO invoice_items (invoice_id,product_id,variant_id,description,colour,qty,price,cost,discount,total) VALUES (?,?,?,?,?,?,?,?,?,?)', [inv.id, it.product_id, it.variant_id, it.description, it.colour, it.qty, it.price, it.cost, it.discount, it.total], c);
       await moveStock(c, { variant_id: it.variant_id, type: 'sale', qty: -it.qty, ref_type: 'invoice', ref_id: inv.id, note: no, user_id: req.user.id, allowNegative: s.allow_negative_stock === '1' });
     }
-    for (const p of pays) await addPaymentTx(c, req, inv, { ...p, date: p.date || date });
-    await recalc(inv.id, c); return { id: inv.id, invoice_no: no };
+    let overpaid = 0;
+    for (const it of plan.items) { const pd = it.p.date || date; let pid = null;
+      if (it.take > 0.004) pid = await addPaymentTx(c, req, inv, { ...it.p, amount: it.take, cheque_amount: it.amt, date: pd });
+      if (it.excess > 0.004) { await keepOverpayment(c, req, inv, { ...it.p, amount: it.excess, date: pd }, pid); overpaid = round2(overpaid + it.excess); } }
+    await recalc(inv.id, c); return { id: inv.id, invoice_no: no, overpaid };
   });
-  await log(req, 'create', 'invoice', out.id, out.invoice_no);
+  await log(req, 'create', 'invoice', out.id, out.invoice_no + (out.overpaid ? ` (overpaid ${money(out.overpaid)} saved as advance)` : ''));
+  if (out.overpaid) { const cr = await one('SELECT customer_id FROM invoices WHERE id=?', [out.id]); out.advance = cr && cr.customer_id ? await depBalance(cr.customer_id) : 0; }
   // automatic delivery
   const s2 = await settings(); const inv = await fullInvoice(out.id); out.delivery = [];
   const want = { email: (b.send ? !!b.send.email : s2.auto_email_invoice === '1') && !!inv.email, whatsapp: (b.send ? !!b.send.whatsapp : s2.auto_whatsapp_invoice === '1') && !!(inv.whatsapp || inv.phone) };
@@ -190,6 +207,7 @@ router.delete('/invoices/:id', can('invoices.delete'), wrap(async (req, res) => 
     const old = await one('SELECT * FROM invoices WHERE id=? FOR UPDATE', [id], c); if (!old) bad('Not found', 404); no = old.invoice_no;
     for (const it of await q('SELECT * FROM invoice_items WHERE invoice_id=?', [id], c)) if (it.variant_id) await moveStock(c, { variant_id: it.variant_id, type: 'sale_cancel', qty: it.qty, ref_type: 'invoice', ref_id: id, note: `Deleted ${no}`, user_id: req.user.id });
     for (const p of await q("SELECT * FROM payments WHERE invoice_id=? AND method='deposit'", [id], c)) await addLedger(c, { customer_id: p.customer_id, date: today(), type: 'used_reversal', amount: p.amount, ref_type: 'payment', ref_id: p.id, description: `Invoice ${no} deleted - deposit returned`, user_id: req.user.id });
+    await q('UPDATE customer_cheques k JOIN customer_deposits d ON d.id=k.deposit_id SET k.amount=d.amount, k.payment_id=NULL, k.invoice_id=NULL WHERE k.invoice_id=?', [id], c);
     await q('DELETE FROM customer_cheques WHERE invoice_id=?', [id], c); await q('DELETE FROM invoices WHERE id=?', [id], c);
   });
   await log(req, 'delete', 'invoice', id, `${no} (stock restored)`); res.json({ ok: true });
@@ -206,18 +224,20 @@ router.get('/invoices/:id/wa-preview', can('invoices.send'), wrap(async (req, re
 
 // ================= PAYMENTS =================
 router.post('/invoices/:id/payments', can('payments.manage'), wrap(async (req, res) => {
-  const id = +req.params.id, b = req.body; let pid;
+  const id = +req.params.id, b = req.body; let pid, overpaid = 0;
   await tx(async c => {
     const inv = await one('SELECT * FROM invoices WHERE id=? FOR UPDATE', [id], c); if (!inv) bad('Not found', 404);
     const amount = round2(b.amount); if (!(amount > 0)) bad('Enter a valid amount');
-    const committed = round2(inv.paid + inv.cheque_pending);
-    if (amount > round2(inv.total - committed) + 0.004) bad(`Amount exceeds the remaining balance of ${money(inv.total - committed)}`);
-    pid = await addPaymentTx(c, req, inv, b); await recalc(id, c);
+    const committed = round2(inv.paid + inv.cheque_pending); const plan = planPayments(inv.total, committed, [{ ...b, amount }]); const it = plan.items[0];
+    if (it.excess > 0.004 && !inv.customer_id) bad(`Amount is more than the remaining ${money(Math.max(inv.total - committed, 0))}. Select a customer on the invoice so the extra can be saved as their advance balance.`);
+    if (it.take > 0.004) pid = await addPaymentTx(c, req, inv, { ...b, amount: it.take, cheque_amount: it.amt });
+    if (it.excess > 0.004) { await keepOverpayment(c, req, inv, { ...b, amount: it.excess }, pid); overpaid = it.excess; }
+    await recalc(id, c);
   });
   await log(req, 'payment', 'invoice', id, `${b.method} ${b.amount}`);
   const inv = await fullInvoice(id); let wa = null;
   if (b.notify) { const tpl = await M.getTemplate('payment_received'); const msg = render(tpl.body, await invoiceVars(inv, { amount: money(b.amount), method: b.method })); wa = await M.sendWhatsApp({ to: inv.whatsapp || inv.phone, message: msg }); await M.logMsg({ channel: 'whatsapp', kind: 'payment', invoice_id: id, customer_id: inv.customer_id, recipient: inv.whatsapp || inv.phone, body: msg, status: wa.ok ? 'sent' : (wa.manual ? 'manual' : 'failed'), error: wa.error, user_id: req.user.id }); }
-  res.json({ id: pid, status: inv.status, balance: inv.balance, wa });
+  res.json({ id: pid, status: inv.status, balance: inv.balance, overpaid, advance: inv.customer_id ? await depBalance(inv.customer_id) : 0, wa });
 }));
 router.put('/payments/:id', can('payments.manage'), wrap(async (req, res) => {
   const b = req.body, id = +req.params.id;
@@ -228,14 +248,14 @@ router.put('/payments/:id', can('payments.manage'), wrap(async (req, res) => {
     if (!(amount > 0)) bad('Invalid amount');
     if (amount > round2(inv.total - (inv.paid + inv.cheque_pending - p.amount)) + 0.004) bad('Amount exceeds the invoice balance');
     await q('UPDATE payments SET date=?,amount=?,note=? WHERE id=?', [b.date || p.date, amount, b.note ?? p.note, id], c);
-    if (p.method === 'cheque') await q('UPDATE customer_cheques SET amount=? WHERE payment_id=?', [amount, id], c);
+    if (p.method === 'cheque') await q('UPDATE customer_cheques SET amount=? WHERE payment_id=? AND deposit_id IS NULL', [amount, id], c);
     await recalc(p.invoice_id, c);
   });
   await log(req, 'update', 'payment', id); res.json({ ok: true });
 }));
 router.delete('/payments/:id', can('payments.manage'), wrap(async (req, res) => {
   const id = +req.params.id; let inv;
-  await tx(async c => { const p = await one('SELECT * FROM payments WHERE id=?', [id], c); if (!p) bad('Not found', 404); inv = p.invoice_id; if (p.method === 'deposit') { const iv = await one('SELECT invoice_no FROM invoices WHERE id=?', [inv], c); await addLedger(c, { customer_id: p.customer_id, date: today(), type: 'used_reversal', amount: p.amount, ref_type: 'payment', ref_id: p.id, description: `Payment removed from invoice ${iv.invoice_no} - deposit returned`, user_id: req.user.id }); } await q('DELETE FROM customer_cheques WHERE payment_id=?', [id], c); await q('DELETE FROM payments WHERE id=?', [id], c); await recalc(inv, c); });
+  await tx(async c => { const p = await one('SELECT * FROM payments WHERE id=?', [id], c); if (!p) bad('Not found', 404); inv = p.invoice_id; if (p.method === 'deposit') { const iv = await one('SELECT invoice_no FROM invoices WHERE id=?', [inv], c); await addLedger(c, { customer_id: p.customer_id, date: today(), type: 'used_reversal', amount: p.amount, ref_type: 'payment', ref_id: p.id, description: `Payment removed from invoice ${iv.invoice_no} - deposit returned`, user_id: req.user.id }); } await q('UPDATE customer_cheques k JOIN customer_deposits d ON d.id=k.deposit_id SET k.amount=d.amount, k.payment_id=NULL, k.invoice_id=NULL WHERE k.payment_id=?', [id], c); await q('DELETE FROM customer_cheques WHERE payment_id=?', [id], c); await q('DELETE FROM payments WHERE id=?', [id], c); await recalc(inv, c); });
   await log(req, 'delete', 'payment', id, `invoice ${inv}`); res.json({ ok: true });
 }));
 

@@ -26,7 +26,7 @@ const rejects = async (fn, m) => { try { await fn(); ok(false, m); } catch (e) {
   ok(/^ARA-\d{4}-\d{5}$/.test(I.invoice_no), 'auto invoice number ' + I.invoice_no);
   p = await api('GET', '/products/' + prod.id); ok(p.stock === 23, 'stock deducted by sale -> 23');
   await rejects(() => api('POST', '/invoices', { customer_id: cu.id, items: [{ variant_id: black.id, qty: 999 }] }), 'oversell rejected');
-  await rejects(() => api('POST', `/invoices/${inv.id}/payments`, { method: 'cash', amount: 99999 }), 'overpayment rejected');
+  await rejects(() => api('POST', '/invoices', { items: [{ variant_id: black.id, qty: 1 }], payments: [{ method: 'cash', amount: 99999 }] }), 'walk-in overpayment rejected');
   const chq = (await api('GET', '/cheques/customer?customer=' + cu.id))[0]; ok(chq.status === 'received', 'cheque recorded as received');
   await api('PUT', '/cheques/customer/' + chq.id, { status: 'deposited' }); I = await api('GET', '/invoices/' + inv.id); ok(I.paid === 1400 && I.status === 'cheque_pending', 'deposited cheque still NOT counted as paid');
   await api('PUT', '/cheques/customer/' + chq.id, { status: 'bounced' }); I = await api('GET', '/invoices/' + inv.id); ok(I.paid === 1400 && I.cheque_pending === 0 && I.status === 'partial' && I.balance === 5600, 'bounced cheque -> back to partial, balance 5600');
@@ -160,6 +160,27 @@ const rejects = async (fn, m) => { try { await fn(); ok(false, m); } catch (e) {
   ok(true, 'deposit reports export to Excel + PDF');
   { const role3 = await api('POST', '/roles', { name: 'NoDep' + sx, permissions: ['invoices.view', 'customers.view'] }); await api('POST', '/users', { name: 'ND', username: 'nd' + sx, password: 'secret1', role_id: role3.id }); const T1 = T; T = (await api('POST', '/auth/login', { username: 'nd' + sx, password: 'secret1' })).token;
     await rejects(() => api('GET', '/deposits'), 'user without deposit permission cannot see deposits'); await rejects(() => api('POST', '/deposits', { customer_id: dc.id, method: 'cash', amount: 1 }), 'user without deposit permission cannot record deposits'); T = T1; }
+  // ---- overpayments are saved as the customer's advance and used on the next invoice
+  const oc = await api('POST', '/customers', { name: 'Overpay Customer ' + sx, phone: '0771112222', type: 'retail' });
+  const obal = async () => (await api('GET', `/customers/${oc.id}/deposit-balance`));
+  const o1 = await api('POST', '/invoices', { customer_id: oc.id, items: [{ variant_id: dv, qty: 10 }], payments: [{ method: 'cash', amount: 10000 }], send: { email: false, whatsapp: false } });
+  let O1 = await api('GET', '/invoices/' + o1.id); let ob = await obal();
+  ok(o1.overpaid === 3000 && O1.total === 7000 && O1.paid === 7000 && O1.balance === 0 && O1.status === 'paid' && ob.balance === 3000, 'cash 10,000 on a 7,000 invoice -> invoice Paid, extra 3,000 saved as advance balance');
+  const odep = (await api('GET', `/deposits?customer=${oc.id}`))[0]; ok(odep && odep.amount === 3000 && odep.status === 'cleared' && /Overpayment on invoice/.test(odep.note || ''), 'overpayment appears in the deposit register as a cleared deposit with a receipt number ' + (odep && odep.receipt_no));
+  const o2 = await api('POST', '/invoices', { customer_id: oc.id, items: [{ variant_id: dv, qty: 5, price: 1000 }], payments: [{ method: 'deposit', amount: 3000 }, { method: 'cash', amount: 2000 }], send: { email: false, whatsapp: false } });
+  let O2 = await api('GET', '/invoices/' + o2.id); ob = await obal(); ok(O2.status === 'paid' && O2.paid === 5000 && ob.balance === 0, 'next invoice 5,000: advance 3,000 deducted + cash 2,000 -> Paid, advance 0');
+  const o3 = await api('POST', '/invoices', { customer_id: oc.id, items: [{ variant_id: dv, qty: 4, price: 1000 }], payments: [{ method: 'cheque', amount: 5000, cheque: { cheque_no: 'OVR-1', bank: 'BOC', cheque_date: TD, deposit_date: TD } }], send: { email: false, whatsapp: false } });
+  let O3 = await api('GET', '/invoices/' + o3.id); ob = await obal();
+  ok(o3.overpaid === 1000 && O3.cheque_pending === 4000 && O3.status === 'cheque_pending' && ob.balance === 0 && ob.pending === 1000, 'cheque 5,000 on a 4,000 invoice: invoice Cheque Pending 4,000, extra 1,000 pending (not yet available)');
+  const ochq = (await api('GET', `/cheques/customer?customer=${oc.id}&cheque_no=OVR-1`)); ok(ochq.length === 1 && ochq[0].amount === 5000, 'ONE cheque of 5,000 is recorded (not two)');
+  await api('PUT', '/cheques/customer/' + ochq[0].id, { status: 'cleared' }); O3 = await api('GET', '/invoices/' + o3.id); ob = await obal(); ok(O3.status === 'paid' && O3.paid === 4000 && ob.balance === 1000 && ob.pending === 0, 'cheque cleared -> invoice Paid and the extra 1,000 becomes available advance');
+  const o4 = await api('POST', '/invoices', { customer_id: oc.id, items: [{ variant_id: dv, qty: 3, price: 1000 }], payments: [], send: { email: false, whatsapp: false } });
+  const op = await api('POST', `/invoices/${o4.id}/payments`, { method: 'cash', amount: 3500 }); let O4 = await api('GET', '/invoices/' + o4.id); ob = await obal();
+  ok(op.overpaid === 500 && O4.status === 'paid' && O4.paid === 3000 && ob.balance === 1500, 'adding a 3,500 payment to a 3,000 balance -> Paid, extra 500 added to advance (1,500)');
+  await rejects(() => api('POST', '/invoices', { items: [{ variant_id: dv, qty: 1 }], payments: [{ method: 'cash', amount: 10000 }] }), 'walk-in customer cannot overpay (needs a customer to hold the advance)');
+  await rejects(() => api('POST', '/invoices', { customer_id: oc.id, items: [{ variant_id: dv, qty: 1 }], payments: [{ method: 'deposit', amount: 1500 }] }), 'deposit payment cannot exceed the amount due');
+  await api('DELETE', '/payments/' + O1.payments[0].id); ob = await obal(); O1 = await api('GET', '/invoices/' + o1.id); ok(O1.status !== 'paid' && ob.balance === 1500, 'removing the cash payment keeps the saved advance (it is a separate deposit)');
+  const oacc = await api('GET', `/customers/${oc.id}/account`); ok(oacc.closing === oacc.balance && oacc.rows.some(r => /Overpayment/.test(r.description || '')), 'account statement shows the overpayment as a deposit and balances to the advance');
   // roles & permissions
   const role = await api('POST', '/roles', { name: 'Tester' + sfx, permissions: ['invoices.view', 'products.view', 'customers.view'] });
   await api('POST', '/users', { name: 'Test User', username: 'u' + sfx, password: 'secret1', role_id: role.id });

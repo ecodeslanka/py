@@ -38,6 +38,7 @@ router.delete('/deposits/:id', can('deposits.manage'), wrap(async (req, res) => 
   await tx(async c => {
     const d = await one('SELECT * FROM customer_deposits WHERE id=? FOR UPDATE', [id], c); if (!d) bad('Not found', 404);
     if (d.status === 'cleared') await addLedger(c, { customer_id: d.customer_id, date: today(), type: 'deposit_cancel', amount: -d.amount, ref_type: 'deposit', ref_id: id, description: `Deposit ${d.receipt_no} cancelled`, user_id: req.user.id }); // fails if already spent
+    await q('UPDATE customer_cheques k JOIN payments p ON p.id=k.payment_id SET k.deposit_id=NULL, k.amount=p.amount WHERE k.deposit_id=?', [id], c);
     await q('DELETE FROM customer_cheques WHERE deposit_id=?', [id], c); await q('DELETE FROM customer_deposits WHERE id=?', [id], c);
   });
   await log(req, 'delete', 'deposit', id); res.json({ ok: true });

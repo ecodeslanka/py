@@ -22,5 +22,17 @@ async function setDepositStatus(conn, dep, status, user_id) {
     await q('UPDATE customer_deposits SET status=?, cleared_date=NULL WHERE id=?', [status, dep.id], conn);
   }
 }
+// Save money as a customer deposit. For a cheque that also pays an invoice, the SAME cheque is linked to both the payment and the deposit.
+async function addDeposit(conn, o) {
+  const amount = round2(o.amount);
+  const r = await q('INSERT INTO customer_deposits (receipt_no,customer_id,date,amount,method,reference,note,status,cleared_date,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [o.receipt_no, o.customer_id, o.date, amount, o.method, o.reference || null, o.note || null, o.method === 'cheque' ? 'pending' : 'cleared', o.method === 'cheque' ? null : o.date, o.user_id || null], conn);
+  if (o.method === 'cheque') {
+    if (o.payment_id) await q('UPDATE customer_cheques SET deposit_id=? WHERE payment_id=?', [r.insertId, o.payment_id], conn);
+    else await q('INSERT INTO customer_cheques (customer_id,cheque_no,bank,cheque_date,amount,deposit_date,deposit_id,status,status_date,note,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [o.customer_id, o.cheque.cheque_no.trim(), o.cheque.bank || null, o.cheque.cheque_date || o.date, amount, o.cheque.deposit_date || o.cheque.cheque_date || o.date, r.insertId, 'received', today(), o.note || null, o.user_id || null], conn);
+  } else await addLedger(conn, { customer_id: o.customer_id, date: o.date, type: 'deposit', amount, ref_type: 'deposit', ref_id: r.insertId, description: `Deposit ${o.receipt_no} (${o.method})${o.note ? ' - ' + o.note : ''}`, user_id: o.user_id });
+  return r.insertId;
+}
 const TYPE_LABEL = { deposit: 'Deposit received', deposit_reversal: 'Deposit reversed', deposit_cancel: 'Deposit cancelled', used: 'Used on invoice', used_reversal: 'Invoice payment reversed', refund: 'Refund paid' };
-module.exports = { balance, addLedger, setDepositStatus, TYPE_LABEL };
+module.exports = { balance, addLedger, addDeposit, setDepositStatus, TYPE_LABEL };
