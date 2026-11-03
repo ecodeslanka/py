@@ -52,10 +52,10 @@ The same app adapts automatically: **under 1024px** it is a mobile app (bottom t
 * `Pending` – invoice was created on credit (nothing paid yet)
 * `Unpaid` – no payment at all
 
-### Profit / loss
-* **Estimated profit/loss** = Sales − Expenses (for the period)
-* **Cash profit** = Income actually received (cash + bank + *cleared* cheques) − Expenses
-* **Gross margin** = Sales − cost price of items sold
+### Profit
+* **PROFIT = selling price (or wholesale price) entered on the sales screen − cost price − discounts** (line discounts + the whole-invoice discount, shared over the items by value).
+* **Net profit = Profit − Expenses.** Expenses (salaries, materials, rent …) are shown separately.
+* Shown live on the sales screen, on each invoice, on the dashboard, and in **Reports → Profit**: by invoice, by item (every invoice line), by product, by customer, by month, plus Profit & Loss and Day-by-day profit. Cost and profit are hidden from users without report / stock permission.
 
 ## WhatsApp (ecodes.online) & Email
 

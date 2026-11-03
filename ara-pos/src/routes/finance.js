@@ -77,7 +77,10 @@ router.get('/dashboard', can('dashboard.view'), wrap(async (req, res) => {
     customer_outstanding: await sum('SELECT COALESCE(SUM(balance),0) v FROM invoices'),
     supplier_balance: await sum(`SELECT COALESCE(SUM(${SUP_BAL}),0) v FROM suppliers s`),
   };
-  out.month_profit = round2(out.month_sales - out.month_expenses);
+  // profit = selling price - cost price - discounts (expenses are shown separately as net profit)
+  const costOf = async (cond, p) => (await one(`SELECT COALESCE(SUM(ii.qty*ii.cost),0) v FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE ${cond}`, p)).v;
+  out.month_cost = round2(await costOf('DATE_FORMAT(i.date,"%Y-%m")=?', [M])); out.today_cost = round2(await costOf('i.date=?', [T]));
+  out.month_profit = round2(out.month_sales - out.month_cost); out.today_profit = round2(out.today_sales - out.today_cost); out.month_net = round2(out.month_profit - out.month_expenses);
   out.upcoming_customer_cheques = await q(`SELECT k.id,k.cheque_no,k.bank,k.amount,k.deposit_date,k.status,c.name cname,DATEDIFF(k.deposit_date,CURDATE()) days_left FROM customer_cheques k LEFT JOIN customers c ON c.id=k.customer_id WHERE k.status IN ('received','pending','deposited') AND (k.deposit_date IS NULL OR k.deposit_date<=?) ORDER BY k.deposit_date LIMIT 8`, [soon]);
   out.upcoming_supplier_cheques = await q(`SELECT k.id,k.cheque_no,k.bank,k.amount,k.present_date,k.status,s.name sname,DATEDIFF(k.present_date,CURDATE()) days_left FROM supplier_cheques k JOIN suppliers s ON s.id=k.supplier_id WHERE k.status IN ('issued','presented') AND (k.present_date IS NULL OR k.present_date<=?) ORDER BY k.present_date LIMIT 8`, [soon]);
   out.low_stock = await q(`SELECT p.id,p.name,p.code,p.low_stock_level,COALESCE(SUM(v.qty),0) qty FROM products p LEFT JOIN product_variants v ON v.product_id=p.id WHERE p.active=1 GROUP BY p.id HAVING qty<=p.low_stock_level ORDER BY qty LIMIT 10`);

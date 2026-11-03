@@ -95,7 +95,7 @@ router.get('/invoices', can('invoices.view'), wrap(async (req, res) => {
   res.json(await q(`SELECT i.*, COALESCE(c.name,i.customer_name,'Walk-in') cname, u.name created_by_name FROM invoices i LEFT JOIN customers c ON c.id=i.customer_id LEFT JOIN users u ON u.id=i.created_by
     WHERE ${w.join(' AND ')} ORDER BY i.date DESC, i.id DESC LIMIT ?`, [...p, +limit]));
 }));
-router.get('/invoices/:id', can('invoices.view'), wrap(async (req, res) => { const i = await fullInvoice(+req.params.id); if (!i) bad('Not found', 404); res.json(i); }));
+router.get('/invoices/:id', can('invoices.view'), wrap(async (req, res) => { const i = await fullInvoice(+req.params.id); if (!i) bad('Not found', 404); if (!req.user.permissions.includes('reports.view')) i.items.forEach(x => { delete x.cost; }); res.json(i); }));
 router.get('/invoices/:id/pdf', can('invoices.view'), wrap(async (req, res) => { const b = await invoicePdf(+req.params.id); if (!b) bad('Not found', 404); res.type('pdf').send(b); }));
 
 async function resolveItems(conn, items, isWholesale) {

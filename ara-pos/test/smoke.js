@@ -181,6 +181,30 @@ const rejects = async (fn, m) => { try { await fn(); ok(false, m); } catch (e) {
   await rejects(() => api('POST', '/invoices', { customer_id: oc.id, items: [{ variant_id: dv, qty: 1 }], payments: [{ method: 'deposit', amount: 1500 }] }), 'deposit payment cannot exceed the amount due');
   await api('DELETE', '/payments/' + O1.payments[0].id); ob = await obal(); O1 = await api('GET', '/invoices/' + o1.id); ok(O1.status !== 'paid' && ob.balance === 1500, 'removing the cash payment keeps the saved advance (it is a separate deposit)');
   const oacc = await api('GET', `/customers/${oc.id}/account`); ok(oacc.closing === oacc.balance && oacc.rows.some(r => /Overpayment/.test(r.description || '')), 'account statement shows the overpayment as a deposit and balances to the advance');
+  // ---- PROFIT = selling price - cost price - discounts (line discounts + whole-invoice discount)
+  const PD = '2026-12-15';
+  const pb = await api('POST', '/products', { code: 'PB' + sx, name: 'Profit Test Flip Flop', cost_price: 100, wholesale_price: 200, selling_price: 250, low_stock_level: 1, variants: [{ colour: 'Red', opening_qty: 100 }] });
+  const pbv = (await api('GET', '/products/' + pb.id)).variants[0].id; const pcu = await api('POST', '/customers', { name: 'Profit Customer ' + sx, type: 'retail' });
+  // A: 4 x 700 (cost 400) = 2,800 ; B: 8 x 250 (cost 100) - line discount 100 = 1,900 ; invoice discount 470  => total 4,230, cost 2,400, profit 1,830
+  const pinv = await api('POST', '/invoices', { customer_id: pcu.id, date: PD, discount: 470, items: [{ variant_id: dv, qty: 4 }, { variant_id: pbv, qty: 8, price: 250, discount: 100 }], payments: [], send: { email: false, whatsapp: false } });
+  const PI = await api('GET', '/invoices/' + pinv.id); ok(PI.subtotal === 4700 && PI.discount === 470 && PI.total === 4230 && PI.items.every(x => x.cost > 0), 'worked example: 2,800 + 1,900 = 4,700 less invoice discount 470 = 4,230');
+  await api('POST', '/expenses', { date: PD, category_id: tr.id, amount: 500, description: 'Delivery for profit test', method: 'cash' });
+  const R = async (type, extra = '') => api('GET', `/reports?type=${type}&from=${PD}&to=${PD}&period=custom&customer=${pcu.id}${extra}`);
+  const rinv = await R('profit_invoice'); const ri = rinv.rows[0]; ok(ri.listv === 4800 && ri.disc === 570 && ri.net === 4230 && ri.cost === 2400 && ri.profit === 1830 && ri.margin === '43.3%', `profit by invoice: selling 4,800 - discounts 570 = net 4,230 - cost 2,400 = PROFIT ${ri.profit} (${ri.margin})`);
+  const ritem = await R('profit_item'); const la = ritem.rows.find(r => r.price === 700), lb = ritem.rows.find(r => r.price === 250);
+  ok(la.net === 2520 && la.costv === 1600 && la.profit === 920 && la.disc === 280 && lb.net === 1710 && lb.costv === 800 && lb.profit === 910 && lb.disc === 290 && ritem.rows.find(r => r.date === 'TOTAL').profit === 1830, 'profit by item: invoice discount shared by value - line A profit 920, line B profit 910, total 1,830');
+  const rprod = await R('products'); ok(rprod.rows.find(r => r.product === 'TOTAL').profit === 1830, 'profit by product totals 1,830');
+  const rcust = await R('profit_customer'); ok(rcust.rows[0].profit === 1830 && rcust.rows[0].disc === 570 && rcust.rows[0].invoices === 1, 'profit by customer: 1,830 after 570 discounts');
+  const rsum = await api('GET', `/reports?type=summary&from=${PD}&to=${PD}&period=custom`); const cd = l => rsum.cards.find(c => c.label.startsWith(l)).value;
+  ok(cd('Net Sales') === 4230 && cd('Cost of goods') === 2400 && cd('Discounts') === 570 && cd('PROFIT') === 1830 && cd('Expenses') === 500 && cd('Net Profit') === 1330, 'profit & loss: sales 4,230, cost 2,400, discounts 570, PROFIT 1,830, expenses 500, net profit 1,330');
+  const rday = await api('GET', `/reports?type=daily&from=${PD}&to=${PD}&period=custom`); const dr = rday.rows[0]; ok(dr.sales === 4230 && dr.cost === 2400 && dr.profit === 1830 && dr.expenses === 500 && dr.net === 1330, 'day-by-day: profit 1,830, net 1,330');
+  const rmon = await api('GET', `/reports?type=profit_month&from=2026-12-01&to=2026-12-31&period=custom`); const mr = rmon.rows.find(r => r.month === '2026-12'); ok(mr.profit === 1830 && mr.expenses === 500 && mr.netp === 1330, 'profit by month (Dec 2026): profit 1,830, net 1,330');
+  const rsal = await R('sales'); ok(rsal.rows[0].profit === 1830 && rsal.rows[0].cost === 2400, 'sales report shows cost and profit per invoice');
+  const dsh = await api('GET', '/dashboard'); ok(typeof dsh.month_profit === 'number' && typeof dsh.today_profit === 'number' && Math.abs(dsh.month_net - (dsh.month_profit - dsh.month_expenses)) < 0.01, 'dashboard: profit = sales - cost, net = profit - expenses');
+  for (const type of ['profit_invoice', 'profit_item', 'products', 'profit_customer', 'profit_month', 'daily', 'summary', 'sales']) { const x = await api('GET', `/reports/export?type=${type}&format=xlsx&all=1`); const y = await api('GET', `/reports/export?type=${type}&format=pdf&all=1`); if (x.slice(0, 2).toString() !== 'PK' || y.slice(0, 4).toString() !== '%PDF') ok(false, 'profit export failed ' + type); }
+  ok(true, 'profit reports export to Excel + PDF');
+  { const r4 = await api('POST', '/roles', { name: 'NoCost' + sx, permissions: ['invoices.view', 'products.view', 'invoices.create'] }); await api('POST', '/users', { name: 'NC', username: 'nc' + sx, password: 'secret1', role_id: r4.id }); const T1 = T; T = (await api('POST', '/auth/login', { username: 'nc' + sx, password: 'secret1' })).token;
+    const ci = await api('GET', '/invoices/' + pinv.id); const cp = await api('GET', '/products/' + pb.id); ok(ci.items.every(x => x.cost === undefined) && cp.cost_price === undefined, 'cost prices are hidden from users without report / stock permissions'); T = T1; }
   // roles & permissions
   const role = await api('POST', '/roles', { name: 'Tester' + sfx, permissions: ['invoices.view', 'products.view', 'customers.view'] });
   await api('POST', '/users', { name: 'Test User', username: 'u' + sfx, password: 'secret1', role_id: role.id });

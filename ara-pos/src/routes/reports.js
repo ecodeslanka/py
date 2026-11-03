@@ -20,6 +20,11 @@ function range(period, from, to) {
   return [from || T.slice(0, 7) + '-01', to || T];
 }
 const C = (key, label, o = {}) => ({ key, label, ...o });
+// PROFIT RULE: profit = selling price entered on the sales screen - cost price - discounts (line discounts + whole-invoice discount).
+// The invoice-level discount is shared over the lines in proportion to their value, so item-wise profit adds up exactly to invoice profit.
+const LINE_NET = '(ii.total - CASE WHEN i.subtotal>0 THEN i.discount*ii.total/i.subtotal ELSE 0 END)';
+const pct = (profit, net) => net > 0.004 ? (Math.round(profit / net * 1000) / 10).toFixed(1) + '%' : '';
+const INV_COST = '(SELECT invoice_id, SUM(qty) qty, SUM(qty*price) listv, SUM(discount) ldisc, SUM(qty*cost) cost FROM invoice_items GROUP BY invoice_id)';
 const MV = { opening: 'Opening stock', receive: 'Goods received', sale: 'Sold', return_in: 'Customer return', return_out: 'Returned to supplier', damage: 'Damaged', adjust: 'Adjustment', sale_cancel: 'Sale cancelled / edited' };
 
 // ---- filter specs (the UI builds its filter bar from these) ----
@@ -48,10 +53,14 @@ const FL = {
 const STOCKF = [FL.art, FL.product, FL.pcategory, FL.size, FL.colour, FL.location, FL.supplier];
 const META = {
   summary: { label: 'Profit & Loss', group: 'Financial', filters: [], perms: ['reports.view'] },
-  daily: { label: 'Day by day', group: 'Financial', filters: [], perms: ['reports.view'] },
+  daily: { label: 'Day by day profit', group: 'Financial', filters: [], perms: ['reports.view'] },
   cashbook: { label: 'Cash & Bank', group: 'Financial', filters: [], perms: ['reports.view'] },
+  profit_invoice: { label: 'Profit by invoice', group: 'Profit', filters: [FL.customer, FL.invstatus, FL.search], perms: ['reports.view'] },
+  profit_item: { label: 'Profit by item (detail)', group: 'Profit', filters: [FL.art, FL.product, FL.pcategory, FL.size, FL.colour, FL.customer, FL.supplier, FL.search], perms: ['reports.view'] },
+  products: { label: 'Profit by product', group: 'Profit', filters: [FL.art, FL.product, FL.pcategory, FL.size, FL.colour, FL.customer, FL.supplier], perms: ['reports.view'] },
+  profit_customer: { label: 'Profit by customer', group: 'Profit', filters: [FL.customer, FL.search], perms: ['reports.view'] },
+  profit_month: { label: 'Profit by month', group: 'Profit', filters: [], perms: ['reports.view'] },
   sales: { label: 'Sales / Invoices', group: 'Sales', filters: [FL.customer, FL.invstatus, FL.search], perms: ['reports.view', 'invoices.view'] },
-  products: { label: 'Product sales', group: 'Sales', filters: [FL.art, FL.product, FL.pcategory, FL.size, FL.colour, FL.customer, FL.supplier], perms: ['reports.view'] },
   customers: { label: 'Customer summary', group: 'Customers', filters: [FL.customer, FL.owing, FL.search], perms: ['reports.view', 'customers.view'] },
   customer_ledger: { label: 'Customer ledger', group: 'Customers', filters: [FL.customer, FL.invstatus, FL.search], perms: ['reports.view', 'customers.view'] },
   deposits: { label: 'Customer deposits', group: 'Customers', filters: [FL.customer, FL.dstatus, FL.dmethod, FL.search], perms: ['reports.view', 'deposits.view'] },
@@ -76,10 +85,14 @@ function grouped(rows, key, amountKey, label) {
   for (const r of rows) { if (r[key] !== cur) { flush(); cur = r[key]; sum = 0; n = 0; } out.push(r); sum += r[amountKey]; n++; } flush(); return out;
 }
 
+function lineFilters(F, w, p) {
+  if (has(F.art)) { w.push('p.code LIKE ?'); p.push(L(F.art)); } if (has(F.product)) { w.push('p.name LIKE ?'); p.push(L(F.product)); } if (has(F.category)) { w.push('p.category_id=?'); p.push(F.category); }
+  if (has(F.size)) { w.push('v.size=?'); p.push(F.size); } if (has(F.colour)) { w.push('v.colour=?'); p.push(F.colour); } if (has(F.customer)) { w.push('i.customer_id=?'); p.push(F.customer); } if (has(F.supplier)) { w.push('p.supplier_id=?'); p.push(F.supplier); }
+}
 const REPORTS = {
   async summary(f, t) {
     const sales = await one('SELECT COALESCE(SUM(total),0) v, COUNT(*) n, COALESCE(SUM(discount),0) disc FROM invoices WHERE date BETWEEN ? AND ?', [f, t]);
-    const qty = (await one('SELECT COALESCE(SUM(ii.qty),0) v, COALESCE(SUM(ii.qty*ii.cost),0) cogs FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE i.date BETWEEN ? AND ?', [f, t]));
+    const qty = (await one('SELECT COALESCE(SUM(ii.qty),0) v, COALESCE(SUM(ii.qty*ii.cost),0) cogs, COALESCE(SUM(ii.qty*ii.price),0) listv, COALESCE(SUM(ii.discount),0) ldisc FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE i.date BETWEEN ? AND ?', [f, t]));
     const incP = await q("SELECT method, COALESCE(SUM(amount),0) v FROM payments WHERE cleared=1 AND method<>'deposit' AND date BETWEEN ? AND ? GROUP BY method", [f, t]);
     const incD = await q("SELECT method, COALESCE(SUM(amount),0) v FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date) BETWEEN ? AND ? GROUP BY method", [f, t]);
     const inc = [...incP, ...incD]; const depIn = round2(incD.reduce((a, r) => a + r.v, 0));
@@ -91,28 +104,39 @@ const REPORTS = {
     const cheq = (await one("SELECT COALESCE(SUM(amount),0) v FROM customer_cheques WHERE status IN ('received','pending','deposited') AND created_at<=?", [t + ' 23:59:59'])).v;
     const sumM = m => round2(inc.filter(r => r.method === m).reduce((a, r) => a + r.v, 0)); const cash = sumM('cash'), bank = sumM('bank'), chq = sumM('cheque');
     const cashOut = exp.filter(r => r.method === 'cash').reduce((a, r) => a + r.v, 0), bankOut = exp.filter(r => r.method !== 'cash').reduce((a, r) => a + r.v, 0);
-    const profit = round2(sales.v - expenses), cashProfit = round2(income - expenses - refunds);
+    const cogs = round2(qty.cogs), discounts = round2(qty.ldisc + sales.disc), profit = round2(sales.v - cogs), netProfit = round2(profit - expenses), cashProfit = round2(income - expenses - refunds);
+    const margin = pct(profit, sales.v);
     const cards = [
-      { label: 'Total Sales', value: sales.v, money: 1, note: `${sales.n} invoices • ${qty.v} pairs` }, { label: 'Income Received', value: income, money: 1, note: 'cash + bank + cleared cheques' },
-      { label: 'Expenses', value: expenses, money: 1 }, { label: 'Profit / Loss (Sales − Expenses)', value: profit, money: 1, tone: profit >= 0 ? 'good' : 'bad' },
-      { label: 'Cash Profit (Income − Expenses − refunds)', value: cashProfit, money: 1, tone: cashProfit >= 0 ? 'good' : 'bad' }, { label: 'Gross Margin (Sales − Cost of goods)', value: round2(sales.v - qty.cogs), money: 1 },
+      { label: 'Net Sales (after discounts)', value: sales.v, money: 1, note: `${sales.n} invoices • ${qty.v} pairs` }, { label: 'Cost of goods sold', value: cogs, money: 1 },
+      { label: 'Discounts given', value: discounts, money: 1, note: 'line + invoice discounts' }, { label: 'PROFIT (Selling − Cost − Discounts)', value: profit, money: 1, tone: profit >= 0 ? 'good' : 'bad', note: margin ? `Margin ${margin}` : '' },
+      { label: 'Expenses', value: expenses, money: 1 }, { label: 'Net Profit after Expenses', value: netProfit, money: 1, tone: netProfit >= 0 ? 'good' : 'bad' },
+      { label: 'Income Received', value: income, money: 1, note: 'cash + bank + cleared cheques + deposits' }, { label: 'Cash Profit (Income − Expenses − refunds)', value: cashProfit, money: 1, tone: cashProfit >= 0 ? 'good' : 'bad' },
       { label: 'Cheques not yet cleared', value: cheq, money: 1 }, { label: 'Supplier payments made', value: round2(supPaid), money: 1 },
     ];
     const rows = [
-      { item: 'Sales (invoiced)', amount: sales.v }, { item: '  Discounts given', amount: sales.disc }, { item: 'Income received - Cash', amount: cash }, { item: 'Income received - Bank transfer', amount: bank }, { item: 'Income received - Cheques cleared', amount: chq },
-      { item: '  of which customer deposits (advance) received', amount: depIn }, { item: 'TOTAL INCOME RECEIVED', amount: income, _bold: 1 }, ...exp.map(e => ({ item: `Expense - ${e.name} (${e.method})`, amount: e.v })), { item: 'TOTAL EXPENSES', amount: expenses, _bold: 1 },
+      { item: 'Sales at selling price (qty × price entered on the sales screen)', amount: round2(qty.listv) }, { item: '  less: line discounts', amount: -round2(qty.ldisc) }, { item: '  less: whole-invoice discounts', amount: -round2(sales.disc) },
+      { item: 'NET SALES', amount: sales.v, _bold: 1 }, { item: 'less: Cost of goods sold (cost price × qty)', amount: -cogs },
+      { item: `PROFIT = Selling price − Cost price − Discounts${margin ? '   (margin ' + margin + ')' : ''}`, amount: profit, _bold: 1 },
+      ...exp.map(e => ({ item: `Expense - ${e.name} (${e.method})`, amount: -e.v })), { item: 'TOTAL EXPENSES', amount: -expenses, _bold: 1 },
+      { item: 'NET PROFIT / (LOSS) after expenses', amount: netProfit, _bold: 1 },
+      { item: '--- Money received (cash position) ---' }, { item: 'Income received - Cash', amount: cash }, { item: 'Income received - Bank transfer', amount: bank }, { item: 'Income received - Cheques cleared', amount: chq },
+      { item: '  of which customer deposits (advance) received', amount: depIn }, { item: 'TOTAL INCOME RECEIVED', amount: income, _bold: 1 },
       { item: 'Customer refunds paid', amount: refunds }, { item: 'Customer deposits held (advance balances, not income yet)', amount: held }, { item: 'Cash paid out (expenses)', amount: cashOut }, { item: 'Bank/cheque paid out (expenses)', amount: bankOut },
-      { item: 'ESTIMATED PROFIT / (LOSS) = Sales − Expenses', amount: profit, _bold: 1 }, { item: 'CASH PROFIT / (LOSS) = Income − Expenses − Refunds', amount: cashProfit, _bold: 1 },
+      { item: 'CASH PROFIT / (LOSS) = Income − Expenses − Refunds', amount: cashProfit, _bold: 1 },
     ];
     return { title: 'Income, Expense & Profit/Loss', cards, columns: [C('item', 'Item'), C('amount', 'Amount (LKR)', { money: 1, w: 120 })], rows };
   },
   async daily(f, t) {
-    const rows = await q(`SELECT d.date, COALESCE((SELECT SUM(total) FROM invoices WHERE date=d.date),0) sales, COALESCE((SELECT SUM(amount) FROM payments WHERE cleared=1 AND method<>'deposit' AND date=d.date),0) + COALESCE((SELECT SUM(amount) FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date)=d.date),0) income,
-      COALESCE((SELECT SUM(amount) FROM expenses WHERE date=d.date),0) expenses FROM (SELECT DISTINCT date FROM (SELECT date FROM invoices UNION SELECT date FROM payments UNION SELECT date FROM expenses UNION SELECT COALESCE(cleared_date,date) AS date FROM customer_deposits WHERE status='cleared') x WHERE date BETWEEN ? AND ?) d ORDER BY d.date`, [f, t]);
-    rows.forEach(r => { r.profit = round2(r.sales - r.expenses); r.cash = round2(r.income - r.expenses); });
-    const tot = rows.reduce((a, r) => ({ sales: a.sales + r.sales, income: a.income + r.income, expenses: a.expenses + r.expenses, profit: a.profit + r.profit, cash: a.cash + r.cash }), { sales: 0, income: 0, expenses: 0, profit: 0, cash: 0 });
+    const rows = await q(`SELECT d.date, COALESCE((SELECT SUM(total) FROM invoices WHERE date=d.date),0) sales,
+      COALESCE((SELECT SUM(ii.qty*ii.cost) FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE i.date=d.date),0) cost,
+      COALESCE((SELECT SUM(amount) FROM payments WHERE cleared=1 AND method<>'deposit' AND date=d.date),0) + COALESCE((SELECT SUM(amount) FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date)=d.date),0) income,
+      COALESCE((SELECT SUM(amount) FROM expenses WHERE date=d.date),0) expenses
+      FROM (SELECT DISTINCT date FROM (SELECT date FROM invoices UNION SELECT date FROM payments UNION SELECT date FROM expenses UNION SELECT COALESCE(cleared_date,date) AS date FROM customer_deposits WHERE status='cleared') x WHERE date BETWEEN ? AND ?) d ORDER BY d.date`, [f, t]);
+    rows.forEach(r => { r.profit = round2(r.sales - r.cost); r.net = round2(r.profit - r.expenses); });
+    const tot = rows.reduce((a, r) => ({ sales: a.sales + r.sales, cost: a.cost + r.cost, profit: a.profit + r.profit, expenses: a.expenses + r.expenses, net: a.net + r.net, income: a.income + r.income }), { sales: 0, cost: 0, profit: 0, expenses: 0, net: 0, income: 0 });
     if (rows.length) rows.push({ date: 'TOTAL', ...Object.fromEntries(Object.entries(tot).map(([k, v]) => [k, round2(v)])), _bold: 1 });
-    return { title: 'Day-by-day Summary', columns: [C('date', 'Date', { w: 80 }), C('sales', 'Sales', { money: 1 }), C('income', 'Income', { money: 1 }), C('expenses', 'Expenses', { money: 1 }), C('profit', 'Profit (Sales−Exp)', { money: 1 }), C('cash', 'Cash Profit', { money: 1 })], rows };
+    return { title: 'Day-by-day Profit', cards: [{ label: 'Net sales', value: round2(tot.sales), money: 1 }, { label: 'Cost of goods', value: round2(tot.cost), money: 1 }, { label: 'PROFIT (selling − cost − discounts)', value: round2(tot.profit), money: 1, tone: tot.profit >= 0 ? 'good' : 'bad' }, { label: 'Net profit after expenses', value: round2(tot.net), money: 1, tone: tot.net >= 0 ? 'good' : 'bad' }],
+      columns: [C('date', 'Date', { w: 75 }), C('sales', 'Net sales', { money: 1 }), C('cost', 'Cost', { money: 1 }), C('profit', 'Profit', { money: 1 }), C('expenses', 'Expenses', { money: 1 }), C('net', 'Net profit', { money: 1 }), C('income', 'Income received', { money: 1 })], rows };
   },
   async cashbook(f, t) {
     const rows = await q(`SELECT date, 'Receipt' type, CONCAT(method,' - ',(SELECT invoice_no FROM invoices WHERE id=invoice_id)) description, method, amount, 0 paid FROM payments WHERE cleared=1 AND method<>'deposit' AND date BETWEEN ? AND ?
@@ -127,23 +151,66 @@ const REPORTS = {
     const w = ['i.date BETWEEN ? AND ?'], p = [f, t];
     if (has(F.customer)) { w.push('i.customer_id=?'); p.push(F.customer); } if (has(F.status)) { w.push('i.status=?'); p.push(F.status); }
     if (has(F.search)) { w.push('(i.invoice_no LIKE ? OR c.name LIKE ? OR i.customer_name LIKE ?)'); p.push(L(F.search), L(F.search), L(F.search)); }
-    const rows = await q(`SELECT i.date, i.invoice_no, COALESCE(c.name,i.customer_name,'Walk-in') customer, (SELECT COALESCE(SUM(qty),0) FROM invoice_items WHERE invoice_id=i.id) qty, i.total, i.paid, i.balance, i.status
+    const rows = await q(`SELECT i.date, i.invoice_no, COALESCE(c.name,i.customer_name,'Walk-in') customer, (SELECT COALESCE(SUM(qty),0) FROM invoice_items WHERE invoice_id=i.id) qty, i.total,
+      (SELECT COALESCE(SUM(qty*cost),0) FROM invoice_items WHERE invoice_id=i.id) cost, i.paid, i.balance, i.status
       FROM invoices i LEFT JOIN customers c ON c.id=i.customer_id WHERE ${w.join(' AND ')} ORDER BY i.date, i.id`, p);
-    const tot = { qty: sumBy(rows, 'qty'), total: sumBy(rows, 'total'), paid: sumBy(rows, 'paid'), balance: sumBy(rows, 'balance') };
-    if (rows.length) rows.push({ date: 'TOTAL', ...tot, _bold: 1 });
-    return { title: 'Sales / Invoices', cards: [{ label: 'Invoices', value: rows.length ? rows.length - 1 : 0 }, { label: 'Sales', value: tot.total, money: 1 }, { label: 'Received', value: tot.paid, money: 1 }, { label: 'Outstanding', value: tot.balance, money: 1, tone: tot.balance > 0 ? 'bad' : 'good' }],
-      columns: [C('date', 'Date', { w: 70 }), C('invoice_no', 'Invoice', { w: 90 }), C('customer', 'Customer'), C('qty', 'Qty', { num: 1, w: 40 }), C('total', 'Total', { money: 1 }), C('paid', 'Paid', { money: 1 }), C('balance', 'Balance', { money: 1 }), C('status', 'Status', { w: 80 })], rows };
+    rows.forEach(r => { r.profit = round2(r.total - r.cost); });
+    const tot = { qty: sumBy(rows, 'qty'), total: sumBy(rows, 'total'), cost: sumBy(rows, 'cost'), profit: sumBy(rows, 'profit'), paid: sumBy(rows, 'paid'), balance: sumBy(rows, 'balance') };
+    const n = rows.length; if (n) rows.push({ date: 'TOTAL', ...tot, _bold: 1 });
+    return { title: 'Sales / Invoices', cards: [{ label: 'Invoices', value: n }, { label: 'Net sales', value: tot.total, money: 1 }, { label: 'Profit', value: tot.profit, money: 1, tone: tot.profit >= 0 ? 'good' : 'bad' }, { label: 'Received', value: tot.paid, money: 1 }, { label: 'Outstanding', value: tot.balance, money: 1, tone: tot.balance > 0 ? 'bad' : 'good' }],
+      columns: [C('date', 'Date', { w: 70 }), C('invoice_no', 'Invoice', { w: 90 }), C('customer', 'Customer'), C('qty', 'Qty', { num: 1, w: 40 }), C('total', 'Net total', { money: 1 }), C('cost', 'Cost', { money: 1 }), C('profit', 'Profit', { money: 1 }), C('paid', 'Paid', { money: 1 }), C('balance', 'Balance', { money: 1 }), C('status', 'Status', { w: 80 })], rows };
   },
+  // profit by product (colour / size line): selling value, discounts, net sales, cost, profit
   async products(f, t, F) {
-    const w = ['i.date BETWEEN ? AND ?'], p = [f, t];
-    if (has(F.art)) { w.push('p.code LIKE ?'); p.push(L(F.art)); } if (has(F.product)) { w.push('p.name LIKE ?'); p.push(L(F.product)); } if (has(F.category)) { w.push('p.category_id=?'); p.push(F.category); }
-    if (has(F.size)) { w.push('v.size=?'); p.push(F.size); } if (has(F.colour)) { w.push('v.colour=?'); p.push(F.colour); } if (has(F.customer)) { w.push('i.customer_id=?'); p.push(F.customer); } if (has(F.supplier)) { w.push('p.supplier_id=?'); p.push(F.supplier); }
-    const rows = await q(`SELECT COALESCE(p.code,'') art, ii.description product, ii.colour, SUM(ii.qty) qty, SUM(ii.total) sales, SUM(ii.qty*ii.cost) cost, SUM(ii.total)-SUM(ii.qty*ii.cost) margin
+    const w = ['i.date BETWEEN ? AND ?'], p = [f, t]; lineFilters(F, w, p);
+    const rows = await q(`SELECT COALESCE(p.code,'') art, ii.description product, ii.colour, SUM(ii.qty) qty, SUM(ii.qty*ii.price) listv, SUM(${LINE_NET}) net, SUM(ii.qty*ii.cost) cost
       FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id LEFT JOIN products p ON p.id=ii.product_id LEFT JOIN product_variants v ON v.id=ii.variant_id WHERE ${w.join(' AND ')}
-      GROUP BY ii.product_id, ii.variant_id, p.code, ii.description, ii.colour ORDER BY sales DESC`, p);
-    const tot = { qty: sumBy(rows, 'qty'), sales: sumBy(rows, 'sales'), cost: sumBy(rows, 'cost'), margin: sumBy(rows, 'margin') }; if (rows.length) rows.push({ product: 'TOTAL', ...tot, _bold: 1 });
-    return { title: 'Product Sales Performance', cards: [{ label: 'Pairs sold', value: tot.qty }, { label: 'Sales', value: tot.sales, money: 1 }, { label: 'Margin', value: tot.margin, money: 1, tone: tot.margin >= 0 ? 'good' : 'bad' }],
-      columns: [C('art', 'ART NO.', { w: 70 }), C('product', 'Product'), C('colour', 'Colour / size', { w: 90 }), C('qty', 'Qty sold', { num: 1, w: 55 }), C('sales', 'Sales', { money: 1 }), C('cost', 'Cost', { money: 1 }), C('margin', 'Margin', { money: 1 })], rows };
+      GROUP BY ii.product_id, ii.variant_id, p.code, ii.description, ii.colour ORDER BY net DESC`, p);
+    rows.forEach(r => { r.net = round2(r.net); r.listv = round2(r.listv); r.disc = round2(r.listv - r.net); r.cost = round2(r.cost); r.profit = round2(r.net - r.cost); r.margin = pct(r.profit, r.net); });
+    const tot = { qty: sumBy(rows, 'qty'), listv: sumBy(rows, 'listv'), disc: sumBy(rows, 'disc'), net: sumBy(rows, 'net'), cost: sumBy(rows, 'cost'), profit: sumBy(rows, 'profit') }; const n = rows.length; if (n) rows.push({ product: 'TOTAL', ...tot, margin: pct(tot.profit, tot.net), _bold: 1 });
+    return { title: 'Profit by Product', cards: [{ label: 'Pairs sold', value: tot.qty }, { label: 'Net sales', value: tot.net, money: 1 }, { label: 'Cost', value: tot.cost, money: 1 }, { label: 'PROFIT', value: tot.profit, money: 1, tone: tot.profit >= 0 ? 'good' : 'bad', note: tot.net > 0 ? 'Margin ' + pct(tot.profit, tot.net) : '' }],
+      columns: [C('art', 'ART NO.', { w: 65 }), C('product', 'Product'), C('colour', 'Colour / size', { w: 85 }), C('qty', 'Qty', { num: 1, w: 40 }), C('listv', 'Selling value', { money: 1 }), C('disc', 'Discounts', { money: 1 }), C('net', 'Net sales', { money: 1 }), C('cost', 'Cost', { money: 1 }), C('profit', 'Profit', { money: 1 }), C('margin', 'Margin', { num: 1, w: 50 })], rows };
+  },
+  // invoice-wise profit
+  async profit_invoice(f, t, F) {
+    const w = ['i.date BETWEEN ? AND ?'], p = [f, t]; if (has(F.customer)) { w.push('i.customer_id=?'); p.push(F.customer); } if (has(F.status)) { w.push('i.status=?'); p.push(F.status); }
+    if (has(F.search)) { w.push('(i.invoice_no LIKE ? OR c.name LIKE ? OR i.customer_name LIKE ?)'); p.push(L(F.search), L(F.search), L(F.search)); }
+    const rows = await q(`SELECT i.date, i.invoice_no, COALESCE(c.name,i.customer_name,'Walk-in') customer, q.qty, q.listv, q.ldisc, i.discount idisc, i.total net, q.cost FROM invoices i LEFT JOIN customers c ON c.id=i.customer_id JOIN ${INV_COST} q ON q.invoice_id=i.id WHERE ${w.join(' AND ')} ORDER BY i.date, i.id LIMIT 5000`, p);
+    rows.forEach(r => { r.disc = round2(r.ldisc + r.idisc); r.profit = round2(r.net - r.cost); r.margin = pct(r.profit, r.net); });
+    const tot = { qty: sumBy(rows, 'qty'), listv: sumBy(rows, 'listv'), disc: sumBy(rows, 'disc'), net: sumBy(rows, 'net'), cost: sumBy(rows, 'cost'), profit: sumBy(rows, 'profit') }; const n = rows.length; if (n) rows.push({ date: 'TOTAL', ...tot, margin: pct(tot.profit, tot.net), _bold: 1 });
+    return { title: 'Profit by Invoice', cards: [{ label: 'Invoices', value: n }, { label: 'Net sales', value: tot.net, money: 1 }, { label: 'Discounts given', value: tot.disc, money: 1 }, { label: 'Cost', value: tot.cost, money: 1 }, { label: 'PROFIT', value: tot.profit, money: 1, tone: tot.profit >= 0 ? 'good' : 'bad', note: tot.net > 0 ? 'Margin ' + pct(tot.profit, tot.net) : '' }],
+      columns: [C('date', 'Date', { w: 70 }), C('invoice_no', 'Invoice', { w: 88 }), C('customer', 'Customer'), C('qty', 'Qty', { num: 1, w: 38 }), C('listv', 'Selling value', { money: 1 }), C('disc', 'Discounts', { money: 1 }), C('net', 'Net sales', { money: 1 }), C('cost', 'Cost', { money: 1 }), C('profit', 'Profit', { money: 1 }), C('margin', 'Margin', { num: 1, w: 48 })], rows };
+  },
+  // every invoice line: selling price, cost price, discount (line + share of invoice discount), profit
+  async profit_item(f, t, F) {
+    const w = ['i.date BETWEEN ? AND ?'], p = [f, t]; lineFilters(F, w, p);
+    if (has(F.search)) { w.push('(i.invoice_no LIKE ? OR c.name LIKE ? OR i.customer_name LIKE ?)'); p.push(L(F.search), L(F.search), L(F.search)); }
+    const rows = await q(`SELECT i.date, i.invoice_no, COALESCE(c.name,i.customer_name,'Walk-in') customer, COALESCE(p.code,'') art, ii.description product, ii.colour, ii.qty, ii.price, ii.cost,
+      ii.discount + (CASE WHEN i.subtotal>0 THEN i.discount*ii.total/i.subtotal ELSE 0 END) disc, ${LINE_NET} net, ii.qty*ii.cost costv
+      FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id LEFT JOIN customers c ON c.id=i.customer_id LEFT JOIN products p ON p.id=ii.product_id LEFT JOIN product_variants v ON v.id=ii.variant_id WHERE ${w.join(' AND ')} ORDER BY i.date, i.id, ii.id LIMIT 5000`, p);
+    rows.forEach(r => { r.disc = round2(r.disc); r.net = round2(r.net); r.costv = round2(r.costv); r.profit = round2(r.net - r.costv); });
+    const tot = { qty: sumBy(rows, 'qty'), disc: sumBy(rows, 'disc'), net: sumBy(rows, 'net'), costv: sumBy(rows, 'costv'), profit: sumBy(rows, 'profit') }; const n = rows.length; if (n) rows.push({ date: 'TOTAL', ...tot, _bold: 1 });
+    return { title: 'Profit by Item (every invoice line)', cards: [{ label: 'Lines', value: n }, { label: 'Pairs', value: tot.qty }, { label: 'Net sales', value: tot.net, money: 1 }, { label: 'Cost', value: tot.costv, money: 1 }, { label: 'PROFIT', value: tot.profit, money: 1, tone: tot.profit >= 0 ? 'good' : 'bad' }],
+      columns: [C('date', 'Date', { w: 66 }), C('invoice_no', 'Invoice', { w: 82 }), C('customer', 'Customer', { w: 90 }), C('art', 'ART NO.', { w: 55 }), C('product', 'Product'), C('colour', 'Colour', { w: 60 }), C('qty', 'Qty', { num: 1, w: 34 }), C('price', 'Selling price', { money: 1, w: 62 }), C('cost', 'Cost price', { money: 1, w: 60 }), C('disc', 'Discount', { money: 1, w: 58 }), C('net', 'Net sales', { money: 1, w: 66 }), C('costv', 'Cost', { money: 1, w: 62 }), C('profit', 'Profit', { money: 1, w: 62 })], rows };
+  },
+  async profit_customer(f, t, F) {
+    const w = ['i.date BETWEEN ? AND ?'], p = [f, t]; if (has(F.customer)) { w.push('i.customer_id=?'); p.push(F.customer); } if (has(F.search)) { w.push('(c.name LIKE ? OR i.customer_name LIKE ?)'); p.push(L(F.search), L(F.search)); }
+    const rows = await q(`SELECT COALESCE(c.name,'Walk-in customers') customer, COUNT(*) invoices, SUM(q.qty) qty, SUM(q.listv) listv, SUM(i.total) net, SUM(q.cost) cost FROM invoices i LEFT JOIN customers c ON c.id=i.customer_id JOIN ${INV_COST} q ON q.invoice_id=i.id WHERE ${w.join(' AND ')} GROUP BY c.id, c.name ORDER BY SUM(i.total)-SUM(q.cost) DESC`, p);
+    rows.forEach(r => { r.listv = round2(r.listv); r.net = round2(r.net); r.cost = round2(r.cost); r.disc = round2(r.listv - r.net); r.profit = round2(r.net - r.cost); r.margin = pct(r.profit, r.net); });
+    const tot = { invoices: sumBy(rows, 'invoices'), qty: sumBy(rows, 'qty'), listv: sumBy(rows, 'listv'), disc: sumBy(rows, 'disc'), net: sumBy(rows, 'net'), cost: sumBy(rows, 'cost'), profit: sumBy(rows, 'profit') }; const n = rows.length; if (n) rows.push({ customer: 'TOTAL', ...tot, margin: pct(tot.profit, tot.net), _bold: 1 });
+    return { title: 'Profit by Customer', cards: [{ label: 'Customers', value: n }, { label: 'Net sales', value: tot.net, money: 1 }, { label: 'Discounts given', value: tot.disc, money: 1 }, { label: 'PROFIT', value: tot.profit, money: 1, tone: tot.profit >= 0 ? 'good' : 'bad' }],
+      columns: [C('customer', 'Customer'), C('invoices', 'Invoices', { num: 1, w: 50 }), C('qty', 'Pairs', { num: 1, w: 45 }), C('listv', 'Selling value', { money: 1 }), C('disc', 'Discounts', { money: 1 }), C('net', 'Net sales', { money: 1 }), C('cost', 'Cost', { money: 1 }), C('profit', 'Profit', { money: 1 }), C('margin', 'Margin', { num: 1, w: 50 })], rows };
+  },
+  // month by month: profit, expenses, net profit
+  async profit_month(f, t, F) {
+    const inv = await q(`SELECT DATE_FORMAT(i.date,'%Y-%m') month, COUNT(*) invoices, SUM(q.listv) listv, SUM(i.total) net, SUM(q.cost) cost FROM invoices i JOIN ${INV_COST} q ON q.invoice_id=i.id WHERE i.date BETWEEN ? AND ? GROUP BY month`, [f, t]);
+    const exp = await q(`SELECT DATE_FORMAT(date,'%Y-%m') month, SUM(amount) v FROM expenses WHERE date BETWEEN ? AND ? GROUP BY month`, [f, t]);
+    const months = [...new Set([...inv.map(r => r.month), ...exp.map(r => r.month)])].sort();
+    const rows = months.map(m => { const a = inv.find(r => r.month === m) || {}, e = (exp.find(r => r.month === m) || {}).v || 0; const net = round2(a.net || 0), cost = round2(a.cost || 0), listv = round2(a.listv || 0), profit = round2(net - cost);
+      return { month: m, invoices: a.invoices || 0, listv, disc: round2(listv - net), net, cost, profit, margin: pct(profit, net), expenses: round2(e), netp: round2(profit - e) }; });
+    const tot = { invoices: sumBy(rows, 'invoices'), listv: sumBy(rows, 'listv'), disc: sumBy(rows, 'disc'), net: sumBy(rows, 'net'), cost: sumBy(rows, 'cost'), profit: sumBy(rows, 'profit'), expenses: sumBy(rows, 'expenses'), netp: sumBy(rows, 'netp') }; if (rows.length) rows.push({ month: 'TOTAL', ...tot, margin: pct(tot.profit, tot.net), _bold: 1 });
+    return { title: 'Profit by Month', cards: [{ label: 'Net sales', value: tot.net, money: 1 }, { label: 'PROFIT (selling − cost − discounts)', value: tot.profit, money: 1, tone: tot.profit >= 0 ? 'good' : 'bad' }, { label: 'Expenses', value: tot.expenses, money: 1 }, { label: 'Net profit after expenses', value: tot.netp, money: 1, tone: tot.netp >= 0 ? 'good' : 'bad' }],
+      columns: [C('month', 'Month', { w: 65 }), C('invoices', 'Invoices', { num: 1, w: 50 }), C('listv', 'Selling value', { money: 1 }), C('disc', 'Discounts', { money: 1 }), C('net', 'Net sales', { money: 1 }), C('cost', 'Cost', { money: 1 }), C('profit', 'Profit', { money: 1 }), C('margin', 'Margin', { num: 1, w: 48 }), C('expenses', 'Expenses', { money: 1 }), C('netp', 'Net profit', { money: 1 })], rows };
   },
   async customers(f, t, F) {
     const w = ['1=1'], p = [f, t, f, t]; if (has(F.customer)) { w.push('c.id=?'); p.push(F.customer); } if (has(F.search)) { w.push('(c.name LIKE ? OR c.phone LIKE ?)'); p.push(L(F.search), L(F.search)); }

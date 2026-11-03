@@ -5,6 +5,9 @@ const { wrap, bad, log, today, settings, nextNumber, round2 } = require('../util
 const { moveStock } = require('../services/invoices');
 const { stockWhere, has, mkLabel, like } = require('../filters');
 router.use(auth);
+// cost prices are only shown to people who manage stock / products or see reports
+const canCost = req => ['products.manage', 'stock.manage', 'reports.view'].some(p => req.user.permissions.includes(p));
+const noCost = r => { delete r.cost_price; delete r.stock_value; delete r.value; return r; };
 
 // ---- categories & brands (quick add from product form) ----
 for (const [path, table] of [['categories', 'categories'], ['brands', 'brands']]) {
@@ -33,11 +36,11 @@ router.get('/products', can('products.view', 'invoices.create'), wrap(async (req
     const vs = await q('SELECT * FROM product_variants WHERE product_id IN (?) ORDER BY colour, size, location', [rows.map(r => r.id)]);
     rows.forEach(r => r.variants = vs.filter(v => v.product_id === r.id));
   }
-  res.json(rows);
+  res.json(canCost(req) ? rows : rows.map(noCost));
 }));
 router.get('/products/:id', can('products.view'), wrap(async (req, res) => {
   const p = await one(`${productSelect} WHERE p.id=? GROUP BY p.id`, [req.params.id]); if (!p) bad('Not found', 404);
-  p.variants = await q('SELECT * FROM product_variants WHERE product_id=? ORDER BY colour, size, location', [p.id]); res.json(p);
+  p.variants = await q('SELECT * FROM product_variants WHERE product_id=? ORDER BY colour, size, location', [p.id]); res.json(canCost(req) ? p : noCost(p));
 }));
 async function saveVariants(conn, req, pid, variants, creating) {
   const seen = new Set();
@@ -92,9 +95,10 @@ router.delete('/variants/:id', can('products.manage'), wrap(async (req, res) => 
 router.get('/stock', can('products.view'), wrap(async (req, res) => {
   const w = ['p.active=1'], p = []; stockWhere(req.query, w, p);
   if (req.query.low === '1') w.push('v.qty<=p.low_stock_level');
-  res.json(await q(`SELECT v.id variant_id, v.colour, v.size, v.location, v.label, v.qty, p.id product_id, p.code, p.name, p.cost_price, p.selling_price, p.low_stock_level, v.qty*p.cost_price value,
+  const stockRows = await q(`SELECT v.id variant_id, v.colour, v.size, v.location, v.label, v.qty, p.id product_id, p.code, p.name, p.cost_price, p.selling_price, p.low_stock_level, v.qty*p.cost_price value,
     c.name category, s.name supplier FROM product_variants v JOIN products p ON p.id=v.product_id LEFT JOIN categories c ON c.id=p.category_id LEFT JOIN suppliers s ON s.id=p.supplier_id
-    WHERE ${w.join(' AND ')} ORDER BY p.name, v.colour, v.size, v.location LIMIT 2000`, p));
+    WHERE ${w.join(' AND ')} ORDER BY p.name, v.colour, v.size, v.location LIMIT 2000`, p);
+  res.json(canCost(req) ? stockRows : stockRows.map(noCost));
 }));
 // complete movement history (filterable, paged)
 router.get('/stock/movements', can('products.view'), wrap(async (req, res) => {

@@ -5,11 +5,11 @@ route('home', async () => {
   view().innerHTML = `
   <div class="hero"><small>${hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening'}, ${esc(S.user.name.split(' ')[0])} 👋</small>
     <div style="margin-top:8px;font-size:12px;opacity:.85">Today's sales</div><div class="big">${rs(d.today_sales)}</div>
-    <div class="row"><div>Invoices today<b>${d.today_invoices}</b></div><div>Month sales<b>${rs(d.month_sales)}</b></div><div>Est. profit (month)<b>${profit < 0 ? '−' : ''}${rs(Math.abs(profit))}</b></div></div></div>
+    <div class="row"><div>Invoices today<b>${d.today_invoices}</b></div><div>Month sales<b>${rs(d.month_sales)}</b></div><div>Today's profit<b>${d.today_profit < 0 ? '−' : ''}${rs(Math.abs(d.today_profit))}</b></div><div>Profit (month)<b>${profit < 0 ? '−' : ''}${rs(Math.abs(profit))}</b></div></div></div>
   <div class="grid g2 g3d" style="margin-bottom:12px">
     ${stat('Income received (month)', rs(d.month_income), { i: 'trend', c: '#16a34a', n: 'cash + bank + cleared cheques' })}
-    ${stat('Expenses (month)', rs(d.month_expenses), { i: 'wallet', c: '#dc2626' })}
-    ${stat('Profit / Loss (month)', (profit < 0 ? '−' : '') + rs(Math.abs(profit)), { i: 'scale', c: profit >= 0 ? '#16a34a' : '#dc2626', cls: profit >= 0 ? 'good' : 'bad', n: 'sales − expenses' })}
+    ${stat('Expenses (month)', rs(d.month_expenses), { i: 'wallet', c: '#dc2626', n: 'Net profit after expenses: ' + (d.month_net < 0 ? '−' : '') + rs(Math.abs(d.month_net)) })}
+    ${stat('Profit (month)', (profit < 0 ? '−' : '') + rs(Math.abs(profit)), { i: 'scale', c: profit >= 0 ? '#16a34a' : '#dc2626', cls: profit >= 0 ? 'good' : 'bad', n: 'selling − cost − discounts' })}
     ${stat('Stock value', rs(d.stock_value), { i: 'box', c: '#7c3aed', n: num(d.stock_qty) + ' pairs at cost' })}
     ${stat('Customers owe', rs(d.customer_outstanding), { i: 'users', c: '#d97706', cls: d.customer_outstanding > 0 ? 'warn' : '', n: d.deposit_available > 0 ? 'Advances held: ' + rs(d.deposit_available) : '' })}
     ${stat('We owe suppliers', rs(d.supplier_balance), { i: 'truck', c: '#2563eb' })}
