@@ -28,7 +28,7 @@ The same app adapts automatically: **under 1024px** it is a mobile app (bottom t
 |---|---|
 | **Products** | Add / edit / delete. Name, code, category, brand, **supplier (select or add new)**, colour variants, cost / wholesale / selling price, **opening quantity per colour**, low-stock level |
 | **GRN / Purchases** | Supplier-wise goods received notes (items, unit costs, due date) → stock goes up; **pay suppliers in cash / bank / cheque, now or later, in parts**; GRN status (Unpaid / Partial / Cheque Pending / Paid); Supplier Dues page; supplier statements (PDF); edit / delete (stock reversed) |
-| **Stock** | Receive via GRN → auto-increase; sales auto-deduct; customer returns, supplier returns, damages, adjustments; stock by product & colour; full movement history; stock value |
+| **Stock** | Colour + **size** + **location** lines; filter by **ART NO.**, product, category, size, colour, location; complete movement history; Receive via GRN → auto-increase; sales auto-deduct; customer returns, supplier returns, damages, adjustments; stock by product & colour; full movement history; stock value |
 | **POS / Invoices** | Mobile POS, automatic invoice numbers (`ARA-2026-00001`), wholesale/retail pricing, line + invoice discounts, edit / delete (stock restored), PDF invoice with ARA branding |
 | **Flexible payments** | One invoice can be split across **Cash + Bank + Cheque + Pending** (amounts or %), later payments any date, multiple payments per invoice, auto status: Unpaid / Partially Paid / Pending / Cheque Pending / Paid |
 | **Cheques** | Customer cheques (received → deposited → cleared / bounced) – *never counted as money until Cleared*. Supplier cheques (issued → presented → cleared / returned). Automatic reminders |
@@ -36,6 +36,8 @@ The same app adapts automatically: **under 1024px** it is a mobile app (bottom t
 | **Customers** | Per-customer history: totals, pairs bought, week / month / year, invoices, payments, cheques, products, **statements** (PDF + send by WhatsApp / email) |
 | **Suppliers** | Material / finished-goods / other suppliers, balances, payments, cheques, goods received |
 | **Expenses** | All categories (editable), receipt photo/PDF upload, who created / edited |
+| **Advanced filters** | One filter system on Reports, Expenses, Cheques and Stock: every filter can be combined, with daily / weekly / monthly / yearly / custom / all-dates ranges and **PDF + Excel export** of exactly what is on screen (filters and dates are printed on the file) |
+| **Expenses** (salaries & materials) | Salary payments per **employee** (total paid, payment dates, full history); material purchases per **item** (rexine, glue, boxes, PU soles …) |
 | **Reports** | Daily / weekly / monthly / yearly / custom: Profit & Loss, day-by-day, cash & bank book, sales, products, customers, suppliers, expenses, cheques, stock → **PDF & Excel** |
 | **Dashboard** | Today / month sales, income, expenses, profit-loss, stock value, customer & supplier balances, upcoming cheques, low stock, 7-day chart |
 | **Users & security** | Unlimited users, custom **roles with 25+ permissions**, deactivate accounts, activity log of every action, login rate-limit, hashed passwords, JWT sessions |
