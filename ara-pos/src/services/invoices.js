@@ -30,6 +30,14 @@ async function moveStock(conn, { variant_id, type, qty, unit_cost = null, ref_ty
   return after;
 }
 
+// What the customer sees on the invoice: deposit before, deducted, remaining after (snapshot taken when the invoice was made).
+// Uncleared cheque deposits are shown separately and are never part of the available deposit.
+function advanceSummary(inv) {
+  if (!inv.customer_id) return null; const pending = inv.advance_pending || 0, cur = inv.advance_balance || 0;
+  if (inv.adv_before != null) return { mode: 'snapshot', before: inv.adv_before, deducted: inv.adv_deducted || 0, overpaid: inv.adv_overpaid || 0, after: inv.adv_after, pending, current: cur };
+  if (cur > 0 || pending > 0 || (inv.deposit_used || 0) > 0 || (inv.overpaid_saved || 0) > 0) return { mode: 'current', deducted: inv.deposit_used || 0, overpaid: inv.overpaid_saved || 0, after: cur, pending, current: cur };
+  return null;
+}
 async function fullInvoice(id) {
   const inv = await one(`SELECT i.*, c.name cname, c.phone, c.whatsapp, c.email, c.address, c.type ctype,
       u.name created_by_name, u2.name updated_by_name
@@ -47,6 +55,7 @@ async function fullInvoice(id) {
     const over = await one('SELECT COALESCE(SUM(amount),0) v FROM customer_deposits WHERE customer_id=? AND note=?', [inv.customer_id, `Overpayment on invoice ${inv.invoice_no}`]);
     inv.advance_balance = round2(adv.b); inv.advance_pending = round2(pend.v); inv.deposit_used = round2(used.v); inv.overpaid_saved = round2(over.v);
   }
+  inv.advance = advanceSummary(inv);
   inv.messages = await q('SELECT id,channel,kind,recipient,status,error,created_at FROM message_log WHERE invoice_id=? ORDER BY id DESC LIMIT 20', [id]);
   return inv;
 }

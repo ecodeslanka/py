@@ -34,7 +34,7 @@ const MIGRATIONS = [
   ['goods_receipts', 'balance', 'DECIMAL(14,2) NOT NULL DEFAULT 0'], ['goods_receipts', 'status', "ENUM('unpaid','partial','cheque_pending','paid') NOT NULL DEFAULT 'unpaid'"], ['goods_receipts', 'updated_by', 'INT NULL'],
   ['product_variants', 'size', "VARCHAR(30) NOT NULL DEFAULT ''"], ['product_variants', 'location', "VARCHAR(60) NOT NULL DEFAULT ''"], ['product_variants', 'label', "VARCHAR(160) NOT NULL DEFAULT ''"],
   ['expense_categories', 'kind', "VARCHAR(12) NOT NULL DEFAULT 'general'"], ['expenses', 'item', 'VARCHAR(100) NULL'],
-  ['customer_cheques', 'deposit_id', 'INT NULL'],
+  ['customer_cheques', 'deposit_id', 'INT NULL'], ['invoices', 'adv_before', 'DECIMAL(14,2) NULL'], ['invoices', 'adv_deducted', 'DECIMAL(14,2) NULL'], ['invoices', 'adv_overpaid', 'DECIMAL(14,2) NULL'], ['invoices', 'adv_after', 'DECIMAL(14,2) NULL'],
   ['supplier_payments', 'grn_id', 'INT NULL'], ['supplier_payments', 'cleared', 'TINYINT NOT NULL DEFAULT 1'], ['supplier_cheques', 'payment_id', 'INT NULL'], ['supplier_cheques', 'grn_id', 'INT NULL'],
 ];
 const EXP_CATS = ['Factory Material Purchases', 'Employee Salaries & Wages', 'Factory Expenses', 'Electricity & Water Bills', 'Transport & Delivery', 'Repairs & Maintenance', 'Rent', 'Other / Miscellaneous'];

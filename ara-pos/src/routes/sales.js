@@ -154,6 +154,7 @@ router.post('/invoices', can('invoices.create'), wrap(async (req, res) => {
     const r = await q('INSERT INTO invoices (invoice_no,customer_id,customer_name,date,due_date,subtotal,discount,total,balance,had_credit,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
       [no, customerId, cname, date, due, subtotal, discount, total, total, total - paying > 0.004 ? 1 : 0, b.notes || null, req.user.id], c);
     const inv = { id: r.insertId, customer_id: customerId, invoice_no: no };
+    const advBefore = customerId ? await depBalance(customerId, c) : 0;
     for (const it of items) {
       await q('INSERT INTO invoice_items (invoice_id,product_id,variant_id,description,colour,qty,price,cost,discount,total) VALUES (?,?,?,?,?,?,?,?,?,?)', [inv.id, it.product_id, it.variant_id, it.description, it.colour, it.qty, it.price, it.cost, it.discount, it.total], c);
       await moveStock(c, { variant_id: it.variant_id, type: 'sale', qty: -it.qty, ref_type: 'invoice', ref_id: inv.id, note: no, user_id: req.user.id, allowNegative: s.allow_negative_stock === '1' });
@@ -162,6 +163,8 @@ router.post('/invoices', can('invoices.create'), wrap(async (req, res) => {
     for (const it of plan.items) { const pd = it.p.date || date; let pid = null;
       if (it.take > 0.004) pid = await addPaymentTx(c, req, inv, { ...it.p, amount: it.take, cheque_amount: it.amt, date: pd });
       if (it.excess > 0.004) { await keepOverpayment(c, req, inv, { ...it.p, amount: it.excess, date: pd }, pid); overpaid = round2(overpaid + it.excess); } }
+    if (customerId) { const used = round2(plan.items.filter(x => x.p.method === 'deposit').reduce((a, x) => a + x.take, 0)), overC = round2(plan.items.filter(x => x.p.method !== 'cheque').reduce((a, x) => a + x.excess, 0));
+      if (used > 0.004 || overC > 0.004) await q('UPDATE invoices SET adv_before=?, adv_deducted=?, adv_overpaid=?, adv_after=? WHERE id=?', [advBefore, used, overC, await depBalance(customerId, c), inv.id], c); }
     await recalc(inv.id, c); return { id: inv.id, invoice_no: no, overpaid };
   });
   await log(req, 'create', 'invoice', out.id, out.invoice_no + (out.overpaid ? ` (overpaid ${money(out.overpaid)} saved as advance)` : ''));
@@ -228,10 +231,15 @@ router.post('/invoices/:id/payments', can('payments.manage'), wrap(async (req, r
   await tx(async c => {
     const inv = await one('SELECT * FROM invoices WHERE id=? FOR UPDATE', [id], c); if (!inv) bad('Not found', 404);
     const amount = round2(b.amount); if (!(amount > 0)) bad('Enter a valid amount');
+    const advBefore = inv.customer_id ? await depBalance(inv.customer_id, c) : 0;
     const committed = round2(inv.paid + inv.cheque_pending); const plan = planPayments(inv.total, committed, [{ ...b, amount }]); const it = plan.items[0];
     if (it.excess > 0.004 && !inv.customer_id) bad(`Amount is more than the remaining ${money(Math.max(inv.total - committed, 0))}. Select a customer on the invoice so the extra can be saved as their advance balance.`);
     if (it.take > 0.004) pid = await addPaymentTx(c, req, inv, { ...b, amount: it.take, cheque_amount: it.amt });
     if (it.excess > 0.004) { await keepOverpayment(c, req, inv, { ...b, amount: it.excess }, pid); overpaid = it.excess; }
+    if (inv.customer_id) { const used = b.method === 'deposit' ? it.take : 0, overC = b.method !== 'cheque' ? it.excess : 0;
+      if (used > 0.004 || overC > 0.004) { const afterB = await depBalance(inv.customer_id, c); const cur = await one('SELECT adv_before FROM invoices WHERE id=?', [id], c);
+        if (cur.adv_before == null) await q('UPDATE invoices SET adv_before=?, adv_deducted=?, adv_overpaid=?, adv_after=? WHERE id=?', [advBefore, used, overC, afterB, id], c);
+        else await q('UPDATE invoices SET adv_deducted=COALESCE(adv_deducted,0)+?, adv_overpaid=COALESCE(adv_overpaid,0)+?, adv_after=? WHERE id=?', [used, overC, afterB, id], c); } }
     await recalc(id, c);
   });
   await log(req, 'payment', 'invoice', id, `${b.method} ${b.amount}`);
@@ -255,7 +263,7 @@ router.put('/payments/:id', can('payments.manage'), wrap(async (req, res) => {
 }));
 router.delete('/payments/:id', can('payments.manage'), wrap(async (req, res) => {
   const id = +req.params.id; let inv;
-  await tx(async c => { const p = await one('SELECT * FROM payments WHERE id=?', [id], c); if (!p) bad('Not found', 404); inv = p.invoice_id; if (p.method === 'deposit') { const iv = await one('SELECT invoice_no FROM invoices WHERE id=?', [inv], c); await addLedger(c, { customer_id: p.customer_id, date: today(), type: 'used_reversal', amount: p.amount, ref_type: 'payment', ref_id: p.id, description: `Payment removed from invoice ${iv.invoice_no} - deposit returned`, user_id: req.user.id }); } await q('UPDATE customer_cheques k JOIN customer_deposits d ON d.id=k.deposit_id SET k.amount=d.amount, k.payment_id=NULL, k.invoice_id=NULL WHERE k.payment_id=?', [id], c); await q('DELETE FROM customer_cheques WHERE payment_id=?', [id], c); await q('DELETE FROM payments WHERE id=?', [id], c); await recalc(inv, c); });
+  await tx(async c => { const p = await one('SELECT * FROM payments WHERE id=?', [id], c); if (!p) bad('Not found', 404); inv = p.invoice_id; if (p.method === 'deposit') { const iv = await one('SELECT invoice_no FROM invoices WHERE id=?', [inv], c); await addLedger(c, { customer_id: p.customer_id, date: today(), type: 'used_reversal', amount: p.amount, ref_type: 'payment', ref_id: p.id, description: `Payment removed from invoice ${iv.invoice_no} - deposit returned`, user_id: req.user.id }); await q('UPDATE invoices SET adv_deducted=GREATEST(COALESCE(adv_deducted,0)-?,0), adv_after=COALESCE(adv_after,0)+? WHERE id=? AND adv_before IS NOT NULL', [p.amount, p.amount, inv], c); } await q('UPDATE customer_cheques k JOIN customer_deposits d ON d.id=k.deposit_id SET k.amount=d.amount, k.payment_id=NULL, k.invoice_id=NULL WHERE k.payment_id=?', [id], c); await q('DELETE FROM customer_cheques WHERE payment_id=?', [id], c); await q('DELETE FROM payments WHERE id=?', [id], c); await recalc(inv, c); });
   await log(req, 'delete', 'payment', id, `invoice ${inv}`); res.json({ ok: true });
 }));
 

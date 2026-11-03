@@ -16,6 +16,26 @@ function header(doc, s, title, right) {
   if (right) doc.font('Helvetica').fontSize(10).text(right, 340, 58, { width: doc.page.width - 380, align: 'right' });
   doc.fillColor(DARK);
 }
+function advanceBox(doc, inv, y) {
+  const A = inv.advance, rows = [];
+  if (A.mode === 'snapshot') {
+    rows.push(['Available deposit before this invoice', money(A.before)]);
+    if (A.deducted > 0) rows.push(['Deducted from deposit for this invoice', '- ' + money(A.deducted), 'red']);
+    if (A.overpaid > 0) rows.push(['Overpayment saved as advance', '+ ' + money(A.overpaid), 'green']);
+    rows.push(['Remaining available deposit after this invoice', money(A.after), 'big']);
+  } else {
+    if (A.deducted > 0) rows.push(['Deposit used on this invoice', money(A.deducted)]); if (A.overpaid > 0) rows.push(['Overpayment saved as advance', '+ ' + money(A.overpaid), 'green']);
+    rows.push([`Advance balance available (as at ${today()})`, money(A.current), 'big']);
+  }
+  if (A.pending > 0) rows.push(['Cheque deposits awaiting clearance (NOT included in the available deposit)', money(A.pending), 'amber']);
+  const COL = { red: '#b91c1c', green: '#047857', amber: '#b45309', big: '#065f46' }, X = 250, W = 305, LW = 205;
+  const heights = rows.map(r => { doc.font(r[2] === 'big' ? 'Helvetica-Bold' : 'Helvetica').fontSize(r[2] === 'big' ? 10 : 9); return Math.max(doc.heightOfString(r[0], { width: LW }), 11) + 6; });
+  const h = 26 + heights.reduce((a, b) => a + b, 0) + 4; y += 8; if (y + h > 740) { doc.addPage(); y = 40; }
+  doc.roundedRect(X, y, W, h, 6).fill('#ecfdf5'); doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(8.5).text('CUSTOMER ADVANCE ACCOUNT', X + 10, y + 8, { width: W - 20 });
+  let yy = y + 24; rows.forEach((r, i) => { const big = r[2] === 'big'; if (big) doc.moveTo(X + 10, yy - 2).lineTo(X + W - 10, yy - 2).strokeColor('#a7f3d0').lineWidth(.8).stroke(); const col = COL[r[2]] || '#065f46';
+    doc.font(big ? 'Helvetica-Bold' : 'Helvetica').fontSize(big ? 10 : 9).fillColor(col).text(r[0], X + 10, yy + 1, { width: LW }); doc.text(r[1], X + W - 100, yy + 1, { width: 90, align: 'right', lineBreak: false }); yy += heights[i]; });
+  doc.fillColor(DARK); return y + h + 6;
+}
 async function invoicePdf(id) {
   const inv = await fullInvoice(id); if (!inv) return null; const s = await settings();
   const doc = new PDFDocument({ size: 'A4', margin: 40 });
@@ -49,14 +69,7 @@ async function invoicePdf(id) {
   tot('TOTAL', money(inv.total), true, BRAND); tot('Paid', money(inv.paid));
   if (inv.cheque_pending) tot('Cheque (not cleared)', money(inv.cheque_pending), false, '#2563eb');
   tot('BALANCE DUE', money(inv.balance), true, inv.balance > 0 ? '#dc2626' : '#16a34a');
-  if (inv.customer_id && (inv.advance_balance > 0 || inv.deposit_used > 0 || inv.overpaid_saved > 0 || inv.advance_pending > 0)) {
-    const lines = []; if (inv.deposit_used > 0) lines.push(['Paid from customer deposit', money(inv.deposit_used)]); if (inv.overpaid_saved > 0) lines.push(['Overpayment saved as advance', money(inv.overpaid_saved)]);
-    if (inv.advance_pending > 0) lines.push(['Cheque deposits pending', money(inv.advance_pending)]); lines.push(['Advance balance available', money(inv.advance_balance)]);
-    y += 8; const h = 26 + lines.length * 15; if (y + h > 740) { doc.addPage(); y = 40; }
-    doc.roundedRect(300, y, 255, h, 6).fill('#ecfdf5'); doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(8.5).text(`CUSTOMER ADVANCE ACCOUNT  (as at ${today()})`, 310, y + 8, { width: 240 });
-    lines.forEach(([l, v], i) => { const yy = y + 24 + i * 15, last = i === lines.length - 1; doc.font(last ? 'Helvetica-Bold' : 'Helvetica').fontSize(last ? 10 : 9).fillColor('#065f46').text(l, 310, yy, { width: 150, lineBreak: false }).text(v, 455, yy, { width: 95, align: 'right', lineBreak: false }); });
-    y += h + 6; doc.fillColor(DARK);
-  }
+  if (inv.advance) y = advanceBox(doc, inv, y);
   if (inv.payments.length) {
     y += 8; doc.font('Helvetica-Bold').fontSize(10).fillColor(DARK).text('Payment History', 40, y); y += 16;
     inv.payments.forEach(p => {

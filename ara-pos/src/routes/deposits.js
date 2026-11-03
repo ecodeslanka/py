@@ -72,7 +72,7 @@ async function accountData(id, from, to) {
   const led = await q('SELECT l.*, u.name by_name FROM customer_account_ledger l LEFT JOIN users u ON u.id=l.created_by WHERE l.customer_id=? AND l.date BETWEEN ? AND ? ORDER BY l.date, l.id', [id, from, to]);
   const deps = await q(`SELECT d.*, k.cheque_no, k.bank, k.status cheque_status FROM customer_deposits d LEFT JOIN customer_cheques k ON k.deposit_id=d.id WHERE d.customer_id=? ORDER BY d.date DESC, d.id DESC`, [id]);
   const inv = await q("SELECT id,invoice_no,date,due_date,total,paid,balance,status FROM invoices WHERE customer_id=? AND balance>0 ORDER BY date", [id]);
-  const rows = led.map(l => ({ ...l, label: TYPE_LABEL[l.type] || l.type, credit: l.amount > 0 ? l.amount : '', debit: l.amount < 0 ? -l.amount : '' }));
+  const rows = led.map(l => ({ ...l, label: TYPE_LABEL[l.type] || l.type, balance_before: round2(l.balance_after - l.amount), credit: l.amount > 0 ? l.amount : '', debit: l.amount < 0 ? -l.amount : '' }));
   const cur = await balance(id), pend = await one("SELECT COALESCE(SUM(amount),0) v FROM customer_deposits WHERE customer_id=? AND status='pending'", [id]);
   return { customer: cu, from, to, opening: round2(open.b), rows, closing: round2(open.b + led.reduce((a, l) => a + l.amount, 0)), received: round2(led.filter(l => ['deposit', 'deposit_reversal', 'deposit_cancel'].includes(l.type)).reduce((a, l) => a + l.amount, 0)),
     used: round2(-led.filter(l => ['used', 'used_reversal'].includes(l.type)).reduce((a, l) => a + l.amount, 0)), refunded: round2(-led.filter(l => l.type === 'refund').reduce((a, l) => a + l.amount, 0)),
@@ -82,13 +82,13 @@ router.get('/customers/:id/account', can('deposits.view', 'customers.view'), wra
   const d = await accountData(+req.params.id, req.query.from, req.query.to);
   if (req.query.format === 'pdf') {
     const rows = [{ date: d.from === '1970-01-01' ? '' : d.from, description: 'Opening advance balance', balance: d.opening, _bold: 1 },
-      ...d.rows.map(r => ({ date: r.date, type: r.label, description: r.description || '', credit: r.credit, debit: r.debit, balance: r.balance_after })),
+      ...d.rows.map(r => ({ date: r.date, type: r.label, description: r.description || '', before: r.balance_before, credit: r.credit, debit: r.debit, balance: r.balance_after })),
       { description: 'CLOSING ADVANCE BALANCE', credit: d.received, debit: round2(d.used + d.refunded), balance: d.closing, _bold: 1 }];
     if (d.pending > 0) rows.push({ description: `Deposits awaiting cheque clearance (not available): ${money(d.pending)}` });
     if (d.outstanding_invoices.length) { rows.push({ description: 'OUTSTANDING INVOICE BALANCES (amount in last column)', _bold: 1 }); d.outstanding_invoices.forEach(i => rows.push({ date: i.date, type: 'Invoice', description: `${i.invoice_no} - ${i.status.replace('_', ' ')}${i.due_date ? ' - due ' + i.due_date : ''}`, balance: i.balance })); rows.push({ description: 'TOTAL OUTSTANDING', balance: d.outstanding_total, _bold: 1 }); }
     return res.type('pdf').send(await tablePdf({ title: 'CUSTOMER ACCOUNT STATEMENT', subtitle: `${d.customer.name}\n${req.query.from || 'Start'} → ${d.to}`,
       summary: [{ label: 'Available advance balance', display: money(d.balance), color: '#16a34a' }, { label: 'Deposits received (period)', display: money(d.received) }, { label: 'Used on invoices + refunds', display: money(d.used + d.refunded) }, { label: 'Outstanding invoices', display: money(d.outstanding_total), color: d.outstanding_total > 0 ? '#dc2626' : '#16a34a' }],
-      columns: [{ key: 'date', label: 'Date', w: 62 }, { key: 'type', label: 'Type', w: 100 }, { key: 'description', label: 'Description' }, { key: 'credit', label: 'Money in', money: 1, w: 72 }, { key: 'debit', label: 'Used / refunded', money: 1, w: 80 }, { key: 'balance', label: 'Balance', money: 1, w: 78 }], rows }));
+      columns: [{ key: 'date', label: 'Date', w: 62 }, { key: 'type', label: 'Type', w: 100 }, { key: 'description', label: 'Description' }, { key: 'before', label: 'Balance before', money: 1, w: 72 }, { key: 'credit', label: 'Money in', money: 1, w: 70 }, { key: 'debit', label: 'Used / refunded', money: 1, w: 80 }, { key: 'balance', label: 'Balance', money: 1, w: 78 }], rows }));
   }
   res.json(d);
 }));

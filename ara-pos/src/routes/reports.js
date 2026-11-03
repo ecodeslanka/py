@@ -268,11 +268,11 @@ const REPORTS = {
   // the full traceable ledger
   async deposit_ledger(f, t, F) {
     const w = ['l.date BETWEEN ? AND ?'], p = [f, t]; if (has(F.customer)) { w.push('l.customer_id=?'); p.push(F.customer); } if (has(F.ltype)) { w.push('l.type=?'); p.push(F.ltype); }
-    const raw = await q(`SELECT l.date, c.name customer, l.type, l.description, l.amount, l.balance_after balance, COALESCE(u.name,'') by_user FROM customer_account_ledger l JOIN customers c ON c.id=l.customer_id LEFT JOIN users u ON u.id=l.created_by WHERE ${w.join(' AND ')} ORDER BY ${has(F.customer) ? 'l.date, l.id' : 'c.name, l.date, l.id'} LIMIT 5000`, p);
-    const rows = raw.map(r => ({ date: r.date, customer: r.customer, type: TYPE_LABEL[r.type] || r.type, description: r.description, credit: r.amount > 0 ? r.amount : '', debit: r.amount < 0 ? -r.amount : '', balance: r.balance, by_user: r.by_user }));
+    const raw = await q(`SELECT l.date, c.name customer, l.type, l.description, l.amount, l.balance_after balance, l.balance_after - l.amount bal_before, COALESCE(u.name,'') by_user FROM customer_account_ledger l JOIN customers c ON c.id=l.customer_id LEFT JOIN users u ON u.id=l.created_by WHERE ${w.join(' AND ')} ORDER BY ${has(F.customer) ? 'l.date, l.id' : 'c.name, l.date, l.id'} LIMIT 5000`, p);
+    const rows = raw.map(r => ({ date: r.date, customer: r.customer, type: TYPE_LABEL[r.type] || r.type, description: r.description, before: round2(r.bal_before), credit: r.amount > 0 ? r.amount : '', debit: r.amount < 0 ? -r.amount : '', balance: r.balance, by_user: r.by_user }));
     const cr = sumBy(raw.filter(r => r.amount > 0), 'amount'), dr = round2(-raw.filter(r => r.amount < 0).reduce((a, r) => a + r.amount, 0)); if (rows.length) rows.push({ description: 'TOTAL', credit: cr, debit: dr, _bold: 1 });
     return { title: 'Customer Deposit Ledger', cards: [{ label: 'Transactions', value: raw.length }, { label: 'Money in (deposits)', value: cr, money: 1, tone: 'good' }, { label: 'Money out (used + refunds)', value: dr, money: 1 }],
-      columns: [C('date', 'Date', { w: 70 }), C('customer', 'Customer'), C('type', 'Type', { w: 110 }), C('description', 'Description'), C('credit', 'In', { money: 1 }), C('debit', 'Out', { money: 1 }), C('balance', 'Balance after', { money: 1 }), C('by_user', 'By', { w: 70 })], rows };
+      columns: [C('date', 'Date', { w: 70 }), C('customer', 'Customer'), C('type', 'Type', { w: 110 }), C('description', 'Description'), C('before', 'Balance before', { money: 1 }), C('credit', 'In', { money: 1 }), C('debit', 'Out', { money: 1 }), C('balance', 'Balance after', { money: 1 }), C('by_user', 'By', { w: 70 })], rows };
   },
   async suppliers(f, t, F) {
     const w = ['1=1'], p = [f, t, f, t, f, t]; if (has(F.supplier)) { w.push('s.id=?'); p.push(F.supplier); } if (has(F.stype)) { w.push('s.type=?'); p.push(F.stype); }

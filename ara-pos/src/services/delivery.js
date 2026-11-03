@@ -6,10 +6,16 @@ const { invoicePdf } = require('./pdf');
 
 const plain = t => String(t).replace(/\*/g, '');
 async function invoiceVars(inv, extra = {}) {
-  const adv = []; // ready-made advance-balance lines for the message ({{advance_line}})
-  if (inv.deposit_used > 0) adv.push(`🪙 Paid from your advance deposit: *${money(inv.deposit_used)}*`); if (inv.overpaid_saved > 0) adv.push(`💰 Overpayment saved as advance: *${money(inv.overpaid_saved)}*`);
-  if (inv.advance_balance > 0) adv.push(`💰 Advance balance available: *${money(inv.advance_balance)}*`); if (inv.advance_pending > 0) adv.push(`(${money(inv.advance_pending)} cheque deposit awaiting clearance)`);
-  return { advance_line: adv.length ? '\n' + adv.join('\n') : '', advance_balance: money(inv.advance_balance || 0), deposit_used: money(inv.deposit_used || 0), ...(await M.companyVars()), customer: inv.cname || inv.customer_name || 'Customer', invoice_no: inv.invoice_no, date: inv.date, due_date: inv.due_date || '-',
+  const A = inv.advance, adv = []; // ready-made advance-balance lines for the message ({{advance_line}})
+  if (A) {
+    if (A.mode === 'snapshot') {
+      adv.push(`🪙 Deposit available before this invoice: *${money(A.before)}*`); if (A.deducted > 0) adv.push(`➖ Deducted for this invoice: *${money(A.deducted)}*`);
+      if (A.overpaid > 0) adv.push(`➕ Overpayment saved as advance: *${money(A.overpaid)}*`); adv.push(`💰 Remaining deposit after this invoice: *${money(A.after)}*`);
+    } else { if (A.deducted > 0) adv.push(`🪙 Paid from your advance deposit: *${money(A.deducted)}*`); if (A.overpaid > 0) adv.push(`➕ Overpayment saved as advance: *${money(A.overpaid)}*`); if (A.current > 0) adv.push(`💰 Advance balance available: *${money(A.current)}*`); }
+    if (A.pending > 0) adv.push(`⏳ Cheque deposit awaiting clearance (not included): *${money(A.pending)}*`);
+  }
+  return { advance_line: adv.length ? '\n' + adv.join('\n') : '', advance_balance: money(inv.advance_balance || 0), deposit_used: money(inv.deposit_used || 0),
+    advance_before: A && A.mode === 'snapshot' ? money(A.before) : '', advance_deducted: money(A ? A.deducted : 0), advance_after: money(A ? (A.mode === 'snapshot' ? A.after : A.current) : 0),
     total: money(inv.total), paid: money(inv.paid), balance: money(inv.balance), link: await M.publicLink('invoice', inv.id), ...extra };
 }
 // channels: {email:bool, whatsapp:bool}; template code defaults to 'invoice'

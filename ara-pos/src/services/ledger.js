@@ -8,6 +8,7 @@ async function addLedger(conn, { customer_id, date, type, amount, ref_type = nul
   await one('SELECT id FROM customers WHERE id=? FOR UPDATE', [customer_id], conn);
   const cur = await balance(customer_id, conn), after = round2(cur + amount);
   if (after < -0.004) bad(`Not enough deposit balance - available ${money(cur)}`);
+  if ((type === 'used' || type === 'used_reversal') && description) description += ` [balance before ${money(cur)} → after ${money(after)}]`;
   await q('INSERT INTO customer_account_ledger (customer_id,date,type,amount,balance_after,ref_type,ref_id,description,created_by) VALUES (?,?,?,?,?,?,?,?,?)', [customer_id, date || today(), type, round2(amount), after, ref_type, ref_id, description, user_id], conn);
   return after;
 }
