@@ -53,7 +53,7 @@ async function invoicePdf(id) {
     y += 8; doc.font('Helvetica-Bold').fontSize(10).fillColor(DARK).text('Payment History', 40, y); y += 16;
     inv.payments.forEach(p => {
       if (y > 760) { doc.addPage(); y = 40; }
-      const m = p.method === 'cheque' ? `Cheque #${p.cheque_no || ''} ${p.bank || ''} (${p.cheque_status || ''})` : p.method === 'bank' ? 'Bank transfer' : 'Cash';
+      const m = p.method === 'cheque' ? `Cheque #${p.cheque_no || ''} ${p.bank || ''} (${p.cheque_status || ''})` : p.method === 'bank' ? 'Bank transfer' : p.method === 'deposit' ? 'Customer deposit (advance)' : 'Cash';
       doc.font('Helvetica').fontSize(9).fillColor(GREY).text(`${p.date}   ${m}`, 40, y, { width: 380 }).fillColor(DARK).text(money(p.amount), 440, y, { width: 115, align: 'right' }); y += 14;
     });
   }

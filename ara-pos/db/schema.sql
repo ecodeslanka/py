@@ -209,7 +209,7 @@ CREATE TABLE IF NOT EXISTS payments (
   customer_id INT NULL,
   date DATE NOT NULL,
   amount DECIMAL(14,2) NOT NULL,
-  method ENUM('cash','bank','cheque') NOT NULL,
+  method ENUM('cash','bank','cheque','deposit') NOT NULL,
   cleared TINYINT NOT NULL DEFAULT 1,
   reference VARCHAR(100) NULL,
   note VARCHAR(255) NULL,
@@ -217,6 +217,40 @@ CREATE TABLE IF NOT EXISTS payments (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX (invoice_id), INDEX (customer_id), INDEX (date),
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS customer_deposits (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  receipt_no VARCHAR(30) NOT NULL,
+  customer_id INT NOT NULL,
+  date DATE NOT NULL,
+  amount DECIMAL(14,2) NOT NULL,
+  method ENUM('cash','bank','cheque') NOT NULL,
+  reference VARCHAR(100) NULL,
+  note VARCHAR(255) NULL,
+  status ENUM('pending','cleared','bounced') NOT NULL DEFAULT 'cleared',
+  cleared_date DATE NULL,
+  created_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (customer_id), INDEX (status), INDEX (date), INDEX (receipt_no),
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB;
+
+-- every change of a customer's advance balance is one row here (credits +, debits -)
+CREATE TABLE IF NOT EXISTS customer_account_ledger (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  customer_id INT NOT NULL,
+  date DATE NOT NULL,
+  type VARCHAR(20) NOT NULL,
+  amount DECIMAL(14,2) NOT NULL,
+  balance_after DECIMAL(14,2) NOT NULL,
+  ref_type VARCHAR(20) NULL,
+  ref_id INT NULL,
+  description VARCHAR(255) NULL,
+  created_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (customer_id, date), INDEX (ref_type, ref_id),
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS customer_cheques (
@@ -229,6 +263,7 @@ CREATE TABLE IF NOT EXISTS customer_cheques (
   cheque_date DATE NULL,
   amount DECIMAL(14,2) NOT NULL,
   deposit_date DATE NULL,
+  deposit_id INT NULL,
   status ENUM('received','pending','deposited','cleared','bounced') NOT NULL DEFAULT 'received',
   status_date DATE NULL,
   note VARCHAR(255) NULL,

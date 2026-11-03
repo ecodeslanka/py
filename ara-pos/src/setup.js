@@ -34,6 +34,7 @@ const MIGRATIONS = [
   ['goods_receipts', 'balance', 'DECIMAL(14,2) NOT NULL DEFAULT 0'], ['goods_receipts', 'status', "ENUM('unpaid','partial','cheque_pending','paid') NOT NULL DEFAULT 'unpaid'"], ['goods_receipts', 'updated_by', 'INT NULL'],
   ['product_variants', 'size', "VARCHAR(30) NOT NULL DEFAULT ''"], ['product_variants', 'location', "VARCHAR(60) NOT NULL DEFAULT ''"], ['product_variants', 'label', "VARCHAR(160) NOT NULL DEFAULT ''"],
   ['expense_categories', 'kind', "VARCHAR(12) NOT NULL DEFAULT 'general'"], ['expenses', 'item', 'VARCHAR(100) NULL'],
+  ['customer_cheques', 'deposit_id', 'INT NULL'],
   ['supplier_payments', 'grn_id', 'INT NULL'], ['supplier_payments', 'cleared', 'TINYINT NOT NULL DEFAULT 1'], ['supplier_cheques', 'payment_id', 'INT NULL'], ['supplier_cheques', 'grn_id', 'INT NULL'],
 ];
 const EXP_CATS = ['Factory Material Purchases', 'Employee Salaries & Wages', 'Factory Expenses', 'Electricity & Water Bills', 'Transport & Delivery', 'Repairs & Maintenance', 'Rent', 'Other / Miscellaneous'];
@@ -60,6 +61,13 @@ async function setup(log = console.log) {
   if (await hasIdx('uq_pv')) await q('ALTER TABLE product_variants DROP INDEX uq_pv');
   await q("UPDATE product_variants SET label=colour WHERE label=''");
   for (const [t, c] of [['expenses', 'payee'], ['expenses', 'item']]) { const ix = await one("SELECT 1 x FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?", [t, c]); if (!ix) await q(`ALTER TABLE \`${t}\` ADD INDEX (\`${c}\`)`); }
+  await q("ALTER TABLE payments MODIFY method ENUM('cash','bank','cheque','deposit') NOT NULL");
+  // grant the new deposit permissions to the default roles once (Administrator always gets everything)
+  const adm = await one("SELECT id FROM roles WHERE name='Administrator'"); if (adm) await q('UPDATE roles SET permissions=? WHERE id=?', [JSON.stringify(require('./permissions').ALL), adm.id]);
+  if (!(await one("SELECT v FROM settings WHERE k='migr_deposit_perms'"))) {
+    for (const rn of ['Manager', 'Cashier', 'Accountant']) { const r = await one('SELECT id,permissions FROM roles WHERE name=?', [rn]); if (!r) continue; const ps = new Set(JSON.parse(r.permissions || '[]')); ps.add('deposits.view'); ps.add('deposits.manage'); await q('UPDATE roles SET permissions=? WHERE id=?', [JSON.stringify([...ps]), r.id]); }
+    await q("INSERT INTO settings (k,v) VALUES ('migr_deposit_perms','1')");
+  }
   await q("ALTER TABLE supplier_payments MODIFY method ENUM('cash','bank','cheque') NOT NULL DEFAULT 'cash'");
   await q('UPDATE goods_receipts SET balance=total WHERE paid=0 AND balance=0 AND total>0'); // legacy receipts
   for (const r of DEFAULT_ROLES) {

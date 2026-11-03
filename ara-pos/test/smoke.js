@@ -112,6 +112,54 @@ const rejects = async (fn, m) => { try { await fn(); ok(false, m); } catch (e) {
   // permissions on reports
   const role2 = await api('POST', '/roles', { name: 'NoRep' + sx, permissions: ['invoices.view'] }); await api('POST', '/users', { name: 'NR', username: 'nr' + sx, password: 'secret1', role_id: role2.id });
   { const T1 = T; T = (await api('POST', '/auth/login', { username: 'nr' + sx, password: 'secret1' })).token; await rejects(() => api('GET', '/reports?type=salaries&all=1'), 'report without permission rejected (403)'); const mt = await api('GET', '/reports/meta'); ok(mt.length === 1 && mt[0].type === 'sales', 'report list only shows permitted reports'); T = T1; }
+  // ---- customer deposits / advance balances
+  const dp = await api('POST', '/products', { code: 'DX' + sx, name: 'Deposit Test Slipper', cost_price: 400, wholesale_price: 600, selling_price: 700, low_stock_level: 1, variants: [{ colour: 'Black', opening_qty: 300 }] });
+  const dv = (await api('GET', '/products/' + dp.id)).variants[0].id;
+  const dc = await api('POST', '/customers', { name: 'Deposit Customer ' + sx, phone: '0779998888', type: 'retail' });
+  const bal = async () => (await api('GET', `/customers/${dc.id}/deposit-balance`));
+  const d1 = await api('POST', '/deposits', { customer_id: dc.id, note: 'advance', parts: [{ method: 'cash', amount: 6000 }, { method: 'cheque', amount: 4000, cheque: { cheque_no: 'DEP-CHQ-1', bank: 'BOC', cheque_date: TD, deposit_date: TD } }] });
+  ok(/^DEP-\d{4}-\d{5}$/.test(d1.receipt_no) && d1.balance === 6000, `mixed deposit (cash 6000 + cheque 4000): receipt ${d1.receipt_no}, only the cash is available -> ${d1.balance}`);
+  let b0 = await bal(); ok(b0.balance === 6000 && b0.pending === 4000, 'uncleared cheque is "pending" and NOT available (balance 6000, pending 4000)');
+  await rejects(() => api('POST', '/invoices', { customer_id: dc.id, items: [{ variant_id: dv, qty: 10 }], payments: [{ method: 'deposit', amount: 7000 }] }), 'cannot use more deposit than is available (7000 > 6000)');
+  const dchq = (await api('GET', `/cheques/customer?customer=${dc.id}`))[0]; ok(!!dchq && dchq.receipt_no === d1.receipt_no, 'deposit cheque appears in the Cheques list with its receipt no.');
+  await api('PUT', '/cheques/customer/' + dchq.id, { status: 'cleared' }); b0 = await bal(); ok(b0.balance === 10000 && b0.pending === 0, 'cheque cleared -> deposit available: balance 10,000');
+  const i1 = await api('POST', '/invoices', { customer_id: dc.id, items: [{ variant_id: dv, qty: 10 }], payments: [{ method: 'deposit', amount: 7000 }], send: { email: false, whatsapp: false } });
+  let I1 = await api('GET', '/invoices/' + i1.id); b0 = await bal(); ok(I1.total === 7000 && I1.status === 'paid' && b0.balance === 3000, 'invoice 7,000 settled from deposit 10,000 -> status Paid, advance balance left 3,000');
+  const i2 = await api('POST', '/invoices', { customer_id: dc.id, items: [{ variant_id: dv, qty: 5, price: 1000 }], payments: [{ method: 'deposit', amount: 3000 }], send: { email: false, whatsapp: false } });
+  let I2 = await api('GET', '/invoices/' + i2.id); b0 = await bal(); ok(I2.total === 5000 && I2.paid === 3000 && I2.balance === 2000 && I2.status === 'partial' && b0.balance === 0, 'next invoice 5,000: deposit 3,000 used, remaining payment 2,000 -> Partially Paid, advance 0');
+  await api('POST', '/deposits', { customer_id: dc.id, method: 'cash', amount: 3000, reference: 'RCPT-77' });
+  const i3 = await api('POST', '/invoices', { customer_id: dc.id, items: [{ variant_id: dv, qty: 10, price: 1000 }], payments: [{ method: 'deposit', amount: 3000 }, { method: 'cash', amount: 2000 }, { method: 'cheque', amount: 3000, cheque: { cheque_no: 'MIX-1', bank: 'HNB', cheque_date: TD, deposit_date: TD } }], send: { email: false, whatsapp: false } });
+  let I3 = await api('GET', '/invoices/' + i3.id); ok(I3.total === 10000 && I3.paid === 5000 && I3.cheque_pending === 3000 && I3.balance === 5000 && I3.status === 'cheque_pending', 'mixed payment: deposit 3000 + cash 2000 + cheque 3000 + pending 2000 -> remaining calculated automatically');
+  ok(I3.payments.some(p => p.method === 'deposit' && p.amount === 3000), 'deposit shows as a payment method on the invoice');
+  let acc = await api('GET', `/customers/${dc.id}/account`); ok(acc.rows.length >= 6 && acc.closing === acc.balance && acc.balance === 0 && acc.outstanding_invoices.length === 2 && acc.outstanding_total === 7000, `account statement: ${acc.rows.length} ledger rows, closing = balance, outstanding invoices 7,000`);
+  ok(acc.rows.every((r, i) => i === 0 || Math.abs(r.balance_after - (acc.rows[i - 1].balance_after + (r.credit || 0) - (r.debit || 0))) < 0.01), 'ledger balances add up row by row (fully traceable)');
+  const pdfA = await api('GET', `/customers/${dc.id}/account?format=pdf`); ok(pdfA.slice(0, 4).toString() === '%PDF', 'account statement PDF');
+  // removing a deposit payment returns the money to the customer's account
+  await api('DELETE', '/payments/' + I2.payments.find(p => p.method === 'deposit').id); b0 = await bal(); I2 = await api('GET', '/invoices/' + i2.id); ok(b0.balance === 3000 && I2.paid === 0, 'deleting a deposit payment returns 3,000 to the advance balance');
+  await rejects(() => api('PUT', '/payments/' + I1.payments.find(p => p.method === 'deposit').id, { amount: 10 }), 'deposit payments cannot be edited');
+  await api('DELETE', '/invoices/' + i1.id); b0 = await bal(); ok(b0.balance === 10000, 'deleting an invoice returns its deposit (7,000) -> balance 10,000');
+  // bounced cheque deposit never becomes available
+  const d2 = await api('POST', '/deposits', { customer_id: dc.id, method: 'cheque', amount: 5000, cheque: { cheque_no: 'BNC-1', bank: 'NSB', cheque_date: TD } });
+  const bchq = (await api('GET', `/cheques/customer?customer=${dc.id}&cheque_no=BNC-1`))[0]; await api('PUT', '/cheques/customer/' + bchq.id, { status: 'bounced' }); b0 = await bal(); ok(b0.balance === 10000 && b0.pending === 0, 'bounced cheque deposit is not available and not pending');
+  const dl = await api('GET', `/deposits?customer=${dc.id}&status=bounced`); ok(dl.length === 1 && dl[0].receipt_no === d2.receipt_no, 'deposit register shows the bounced deposit');
+  // cleared then bounced -> reversed
+  await api('PUT', '/cheques/customer/' + bchq.id, { status: 'cleared' }); b0 = await bal(); ok(b0.balance === 15000, 'bounced cheque later cleared -> credited 5,000');
+  await api('PUT', '/cheques/customer/' + bchq.id, { status: 'bounced' }); b0 = await bal(); ok(b0.balance === 10000, 'cleared cheque bounced afterwards -> reversed (balance 10,000)');
+  // refund + protection against negative balance
+  const rf = await api('POST', `/customers/${dc.id}/refund`, { amount: 1500, method: 'cash', note: 'customer request' }); ok(rf.balance === 8500, 'refund 1,500 -> advance 8,500');
+  await rejects(() => api('POST', `/customers/${dc.id}/refund`, { amount: 999999, method: 'cash' }), 'refund larger than the balance rejected');
+  const dsum = await api('GET', '/deposits/summary'); const mine = dsum.balances.find(x => x.id === dc.id); ok(mine && mine.available === 8500 && mine.refunded === 1500 && dsum.customers_with_balance >= 1 && dsum.available >= 8500, 'deposit dashboard: customer-wise available 8,500, refunded 1,500');
+  { const c2 = await api('POST', '/customers', { name: 'Deposit Two ' + sx, type: 'retail' }); const dd = await api('POST', '/deposits', { customer_id: c2.id, method: 'bank', amount: 1000, reference: 'TRF-9' });
+    await api('POST', '/invoices', { customer_id: c2.id, items: [{ variant_id: dv, qty: 1, price: 800 }], payments: [{ method: 'deposit', amount: 800 }], send: { email: false, whatsapp: false } });
+    await rejects(() => api('DELETE', '/deposits/' + dd.ids[0]), 'cannot delete a cleared deposit when its money has already been spent'); }
+  const rdep = await api('GET', `/reports?type=deposits&all=1&customer=${dc.id}`); ok(rdep.rows.length >= 4 && rdep.cards[2].label === 'Awaiting cheque clearance', 'deposit register report');
+  const rbal = await api('GET', `/reports?type=deposit_balances&all=1&customer=${dc.id}`); ok(rbal.rows[0].closing === 8500 && rbal.rows[0].refunds === 1500, 'deposit balances report: closing 8,500, refunds 1,500');
+  const rled = await api('GET', `/reports?type=deposit_ledger&all=1&customer=${dc.id}`); ok(rled.rows.length > 8 && rled.rows[rled.rows.length - 2].balance === 8500, 'deposit ledger report (every movement) ends at 8,500');
+  const pl = await api('GET', `/reports?type=summary&all=1`); ok(pl.rows.some(r => /customer deposits/.test(r.item)), 'profit & loss report shows customer deposits separately');
+  for (const type of ['deposits', 'deposit_balances', 'deposit_ledger']) { const x = await api('GET', `/reports/export?type=${type}&format=xlsx&all=1`); const y = await api('GET', `/reports/export?type=${type}&format=pdf&all=1`); if (x.slice(0, 2).toString() !== 'PK' || y.slice(0, 4).toString() !== '%PDF') ok(false, 'deposit export failed ' + type); }
+  ok(true, 'deposit reports export to Excel + PDF');
+  { const role3 = await api('POST', '/roles', { name: 'NoDep' + sx, permissions: ['invoices.view', 'customers.view'] }); await api('POST', '/users', { name: 'ND', username: 'nd' + sx, password: 'secret1', role_id: role3.id }); const T1 = T; T = (await api('POST', '/auth/login', { username: 'nd' + sx, password: 'secret1' })).token;
+    await rejects(() => api('GET', '/deposits'), 'user without deposit permission cannot see deposits'); await rejects(() => api('POST', '/deposits', { customer_id: dc.id, method: 'cash', amount: 1 }), 'user without deposit permission cannot record deposits'); T = T1; }
   // roles & permissions
   const role = await api('POST', '/roles', { name: 'Tester' + sfx, permissions: ['invoices.view', 'products.view', 'customers.view'] });
   await api('POST', '/users', { name: 'Test User', username: 'u' + sfx, password: 'secret1', role_id: role.id });

@@ -37,6 +37,7 @@ app.get('/p/statement/:id/:sig.pdf', wrap(async (req, res) => {
 app.use('/api', require('./routes/admin'));
 app.use('/api', require('./routes/inventory'));
 app.use('/api', require('./routes/grn'));
+app.use('/api', require('./routes/deposits'));
 app.use('/api', salesRouter);
 app.use('/api', require('./routes/finance'));
 app.use('/api', require('./routes/reports'));

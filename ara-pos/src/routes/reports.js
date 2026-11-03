@@ -8,6 +8,7 @@ const { wrap, bad, log, today, addDays, round2, money, settings } = require('../
 const { tablePdf } = require('../services/pdf');
 const { SUP_BAL } = require('../sql');
 const { has, like: L, expenseWhere, stockWhere } = require('../filters');
+const { TYPE_LABEL } = require('../services/ledger');
 router.use(auth);
 
 function range(period, from, to) {
@@ -40,6 +41,8 @@ const FL = {
   search: T('search', 'Search'), min: N('min', 'Min. amount'), max: N('max', 'Max. amount'),
   mtype: O('mtype', 'Movement type', Object.entries(MV)), user: O('user', 'Done by (user)', 'users'),
   low: O('low', 'Stock level', [['1', 'Low / out of stock only']]), owing: O('owing', 'Balance', [['1', 'Owing money only']]),
+  dstatus: O('status', 'Deposit status', [['pending', 'Pending (cheque not cleared)'], ['cleared', 'Cleared'], ['bounced', 'Bounced']]), dmethod: O('method', 'Payment method', [['cash', 'Cash'], ['bank', 'Bank transfer'], ['cheque', 'Cheque']]),
+  depbal: O('avail', 'Balance', [['1', 'Available balance only']]), ltype: O('ltype', 'Transaction type', Object.entries(TYPE_LABEL)),
   stype: O('stype', 'Supplier type', [['material', 'Material'], ['product', 'Finished goods'], ['other', 'Other']]),
 };
 const STOCKF = [FL.art, FL.product, FL.pcategory, FL.size, FL.colour, FL.location, FL.supplier];
@@ -51,6 +54,9 @@ const META = {
   products: { label: 'Product sales', group: 'Sales', filters: [FL.art, FL.product, FL.pcategory, FL.size, FL.colour, FL.customer, FL.supplier], perms: ['reports.view'] },
   customers: { label: 'Customer summary', group: 'Customers', filters: [FL.customer, FL.owing, FL.search], perms: ['reports.view', 'customers.view'] },
   customer_ledger: { label: 'Customer ledger', group: 'Customers', filters: [FL.customer, FL.invstatus, FL.search], perms: ['reports.view', 'customers.view'] },
+  deposits: { label: 'Customer deposits', group: 'Customers', filters: [FL.customer, FL.dstatus, FL.dmethod, FL.search], perms: ['reports.view', 'deposits.view'] },
+  deposit_balances: { label: 'Deposit balances', group: 'Customers', filters: [FL.customer, FL.depbal], perms: ['reports.view', 'deposits.view'] },
+  deposit_ledger: { label: 'Deposit ledger', group: 'Customers', filters: [FL.customer, FL.ltype], perms: ['reports.view', 'deposits.view'] },
   suppliers: { label: 'Supplier summary', group: 'Suppliers', filters: [FL.supplier, FL.stype], perms: ['reports.view', 'suppliers.view'] },
   supplier_ledger: { label: 'Supplier ledger', group: 'Suppliers', filters: [FL.supplier, FL.stype], perms: ['reports.view', 'suppliers.view'] },
   expenses: { label: 'Expenses', group: 'Expenses', filters: [FL.xcategory, FL.employee, FL.item, FL.supplier, FL.method, FL.search, FL.min, FL.max], perms: ['reports.view', 'expenses.view'] },
@@ -74,40 +80,46 @@ const REPORTS = {
   async summary(f, t) {
     const sales = await one('SELECT COALESCE(SUM(total),0) v, COUNT(*) n, COALESCE(SUM(discount),0) disc FROM invoices WHERE date BETWEEN ? AND ?', [f, t]);
     const qty = (await one('SELECT COALESCE(SUM(ii.qty),0) v, COALESCE(SUM(ii.qty*ii.cost),0) cogs FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE i.date BETWEEN ? AND ?', [f, t]));
-    const inc = await q("SELECT method, COALESCE(SUM(amount),0) v FROM payments WHERE cleared=1 AND date BETWEEN ? AND ? GROUP BY method", [f, t]);
+    const incP = await q("SELECT method, COALESCE(SUM(amount),0) v FROM payments WHERE cleared=1 AND method<>'deposit' AND date BETWEEN ? AND ? GROUP BY method", [f, t]);
+    const incD = await q("SELECT method, COALESCE(SUM(amount),0) v FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date) BETWEEN ? AND ? GROUP BY method", [f, t]);
+    const inc = [...incP, ...incD]; const depIn = round2(incD.reduce((a, r) => a + r.v, 0));
+    const refunds = round2(-(await one("SELECT COALESCE(SUM(amount),0) v FROM customer_account_ledger WHERE type='refund' AND date BETWEEN ? AND ?", [f, t])).v);
+    const held = round2((await one('SELECT COALESCE(SUM(amount),0) v FROM customer_account_ledger')).v);
     const exp = await q('SELECT COALESCE(c.name,"Uncategorised") name, COALESCE(SUM(e.amount),0) v, e.method FROM expenses e LEFT JOIN expense_categories c ON c.id=e.category_id WHERE e.date BETWEEN ? AND ? GROUP BY c.name, e.method', [f, t]);
     const supPaid = (await one('SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE cleared=1 AND date BETWEEN ? AND ?', [f, t])).v + (await one("SELECT COALESCE(SUM(amount),0) v FROM supplier_cheques WHERE status='cleared' AND payment_id IS NULL AND status_date BETWEEN ? AND ?", [f, t])).v;
     const income = round2(inc.reduce((a, r) => a + r.v, 0)), expenses = round2(exp.reduce((a, r) => a + r.v, 0));
     const cheq = (await one("SELECT COALESCE(SUM(amount),0) v FROM customer_cheques WHERE status IN ('received','pending','deposited') AND created_at<=?", [t + ' 23:59:59'])).v;
-    const cash = inc.find(r => r.method === 'cash')?.v || 0, bank = inc.find(r => r.method === 'bank')?.v || 0, chq = inc.find(r => r.method === 'cheque')?.v || 0;
+    const sumM = m => round2(inc.filter(r => r.method === m).reduce((a, r) => a + r.v, 0)); const cash = sumM('cash'), bank = sumM('bank'), chq = sumM('cheque');
     const cashOut = exp.filter(r => r.method === 'cash').reduce((a, r) => a + r.v, 0), bankOut = exp.filter(r => r.method !== 'cash').reduce((a, r) => a + r.v, 0);
-    const profit = round2(sales.v - expenses), cashProfit = round2(income - expenses);
+    const profit = round2(sales.v - expenses), cashProfit = round2(income - expenses - refunds);
     const cards = [
       { label: 'Total Sales', value: sales.v, money: 1, note: `${sales.n} invoices • ${qty.v} pairs` }, { label: 'Income Received', value: income, money: 1, note: 'cash + bank + cleared cheques' },
       { label: 'Expenses', value: expenses, money: 1 }, { label: 'Profit / Loss (Sales − Expenses)', value: profit, money: 1, tone: profit >= 0 ? 'good' : 'bad' },
-      { label: 'Cash Profit (Income − Expenses)', value: cashProfit, money: 1, tone: cashProfit >= 0 ? 'good' : 'bad' }, { label: 'Gross Margin (Sales − Cost of goods)', value: round2(sales.v - qty.cogs), money: 1 },
+      { label: 'Cash Profit (Income − Expenses − refunds)', value: cashProfit, money: 1, tone: cashProfit >= 0 ? 'good' : 'bad' }, { label: 'Gross Margin (Sales − Cost of goods)', value: round2(sales.v - qty.cogs), money: 1 },
       { label: 'Cheques not yet cleared', value: cheq, money: 1 }, { label: 'Supplier payments made', value: round2(supPaid), money: 1 },
     ];
     const rows = [
       { item: 'Sales (invoiced)', amount: sales.v }, { item: '  Discounts given', amount: sales.disc }, { item: 'Income received - Cash', amount: cash }, { item: 'Income received - Bank transfer', amount: bank }, { item: 'Income received - Cheques cleared', amount: chq },
-      { item: 'TOTAL INCOME RECEIVED', amount: income, _bold: 1 }, ...exp.map(e => ({ item: `Expense - ${e.name} (${e.method})`, amount: e.v })), { item: 'TOTAL EXPENSES', amount: expenses, _bold: 1 },
-      { item: 'Cash paid out (expenses)', amount: cashOut }, { item: 'Bank/cheque paid out (expenses)', amount: bankOut },
-      { item: 'ESTIMATED PROFIT / (LOSS) = Sales − Expenses', amount: profit, _bold: 1 }, { item: 'CASH PROFIT / (LOSS) = Income − Expenses', amount: cashProfit, _bold: 1 },
+      { item: '  of which customer deposits (advance) received', amount: depIn }, { item: 'TOTAL INCOME RECEIVED', amount: income, _bold: 1 }, ...exp.map(e => ({ item: `Expense - ${e.name} (${e.method})`, amount: e.v })), { item: 'TOTAL EXPENSES', amount: expenses, _bold: 1 },
+      { item: 'Customer refunds paid', amount: refunds }, { item: 'Customer deposits held (advance balances, not income yet)', amount: held }, { item: 'Cash paid out (expenses)', amount: cashOut }, { item: 'Bank/cheque paid out (expenses)', amount: bankOut },
+      { item: 'ESTIMATED PROFIT / (LOSS) = Sales − Expenses', amount: profit, _bold: 1 }, { item: 'CASH PROFIT / (LOSS) = Income − Expenses − Refunds', amount: cashProfit, _bold: 1 },
     ];
     return { title: 'Income, Expense & Profit/Loss', cards, columns: [C('item', 'Item'), C('amount', 'Amount (LKR)', { money: 1, w: 120 })], rows };
   },
   async daily(f, t) {
-    const rows = await q(`SELECT d.date, COALESCE((SELECT SUM(total) FROM invoices WHERE date=d.date),0) sales, COALESCE((SELECT SUM(amount) FROM payments WHERE cleared=1 AND date=d.date),0) income,
-      COALESCE((SELECT SUM(amount) FROM expenses WHERE date=d.date),0) expenses FROM (SELECT DISTINCT date FROM (SELECT date FROM invoices UNION SELECT date FROM payments UNION SELECT date FROM expenses) x WHERE date BETWEEN ? AND ?) d ORDER BY d.date`, [f, t]);
+    const rows = await q(`SELECT d.date, COALESCE((SELECT SUM(total) FROM invoices WHERE date=d.date),0) sales, COALESCE((SELECT SUM(amount) FROM payments WHERE cleared=1 AND method<>'deposit' AND date=d.date),0) + COALESCE((SELECT SUM(amount) FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date)=d.date),0) income,
+      COALESCE((SELECT SUM(amount) FROM expenses WHERE date=d.date),0) expenses FROM (SELECT DISTINCT date FROM (SELECT date FROM invoices UNION SELECT date FROM payments UNION SELECT date FROM expenses UNION SELECT COALESCE(cleared_date,date) AS date FROM customer_deposits WHERE status='cleared') x WHERE date BETWEEN ? AND ?) d ORDER BY d.date`, [f, t]);
     rows.forEach(r => { r.profit = round2(r.sales - r.expenses); r.cash = round2(r.income - r.expenses); });
     const tot = rows.reduce((a, r) => ({ sales: a.sales + r.sales, income: a.income + r.income, expenses: a.expenses + r.expenses, profit: a.profit + r.profit, cash: a.cash + r.cash }), { sales: 0, income: 0, expenses: 0, profit: 0, cash: 0 });
     if (rows.length) rows.push({ date: 'TOTAL', ...Object.fromEntries(Object.entries(tot).map(([k, v]) => [k, round2(v)])), _bold: 1 });
     return { title: 'Day-by-day Summary', columns: [C('date', 'Date', { w: 80 }), C('sales', 'Sales', { money: 1 }), C('income', 'Income', { money: 1 }), C('expenses', 'Expenses', { money: 1 }), C('profit', 'Profit (Sales−Exp)', { money: 1 }), C('cash', 'Cash Profit', { money: 1 })], rows };
   },
   async cashbook(f, t) {
-    const rows = await q(`SELECT date, 'Receipt' type, CONCAT(method,' - ',(SELECT invoice_no FROM invoices WHERE id=invoice_id)) description, method, amount, 0 paid FROM payments WHERE cleared=1 AND date BETWEEN ? AND ?
+    const rows = await q(`SELECT date, 'Receipt' type, CONCAT(method,' - ',(SELECT invoice_no FROM invoices WHERE id=invoice_id)) description, method, amount, 0 paid FROM payments WHERE cleared=1 AND method<>'deposit' AND date BETWEEN ? AND ?
+      UNION ALL SELECT COALESCE(cleared_date,date), 'Receipt', CONCAT('Customer deposit ', receipt_no), method, amount, 0 FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date) BETWEEN ? AND ?
+      UNION ALL SELECT date, 'Refund', COALESCE(description,'Customer refund'), 'cash', 0, -amount FROM customer_account_ledger WHERE type='refund' AND date BETWEEN ? AND ?
       UNION ALL SELECT date,'Expense', CONCAT((SELECT name FROM expense_categories WHERE id=category_id),' - ',COALESCE(description,'')), method, 0, amount FROM expenses WHERE date BETWEEN ? AND ?
-      UNION ALL SELECT date,'Supplier payment', 'Supplier payment', method, 0, amount FROM supplier_payments WHERE cleared=1 AND date BETWEEN ? AND ? ORDER BY date, type`, [f, t, f, t, f, t]);
+      UNION ALL SELECT date,'Supplier payment', 'Supplier payment', method, 0, amount FROM supplier_payments WHERE cleared=1 AND date BETWEEN ? AND ? ORDER BY date, type`, [f, t, f, t, f, t, f, t, f, t]);
     let bal = 0; rows.forEach(r => { bal = round2(bal + r.amount - r.paid); r.balance = bal; r.in = r.amount || ''; r.out = r.paid || ''; });
     return { title: 'Cash & Bank Transactions', columns: [C('date', 'Date', { w: 75 }), C('type', 'Type', { w: 95 }), C('description', 'Description'), C('method', 'Method', { w: 60 }), C('in', 'Money In', { money: 1 }), C('out', 'Money Out', { money: 1 }), C('balance', 'Net', { money: 1 })], rows };
   },
@@ -161,6 +173,39 @@ const REPORTS = {
     const td = sumBy(ev, 'debit'), tc = sumBy(ev, 'credit'); const out = await one(`SELECT COALESCE(SUM(i.balance),0) v FROM invoices i WHERE i.customer_id IN (?)${st}`, [ids, ...sp]);
     if (ev.length) rows.push({ description: 'TOTAL', debit: td, credit: tc, balance: single ? bal : '', _bold: 1 });
     return { title: 'Customer Ledger - invoices, payments & outstanding', cards: [{ label: 'Invoiced', value: td, money: 1 }, { label: 'Received (cleared)', value: tc, money: 1, tone: 'good' }, { label: 'Outstanding now', value: round2(out.v), money: 1, tone: out.v > 0 ? 'bad' : 'good', note: `${custs.length} customer(s)` }], columns: cols, rows };
+  },
+  // advance deposits received from customers
+  async deposits(f, t, F) {
+    const w = ['d.date BETWEEN ? AND ?'], p = [f, t]; if (has(F.customer)) { w.push('d.customer_id=?'); p.push(F.customer); } if (has(F.status)) { w.push('d.status=?'); p.push(F.status); } if (has(F.method)) { w.push('d.method=?'); p.push(F.method); }
+    if (has(F.search)) { w.push('(d.receipt_no LIKE ? OR d.reference LIKE ? OR c.name LIKE ?)'); p.push(L(F.search), L(F.search), L(F.search)); }
+    const rows = await q(`SELECT d.date, d.receipt_no receipt, c.name customer, d.method, COALESCE(d.reference,'') reference, COALESCE(k.cheque_no,'') cheque_no, COALESCE(k.bank,'') bank, d.amount, d.status FROM customer_deposits d JOIN customers c ON c.id=d.customer_id LEFT JOIN customer_cheques k ON k.deposit_id=d.id WHERE ${w.join(' AND ')} ORDER BY d.date, d.id`, p);
+    const by = s => sumBy(rows.filter(r => r.status === s), 'amount'); if (rows.length) rows.push({ date: 'TOTAL', amount: sumBy(rows, 'amount'), _bold: 1 });
+    return { title: 'Customer Deposits (advance payments)', cards: [{ label: 'Deposits', value: rows.length ? rows.length - 1 : 0 }, { label: 'Cleared (available)', value: by('cleared'), money: 1, tone: 'good' }, { label: 'Awaiting cheque clearance', value: by('pending'), money: 1 }, { label: 'Bounced', value: by('bounced'), money: 1, tone: by('bounced') ? 'bad' : '' }],
+      columns: [C('date', 'Date', { w: 70 }), C('receipt', 'Receipt no.', { w: 85 }), C('customer', 'Customer'), C('method', 'Method', { w: 55 }), C('reference', 'Reference'), C('cheque_no', 'Cheque no.', { w: 70 }), C('bank', 'Bank', { w: 80 }), C('amount', 'Amount', { money: 1 }), C('status', 'Status', { w: 60 })], rows };
+  },
+  // customer-wise: opening, deposits, used, refunds, closing (available) balance
+  async deposit_balances(f, t, F) {
+    const D = "('deposit','deposit_reversal','deposit_cancel')", U = "('used','used_reversal')", w = ['1=1'], p = [f, f, t, f, t, f, t, t]; if (has(F.customer)) { w.push('c.id=?'); p.push(F.customer); }
+    const rows = await q(`SELECT c.name customer, c.phone,
+      COALESCE((SELECT SUM(amount) FROM customer_account_ledger WHERE customer_id=c.id AND date<?),0) opening,
+      COALESCE((SELECT SUM(amount) FROM customer_account_ledger WHERE customer_id=c.id AND date BETWEEN ? AND ? AND type IN ${D}),0) deposits,
+      -COALESCE((SELECT SUM(amount) FROM customer_account_ledger WHERE customer_id=c.id AND date BETWEEN ? AND ? AND type IN ${U}),0) used,
+      -COALESCE((SELECT SUM(amount) FROM customer_account_ledger WHERE customer_id=c.id AND date BETWEEN ? AND ? AND type='refund'),0) refunds,
+      COALESCE((SELECT SUM(amount) FROM customer_account_ledger WHERE customer_id=c.id AND date<=?),0) closing,
+      COALESCE((SELECT SUM(amount) FROM customer_deposits WHERE customer_id=c.id AND status='pending'),0) pending
+      FROM customers c WHERE ${w.join(' AND ')} HAVING ${F.avail === '1' ? 'closing>0' : '(opening<>0 OR deposits<>0 OR used<>0 OR refunds<>0 OR closing<>0 OR pending>0)'} ORDER BY closing DESC, c.name`, p);
+    const tot = { opening: sumBy(rows, 'opening'), deposits: sumBy(rows, 'deposits'), used: sumBy(rows, 'used'), refunds: sumBy(rows, 'refunds'), closing: sumBy(rows, 'closing'), pending: sumBy(rows, 'pending') }; if (rows.length) rows.push({ customer: 'TOTAL', ...tot, _bold: 1 });
+    return { title: 'Customer Deposit Balances', cards: [{ label: 'Customers with advance', value: rows.filter(r => r.closing > 0 && r.customer !== 'TOTAL').length }, { label: 'Available advance (closing)', value: tot.closing, money: 1, tone: 'good' }, { label: 'Deposits received', value: tot.deposits, money: 1 }, { label: 'Used on invoices', value: tot.used, money: 1 }, { label: 'Awaiting cheque clearance', value: tot.pending, money: 1 }],
+      columns: [C('customer', 'Customer'), C('phone', 'Phone', { w: 80 }), C('opening', 'Opening', { money: 1 }), C('deposits', 'Deposits', { money: 1 }), C('used', 'Used', { money: 1 }), C('refunds', 'Refunds', { money: 1 }), C('closing', 'Available', { money: 1 }), C('pending', 'Awaiting clearance', { money: 1 })], rows };
+  },
+  // the full traceable ledger
+  async deposit_ledger(f, t, F) {
+    const w = ['l.date BETWEEN ? AND ?'], p = [f, t]; if (has(F.customer)) { w.push('l.customer_id=?'); p.push(F.customer); } if (has(F.ltype)) { w.push('l.type=?'); p.push(F.ltype); }
+    const raw = await q(`SELECT l.date, c.name customer, l.type, l.description, l.amount, l.balance_after balance, COALESCE(u.name,'') by_user FROM customer_account_ledger l JOIN customers c ON c.id=l.customer_id LEFT JOIN users u ON u.id=l.created_by WHERE ${w.join(' AND ')} ORDER BY ${has(F.customer) ? 'l.date, l.id' : 'c.name, l.date, l.id'} LIMIT 5000`, p);
+    const rows = raw.map(r => ({ date: r.date, customer: r.customer, type: TYPE_LABEL[r.type] || r.type, description: r.description, credit: r.amount > 0 ? r.amount : '', debit: r.amount < 0 ? -r.amount : '', balance: r.balance, by_user: r.by_user }));
+    const cr = sumBy(raw.filter(r => r.amount > 0), 'amount'), dr = round2(-raw.filter(r => r.amount < 0).reduce((a, r) => a + r.amount, 0)); if (rows.length) rows.push({ description: 'TOTAL', credit: cr, debit: dr, _bold: 1 });
+    return { title: 'Customer Deposit Ledger', cards: [{ label: 'Transactions', value: raw.length }, { label: 'Money in (deposits)', value: cr, money: 1, tone: 'good' }, { label: 'Money out (used + refunds)', value: dr, money: 1 }],
+      columns: [C('date', 'Date', { w: 70 }), C('customer', 'Customer'), C('type', 'Type', { w: 110 }), C('description', 'Description'), C('credit', 'In', { money: 1 }), C('debit', 'Out', { money: 1 }), C('balance', 'Balance after', { money: 1 }), C('by_user', 'By', { w: 70 })], rows };
   },
   async suppliers(f, t, F) {
     const w = ['1=1'], p = [f, t, f, t, f, t]; if (has(F.supplier)) { w.push('s.id=?'); p.push(F.supplier); } if (has(F.stype)) { w.push('s.type=?'); p.push(F.stype); }

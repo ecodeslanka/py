@@ -11,7 +11,7 @@ route('home', async () => {
     ${stat('Expenses (month)', rs(d.month_expenses), { i: 'wallet', c: '#dc2626' })}
     ${stat('Profit / Loss (month)', (profit < 0 ? '−' : '') + rs(Math.abs(profit)), { i: 'scale', c: profit >= 0 ? '#16a34a' : '#dc2626', cls: profit >= 0 ? 'good' : 'bad', n: 'sales − expenses' })}
     ${stat('Stock value', rs(d.stock_value), { i: 'box', c: '#7c3aed', n: num(d.stock_qty) + ' pairs at cost' })}
-    ${stat('Customers owe', rs(d.customer_outstanding), { i: 'users', c: '#d97706', cls: d.customer_outstanding > 0 ? 'warn' : '' })}
+    ${stat('Customers owe', rs(d.customer_outstanding), { i: 'users', c: '#d97706', cls: d.customer_outstanding > 0 ? 'warn' : '', n: d.deposit_available > 0 ? 'Advances held: ' + rs(d.deposit_available) : '' })}
     ${stat('We owe suppliers', rs(d.supplier_balance), { i: 'truck', c: '#2563eb' })}
   </div>
   <div class="card"><h3>Last 7 days sales</h3><div class="bars">${d.last7.map(x => `<div><span>${x.sales ? (x.sales >= 1000 ? Math.round(x.sales / 1000) + 'k' : x.sales) : ''}</span><i style="height:${Math.max(3, x.sales / max * 78)}%"></i><span>${new Date(x.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short' })}</span></div>`).join('')}</div></div>

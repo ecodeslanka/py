@@ -103,7 +103,7 @@ window.addEventListener('hashchange', render);
 /* ---------- shell ---------- */
 const NAV = [
   { k: 'home', h: '#/', l: 'Dashboard', i: 'home', perm: 'dashboard.view' }, { k: 'pos', h: '#/pos', l: 'New Sale (POS)', i: 'plus', perm: 'invoices.create' },
-  { k: 'invoices', h: '#/invoices', l: 'Invoices', i: 'file', perm: 'invoices.view' }, { k: 'pending', h: '#/pending', l: 'Pending Payments', i: 'clock', perm: ['invoices.view', 'payments.manage'] },
+  { k: 'invoices', h: '#/invoices', l: 'Invoices', i: 'file', perm: 'invoices.view' }, { k: 'pending', h: '#/pending', l: 'Pending Payments', i: 'clock', perm: ['invoices.view', 'payments.manage'] }, { k: 'deposits', h: '#/deposits', l: 'Customer Deposits', i: 'wallet', perm: 'deposits.view' },
   { k: 'customers', h: '#/customers', l: 'Customers', i: 'users', perm: 'customers.view' }, { k: 'products', h: '#/products', l: 'Products', i: 'tag', perm: 'products.view' },
   { k: 'stock', h: '#/stock', l: 'Stock', i: 'box', perm: 'products.view' }, { k: 'grn', h: '#/grn', l: 'GRN / Purchases', i: 'download', perm: ['products.view', 'suppliers.view', 'stock.manage'] },
   { k: 'suppliers', h: '#/suppliers', l: 'Suppliers', i: 'truck', perm: 'suppliers.view' }, { k: 'supplier-dues', h: '#/supplier-dues', l: 'Supplier Dues', i: 'wallet', perm: 'suppliers.view' },
@@ -155,7 +155,7 @@ async function boot() {
 
 /* ---------- More page ---------- */
 route('more', () => {
-  const T = [['customers', 'users', '#2563eb'], ['pending', 'clock', '#d97706'], ['products', 'tag', '#0f766e'], ['grn', 'download', '#2563eb'], ['suppliers', 'truck', '#7c3aed'], ['supplier-dues', 'wallet', '#dc2626'], ['cheques', 'card', '#0891b2'], ['expenses', 'wallet', '#dc2626'], ['reports', 'chart', '#16a34a'], ['notifications', 'bell', '#f59e0b'], ['users', 'shield', '#475569'], ['settings', 'settings', '#475569'], ['logs', 'activity', '#64748b']];
+  const T = [['customers', 'users', '#2563eb'], ['pending', 'clock', '#d97706'], ['deposits', 'wallet', '#16a34a'], ['products', 'tag', '#0f766e'], ['grn', 'download', '#2563eb'], ['suppliers', 'truck', '#7c3aed'], ['supplier-dues', 'wallet', '#dc2626'], ['cheques', 'card', '#0891b2'], ['expenses', 'wallet', '#dc2626'], ['reports', 'chart', '#16a34a'], ['notifications', 'bell', '#f59e0b'], ['users', 'shield', '#475569'], ['settings', 'settings', '#475569'], ['logs', 'activity', '#64748b']];
   view().innerHTML = `<div class="card" style="display:flex;gap:12px;align-items:center"><div class="item" style="box-shadow:none;padding:0;cursor:default"><div class="av">${esc(ini(S.user.name))}</div><div class="mid"><div class="t">${esc(S.user.name)}</div><div class="s">${esc(S.user.role_name)} • @${esc(S.user.username)}</div></div></div><button class="btn sec sm" id="pw">${ic('lock')} Password</button></div>
   <div class="tiles">${T.map(([k, i, c]) => { const n = NAV.find(x => x.k === k); return allowed(n) ? `<a class="tile" href="${n.h}" style="--c:${c}"><div class="ico">${ic(i)}</div>${n.l.replace(' Payments', '').replace('Users & Roles', 'Users').replace('GRN / Purchases', 'GRN')}</a>` : ''; }).join('')}</div>
   <button class="btn ghost block" id="lo2" style="margin-top:16px">${ic('logout')} Logout</button>`;
