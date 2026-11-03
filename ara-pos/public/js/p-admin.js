@@ -25,7 +25,7 @@ route('users', async (a, q) => {
 }, { title: 'Users & Roles', back: true, nav: 'more', perm: ['users.manage', 'roles.manage'] });
 
 /* ---- settings ---- */
-const PH = ['customer', 'invoice_no', 'date', 'due_date', 'total', 'paid', 'balance', 'link', 'company', 'company_phone', 'amount', 'method', 'period', 'cheque_no', 'bank'];
+const PH = ['customer', 'invoice_no', 'date', 'due_date', 'total', 'paid', 'balance', 'link', 'company', 'company_phone', 'amount', 'method', 'period', 'cheque_no', 'bank', 'advance_line', 'advance_balance', 'deposit_used'];
 route('settings', async (a, q) => {
   const tab = q.tab || 'company'; const s = await api('GET', '/settings'); const T = [['company', 'Company'], ['wa', 'WhatsApp'], ['email', 'Email'], ['tpl', 'Templates'], ['alerts', 'Alerts'], ['backup', 'Backup'], ['log', 'Sent log']];
   view().innerHTML = `${seg(T, tab)}<div id="tb"></div>`; $$('[data-seg]').forEach(b => b.onclick = () => go('#/settings?tab=' + b.dataset.seg)); const B = $('#tb');

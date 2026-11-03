@@ -40,6 +40,13 @@ async function fullInvoice(id) {
   inv.payments = await q(`SELECT p.*, c.cheque_no, c.bank, c.cheque_date, c.deposit_date, c.status cheque_status, c.id cheque_id, u.name by_name
     FROM payments p LEFT JOIN customer_cheques c ON c.payment_id=p.id LEFT JOIN users u ON u.id=p.created_by
     WHERE p.invoice_id=? ORDER BY p.date, p.id`, [id]);
+  if (inv.customer_id) { // customer advance account (deposits / overpayments) shown on the invoice, PDF and messages
+    const adv = await one('SELECT COALESCE(SUM(amount),0) b FROM customer_account_ledger WHERE customer_id=?', [inv.customer_id]);
+    const pend = await one("SELECT COALESCE(SUM(amount),0) v FROM customer_deposits WHERE customer_id=? AND status='pending'", [inv.customer_id]);
+    const used = await one("SELECT COALESCE(SUM(amount),0) v FROM payments WHERE invoice_id=? AND method='deposit'", [id]);
+    const over = await one('SELECT COALESCE(SUM(amount),0) v FROM customer_deposits WHERE customer_id=? AND note=?', [inv.customer_id, `Overpayment on invoice ${inv.invoice_no}`]);
+    inv.advance_balance = round2(adv.b); inv.advance_pending = round2(pend.v); inv.deposit_used = round2(used.v); inv.overpaid_saved = round2(over.v);
+  }
   inv.messages = await q('SELECT id,channel,kind,recipient,status,error,created_at FROM message_log WHERE invoice_id=? ORDER BY id DESC LIMIT 20', [id]);
   return inv;
 }

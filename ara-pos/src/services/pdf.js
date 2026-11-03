@@ -1,6 +1,6 @@
 const PDFDocument = require('pdfkit');
 const { q, one } = require('../db');
-const { settings, money } = require('../util');
+const { settings, money, today } = require('../util');
 const { fullInvoice } = require('./invoices');
 
 const BRAND = '#0f766e', DARK = '#0f172a', GREY = '#64748b', LINE = '#e2e8f0';
@@ -26,7 +26,7 @@ async function invoicePdf(id) {
   doc.font('Helvetica').fontSize(9.5).text([inv.address, inv.phone, inv.email].filter(Boolean).join('\n'), 40, y + 30, { width: 260 });
   doc.font('Helvetica').fontSize(9.5).text(`Invoice No:  ${inv.invoice_no}\nDate:  ${inv.date}\nDue Date:  ${inv.due_date || '-'}\nStatus:  ${STATUS[inv.status]}`, 340, y + 14, { width: 215 });
   y += 92;
-  const cols = [[40, 'Item', 215, 'left'], [255, 'Colour', 70, 'left'], [325, 'Qty', 40, 'right'], [365, 'Price', 70, 'right'], [435, 'Disc.', 50, 'right'], [485, 'Amount', 70, 'right']];
+  const cols = [[40, 'Item', 160, 'left'], [200, 'Colour', 125, 'left'], [325, 'Qty', 40, 'right'], [365, 'Price', 70, 'right'], [435, 'Disc.', 50, 'right'], [485, 'Amount', 70, 'right']];
   const rowHead = yy => {
     doc.rect(40, yy, 515, 22).fill(DARK); doc.fillColor('#fff').font('Helvetica-Bold').fontSize(9);
     cols.forEach(([x, t, w, a]) => doc.text(t, x + 4, yy + 7, { width: w - 8, align: a }));
@@ -49,6 +49,14 @@ async function invoicePdf(id) {
   tot('TOTAL', money(inv.total), true, BRAND); tot('Paid', money(inv.paid));
   if (inv.cheque_pending) tot('Cheque (not cleared)', money(inv.cheque_pending), false, '#2563eb');
   tot('BALANCE DUE', money(inv.balance), true, inv.balance > 0 ? '#dc2626' : '#16a34a');
+  if (inv.customer_id && (inv.advance_balance > 0 || inv.deposit_used > 0 || inv.overpaid_saved > 0 || inv.advance_pending > 0)) {
+    const lines = []; if (inv.deposit_used > 0) lines.push(['Paid from customer deposit', money(inv.deposit_used)]); if (inv.overpaid_saved > 0) lines.push(['Overpayment saved as advance', money(inv.overpaid_saved)]);
+    if (inv.advance_pending > 0) lines.push(['Cheque deposits pending', money(inv.advance_pending)]); lines.push(['Advance balance available', money(inv.advance_balance)]);
+    y += 8; const h = 26 + lines.length * 15; if (y + h > 740) { doc.addPage(); y = 40; }
+    doc.roundedRect(300, y, 255, h, 6).fill('#ecfdf5'); doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(8.5).text(`CUSTOMER ADVANCE ACCOUNT  (as at ${today()})`, 310, y + 8, { width: 240 });
+    lines.forEach(([l, v], i) => { const yy = y + 24 + i * 15, last = i === lines.length - 1; doc.font(last ? 'Helvetica-Bold' : 'Helvetica').fontSize(last ? 10 : 9).fillColor('#065f46').text(l, 310, yy, { width: 150, lineBreak: false }).text(v, 455, yy, { width: 95, align: 'right', lineBreak: false }); });
+    y += h + 6; doc.fillColor(DARK);
+  }
   if (inv.payments.length) {
     y += 8; doc.font('Helvetica-Bold').fontSize(10).fillColor(DARK).text('Payment History', 40, y); y += 16;
     inv.payments.forEach(p => {
