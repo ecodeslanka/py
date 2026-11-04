@@ -4,389 +4,199 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bride2B Bridal Closet | Designing · Rent · Sale</title>
-<meta name="description" content="Bride2B Bridal Closet – luxury bridal gowns, Kandyan sarees and bridal lehengas for rent and sale in Sri Lanka. Find your dream dress and inquire on WhatsApp.">
+<meta name="description" content="Bride2B Bridal Closet – luxury bridal gowns, Kandyan sarees and bridal lehengas for rent and sale in Sri Lanka.">
 <meta name="theme-color" content="#B8924A">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/base.css">
 <style>
-:root{
-  --ivory:#FBF7EF; --ivory-2:#F4ECDC; --paper:#FFFDF8;
-  --gold:#B8924A; --gold-d:#8F6D2E; --gold-l:#E3CB93;
-  --ink:#1C1710; --muted:#6F665A; --line:#E7DCC4;
-  --wa:#25D366;
-  --serif:'Cormorant Garamond',Georgia,serif; --sans:'Jost',system-ui,sans-serif;
-  --r:14px; --shadow:0 10px 30px rgba(120,90,30,.12);
-}
-*{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-body{font-family:var(--sans);background:var(--ivory);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased}
-img{max-width:100%;display:block}
-a{color:inherit;text-decoration:none}
-button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
-.wrap{width:min(1180px,100% - 32px);margin-inline:auto}
-section{padding:72px 0}
-.eyebrow{font-size:.72rem;letter-spacing:.32em;text-transform:uppercase;color:var(--gold-d);font-weight:500}
-h1,h2,h3{font-family:var(--serif);font-weight:500;line-height:1.1}
-.sec-head{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:32px;flex-wrap:wrap}
-.sec-head h2{font-size:clamp(2rem,4.5vw,3rem);margin-top:6px}
-.link{font-size:.85rem;letter-spacing:.12em;text-transform:uppercase;color:var(--gold-d);border-bottom:1px solid var(--gold);padding-bottom:2px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:14px 28px;border-radius:999px;font-size:.82rem;letter-spacing:.14em;text-transform:uppercase;font-weight:500;transition:.25s}
-.btn-gold{background:linear-gradient(135deg,var(--gold),var(--gold-d));color:#fff;box-shadow:0 6px 18px rgba(143,109,46,.3)}
-.btn-gold:hover{transform:translateY(-2px)}
-.btn-line{border:1px solid var(--gold);color:var(--gold-d)}
-.btn-line:hover{background:var(--gold);color:#fff}
-.btn-wa{background:var(--wa);color:#fff}
+/* ===== SLIDESHOW ===== */
+.show{position:relative;height:clamp(560px,86vh,820px);overflow:hidden;background:var(--ink);padding:0;isolation:isolate}
+.slide{position:absolute;inset:0;opacity:0;visibility:hidden;transition:opacity 1.1s ease,visibility 1.1s}
+.slide.on{opacity:1;visibility:visible;z-index:2}
+.bg{position:absolute;inset:-4%;background:var(--img,none),radial-gradient(circle at 70% 30%,var(--a),transparent 55%),linear-gradient(135deg,var(--b),var(--c));background-size:cover;background-position:center;transform:scale(1.02)}
+.slide.on .bg{animation:kb 9s ease-out forwards}
+@keyframes kb{to{transform:scale(1.14) translate(-1.5%,1%)}}
+.slide::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(20,15,8,.78),rgba(20,15,8,.15) 65%)}
+.orb{position:absolute;border:1px solid rgba(227,203,147,.4);border-radius:50%;z-index:1}
+.o1{width:520px;height:520px;right:6%;top:50%;margin-top:-260px;animation:spin 40s linear infinite}
+.o2{width:360px;height:360px;right:12%;top:50%;margin-top:-180px;border-style:dashed;animation:spin 30s linear infinite reverse}
+@keyframes spin{to{transform:rotate(360deg)}}
+.big-n{position:absolute;right:5%;bottom:-6%;font-family:var(--serif);font-size:clamp(10rem,26vw,24rem);line-height:1;color:rgba(255,255,255,.1);z-index:1;pointer-events:none}
+.s-in{position:relative;z-index:3;height:100%;display:flex;align-items:center}
+.s-txt{max-width:600px;color:#fff}
+.s-txt .eyebrow{color:var(--gold-l)}
+.s-txt h1{font-size:clamp(2.8rem,8vw,6.2rem);margin:14px 0 18px}
+.s-txt h1 em{color:var(--gold-l);font-style:italic}
+.s-txt p{color:#e6dcc6;max-width:460px;font-size:1.05rem}
+.s-btns{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+.s-btns .btn-line{border-color:var(--gold-l);color:var(--gold-l)}
+.s-btns .btn-line:hover{background:var(--gold-l);color:var(--ink)}
+.slide .eyebrow,.slide h1,.slide p,.slide .s-btns{opacity:0;transform:translateY(34px)}
+.slide.on .eyebrow,.slide.on h1,.slide.on p,.slide.on .s-btns{animation:up .9s cubic-bezier(.2,.7,.2,1) forwards}
+.slide.on h1{animation-delay:.25s}.slide.on p{animation-delay:.45s}.slide.on .s-btns{animation-delay:.65s}
+@keyframes up{to{opacity:1;transform:none}}
+.ctrl{position:absolute;z-index:6;left:0;right:0;bottom:28px}
+.ctrl .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.dots{display:flex;gap:10px}
+.dot{width:46px;height:3px;background:rgba(255,255,255,.3);border-radius:3px;position:relative;overflow:hidden}
+.dot i{position:absolute;inset:0;background:var(--gold-l);transform:scaleX(0);transform-origin:left}
+.dot.done i{transform:scaleX(1)}
+.dot.on i{animation:fill var(--dur,6s) linear forwards}
+.paused .dot.on i{animation-play-state:paused}
+@keyframes fill{to{transform:scaleX(1)}}
+.arrows{display:flex;gap:10px;margin-right:76px}
+.arrows button{width:48px;height:48px;border-radius:50%;border:1px solid rgba(255,255,255,.5);color:#fff;font-size:1.2rem;transition:.25s}
+.arrows button:hover{background:var(--gold);border-color:var(--gold)}
+.scroll-cue{position:absolute;right:20px;top:50%;z-index:5;writing-mode:vertical-rl;font-size:.65rem;letter-spacing:.4em;color:rgba(255,255,255,.6);text-transform:uppercase}
 
-/* Top bar & header */
-.topbar{background:var(--ink);color:var(--gold-l);font-size:.75rem;letter-spacing:.2em;text-align:center;padding:8px 12px;text-transform:uppercase}
-header{position:sticky;top:0;z-index:50;background:rgba(251,247,239,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
-.nav{display:flex;align-items:center;justify-content:space-between;height:76px;gap:16px}
-.logo{text-align:center;line-height:1}
-.logo b{font-family:var(--serif);font-size:1.9rem;font-weight:600;letter-spacing:.18em;color:var(--ink)}
-.logo b i{color:var(--gold);font-style:normal}
-.logo small{display:block;font-size:.58rem;letter-spacing:.38em;color:var(--gold-d);margin-top:4px}
-.menu{display:flex;gap:30px;align-items:center}
-.menu a,.menu .dd>button{font-size:.8rem;letter-spacing:.16em;text-transform:uppercase;padding:6px 0;position:relative}
-.menu a::after,.menu .dd>button::after{content:"";position:absolute;left:0;bottom:0;width:0;height:1px;background:var(--gold);transition:.25s}
-.menu a:hover::after,.menu .dd:hover>button::after{width:100%}
-.dd{position:relative}
-.dd-panel{position:absolute;top:100%;left:-20px;min-width:240px;background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:10px;display:none}
-.dd:hover .dd-panel,.dd:focus-within .dd-panel{display:block}
-.dd-panel a{display:block;padding:10px 14px;border-radius:8px;letter-spacing:.06em;text-transform:none;font-size:.92rem}
-.dd-panel a:hover{background:var(--ivory-2)}
-.dd-panel a::after{display:none}
-.nav-cta{padding:10px 20px}
-.burger{display:none;width:44px;height:44px;border:1px solid var(--line);border-radius:50%}
-.burger span,.burger span::before,.burger span::after{display:block;width:18px;height:1.5px;background:var(--ink);margin:auto;position:relative}
-.burger span::before,.burger span::after{content:"";position:absolute;left:0}
-.burger span::before{top:-6px}.burger span::after{top:6px}
+/* ===== MARQUEE ===== */
+.marq{background:var(--gold);color:#fff;overflow:hidden;white-space:nowrap;padding:14px 0}
+.marq div{display:inline-block;animation:mq 28s linear infinite;font-family:var(--serif);font-size:1.5rem;font-style:italic}
+.marq span{margin:0 28px}
+.marq span::after{content:"✦";margin-left:56px;font-size:.9rem;font-style:normal}
+@keyframes mq{to{transform:translateX(-50%)}}
 
-/* Hero */
-.hero{padding:0;background:radial-gradient(1200px 500px at 85% 20%,#F1E3C0 0,transparent 60%),var(--ivory)}
-.hero-in{display:grid;grid-template-columns:1.05fr .95fr;gap:40px;align-items:center;min-height:620px;padding:48px 0}
-.hero h1{font-size:clamp(2.8rem,7vw,5.4rem);margin:16px 0 20px}
-.hero h1 em{color:var(--gold-d);font-style:italic}
-.hero p{color:var(--muted);max-width:480px;font-size:1.05rem}
-.hero-btns{display:flex;gap:12px;flex-wrap:wrap;margin-top:30px}
-.hero-tags{display:flex;gap:28px;margin-top:40px;flex-wrap:wrap}
-.hero-tags div b{display:block;font-family:var(--serif);font-size:1.7rem;color:var(--gold-d)}
-.hero-tags div span{font-size:.75rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-.hero-img{position:relative;height:540px}
-.arch{position:absolute;inset:0 0 0 12%;border-radius:300px 300px 20px 20px;background:
-  linear-gradient(180deg,rgba(255,255,255,.0),rgba(28,23,16,.35)),
-  linear-gradient(145deg,#EFD9A6,#B8924A 55%,#6E521F);overflow:hidden;border:6px solid var(--paper);box-shadow:var(--shadow)}
-.arch::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 30% 20%,rgba(255,255,255,.55),transparent 45%)}
-.arch span{position:absolute;bottom:28px;left:0;right:0;text-align:center;color:#fff;font-family:var(--serif);font-size:1.4rem;font-style:italic}
-.badge{position:absolute;left:0;bottom:60px;background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:14px 18px;box-shadow:var(--shadow);font-size:.85rem}
-.badge b{display:block;font-family:var(--serif);font-size:1.2rem;color:var(--gold-d)}
-.ph{background:linear-gradient(150deg,var(--c1,#F4E9CF),var(--c2,#D9BE7E));position:relative;overflow:hidden}
-.ph::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 25% 15%,rgba(255,255,255,.55),transparent 50%)}
+/* ===== BIG CATEGORIES ===== */
+.bento{display:grid;grid-template-columns:repeat(12,1fr);grid-auto-rows:minmax(230px,auto);gap:18px}
+.tile{position:relative;border-radius:26px;overflow:hidden;color:#fff;display:flex;align-items:flex-end;min-height:260px;isolation:isolate;
+  opacity:0;transform:translateY(60px) scale(.96);transition:opacity .8s,transform .8s cubic-bezier(.2,.7,.2,1),box-shadow .4s}
+.tile.in{opacity:1;transform:none}
+.tile:nth-child(1){grid-column:span 7;grid-row:span 2}
+.tile:nth-child(2){grid-column:span 5}
+.tile:nth-child(3){grid-column:span 5}
+.tile:nth-child(4){grid-column:span 4}
+.tile:nth-child(5){grid-column:span 4}
+.tile:nth-child(6){grid-column:span 4}
+.tile .tbg{position:absolute;inset:0;z-index:-2;background:var(--img,none),radial-gradient(circle at 25% 15%,rgba(255,255,255,.55),transparent 45%),linear-gradient(150deg,var(--c1),var(--c2));background-size:cover;transition:transform 1s cubic-bezier(.2,.7,.2,1)}
+.tile::before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(0deg,rgba(20,15,8,.8),rgba(20,15,8,.05) 70%);transition:.4s}
+.tile::after{content:"";position:absolute;top:0;left:-80%;width:50%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.35),transparent);transform:skewX(-20deg);z-index:0}
+.tile:hover::after{left:140%;transition:left 1s}
+.tile:hover .tbg{transform:scale(1.12) rotate(1deg)}
+.tile:hover{box-shadow:0 24px 50px rgba(60,40,10,.35)}
+.t-n{position:absolute;top:18px;left:24px;font-family:var(--serif);font-size:1.1rem;letter-spacing:.2em;opacity:.85}
+.t-go{position:absolute;top:16px;right:16px;width:54px;height:54px;border-radius:50%;background:#fff;color:var(--ink);display:grid;place-items:center;font-size:1.3rem;transition:.4s;transform:rotate(-45deg)}
+.tile:hover .t-go{background:var(--gold);color:#fff;transform:rotate(0)}
+.t-body{padding:26px;width:100%}
+.t-body h3{font-size:clamp(1.7rem,3vw,2.6rem);transition:.4s}
+.tile:nth-child(1) .t-body h3{font-size:clamp(2.4rem,5vw,4.2rem)}
+.t-body p{font-size:.9rem;color:#eadfc6;margin-top:4px}
+.t-subs{display:flex;flex-wrap:wrap;gap:6px;max-height:0;opacity:0;overflow:hidden;transition:max-height .5s,opacity .5s,margin .5s}
+.tile:hover .t-subs,.tile:focus-visible .t-subs{max-height:120px;opacity:1;margin-top:14px}
+.t-subs span{font-size:.72rem;letter-spacing:.08em;border:1px solid rgba(255,255,255,.6);border-radius:999px;padding:4px 12px;backdrop-filter:blur(4px)}
+@media(hover:none){.t-subs{max-height:120px;opacity:1;margin-top:12px}}
 
-/* Search strip */
-.finder{margin-top:-40px;position:relative;z-index:5}
-.finder-box{background:var(--paper);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:22px;display:grid;grid-template-columns:repeat(4,1fr) auto;gap:14px;align-items:end}
-label{display:block;font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
-select,input[type=text],input[type=date],input[type=tel]{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--ivory);font:inherit;color:var(--ink)}
-select:focus,input:focus{outline:2px solid var(--gold-l);border-color:var(--gold)}
-
-/* Categories */
-.cats{display:grid;grid-template-columns:repeat(6,1fr);gap:16px}
-.cat{display:block;text-align:center}
-.cat .ph{aspect-ratio:3/4;border-radius:200px 200px 14px 14px;border:1px solid var(--line);transition:.3s}
-.cat:hover .ph{transform:translateY(-6px);box-shadow:var(--shadow)}
-.cat h3{font-size:1.25rem;margin-top:14px}
-.cat small{color:var(--muted);font-size:.78rem}
-.cat .n{font-family:var(--serif);font-size:2.4rem;color:rgba(255,255,255,.85);position:absolute;bottom:14px;left:0;right:0;z-index:2}
-
-/* Products */
-.layout{display:grid;grid-template-columns:260px 1fr;gap:32px}
-.filters{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:22px;align-self:start;position:sticky;top:96px}
-.filters h3{font-size:1.5rem;margin-bottom:4px}
-.filters p{font-size:.82rem;color:var(--muted);margin-bottom:16px}
-.f-group{margin-bottom:16px}
-.pills{display:flex;gap:6px;flex-wrap:wrap}
-.pill{padding:7px 14px;border:1px solid var(--line);border-radius:999px;font-size:.8rem;background:var(--ivory)}
-.pill.on{background:var(--gold);border-color:var(--gold);color:#fff}
-.f-reset{width:100%;margin-top:6px;font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold-d);padding:10px;border:1px dashed var(--gold);border-radius:10px}
-.f-toggle{display:none}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-.card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;transition:.3s;display:flex;flex-direction:column}
-.card:hover{transform:translateY(-5px);box-shadow:var(--shadow)}
-.card .ph{aspect-ratio:3/4}
-.tag{position:absolute;top:12px;left:12px;z-index:2;background:var(--ink);color:var(--gold-l);font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;padding:5px 10px;border-radius:999px}
-.tag.booked{background:#8a2b2b;color:#fff;left:auto;right:12px}
-.card-b{padding:16px 16px 18px;display:flex;flex-direction:column;gap:6px;flex:1}
-.card-b small{font-size:.7rem;letter-spacing:.18em;color:var(--gold-d);text-transform:uppercase}
-.card-b h3{font-size:1.35rem}
-.meta{font-size:.82rem;color:var(--muted)}
-.prices{display:flex;justify-content:space-between;font-size:.85rem;border-top:1px solid var(--line);padding-top:10px;margin-top:auto}
-.prices span{color:var(--muted);display:block;font-size:.65rem;letter-spacing:.14em;text-transform:uppercase}
-.prices b{font-weight:500}
-.card .btn{margin-top:10px;padding:11px;font-size:.74rem}
-.empty{grid-column:1/-1;text-align:center;padding:60px 0;color:var(--muted)}
-.count{font-size:.85rem;color:var(--muted);margin-bottom:14px}
-
-/* Alt sections */
-.alt{background:var(--ivory-2)}
-.dark{background:var(--ink);color:var(--ivory)}
-.dark .eyebrow{color:var(--gold-l)}
-.dark .link{color:var(--gold-l);border-color:var(--gold)}
-.row{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
-
-/* Steps */
+/* ===== OTHER ===== */
 .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;counter-reset:s}
 .step{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:28px 22px;text-align:center}
 .step::before{counter-increment:s;content:"0" counter(s);display:block;font-family:var(--serif);font-size:2.6rem;color:var(--gold);line-height:1;margin-bottom:10px}
-.step h3{font-size:1.35rem;margin-bottom:6px}
-.step p{font-size:.9rem;color:var(--muted)}
+.step h3{font-size:1.35rem;margin-bottom:6px}.step p{font-size:.9rem;color:var(--muted)}
 .note{margin-top:24px;padding:16px 20px;border-left:3px solid var(--gold);background:var(--paper);border-radius:0 10px 10px 0;font-size:.9rem;color:var(--muted)}
-
-/* Reviews & moments */
 .reviews{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
 .rev{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:26px}
 .stars{color:var(--gold);letter-spacing:3px;margin-bottom:10px}
 .rev p{font-family:var(--serif);font-size:1.2rem;line-height:1.4}
 .rev span{display:block;margin-top:14px;font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
-.moments{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
-.moments .ph{aspect-ratio:1;border-radius:var(--r)}
-.moments .ph:nth-child(2),.moments .ph:nth-child(5){aspect-ratio:1/1.3;grid-row:span 1}
-
-/* Contact */
 .contact{display:grid;grid-template-columns:1fr 1fr;gap:32px}
 .c-card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:32px}
 .c-card h2{font-size:2.2rem;margin:6px 0 16px}
 .c-list{list-style:none;display:grid;gap:12px;margin:18px 0 24px}
 .c-list li{display:flex;gap:12px;font-size:.95rem}
 .c-list b{min-width:80px;font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold-d);padding-top:3px}
-.map{border-radius:var(--r);min-height:320px;border:1px solid var(--line);display:grid;place-items:center;text-align:center;color:var(--muted);padding:24px;
-  background:linear-gradient(0deg,rgba(251,247,239,.85),rgba(251,247,239,.85)),repeating-linear-gradient(45deg,var(--line) 0 1px,transparent 1px 22px)}
+.map{border-radius:var(--r);min-height:320px;border:1px solid var(--line);display:grid;place-items:center;text-align:center;color:var(--muted);padding:24px;background:linear-gradient(0deg,rgba(251,247,239,.85),rgba(251,247,239,.85)),repeating-linear-gradient(45deg,var(--line) 0 1px,transparent 1px 22px)}
 
-footer{background:var(--ink);color:#cbbfa6;padding:56px 0 24px}
-.f-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:32px}
-footer h4{font-family:var(--serif);color:var(--gold-l);font-size:1.2rem;font-weight:500;margin-bottom:12px}
-footer a{display:block;font-size:.9rem;padding:3px 0}
-footer a:hover{color:var(--gold-l)}
-footer .logo b{color:var(--ivory)}
-.copy{border-top:1px solid #3a3224;margin-top:32px;padding-top:18px;font-size:.78rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
-
-/* Floating WA */
-.wa-float{position:fixed;right:18px;bottom:18px;z-index:60;width:58px;height:58px;border-radius:50%;background:var(--wa);display:grid;place-items:center;box-shadow:0 8px 24px rgba(0,0,0,.25)}
-.wa-float svg{width:30px;height:30px;fill:#fff}
-
-/* Modal */
-.modal{position:fixed;inset:0;background:rgba(28,23,16,.6);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
-.modal.open{display:flex}
-.m-box{background:var(--paper);border-radius:20px;width:min(480px,100%);padding:28px;max-height:92vh;overflow:auto;position:relative}
-.m-box h3{font-size:1.9rem}
-.m-box .sub{font-size:.88rem;color:var(--muted);margin-bottom:16px}
-.m-box .field{margin-bottom:12px}
-.m-x{position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);font-size:1.2rem}
-.seg{display:flex;gap:6px}
-.seg .pill{flex:1;text-align:center}
-.preview{background:var(--ivory);border:1px dashed var(--gold);border-radius:10px;padding:12px;font-size:.82rem;color:var(--muted);white-space:pre-line;margin:6px 0 14px;max-height:150px;overflow:auto}
-
-/* Responsive */
 @media(max-width:1020px){
-  .cats{grid-template-columns:repeat(3,1fr)}
-  .grid{grid-template-columns:repeat(2,1fr)}
-  .row,.steps,.moments{grid-template-columns:repeat(2,1fr)}
-  .finder-box{grid-template-columns:repeat(2,1fr)}
-  .finder-box .btn{grid-column:1/-1}
+  .bento{grid-template-columns:repeat(6,1fr)}
+  .tile:nth-child(n){grid-column:span 3;grid-row:auto}
+  .tile:nth-child(1){grid-column:span 6;min-height:380px}
+  .steps{grid-template-columns:repeat(2,1fr)}
+  .o1,.o2{display:none}
 }
-@media(max-width:860px){
-  section{padding:52px 0}
-  .menu{position:fixed;inset:calc(76px + 33px) 0 auto 0;background:var(--paper);flex-direction:column;align-items:stretch;gap:0;padding:12px 20px 24px;border-bottom:1px solid var(--line);display:none;max-height:calc(100vh - 110px);overflow:auto}
-  .menu.open{display:flex}
-  .menu>a,.menu .dd>button{padding:14px 0;border-bottom:1px solid var(--line);width:100%;text-align:left}
-  .dd-panel{position:static;display:block;border:0;box-shadow:none;padding:0 0 0 12px;background:none}
-  .nav-cta{display:none}
-  .burger{display:block}
-  .hero-in{grid-template-columns:1fr;min-height:0;text-align:center}
-  .hero p{margin-inline:auto}
-  .hero-btns,.hero-tags{justify-content:center}
-  .hero-img{height:420px;order:-1}
-  .arch{inset:0 8%}
-  .badge{left:4%;bottom:30px}
-  .layout{grid-template-columns:1fr}
-  .filters{position:static;display:none}
-  .filters.open{display:block}
-  .f-toggle{display:flex;width:100%;margin-bottom:16px}
-  .reviews,.contact{grid-template-columns:1fr}
-  .f-grid{grid-template-columns:1fr 1fr}
-}
+@media(max-width:860px){.reviews,.contact{grid-template-columns:1fr}.scroll-cue{display:none}}
 @media(max-width:560px){
-  .cats{grid-template-columns:repeat(2,1fr)}
-  .grid{gap:12px}
-  .card-b{padding:12px}
-  .card-b h3{font-size:1.1rem}
-  .prices{flex-direction:column;gap:4px}
-  .row{grid-template-columns:repeat(2,1fr);gap:12px}
+  .show{height:clamp(540px,88vh,720px)}
+  .bento{gap:12px}
+  .tile:nth-child(n){grid-column:span 6;min-height:230px}
+  .tile:nth-child(1){min-height:320px}
   .steps{grid-template-columns:1fr}
-  .finder-box{grid-template-columns:1fr}
-  .f-grid{grid-template-columns:1fr}
-  .hero-img{height:340px}
+  .dot{width:28px}.arrows button{width:42px;height:42px}
 }
-@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
+<div id="site-header"></div>
 
-<div class="topbar">Designing · Rent · Sale &nbsp;|&nbsp; Bridal Catalogue &amp; WhatsApp Inquiry</div>
-
-<header>
-  <div class="wrap nav">
-    <button class="burger" id="burger" aria-label="Open menu" aria-expanded="false"><span></span></button>
-    <nav class="menu" id="menu" aria-label="Main navigation">
-      <a href="#home">Home</a>
-      <div class="dd">
-        <button type="button">Collections ▾</button>
-        <div class="dd-panel">
-          <a href="#catalogue" data-cat="Bridal Gowns">Bridal Gowns</a>
-          <a href="#catalogue" data-cat="Kandyan Sarees">Kandyan Sarees</a>
-          <a href="#catalogue" data-cat="Bridal Lehengas">Bridal Lehengas</a>
-          <a href="#catalogue" data-cat="Engagement & Reception">Engagement &amp; Reception</a>
-          <a href="#catalogue" data-cat="Bridal Sarees">Bridal Sarees</a>
-          <a href="#catalogue" data-cat="Special Collections">Special Collections</a>
-        </div>
-      </div>
-      <a href="#new">New Arrivals</a>
-      <a href="#about">About Us</a>
-      <a href="#how">How to Rent</a>
-      <a href="#contact">Contact</a>
-    </nav>
-    <a class="logo" href="#home" aria-label="Bride2B Bridal Closet">
-      <b>BRIDE<i>2</i>B</b><small>BRIDAL CLOSET</small>
-    </a>
-    <a class="btn btn-gold nav-cta" href="#" data-wa-general>WhatsApp</a>
-  </div>
-</header>
-
-<main id="home">
-<!-- 1. HERO -->
-<section class="hero">
-  <div class="wrap hero-in">
-    <div>
+<main>
+<!-- SLIDESHOW -->
+<section class="show" id="show" aria-roledescription="carousel" aria-label="Featured collections">
+  <div class="slide on" style="--a:#E3CB93;--b:#3b2c12;--c:#B8924A">
+    <div class="bg"></div><div class="orb o1"></div><div class="orb o2"></div><div class="big-n">01</div>
+    <div class="wrap s-in"><div class="s-txt">
       <span class="eyebrow">Designing · Rent · Sale</span>
-      <h1>Find the dress of your <em>forever</em> day</h1>
-      <p>Luxury bridal gowns, Kandyan sarees and bridal lehengas – available to rent or buy, or custom designed just for you.</p>
-      <div class="hero-btns">
-        <a class="btn btn-gold" href="#catalogue">Explore Collection</a>
-        <a class="btn btn-line" href="#how">How to Rent</a>
-      </div>
-      <div class="hero-tags">
-        <div><b>500+</b><span>Bridal Designs</span></div>
-        <div><b>Rent &amp; Sale</b><span>Flexible Options</span></div>
-        <div><b>Custom</b><span>Made for You</span></div>
-      </div>
-    </div>
-    <div class="hero-img">
-      <div class="arch"><span>Replace with bridal model photoshoot</span></div>
-      <div class="badge"><b>New Season</b>Bridal Collection 2027</div>
-    </div>
+      <h1>Find the gown of your <em>forever</em> day</h1>
+      <p>Luxury bridal gowns – mermaid, princess and A-line – to rent, buy or have custom made.</p>
+      <div class="s-btns"><a class="btn btn-gold" href="collections.html?cat=Bridal%20Gowns">Shop Bridal Gowns</a><a class="btn btn-line" href="#categories">All Collections</a></div>
+    </div></div>
+  </div>
+  <div class="slide" style="--a:#F2DFA8;--b:#5a1d1d;--c:#B8924A">
+    <div class="bg"></div><div class="orb o1"></div><div class="orb o2"></div><div class="big-n">02</div>
+    <div class="wrap s-in"><div class="s-txt">
+      <span class="eyebrow">Heritage Collection</span>
+      <h1>Timeless <em>Kandyan</em> elegance</h1>
+      <p>Traditional, modern and luxury Kandyan sarees – in red &amp; gold and beyond.</p>
+      <div class="s-btns"><a class="btn btn-gold" href="collections.html?cat=Kandyan%20Sarees">Shop Kandyan</a><a class="btn btn-line" href="#how">How to Rent</a></div>
+    </div></div>
+  </div>
+  <div class="slide" style="--a:#E8B4A8;--b:#3a0f1a;--c:#8f3a3a">
+    <div class="bg"></div><div class="orb o1"></div><div class="orb o2"></div><div class="big-n">03</div>
+    <div class="wrap s-in"><div class="s-txt">
+      <span class="eyebrow">Statement Bridal</span>
+      <h1>Bridal <em>lehengas</em> that glow</h1>
+      <p>Zari, sequin and stone-work lehengas for brides who love to stand out.</p>
+      <div class="s-btns"><a class="btn btn-gold" href="collections.html?cat=Bridal%20Lehengas">Shop Lehengas</a><a class="btn btn-line" href="#new">New Arrivals</a></div>
+    </div></div>
+  </div>
+  <div class="slide" style="--a:#FBF3DE;--b:#1c1710;--c:#6E521F">
+    <div class="bg"></div><div class="orb o1"></div><div class="orb o2"></div><div class="big-n">04</div>
+    <div class="wrap s-in"><div class="s-txt">
+      <span class="eyebrow">Custom Designing</span>
+      <h1>Your dream, <em>designed</em> for you</h1>
+      <p>Tell us your wedding date and your vision – we’ll bring it to life.</p>
+      <div class="s-btns"><a class="btn btn-gold" href="#" data-wa-general>Chat on WhatsApp</a><a class="btn btn-line" href="#categories">Browse Ideas</a></div>
+    </div></div>
+  </div>
+  <div class="scroll-cue">Scroll</div>
+  <div class="ctrl"><div class="wrap">
+    <div class="dots" id="dots"></div>
+    <div class="arrows"><button id="prev" aria-label="Previous slide">←</button><button id="next" aria-label="Next slide">→</button></div>
+  </div></div>
+</section>
+
+<div class="marq" aria-hidden="true"><div id="marq"></div></div>
+
+<!-- BIG CATEGORIES -->
+<section id="categories">
+  <div class="wrap">
+    <div class="sec-head"><div><span class="eyebrow">Collections</span><h2>Shop by Category</h2></div><span class="eyebrow" style="color:var(--muted)">Tap a category to explore &amp; filter →</span></div>
+    <div class="bento" id="bento"></div>
   </div>
 </section>
 
-<!-- Quick finder -->
-<div class="wrap finder">
-  <form class="finder-box" id="quick" onsubmit="return false">
-    <div><label for="q-cat">Category</label>
-      <select id="q-cat"><option value="">All Categories</option></select></div>
-    <div><label for="q-svc">Service</label>
-      <select id="q-svc"><option value="">Rent or Sale</option><option>Rent</option><option>Sale</option><option>Custom Made</option></select></div>
-    <div><label for="q-col">Colour</label>
-      <select id="q-col"><option value="">Any Colour</option></select></div>
-    <div><label for="q-date">Wedding Date</label><input type="date" id="q-date"></div>
-    <button class="btn btn-gold" id="q-go">Find My Dress</button>
-  </form>
-</div>
-
-<!-- 2. SHOP BY CATEGORY -->
-<section id="collections">
+<section id="new" class="alt">
   <div class="wrap">
-    <div class="sec-head">
-      <div><span class="eyebrow">Collections</span><h2>Shop by Category</h2></div>
-    </div>
-    <div class="cats" id="cats"></div>
-  </div>
-</section>
-
-<!-- CATALOGUE WITH FILTERS -->
-<section id="catalogue" class="alt">
-  <div class="wrap">
-    <div class="sec-head">
-      <div><span class="eyebrow">Catalogue</span><h2>Find Your Dream Dress</h2></div>
-      <div style="min-width:200px"><label for="f-sort">Sort By</label>
-        <select id="f-sort"><option value="new">Newest First</option><option value="best">Best Sellers</option><option value="plow">Rental: Low to High</option><option value="phigh">Rental: High to Low</option></select></div>
-    </div>
-    <button class="btn btn-line f-toggle" id="f-toggle">Show Filters</button>
-    <div class="layout">
-      <aside class="filters" id="filters">
-        <h3>Filters</h3><p>Options change with category.</p>
-        <div class="f-group"><label for="f-cat">Product Category</label><select id="f-cat"><option value="">All Categories</option></select></div>
-        <div class="f-group"><label>Service Type</label><div class="pills" data-f="svc"></div></div>
-        <div class="f-group"><label for="f-col">Colour</label><select id="f-col"><option value="">Any Colour</option></select></div>
-        <div class="f-group"><label for="f-size">Size</label><select id="f-size"><option value="">Any Size</option></select></div>
-        <div class="f-group"><label>Availability</label><div class="pills" data-f="avail"></div></div>
-        <div class="f-group"><label for="f-date">Wedding Date</label><input type="date" id="f-date"></div>
-        <div id="dyn"></div>
-        <button class="f-reset" id="f-reset">Reset Filters</button>
-      </aside>
-      <div>
-        <div class="count" id="count"></div>
-        <div class="grid" id="grid"></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- 3. NEW ARRIVALS -->
-<section id="new">
-  <div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Just In</span><h2>New Arrivals</h2></div><a class="link" href="#catalogue">View All →</a></div>
+    <div class="sec-head"><div><span class="eyebrow">Just In</span><h2>New Arrivals</h2></div><a class="link" href="collections.html?sort=new">View All →</a></div>
     <div class="row" id="row-new"></div>
   </div>
 </section>
 
-<!-- 4. BEST SELLERS -->
-<section id="best" class="alt">
+<section id="best">
   <div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Loved by Brides</span><h2>Best Selling Dresses</h2></div><a class="link" href="#catalogue">View All →</a></div>
+    <div class="sec-head"><div><span class="eyebrow">Loved by Brides</span><h2>Best Selling Dresses</h2></div><a class="link" href="collections.html?sort=best">View All →</a></div>
     <div class="row" id="row-best"></div>
   </div>
 </section>
 
-<!-- 5. KANDYAN -->
-<section id="kandyan">
-  <div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Heritage</span><h2>Luxury Kandyan Collection</h2></div><a class="link" href="#catalogue" data-cat="Kandyan Sarees">View All →</a></div>
-    <div class="row" id="row-kandyan"></div>
-  </div>
-</section>
-
-<!-- 6. LEHENGA -->
-<section id="lehenga" class="dark">
-  <div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Statement Bridal</span><h2>Bridal Lehenga Collection</h2></div><a class="link" href="#catalogue" data-cat="Bridal Lehengas">View All →</a></div>
-    <div class="row" id="row-leh"></div>
-  </div>
-</section>
-
-<!-- ABOUT -->
-<section id="about">
-  <div class="wrap contact" style="align-items:center">
-    <div class="ph" style="aspect-ratio:4/5;border-radius:200px 200px 16px 16px;border:6px solid var(--paper);box-shadow:var(--shadow)"></div>
-    <div>
-      <span class="eyebrow">About Bride2B</span>
-      <h2 style="font-size:clamp(2rem,4.5vw,3rem);margin:8px 0 16px">Designing your most beautiful day</h2>
-      <p style="color:var(--muted);margin-bottom:14px">Bride2B Bridal Closet brings together designing, rental and sale under one roof – from elegant bridal gowns to rich Kandyan sarees and statement lehengas.</p>
-      <p style="color:var(--muted);margin-bottom:24px">Add your business story here: years of experience, your design philosophy and what makes your brides feel special.</p>
-      <a class="btn btn-line" href="#contact">Visit Our Showroom</a>
-    </div>
-  </div>
-</section>
-
-<!-- 7. HOW TO RENT -->
 <section id="how" class="alt">
   <div class="wrap">
     <div class="sec-head"><div><span class="eyebrow">Simple Process</span><h2>How to Rent</h2></div></div>
@@ -400,7 +210,6 @@ footer .logo b{color:var(--ivory)}
   </div>
 </section>
 
-<!-- 8. REVIEWS -->
 <section id="reviews">
   <div class="wrap">
     <div class="sec-head"><div><span class="eyebrow">Testimonials</span><h2>Customer Reviews</h2></div></div>
@@ -412,19 +221,7 @@ footer .logo b{color:var(--ivory)}
   </div>
 </section>
 
-<!-- 9. MOMENTS -->
-<section id="moments" class="alt">
-  <div class="wrap">
-    <div class="sec-head"><div><span class="eyebrow">Gallery</span><h2>Our Bridal Moments</h2></div><a class="link" href="#" rel="noopener">Follow on Instagram →</a></div>
-    <div class="moments">
-      <div class="ph" style="--c1:#F4E9CF;--c2:#CFAE63"></div><div class="ph" style="--c1:#EFE0C0;--c2:#B8924A"></div>
-      <div class="ph" style="--c1:#F7EFDD;--c2:#E3CB93"></div><div class="ph" style="--c1:#EBD9AE;--c2:#8F6D2E"></div>
-    </div>
-  </div>
-</section>
-
-<!-- 10. CONTACT -->
-<section id="contact">
+<section id="contact" class="alt">
   <div class="wrap contact">
     <div class="c-card">
       <span class="eyebrow">Contact &amp; Location</span>
@@ -442,188 +239,47 @@ footer .logo b{color:var(--ivory)}
 </section>
 </main>
 
-<footer>
-  <div class="wrap">
-    <div class="f-grid">
-      <div><div class="logo" style="text-align:left"><b>BRIDE<i>2</i>B</b><small>BRIDAL CLOSET</small></div>
-        <p style="margin-top:14px;font-size:.9rem;max-width:300px">Designing · Rent · Sale. Luxury bridal wear for your most beautiful day.</p></div>
-      <div><h4>Collections</h4><a href="#catalogue" data-cat="Bridal Gowns">Bridal Gowns</a><a href="#catalogue" data-cat="Kandyan Sarees">Kandyan Sarees</a><a href="#catalogue" data-cat="Bridal Lehengas">Bridal Lehengas</a><a href="#catalogue" data-cat="Bridal Sarees">Bridal Sarees</a></div>
-      <div><h4>Information</h4><a href="#how">How to Rent</a><a href="#">Rental Terms</a><a href="#">Custom Designing</a><a href="#">FAQ</a><a href="#">Privacy Policy</a></div>
-      <div><h4>Follow Us</h4><a href="#">Facebook</a><a href="#">Instagram</a><a href="#" data-wa-general>WhatsApp</a></div>
-    </div>
-    <div class="copy"><span>© <span id="yr"></span> Bride2B Bridal Closet. All rights reserved.</span><span>Catalogue &amp; inquiry website</span></div>
-  </div>
-</footer>
+<div id="site-footer"></div>
 
-<a class="wa-float" href="#" data-wa-general aria-label="WhatsApp inquiry">
-  <svg viewBox="0 0 32 32"><path d="M16 3C9 3 3.4 8.6 3.4 15.5c0 2.3.6 4.4 1.7 6.3L3 29l7.4-1.9c1.8 1 3.8 1.500 5.600 1.500 6.900 0 12.600-5.600 12.600-12.500S22.900 3 16 3zm0 22.900c-1.800 0-3.500-.5-5-1.400l-.4-.2-4.400 1.100 1.200-4.300-.3-.4a10.200 10.200 0 0 1-1.600-5.500C5.500 9.900 10.200 5.300 16 5.300s10.500 4.600 10.500 10.300S21.800 25.900 16 25.900zm5.800-7.600c-.3-.2-1.900-.9-2.200-1s-.5-.2-.7.200-.8 1-1 1.200-.4.200-.7.100a8.600 8.600 0 0 1-4.300-3.700c-.3-.6.300-.5.900-1.700.1-.2.100-.4 0-.5s-.7-1.700-1-2.300c-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.5.100-.8.400s-1 1-1 2.400 1 2.800 1.200 3c.1.200 2 3.100 4.900 4.300 1.800.8 2.500.9 3.400.7.600-.1 1.900-.8 2.100-1.500.3-.7.300-1.400.2-1.500s-.3-.2-.6-.4z"/></svg>
-</a>
-
-<!-- Inquiry modal -->
-<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
-  <div class="m-box">
-    <button class="m-x" id="m-x" aria-label="Close">×</button>
-    <span class="eyebrow">WhatsApp Inquiry</span>
-    <h3 id="m-title">Interested in this dress?</h3>
-    <p class="sub" id="m-sub">Fill in your details – we’ll open WhatsApp with the message ready.</p>
-    <div class="field"><label for="m-name">Your Name</label><input type="text" id="m-name" autocomplete="name"></div>
-    <div class="field"><label for="m-phone">Contact Number</label><input type="tel" id="m-phone" autocomplete="tel"></div>
-    <div class="field"><label>Service</label><div class="seg pills" id="m-svc"></div></div>
-    <div class="field"><label for="m-date">Wedding Date</label><input type="date" id="m-date"></div>
-    <label>Message Preview</label>
-    <div class="preview" id="m-prev"></div>
-    <button class="btn btn-wa" style="width:100%" id="m-send">Send on WhatsApp</button>
-    <p class="sub" style="margin:12px 0 0;text-align:center">This is an inquiry, not a booking confirmation.</p>
-  </div>
-</div>
-
+<script src="assets/data.js"></script>
+<script src="assets/common.js"></script>
 <script>
-/* ===== CONFIG – edit these ===== */
-const WA_NUMBER = "94770000000";   // WhatsApp number, country code first, no + or spaces
-const CATS = {
-  "Bridal Gowns":["Luxury Bridal Gowns","Mermaid Gowns","Princess Gowns","A-Line Gowns","Reception Gowns","Minimal Bridal Gowns"],
-  "Kandyan Sarees":["Luxury Kandyan","Modern Kandyan","Traditional Kandyan","Red & Gold Collection","Other Colour Collection"],
-  "Bridal Lehengas":["Luxury Lehengas","Traditional Lehengas","Modern Lehengas","Engagement Lehengas"],
-  "Engagement & Reception":["Engagement Dresses","Reception Dresses","Going Away Dresses","Pre-shoot Dresses"],
-  "Bridal Sarees":["Designer Sarees","Wedding Sarees","Luxury Sarees"],
-  "Special Collections":["New Arrivals","Best Sellers","Exclusive Designs","Sale Collection"]
-};
-const COLOURS = ["Ivory","White","Red","Pink","Gold","Maroon","Blush"];
-const SIZES = ["XS","S","M","L","XL","Custom"];
-/* Category-specific filters */
-const DYN = {
-  "Bridal Gowns":{ Silhouette:["Mermaid","Princess","A-Line","Minimal"], Neckline:["Sweetheart","V-Neck","Off-Shoulder","Square"], Sleeve:["Sleeveless","Cap","Long","Off-Shoulder"] },
-  "Kandyan Sarees":{ Style:["Traditional","Modern","Luxury"], Jacket:["Full Sleeve","Short Sleeve","Back Design"] },
-  "Bridal Lehengas":{ Embroidery:["Zari","Sequin","Stone Work"], Style:["Traditional","Modern","Luxury"] }
-};
-/* Sample products – later replaced by the Admin Panel / database */
-const P = [
- {id:"B2B-001",name:"Luxury Bridal Gown",cat:"Bridal Gowns",sub:"Princess Gowns",col:"Ivory",sizes:["S","M","L","Custom"],svc:["Rent","Sale"],rent:45000,sale:185000,avail:true,isNew:true,best:true,booked:["2027-03-15"],a:{Silhouette:"Princess",Neckline:"Sweetheart",Sleeve:"Sleeveless"}},
- {id:"B2B-002",name:"Mermaid Lace Gown",cat:"Bridal Gowns",sub:"Mermaid Gowns",col:"White",sizes:["XS","S","M"],svc:["Rent","Sale","Custom Made"],rent:38000,sale:150000,avail:true,isNew:true,best:false,booked:[],a:{Silhouette:"Mermaid",Neckline:"V-Neck",Sleeve:"Long"}},
- {id:"B2B-003",name:"Minimal Satin Gown",cat:"Bridal Gowns",sub:"Minimal Bridal Gowns",col:"Ivory",sizes:["M","L","XL"],svc:["Rent"],rent:30000,sale:null,avail:false,isNew:false,best:true,booked:[],a:{Silhouette:"Minimal",Neckline:"Square",Sleeve:"Cap"}},
- {id:"B2B-004",name:"Royal Kandyan Saree",cat:"Kandyan Sarees",sub:"Luxury Kandyan",col:"Gold",sizes:["Custom"],svc:["Rent","Sale"],rent:35000,sale:120000,avail:true,isNew:false,best:true,booked:["2027-02-20"],a:{Style:"Luxury",Jacket:"Full Sleeve"}},
- {id:"B2B-005",name:"Red & Gold Kandyan",cat:"Kandyan Sarees",sub:"Red & Gold Collection",col:"Red",sizes:["Custom"],svc:["Rent","Sale","Custom Made"],rent:32000,sale:110000,avail:true,isNew:true,best:false,booked:[],a:{Style:"Traditional",Jacket:"Back Design"}},
- {id:"B2B-006",name:"Modern Kandyan Set",cat:"Kandyan Sarees",sub:"Modern Kandyan",col:"Pink",sizes:["S","M","L"],svc:["Rent"],rent:28000,sale:null,avail:true,isNew:false,best:false,booked:[],a:{Style:"Modern",Jacket:"Short Sleeve"}},
- {id:"B2B-007",name:"Zari Bridal Lehenga",cat:"Bridal Lehengas",sub:"Luxury Lehengas",col:"Maroon",sizes:["S","M","L","Custom"],svc:["Rent","Sale"],rent:40000,sale:165000,avail:true,isNew:true,best:true,booked:[],a:{Embroidery:"Zari",Style:"Luxury"}},
- {id:"B2B-008",name:"Engagement Lehenga",cat:"Bridal Lehengas",sub:"Engagement Lehengas",col:"Blush",sizes:["XS","S","M"],svc:["Rent","Sale"],rent:26000,sale:95000,avail:false,isNew:false,best:false,booked:[],a:{Embroidery:"Sequin",Style:"Modern"}},
- {id:"B2B-009",name:"Reception Evening Dress",cat:"Engagement & Reception",sub:"Reception Dresses",col:"Pink",sizes:["S","M","L"],svc:["Rent","Sale"],rent:18000,sale:70000,avail:true,isNew:true,best:false,booked:[],a:{}},
- {id:"B2B-010",name:"Pre-shoot Flowing Gown",cat:"Engagement & Reception",sub:"Pre-shoot Dresses",col:"White",sizes:["XS","S","M","L"],svc:["Rent"],rent:15000,sale:null,avail:true,isNew:false,best:true,booked:[],a:{}},
- {id:"B2B-011",name:"Designer Wedding Saree",cat:"Bridal Sarees",sub:"Wedding Sarees",col:"Gold",sizes:["Custom"],svc:["Rent","Sale"],rent:22000,sale:85000,avail:true,isNew:false,best:false,booked:[],a:{}},
- {id:"B2B-012",name:"Princess Ball Gown",cat:"Bridal Gowns",sub:"Princess Gowns",col:"Ivory",sizes:["M","L","XL"],svc:["Rent","Sale","Custom Made"],rent:52000,sale:210000,avail:true,isNew:true,best:true,booked:[],a:{Silhouette:"Princess",Neckline:"Off-Shoulder",Sleeve:"Off-Shoulder"}}
-];
-const SWATCH = {Ivory:["#FBF3DE","#E6D3A4"],White:["#FFFFFF","#E9E1CF"],Red:["#E8B4A8","#A8322A"],Pink:["#F8DCDD","#D99AA3"],Gold:["#F2DFA8","#B8924A"],Maroon:["#D9A3A3","#6E1F2B"],Blush:["#FBE6E0","#E3B3A8"]};
-
-/* ===== helpers ===== */
-const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
-const money=n=>n?"LKR "+n.toLocaleString("en-LK"):"On request";
-const state={cat:"",svc:"All",avail:"All",col:"",size:"",date:"",sort:"new",dyn:{}};
-const opt=(sel,list)=>list.forEach(v=>sel.insertAdjacentHTML("beforeend",`<option>${v}</option>`));
-
-function isFree(p,date){ return p.avail && !(date && p.booked.includes(date)); }
-function ph(p){const [a,b]=SWATCH[p.col]||SWATCH.Ivory;return `style="--c1:${a};--c2:${b}"`}
-
-function card(p){
-  const free=isFree(p,state.date);
-  return `<article class="card"><div class="ph" ${ph(p)}>
-    ${p.isNew?'<span class="tag">New</span>':''}${!free?'<span class="tag booked">Booked</span>':''}</div>
-    <div class="card-b"><small>${p.id} · ${p.sub}</small><h3>${p.name}</h3>
-    <div class="meta">${p.col} · ${p.sizes.join(" / ")}<br>${p.svc.join(" · ")}</div>
-    <div class="prices"><div><span>Rent</span><b>${p.svc.includes("Rent")?money(p.rent):"—"}</b></div>
-    <div><span>Buy</span><b>${p.sale?money(p.sale):"—"}</b></div></div>
-    <button class="btn btn-gold" data-inq="${p.id}">Inquire on WhatsApp</button></div></article>`;
-}
-
-/* ===== filtering ===== */
-function filtered(){
-  let r=P.filter(p=>
-    (!state.cat||p.cat===state.cat) &&
-    (state.svc==="All"||p.svc.includes(state.svc)) &&
-    (!state.col||p.col===state.col) &&
-    (!state.size||p.sizes.includes(state.size)) &&
-    (state.avail==="All"||(state.avail==="Available"?isFree(p,state.date):!isFree(p,state.date))) &&
-    Object.entries(state.dyn).every(([k,v])=>!v||p.a[k]===v));
-  const s={new:(a,b)=>b.isNew-a.isNew,best:(a,b)=>b.best-a.best,plow:(a,b)=>a.rent-b.rent,phigh:(a,b)=>b.rent-a.rent}[state.sort];
-  return r.sort(s);
-}
-function render(){
-  const r=filtered();
-  $("#count").textContent=`${r.length} dress${r.length===1?"":"es"} found`+(state.date?` · checked for ${state.date}`:"");
-  $("#grid").innerHTML=r.length?r.map(card).join(""):'<div class="empty">No dresses match these filters. Try resetting or <a class="link" href="#" data-wa-general>ask us on WhatsApp</a>.</div>';
-}
-function renderDyn(){
-  const d=DYN[state.cat]||{}; state.dyn={};
-  $("#dyn").innerHTML=Object.entries(d).map(([k,v])=>`<div class="f-group"><label>${k}</label><select data-dyn="${k}"><option value="">Any</option>${v.map(x=>`<option>${x}</option>`).join("")}</select></div>`).join("");
-}
-function pills(el,list,key){
-  el.innerHTML=list.map(v=>`<button type="button" class="pill${state[key]===v?" on":""}" data-v="${v}">${v}</button>`).join("");
-}
-function syncUI(){
-  $("#f-cat").value=state.cat;$("#f-col").value=state.col;$("#f-size").value=state.size;$("#f-date").value=state.date;$("#f-sort").value=state.sort;
-  pills($('[data-f="svc"]'),["All","Rent","Sale","Custom Made"],"svc");
-  pills($('[data-f="avail"]'),["All","Available","Booked"],"avail");
-}
-function setCat(c){state.cat=c;renderDyn();syncUI();render();}
-
-/* ===== init ===== */
+/* categories */
 const cats=Object.keys(CATS);
-opt($("#q-cat"),cats);opt($("#f-cat"),cats);opt($("#q-col"),COLOURS);opt($("#f-col"),COLOURS);opt($("#f-size"),SIZES);
-$("#cats").innerHTML=cats.map((c,i)=>`<a class="cat" href="#catalogue" data-cat="${c}"><div class="ph" style="--c1:${["#F4E9CF","#F2DFA8","#F8DCDD","#FBE6E0","#EFE0C0","#E3CB93"][i]};--c2:${["#D9BE7E","#B8924A","#D99AA3","#E3B3A8","#CFAE63","#8F6D2E"][i]}"><span class="n">0${i+1}</span></div><h3>${c}</h3><small>${CATS[c].length} collections</small></a>`).join("");
-const mini=(list,id)=>$(id).innerHTML=list.slice(0,4).map(card).join("");
-mini(P.filter(p=>p.isNew),"#row-new");mini(P.filter(p=>p.best),"#row-best");
-mini(P.filter(p=>p.cat==="Kandyan Sarees"),"#row-kandyan");mini(P.filter(p=>p.cat==="Bridal Lehengas"),"#row-leh");
-$("#yr").textContent=new Date().getFullYear();
-syncUI();render();
-
-/* ===== events ===== */
-document.addEventListener("click",e=>{
-  const c=e.target.closest("[data-cat]");
-  if(c){setCat(c.dataset.cat);$("#menu").classList.remove("open");}
-  const pill=e.target.closest(".pills .pill[data-v]");
-  if(pill&&pill.parentElement.dataset.f){state[pill.parentElement.dataset.f]=pill.dataset.v;syncUI();render();}
-  const inq=e.target.closest("[data-inq]"); if(inq){e.preventDefault();openModal(P.find(p=>p.id===inq.dataset.inq));}
-  const gen=e.target.closest("[data-wa-general]"); if(gen){e.preventDefault();openModal(null);}
-});
-$("#f-cat").onchange=e=>setCat(e.target.value);
-$("#f-col").onchange=e=>{state.col=e.target.value;render()};
-$("#f-size").onchange=e=>{state.size=e.target.value;render()};
-$("#f-date").onchange=e=>{state.date=e.target.value;render()};
-$("#f-sort").onchange=e=>{state.sort=e.target.value;render()};
-$("#dyn").onchange=e=>{if(e.target.dataset.dyn){state.dyn[e.target.dataset.dyn]=e.target.value;render()}};
-$("#f-reset").onclick=()=>{Object.assign(state,{cat:"",svc:"All",avail:"All",col:"",size:"",date:"",sort:"new"});renderDyn();syncUI();render();};
-$("#f-toggle").onclick=e=>{const o=$("#filters").classList.toggle("open");e.target.textContent=o?"Hide Filters":"Show Filters"};
-$("#q-go").onclick=()=>{
-  state.cat=$("#q-cat").value;state.svc=$("#q-svc").value||"All";state.col=$("#q-col").value;state.date=$("#q-date").value;
-  renderDyn();syncUI();render();$("#catalogue").scrollIntoView({behavior:"smooth"});
-};
-$("#burger").onclick=e=>{const o=$("#menu").classList.toggle("open");e.currentTarget.setAttribute("aria-expanded",o)};
-$$("#menu a:not([data-cat])").forEach(a=>a.addEventListener("click",()=>$("#menu").classList.remove("open")));
-
-/* ===== WhatsApp inquiry ===== */
-let cur=null, svc="Rental";
-function msg(){
-  const n=$("#m-name").value.trim(),ph=$("#m-phone").value.trim(),d=$("#m-date").value;
-  const dt=d?new Date(d+"T00:00").toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}):"Not decided yet";
-  return `Hello Bride2B Bridal Closet! ❤️\n\nI'm interested ${cur?"in this dress":"in your bridal collection"}.\n`+
-   (cur?`\nProduct: ${cur.name}\nProduct Code: ${cur.id}\n`:"")+
-   `\nService: ${svc}\nWedding Date: ${dt}\nName: ${n||"-"}\nContact: ${ph||"-"}\n\nPlease send me more details about availability and pricing.\n\nThank you!`;
-}
-function openModal(p){
-  cur=p;
-  $("#m-title").textContent=p?p.name:"Chat with Bride2B";
-  $("#m-sub").textContent=p?`Product Code: ${p.id}`:"Tell us about your wedding and we’ll help you find the perfect dress.";
-  const list=p?p.svc.map(s=>s==="Rent"?"Rental":s):["Rental","Sale","Custom Made"];
-  svc=list[0];
-  $("#m-svc").innerHTML=list.map(v=>`<button type="button" class="pill${v===svc?" on":""}" data-s="${v}">${v}</button>`).join("");
-  $("#m-date").value=state.date||"";
-  $("#modal").classList.add("open");upd();
-}
-function upd(){$("#m-prev").textContent=msg()}
-$("#m-svc").onclick=e=>{const b=e.target.closest("[data-s]");if(!b)return;svc=b.dataset.s;$$("#m-svc .pill").forEach(x=>x.classList.toggle("on",x===b));upd()};
-["m-name","m-phone","m-date"].forEach(i=>$("#"+i).addEventListener("input",upd));
-$("#m-send").onclick=()=>window.open(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(msg())}`,"_blank","noopener");
-const close=()=>$("#modal").classList.remove("open");
-$("#m-x").onclick=close;$("#modal").onclick=e=>{if(e.target.id==="modal")close()};
-document.addEventListener("keydown",e=>{if(e.key==="Escape")close()});
+$("#bento").innerHTML=cats.map((c,i)=>{const m=CAT_META[c];
+  return `<a class="tile" href="${catUrl(c)}" style="--c1:${m.c[0]};--c2:${m.c[1]};transition-delay:${i*90}ms" aria-label="${c}">
+   <div class="tbg"></div><span class="t-n">0${i+1}</span><span class="t-go">→</span>
+   <div class="t-body"><h3>${c}</h3><p>${m.t} · ${CATS[c].length} collections</p>
+   <div class="t-subs">${CATS[c].map(s=>`<span>${s}</span>`).join("")}</div></div></a>`}).join("");
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}}),{threshold:.15});
+$$(".tile").forEach(t=>io.observe(t));
+/* marquee */
+$("#marq").innerHTML=[...Array(2)].map(()=>cats.map(c=>`<span>${c}</span>`).join("")).join("");
+/* products */
+$("#row-new").innerHTML=P.filter(p=>p.isNew).slice(0,4).map(p=>card(p)).join("");
+$("#row-best").innerHTML=P.filter(p=>p.best).slice(0,4).map(p=>card(p)).join("");
+/* slideshow */
+(()=>{
+  const slides=$$(".slide"),dots=$("#dots"),box=$("#show"),DUR=6500;let i=0,t;
+  box.style.setProperty("--dur",DUR+"ms");
+  dots.innerHTML=slides.map((_,k)=>`<button class="dot" aria-label="Go to slide ${k+1}"><i></i></button>`).join("");
+  const ds=$$(".dot");
+  function go(n){
+    i=(n+slides.length)%slides.length;
+    slides.forEach((s,k)=>s.classList.toggle("on",k===i));
+    ds.forEach((d,k)=>{d.classList.remove("on");d.classList.toggle("done",k<i);});
+    void dots.offsetWidth; ds[i].classList.add("on");
+    clearTimeout(t);t=setTimeout(()=>go(i+1),DUR);
+  }
+  ds.forEach((d,k)=>d.onclick=()=>go(k));
+  $("#prev").onclick=()=>go(i-1);$("#next").onclick=()=>go(i+1);
+  box.addEventListener("mouseenter",()=>{box.classList.add("paused");clearTimeout(t)});
+  box.addEventListener("mouseleave",()=>{box.classList.remove("paused");clearTimeout(t);t=setTimeout(()=>go(i+1),DUR)});
+  let x0=null;box.addEventListener("touchstart",e=>x0=e.touches[0].clientX,{passive:true});
+  box.addEventListener("touchend",e=>{if(x0===null)return;const d=e.changedTouches[0].clientX-x0;if(Math.abs(d)>50)go(i+(d<0?1:-1));x0=null});
+  document.addEventListener("keydown",e=>{if(e.key==="ArrowRight")go(i+1);if(e.key==="ArrowLeft")go(i-1)});
+  go(0);
+})();
 </script>
 </body>
 </html>

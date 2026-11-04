@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collections | Bride2B Bridal Closet</title>
+<meta name="description" content="Browse and filter Bride2B bridal gowns, Kandyan sarees, lehengas and more. Inquire on WhatsApp.">
+<meta name="theme-color" content="#14100a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/base.css">
+<style>
+/* ===== Dark "catalogue" style – intentionally different from the homepage ===== */
+body{background:#14100a;color:#efe6d2}
+header.site{background:rgba(20,16,10,.94);border-color:#2e2619;color:#efe6d2}
+header.site .logo b{color:#fff}
+header.site .burger{border-color:#3a3022}
+header.site .burger span,header.site .burger span::before,header.site .burger span::after{background:#efe6d2}
+.dd-panel{background:#1a150d;border-color:#2e2619}
+.dd-panel a:hover{background:#2a2216}
+@media(max-width:860px){.menu{background:#14100a;border-color:#2e2619}.menu>a,.menu .dd>button{border-color:#2e2619}}
+.cx{--gold:#D4AF6A;--line:#2e2619}
+.page-hero{padding:56px 0 34px;background:radial-gradient(800px 300px at 80% 0,rgba(212,175,106,.18),transparent 70%)}
+.crumbs{font-size:.75rem;letter-spacing:.2em;text-transform:uppercase;color:#9b8e72}
+.crumbs a:hover{color:var(--gold-l)}
+.page-hero h1{font-size:clamp(2.6rem,7vw,5rem);margin:10px 0 6px;color:#fff}
+.page-hero h1 em{color:var(--gold-l);font-style:italic}
+.page-hero p{color:#b7aa8d;max-width:560px}
+
+/* sticky category rail */
+.rail{position:sticky;top:76px;z-index:30;background:rgba(20,16,10,.92);backdrop-filter:blur(12px);border-block:1px solid #2e2619}
+.rail-in{display:flex;gap:8px;overflow-x:auto;padding:12px 0;scrollbar-width:none}
+.rail-in::-webkit-scrollbar{display:none}
+.tab{flex:none;padding:10px 20px;border-radius:999px;border:1px solid #3a3022;font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:#cbbd9f;transition:.25s;white-space:nowrap}
+.tab:hover{border-color:var(--gold)}
+.tab.on{background:var(--gold);border-color:var(--gold);color:#14100a;font-weight:500}
+.subs{display:flex;gap:8px;flex-wrap:wrap;padding:18px 0 0}
+.chip{padding:7px 16px;border-radius:8px;background:#1d1810;border:1px solid #2e2619;font-size:.85rem;color:#cbbd9f;transition:.2s}
+.chip:hover{border-color:var(--gold)}
+.chip.on{background:#2a2216;border-color:var(--gold);color:var(--gold-l)}
+
+.shop{display:grid;grid-template-columns:280px 1fr;gap:34px;padding:28px 0 90px;align-items:start}
+.side{background:#1a150d;border:1px solid #2e2619;border-radius:18px;padding:22px;position:sticky;top:148px;max-height:calc(100vh - 168px);overflow:auto}
+.side h3{font-size:1.5rem;color:#fff;display:flex;justify-content:space-between;align-items:center}
+.side h3 button{font-family:var(--sans);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold-l);border-bottom:1px solid var(--gold)}
+.side .fg{padding:16px 0;border-top:1px solid #2e2619;margin-top:14px}
+.side label{color:#9b8e72}
+.side select,.side input{background:#14100a;border-color:#3a3022;color:#efe6d2;color-scheme:dark}
+.side .pill{background:#14100a;border-color:#3a3022;color:#cbbd9f}
+.side .pill.on{background:var(--gold);border-color:var(--gold);color:#14100a}
+.sw{display:flex;gap:10px;flex-wrap:wrap}
+.sw button{width:34px;height:34px;border-radius:50%;border:2px solid #3a3022;background:linear-gradient(135deg,var(--c1),var(--c2));position:relative;transition:.2s}
+.sw button:hover{transform:scale(1.12)}
+.sw button.on{border-color:#fff;box-shadow:0 0 0 2px var(--gold)}
+.sizes{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.sizes .pill{text-align:center;padding:8px 0}
+
+.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.count{font-size:.9rem;color:#9b8e72}
+.count b{color:var(--gold-l);font-family:var(--serif);font-size:1.6rem;font-weight:500;margin-right:6px}
+.bar-r{display:flex;gap:10px;align-items:center}
+.bar select{background:#1a150d;border-color:#3a3022;color:#efe6d2;min-width:190px}
+.f-open{display:none;border:1px solid var(--gold);color:var(--gold-l);padding:11px 20px;border-radius:999px;font-size:.78rem;letter-spacing:.14em;text-transform:uppercase}
+.active{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.active button{display:inline-flex;gap:8px;align-items:center;background:#2a2216;border:1px solid var(--gold);color:var(--gold-l);padding:5px 8px 5px 14px;border-radius:999px;font-size:.8rem}
+.active button i{font-style:normal;width:20px;height:20px;border-radius:50%;background:var(--gold);color:#14100a;display:grid;place-items:center;line-height:1}
+
+/* dark product cards with hover overlay */
+.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.pc{position:relative;background:#1a150d;border:1px solid #2e2619;border-radius:18px;overflow:hidden;transition:.35s;animation:rise .6s both}
+@keyframes rise{from{opacity:0;transform:translateY(26px)}}
+.pc:hover{border-color:var(--gold);transform:translateY(-6px);box-shadow:0 18px 40px rgba(0,0,0,.5)}
+.pc .ph{aspect-ratio:3/4}
+.pc .ph{transition:transform .8s}
+.pc:hover .ph{transform:scale(1.07)}
+.pc .imgbox{overflow:hidden;position:relative}
+.pc .ov{position:absolute;left:0;right:0;bottom:0;padding:16px;z-index:3;background:linear-gradient(0deg,rgba(0,0,0,.8),transparent);transform:translateY(100%);transition:.4s}
+.pc:hover .ov{transform:none}
+.pc .ov .btn{width:100%;padding:12px;font-size:.74rem}
+.pc .tag{background:var(--gold);color:#14100a}
+.pc .tag.booked{background:#8a2b2b;color:#fff}
+.pc-b{padding:16px}
+.pc-b small{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold)}
+.pc-b h3{font-size:1.4rem;color:#fff;margin:2px 0 4px}
+.pc-b .meta{font-size:.82rem;color:#9b8e72}
+.pc-p{display:flex;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid #2e2619;font-size:.88rem}
+.pc-p span{display:block;color:#9b8e72;font-size:.64rem;letter-spacing:.14em;text-transform:uppercase}
+.pc-p b{font-weight:500;color:var(--gold-l)}
+.pc .m-btn{display:none;width:100%;margin-top:12px;padding:11px;font-size:.74rem}
+.empty{grid-column:1/-1;text-align:center;padding:70px 20px;border:1px dashed #3a3022;border-radius:18px;color:#9b8e72}
+.empty h3{color:#fff;font-size:1.8rem;margin-bottom:8px}
+
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:80;display:none}
+@media(max-width:1020px){.pgrid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:860px){
+  .shop{grid-template-columns:1fr}
+  .f-open{display:inline-block}
+  .side{position:fixed;z-index:90;left:0;top:0;bottom:0;width:min(88vw,340px);max-height:none;border-radius:0 18px 18px 0;transform:translateX(-102%);transition:transform .35s}
+  .side.open{transform:none}
+  .scrim.open{display:block}
+  .rail{top:76px}
+  .pc .ov{display:none}.pc .m-btn{display:block}
+}
+@media(max-width:560px){
+  .pgrid{gap:12px}.pc-b{padding:12px}.pc-b h3{font-size:1.1rem}
+  .pc-p{flex-direction:column;gap:4px}
+  .bar select{min-width:0;width:100%}.bar-r{width:100%}
+}
+</style>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main class="cx">
+<section class="page-hero" style="padding-bottom:34px">
+  <div class="wrap">
+    <div class="crumbs"><a href="index.html">Home</a> / <a href="collections.html">Collections</a> <span id="crumb"></span></div>
+    <h1 id="h1">All <em>Collections</em></h1>
+    <p id="lead">Choose a category, narrow it down with filters and send us an inquiry on WhatsApp.</p>
+  </div>
+</section>
+
+<div class="rail"><div class="wrap"><div class="rail-in" id="tabs"></div></div></div>
+
+<div class="wrap">
+  <div class="subs" id="subs"></div>
+  <div class="shop">
+    <aside class="side" id="side" aria-label="Filters">
+      <h3>Filters <button id="reset">Reset</button></h3>
+      <div class="fg"><label>Service Type</label><div class="pills" id="f-svc"></div></div>
+      <div class="fg"><label>Colour</label><div class="sw" id="f-col"></div></div>
+      <div class="fg"><label>Size</label><div class="sizes" id="f-size"></div></div>
+      <div class="fg"><label>Availability</label><div class="pills" id="f-av"></div></div>
+      <div class="fg"><label for="f-date">Wedding Date</label><input type="date" id="f-date"><p style="font-size:.76rem;color:#9b8e72;margin-top:6px">Dresses already booked for this date are marked.</p></div>
+      <div id="dyn"></div>
+      <button class="btn btn-gold f-open" style="display:none;width:100%;margin-top:10px" id="apply">Show Results</button>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+    <div>
+      <div class="bar">
+        <div class="count" id="count"></div>
+        <div class="bar-r">
+          <button class="f-open" id="f-open">Filters</button>
+          <select id="sort" aria-label="Sort by"><option value="new">Newest First</option><option value="best">Best Sellers</option><option value="plow">Rental: Low to High</option><option value="phigh">Rental: High to Low</option></select>
+        </div>
+      </div>
+      <div class="active" id="active"></div>
+      <div class="pgrid" id="grid"></div>
+    </div>
+  </div>
+</div>
+</main>
+
+<div id="site-footer"></div>
+<script src="assets/data.js"></script>
+<script src="assets/common.js"></script>
+<script>
+const S={cat:"",sub:"",svc:"All",av:"All",col:"",size:"",date:"",sort:"new",dyn:{}};
+const q=new URLSearchParams(location.search);
+if(CATS[q.get("cat")])S.cat=q.get("cat");
+if(S.cat&&CATS[S.cat].includes(q.get("sub")))S.sub=q.get("sub");
+if(["new","best","plow","phigh"].includes(q.get("sort")))S.sort=q.get("sort");
+const getWeddingDate=()=>S.date;
+
+function pc(p){
+  const free=isFree(p,S.date);
+  return `<article class="pc"><div class="imgbox"><div class="ph" ${phStyle(p)}>${p.isNew?'<span class="tag">New</span>':''}${!free?'<span class="tag booked">Booked</span>':''}</div>
+  <div class="ov"><button class="btn btn-gold" data-inq="${p.id}">Inquire on WhatsApp</button></div></div>
+  <div class="pc-b"><small>${p.id} · ${p.sub}</small><h3>${p.name}</h3><div class="meta">${p.col} · ${p.sizes.join(" / ")} · ${p.svc.join(" / ")}</div>
+  <div class="pc-p"><div><span>Rent</span><b>${p.svc.includes("Rent")?money(p.rent):"—"}</b></div><div><span>Buy</span><b>${p.sale?money(p.sale):"—"}</b></div></div>
+  <button class="btn btn-gold m-btn" data-inq="${p.id}">Inquire on WhatsApp</button></div></article>`;
+}
+function list(){
+  const r=P.filter(p=>(!S.cat||p.cat===S.cat)&&(!S.sub||p.sub===S.sub)&&(S.svc==="All"||p.svc.includes(S.svc))&&(!S.col||p.col===S.col)&&(!S.size||p.sizes.includes(S.size))&&
+   (S.av==="All"||(S.av==="Available"?isFree(p,S.date):!isFree(p,S.date)))&&Object.entries(S.dyn).every(([k,v])=>!v||p.a[k]===v));
+  return r.sort({new:(a,b)=>b.isNew-a.isNew,best:(a,b)=>b.best-a.best,plow:(a,b)=>a.rent-b.rent,phigh:(a,b)=>b.rent-a.rent}[S.sort]);
+}
+const pill=(v,on)=>`<button type="button" class="pill${on?" on":""}" data-v="${v}">${v}</button>`;
+function render(){
+  /* heading */
+  $("#h1").innerHTML=S.sub?`${S.sub}`:S.cat?`${S.cat.replace(/^(\S+)/,"<em>$1</em>")}`:"All <em>Collections</em>";
+  $("#crumb").innerHTML=(S.cat?` / <a href="${catUrl(S.cat)}">${S.cat}</a>`:"")+(S.sub?` / ${S.sub}`:"");
+  $("#lead").textContent=S.cat?`${CATS[S.cat].length} collections inside ${S.cat}. Use the filters to find the perfect match.`:"Choose a category, narrow it down with filters and send us an inquiry on WhatsApp.";
+  document.title=(S.sub||S.cat||"Collections")+" | Bride2B Bridal Closet";
+  /* tabs + sub chips */
+  $("#tabs").innerHTML=`<a class="tab${!S.cat?" on":""}" href="#" data-tab="">All</a>`+Object.keys(CATS).map(c=>`<a class="tab${S.cat===c?" on":""}" href="#" data-tab="${c}">${c}</a>`).join("");
+  $("#subs").innerHTML=S.cat?`<button class="chip${!S.sub?" on":""}" data-sub="">All ${S.cat}</button>`+CATS[S.cat].map(s=>`<button class="chip${S.sub===s?" on":""}" data-sub="${s}">${s}</button>`).join(""):"";
+  /* side */
+  $("#f-svc").innerHTML=["All","Rent","Sale","Custom Made"].map(v=>pill(v,S.svc===v)).join("");
+  $("#f-av").innerHTML=["All","Available","Booked"].map(v=>pill(v,S.av===v)).join("");
+  $("#f-col").innerHTML=COLOURS.map(c=>`<button type="button" title="${c}" aria-label="${c}" data-v="${c}" class="${S.col===c?"on":""}" style="--c1:${SWATCH[c][0]};--c2:${SWATCH[c][1]}"></button>`).join("");
+  $("#f-size").innerHTML=SIZES.map(v=>pill(v,S.size===v)).join("");
+  $("#f-date").value=S.date;$("#sort").value=S.sort;
+  const d=DYN[S.cat]||{};
+  $("#dyn").innerHTML=Object.entries(d).map(([k,v])=>`<div class="fg"><label>${k}</label><select data-dyn="${k}"><option value="">Any</option>${v.map(x=>`<option${S.dyn[k]===x?" selected":""}>${x}</option>`).join("")}</select></div>`).join("");
+  /* results */
+  const r=list();
+  $("#count").innerHTML=`<b>${r.length}</b>dress${r.length===1?"":"es"} found`+(S.date?` · for ${S.date}`:"");
+  $("#grid").innerHTML=r.length?r.map((p,i)=>pc(p).replace('class="pc"',`class="pc" style="animation-delay:${Math.min(i,8)*60}ms"`)).join(""):`<div class="empty"><h3>No matching dresses yet</h3><p>Try removing a filter – or tell us what you need and we’ll help.</p><p style="margin-top:16px"><button class="btn btn-gold" data-wa-general>Ask on WhatsApp</button></p></div>`;
+  /* active chips */
+  const a=[];
+  if(S.svc!=="All")a.push(["svc",S.svc]);if(S.av!=="All")a.push(["av",S.av]);if(S.col)a.push(["col",S.col]);if(S.size)a.push(["size","Size "+S.size]);if(S.date)a.push(["date",S.date]);
+  Object.entries(S.dyn).forEach(([k,v])=>v&&a.push(["dyn:"+k,v]));
+  $("#active").innerHTML=a.map(([k,v])=>`<button data-x="${k}">${v}<i>×</i></button>`).join("");
+  /* url */
+  const u=new URLSearchParams();if(S.cat)u.set("cat",S.cat);if(S.sub)u.set("sub",S.sub);if(S.sort!=="new")u.set("sort",S.sort);
+  history.replaceState(null,"",u.toString()?"?"+u:location.pathname);
+}
+function setCat(c){S.cat=c;S.sub="";S.dyn={};render();window.scrollTo({top:0,behavior:"smooth"})}
+document.addEventListener("click",e=>{
+  const t=e.target.closest("[data-tab]");if(t){e.preventDefault();setCat(t.dataset.tab);return}
+  const sb=e.target.closest("[data-sub]");if(sb){S.sub=sb.dataset.sub;render();return}
+  const x=e.target.closest("[data-x]");if(x){const k=x.dataset.x;if(k.startsWith("dyn:"))delete S.dyn[k.slice(4)];else S[k]=({svc:"All",av:"All"})[k]||"";render();return}
+  const p=e.target.closest(".pill[data-v]");if(p){const id=p.parentElement.id;
+    if(id==="f-svc")S.svc=p.dataset.v;if(id==="f-av")S.av=p.dataset.v;if(id==="f-size")S.size=S.size===p.dataset.v?"":p.dataset.v;render();return}
+  const c=e.target.closest("#f-col button");if(c){S.col=S.col===c.dataset.v?"":c.dataset.v;render()}
+});
+$("#f-date").onchange=e=>{S.date=e.target.value;render()};
+$("#sort").onchange=e=>{S.sort=e.target.value;render()};
+$("#dyn").onchange=e=>{if(e.target.dataset.dyn){S.dyn[e.target.dataset.dyn]=e.target.value;render()}};
+$("#reset").onclick=()=>{Object.assign(S,{sub:"",svc:"All",av:"All",col:"",size:"",date:"",dyn:{}});render()};
+const drawer=o=>{$("#side").classList.toggle("open",o);$("#scrim").classList.toggle("open",o);$("#apply").style.display=o?"block":"none"};
+$("#f-open").onclick=()=>drawer(true);$("#scrim").onclick=()=>drawer(false);$("#apply").onclick=()=>drawer(false);
+render();
+</script>
+</body>
+</html>
