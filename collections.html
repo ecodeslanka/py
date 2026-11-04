@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Collections | Bride2B Bridal Closet</title>
 <meta name="description" content="Browse and filter Bride2B bridal gowns, Kandyan sarees, lehengas and more. Inquire on WhatsApp.">
-<meta name="theme-color" content="#14100a">
+<meta name="theme-color" content="#0b0907">
+<link rel="icon" type="image/png" href="assets/img/favicon-64.png">
+<link rel="apple-touch-icon" href="assets/img/favicon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -17,10 +19,6 @@ body{background:#14100a;color:#efe6d2}
 body::after{mix-blend-mode:screen;opacity:.05}
 .page-hero h1{background:linear-gradient(100deg,#fff 40%,var(--gold-l),#fff 60%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:sheen 6s linear infinite}
 .page-hero h1 em{-webkit-text-fill-color:var(--gold-l)}
-header.site{background:rgba(20,16,10,.94);border-color:#2e2619;color:#efe6d2}
-header.site .logo b{color:#fff}
-header.site .burger{border-color:#3a3022}
-header.site .burger span,header.site .burger span::before,header.site .burger span::after{background:#efe6d2}
 .dd-panel{background:#1a150d;border-color:#2e2619}
 .dd-panel a:hover{background:#2a2216}
 @media(max-width:860px){.menu{background:#14100a;border-color:#2e2619}.menu>a,.menu .dd>button{border-color:#2e2619}}
@@ -170,7 +168,7 @@ const getWeddingDate=()=>S.date;
 
 function pc(p){
   const free=isFree(p,S.date);
-  return `<article class="pc"><div class="imgbox"><div class="ph" ${phStyle(p)}>${p.isNew?'<span class="tag">New</span>':''}${!free?'<span class="tag booked">Booked</span>':''}</div>
+  return `<article class="pc"><div class="imgbox"><div class="ph" ${phStyle(p)}>${imgTag(p)}${p.isNew?'<span class="tag">New</span>':''}${!free?'<span class="tag booked">Booked</span>':''}</div>
   <div class="ov"><button class="btn btn-gold" data-inq="${p.id}">Inquire on WhatsApp</button></div></div>
   <div class="pc-b"><small>${p.id} · ${p.sub}</small><h3>${p.name}</h3><div class="meta">${p.col} · ${p.sizes.join(" / ")} · ${p.svc.join(" / ")}</div>
   <div class="pc-p"><div><span>Rent</span><b>${p.svc.includes("Rent")?money(p.rent):"—"}</b></div><div><span>Buy</span><b>${p.sale?money(p.sale):"—"}</b></div></div>

@@ -1,5 +1,6 @@
 /* ===== CONFIG – edit these ===== */
-const WA_NUMBER = "94770000000"; // country code first, no + or spaces
+const WA_NUMBER = "94753876008"; // WhatsApp number: country code first, no + or spaces (075 387 6008)
+const PHONES = [{show:"075 387 6008",tel:"+94753876008"},{show:"077 411 6691",tel:"+94774116691"}];
 const CATS = {
   "Bridal Gowns":["Luxury Bridal Gowns","Mermaid Gowns","Princess Gowns","A-Line Gowns","Reception Gowns","Minimal Bridal Gowns"],
   "Kandyan Sarees":["Luxury Kandyan","Modern Kandyan","Traditional Kandyan","Red & Gold Collection","Other Colour Collection"],
@@ -40,3 +41,9 @@ const CAT_META={
   "Bridal Sarees":{c:["#EFE0C0","#B8924A"],t:"Designer & wedding"},
   "Special Collections":{c:["#E3CB93","#2a2216"],t:"New, best & exclusive"}
 };
+
+/* Images: put your real photos in assets/photos/ (B2B-001.jpg ... cat-1.jpg ... slide-1.jpg).
+   If a photo is missing, the sample illustration in assets/img/ is shown instead. */
+P.forEach(p=>{p.photo="assets/photos/"+p.id+".jpg";p.img="assets/img/"+p.id+".svg"});
+Object.keys(CAT_META).forEach((c,i)=>{const n="cat-"+(i+1);CAT_META[c].bg=`url(assets/photos/${n}.jpg), url(assets/img/${n}.svg)`});
+const imgTag=p=>`<img src="${p.photo}" alt="${p.name} – ${p.cat}" loading="lazy" onerror="this.onerror=null;this.src='${p.img}'">`;

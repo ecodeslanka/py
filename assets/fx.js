@@ -4,7 +4,7 @@ const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelect
 /* loader (once per session) */
 let seen=false;try{seen=sessionStorage.getItem("b2b")}catch(e){}
 if(!seen&&!reduce){
-  const l=document.createElement("div");l.id="fx-loader";l.innerHTML='<div style="text-align:center"><b>BRIDE<i>2</i>B</b><span></span></div>';document.body.prepend(l);
+  const l=document.createElement("div");l.id="fx-loader";l.innerHTML='<div style="text-align:center"><img src="assets/img/logo-full.png" alt="Bride2B Bridal Closet"><span></span></div>';document.body.prepend(l);
   addEventListener("load",()=>setTimeout(()=>l.classList.add("out"),900));setTimeout(()=>l.classList.add("out"),2500);
   try{sessionStorage.setItem("b2b","1")}catch(e){}
 }

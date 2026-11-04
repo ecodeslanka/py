@@ -5,7 +5,7 @@ const isFree=(p,date)=>p.avail&&!(date&&p.booked.includes(date));
 const phStyle=p=>{const [a,b]=SWATCH[p.col]||SWATCH.Ivory;return `style="--c1:${a};--c2:${b}"`};
 function card(p,date){
   const free=isFree(p,date);
-  return `<article class="card"><div class="ph" ${phStyle(p)}>${p.isNew?'<span class="tag">New</span>':''}${!free?'<span class="tag booked">Booked</span>':''}</div>
+  return `<article class="card"><div class="ph" ${phStyle(p)}>${imgTag(p)}${p.isNew?'<span class="tag">New</span>':''}${!free?'<span class="tag booked">Booked</span>':''}</div>
   <div class="card-b"><small>${p.id} · ${p.sub}</small><h3>${p.name}</h3>
   <div class="meta">${p.col} · ${p.sizes.join(" / ")}<br>${p.svc.join(" · ")}</div>
   <div class="prices"><div><span>Rent</span><b>${p.svc.includes("Rent")?money(p.rent):"—"}</b></div><div><span>Buy</span><b>${p.sale?money(p.sale):"—"}</b></div></div>
@@ -16,7 +16,7 @@ const WA_SVG='<svg viewBox="0 0 32 32"><path d="M16 3C9 3 3.4 8.6 3.4 15.500c0 2
 /* shared chrome */
 function chrome(){
   const dd=Object.keys(CATS).map(c=>`<a href="${catUrl(c)}">${c}</a>`).join("");
-  $("#site-header").outerHTML=`<div class="topbar">Designing · Rent · Sale</div>
+  $("#site-header").outerHTML=`<div class="topbar">Designing | Rent | Sale &nbsp;·&nbsp; <a href="tel:${PHONES[0].tel}">${PHONES[0].show}</a> &nbsp;|&nbsp; <a href="tel:${PHONES[1].tel}">${PHONES[1].show}</a></div>
   <header class="site"><div class="wrap nav">
    <button class="burger" id="burger" aria-label="Open menu" aria-expanded="false"><span></span></button>
    <nav class="menu" id="menu" aria-label="Main navigation">
@@ -24,10 +24,10 @@ function chrome(){
      <div class="dd"><button type="button">Collections ▾</button><div class="dd-panel">${dd}</div></div>
      <a href="index.html#new">New Arrivals</a><a href="index.html#how">How to Rent</a><a href="index.html#contact">Contact</a>
    </nav>
-   <a class="logo" href="index.html" aria-label="Bride2B Bridal Closet"><b>BRIDE<i>2</i>B</b><small>BRIDAL CLOSET</small></a>
+   <a class="logo" href="index.html" aria-label="Bride2B Bridal Closet"><img src="assets/img/logo-mark.png" alt="Bride2B logo"><span><b>Bride2B</b><small>Bridal Closet</small></span></a>
    <a class="btn btn-gold nav-cta" href="#" data-wa-general>WhatsApp</a></div></header>`;
   $("#site-footer").outerHTML=`<footer class="site"><div class="wrap"><div class="f-grid">
-   <div><div class="logo" style="text-align:left"><b>BRIDE<i>2</i>B</b><small>BRIDAL CLOSET</small></div><p style="margin-top:14px;font-size:.9rem;max-width:300px">Designing · Rent · Sale. Luxury bridal wear for your most beautiful day.</p></div>
+   <div><img class="f-logo" src="assets/img/logo-full.png" alt="Bride2B Bridal Closet"><p style="font-size:.9rem;max-width:300px">Designing | Rent | Sale. Luxury bridal wear for your most beautiful day.</p><p style="margin-top:10px"><a href="tel:${PHONES[0].tel}">📞 ${PHONES[0].show}</a><a href="tel:${PHONES[1].tel}">📞 ${PHONES[1].show}</a></p></div>
    <div><h4>Collections</h4>${Object.keys(CATS).slice(0,4).map(c=>`<a href="${catUrl(c)}">${c}</a>`).join("")}</div>
    <div><h4>Information</h4><a href="index.html#how">How to Rent</a><a href="#">Rental Terms</a><a href="#">Custom Designing</a><a href="#">FAQ</a><a href="#">Privacy Policy</a></div>
    <div><h4>Follow Us</h4><a href="#">Facebook</a><a href="#">Instagram</a><a href="#" data-wa-general>WhatsApp</a></div></div>
