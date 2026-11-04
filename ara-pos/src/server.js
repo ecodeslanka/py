@@ -12,7 +12,7 @@ const { settings } = require('./util');
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '4mb' }));
 
 // simple login rate-limit (per IP)
 const fails = new Map();
@@ -28,6 +28,10 @@ app.get('/p/invoice/:id/:sig.pdf', wrap(async (req, res) => {
   if (!M.verifySig('invoice', req.params.id, req.params.sig)) return res.status(404).send('Not found');
   const b = await invoicePdf(+req.params.id); if (!b) return res.status(404).send('Not found');
   res.type('pdf').set('Content-Disposition', 'inline; filename="invoice.pdf"').send(b);
+}));
+app.get('/p/logo', wrap(async (req, res) => {
+  const f = (await settings()).company_logo; const fp = f && path.join(require('./config').uploadsDir, path.basename(f));
+  if (!fp || !require('fs').existsSync(fp)) return res.status(404).send('No logo'); res.set('Cache-Control', 'public, max-age=3600').sendFile(fp);
 }));
 const salesRouter = require('./routes/sales');
 app.get('/p/statement/:id/:sig.pdf', wrap(async (req, res) => {

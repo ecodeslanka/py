@@ -12,7 +12,7 @@ async function invoiceVars(inv, extra = {}) {
       adv.push(`🪙 Deposit available before this invoice: *${money(A.before)}*`); if (A.deducted > 0) adv.push(`➖ Deducted for this invoice: *${money(A.deducted)}*`);
       if (A.overpaid > 0) adv.push(`➕ Overpayment saved as advance: *${money(A.overpaid)}*`); adv.push(`💰 Remaining deposit after this invoice: *${money(A.after)}*`);
     } else { if (A.deducted > 0) adv.push(`🪙 Paid from your advance deposit: *${money(A.deducted)}*`); if (A.overpaid > 0) adv.push(`➕ Overpayment saved as advance: *${money(A.overpaid)}*`); if (A.current > 0) adv.push(`💰 Advance balance available: *${money(A.current)}*`); }
-    if (A.pending > 0) adv.push(`⏳ Cheque deposit awaiting clearance (not included): *${money(A.pending)}*`);
+    if (A.pending > 0) adv.push(`🧾 Cheque deposits not yet cleared (already included): *${money(A.pending)}*`);
   }
   return { advance_line: adv.length ? '\n' + adv.join('\n') : '', advance_balance: money(inv.advance_balance || 0), deposit_used: money(inv.deposit_used || 0),
     advance_before: A && A.mode === 'snapshot' ? money(A.before) : '', advance_deducted: money(A ? A.deducted : 0), advance_after: money(A ? (A.mode === 'snapshot' ? A.after : A.current) : 0),

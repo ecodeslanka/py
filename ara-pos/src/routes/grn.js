@@ -84,7 +84,7 @@ router.put('/grn/:id', can('stock.manage'), wrap(async (req, res) => {
         await moveStock(c, { variant_id: it.variant_id, type: 'receive', qty: it.qty, unit_cost: it.cost, ref_type: 'grn', ref_id: id, note: old.grn_no, user_id: req.user.id });
       }
     }
-    const committed = round2(old.paid + old.cheque_pending); if (total + 0.004 < committed) bad(`New total (${money(total)}) is less than payments already recorded (${money(committed)})`);
+    const committed = round2(old.paid); if (total + 0.004 < committed) bad(`New total (${money(total)}) is less than payments already recorded (${money(committed)})`);
     await q('UPDATE goods_receipts SET supplier_id=?,date=?,ref=?,note=?,due_date=?,total=?,updated_by=? WHERE id=?', [b.supplier_id === undefined ? old.supplier_id : (b.supplier_id || null), b.date || old.date, b.ref ?? old.ref, b.note ?? old.note, b.due_date === '' ? null : (b.due_date || old.due_date), total, req.user.id, id], c);
     await recalcGrn(id, c);
   });
@@ -106,7 +106,7 @@ router.post('/grn/:id/payments', can('suppliers.manage'), wrap(async (req, res) 
   await tx(async c => {
     g = await one('SELECT * FROM goods_receipts WHERE id=? FOR UPDATE', [id], c); if (!g) bad('Not found', 404); if (!g.supplier_id) bad('This GRN has no supplier');
     const amount = round2(b.amount); if (!(amount > 0)) bad('Enter a valid amount');
-    const committed = round2(g.paid + g.cheque_pending); if (amount > round2(g.total - committed) + 0.004) bad(`Amount exceeds the remaining balance of ${money(g.total - committed)}`);
+    const committed = round2(g.paid); if (amount > round2(g.total - committed) + 0.004) bad(`Amount exceeds the remaining balance of ${money(g.total - committed)}`);
     pid = await addSupplierPayment(c, req, { supplier_id: g.supplier_id, grn_id: id }, b); await recalcGrn(id, c);
   });
   await log(req, 'payment', 'grn', id, `${b.method} ${b.amount}`);
@@ -135,15 +135,15 @@ async function supStatement(id, from, to) {
   const s = await one('SELECT * FROM suppliers WHERE id=?', [id]); if (!s) bad('Supplier not found', 404);
   from = from || '1970-01-01'; to = to || today();
   const open = await one(`SELECT ? + (SELECT COALESCE(SUM(total),0) FROM goods_receipts WHERE supplier_id=? AND date<?) - (SELECT COALESCE(SUM(amount),0) FROM supplier_payments WHERE supplier_id=? AND cleared=1 AND date<?)
-    - (SELECT COALESCE(SUM(amount),0) FROM supplier_cheques WHERE supplier_id=? AND status='cleared' AND payment_id IS NULL AND COALESCE(status_date,cheque_date)<?) bal`, [s.opening_balance, id, from, id, from, id, from]);
+    - (SELECT COALESCE(SUM(amount),0) FROM supplier_cheques WHERE supplier_id=? AND status<>'returned' AND payment_id IS NULL AND COALESCE(cheque_date,status_date)<?) bal`, [s.opening_balance, id, from, id, from, id, from]);
   const grns = await q('SELECT grn_no,date,total FROM goods_receipts WHERE supplier_id=? AND date BETWEEN ? AND ?', [id, from, to]);
   const pays = await q(`SELECT p.date,p.amount,p.method,p.cleared,g.grn_no,c.cheque_no,c.bank,c.status cs FROM supplier_payments p LEFT JOIN goods_receipts g ON g.id=p.grn_id LEFT JOIN supplier_cheques c ON c.payment_id=p.id WHERE p.supplier_id=? AND p.date BETWEEN ? AND ?`, [id, from, to]);
-  const chq = await q(`SELECT COALESCE(status_date,cheque_date) date,amount,cheque_no,bank FROM supplier_cheques WHERE supplier_id=? AND status='cleared' AND payment_id IS NULL AND COALESCE(status_date,cheque_date) BETWEEN ? AND ?`, [id, from, to]);
+  const chq = await q(`SELECT COALESCE(cheque_date,status_date) date,amount,cheque_no,bank FROM supplier_cheques WHERE supplier_id=? AND status<>'returned' AND payment_id IS NULL AND COALESCE(cheque_date,status_date) BETWEEN ? AND ?`, [id, from, to]);
   const ev = [...grns.map(g => ({ date: g.date, o: 0, ref: g.grn_no, description: 'Goods received', debit: g.total, credit: 0 })),
     ...pays.map(p => ({ date: p.date, o: 1, ref: p.grn_no || '', description: p.method === 'cheque' ? `Cheque ${p.cheque_no || ''} ${p.bank || ''} [${p.cs}]` : `Payment - ${p.method}`, debit: 0, credit: p.cleared ? p.amount : 0, pend: p.cleared ? 0 : p.amount })),
     ...chq.map(c => ({ date: c.date, o: 1, ref: '', description: `Cheque ${c.cheque_no} ${c.bank || ''} [cleared]`, debit: 0, credit: c.amount }))].sort((a, b) => a.date.localeCompare(b.date) || a.o - b.o);
   let bal = round2(open.bal), td = 0, tc = 0; const rows = [{ date: from === '1970-01-01' ? '' : from, ref: '', description: 'Opening balance', debit: '', credit: '', balance: bal, _bold: true }];
-  ev.forEach(e => { bal = round2(bal + e.debit - e.credit); td += e.debit; tc += e.credit; rows.push({ date: e.date, ref: e.ref, description: e.description + (e.pend ? ` (${money(e.pend)} not cleared)` : ''), debit: e.debit || '', credit: e.credit || '', balance: bal }); });
+  ev.forEach(e => { bal = round2(bal + e.debit - e.credit); td += e.debit; tc += e.credit; rows.push({ date: e.date, ref: e.ref, description: e.description + (e.pend ? ` (${money(e.pend)} bounced - not counted)` : ''), debit: e.debit || '', credit: e.credit || '', balance: bal }); });
   rows.push({ date: '', ref: '', description: 'CLOSING BALANCE (we owe)', debit: round2(td), credit: round2(tc), balance: bal, _bold: true });
   return { supplier: s, from, to, rows, closing: bal, totalDebit: round2(td), totalCredit: round2(tc) };
 }

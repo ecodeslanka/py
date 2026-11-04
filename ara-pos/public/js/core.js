@@ -117,7 +117,7 @@ function shell() {
   const tabs = [['home', 'Home', 'home'], ['invoices', 'Invoices', 'file'], ['pos', '', 'plus'], ['stock', 'Stock', 'box'], ['more', 'More', 'more']];
   const navOK = k => { const n = NAV.find(x => x.k === k); return k === 'more' || (n && allowed(n)); };
   $('#app').innerHTML = `
-  <aside class="side"><div class="logo"><div class="mark">A</div><div>${esc(S.company.name || 'ARA GROUP')}<div style="font-size:11px;color:var(--mut);font-weight:600">POS & Store Management</div></div></div>
+  <aside class="side"><div class="logo"><div class="mark ${S.company.logo ? 'has-img' : ''}">${S.company.logo ? `<img src="${esc(S.company.logo)}" alt="">` : 'A'}</div><div>${esc(S.company.name || 'ARA GROUP')}<div style="font-size:11px;color:var(--mut);font-weight:600">POS & Store Management</div></div></div>
     ${NAV.filter(allowed).map(n => `<a href="${n.h}" data-nav="${n.k}">${ic(n.i)}<span>${n.l}</span></a>`).join('')}
     <div style="flex:1"></div><a href="#" id="lo">${ic('logout')}<span>Logout (${esc(S.user.name)})</span></a></aside>
   <div class="main"><div class="topbar"><button class="ib" id="bk" style="display:none">${ic('back')}</button><h1 id="ttl">ARA</h1>
@@ -140,6 +140,7 @@ function loginView() {
     <div class="login-main"><form class="box" id="lf"><div class="mark">A</div><h1>ARA GROUP</h1><p>POS & Store Management</p><h3 class="lg-h">Welcome back</h3><div class="lg-s">Sign in to continue</div>
     ${F('Username', '<input name="username" autocomplete="username" autocapitalize="off" required>')}${F('Password', '<input name="password" type="password" autocomplete="current-password" required>')}
     <button class="btn block" style="margin-top:6px">Sign in</button><div class="hint" style="text-align:center;margin-top:14px">Authorised staff only</div></form></div></div>`;
+  fetch('/api/auth/branding').then(r => r.json()).then(b => { if (b.name) $$('.login h1, .login-side h2').forEach(h => h.textContent = b.name); if (b.logo) $$('.login .mark').forEach(m => { m.classList.add('has-img'); m.innerHTML = `<img src="${esc(b.logo)}" alt="">`; }); }).catch(() => { });
   $('#lf').onsubmit = async e => { e.preventDefault(); const b = $('button', e.target); b.disabled = true; try { const r = await api('POST', '/auth/login', fd(e.target)); S.token = r.token; localStorage.setItem('ara_token', r.token); await start(); } catch (x) { fail(x); b.disabled = false; } };
 }
 function logout(silent) { S.token = null; S.user = null; localStorage.removeItem('ara_token'); loginView(); if (!silent) toast('Logged out'); }

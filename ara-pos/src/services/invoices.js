@@ -6,12 +6,11 @@ async function recalc(id, conn) {
   const inv = await one('SELECT * FROM invoices WHERE id=?', [id], conn); if (!inv) return null;
   const r = await one(`SELECT
       COALESCE(SUM(CASE WHEN p.cleared=1 THEN p.amount END),0) paid,
-      COALESCE(SUM(CASE WHEN p.method='cheque' AND p.cleared=0 AND c.status IN ('received','pending','deposited') THEN p.amount END),0) chq
+      COALESCE(SUM(CASE WHEN p.method='cheque' AND p.cleared=1 AND c.status IN ('received','pending','deposited') THEN p.amount END),0) chq
     FROM payments p LEFT JOIN customer_cheques c ON c.payment_id=p.id WHERE p.invoice_id=?`, [id], conn);
   const paid = round2(r.paid), chq = round2(r.chq), balance = round2(inv.total - paid);
   let status;
   if (balance <= 0.004 && inv.total >= 0) status = 'paid';
-  else if (chq > 0) status = 'cheque_pending';
   else if (paid > 0) status = 'partial';
   else status = inv.had_credit ? 'pending' : 'unpaid';
   await q('UPDATE invoices SET paid=?,cheque_pending=?,balance=?,status=? WHERE id=?', [paid, chq, Math.max(balance, 0), status, id], conn);

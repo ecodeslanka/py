@@ -229,3 +229,6 @@ body.pos .bottomnav .fab{visibility:hidden}
 .vrow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.vrow>span{display:none}
 @media(min-width:700px){.vrow{grid-template-columns:1.2fr .7fr 1fr .9fr 38px}}
 .rhead{margin:4px 0 10px;font-size:16px}
+
+/* company logo in marks */
+.mark.has-img{background:#fff!important;box-shadow:0 0 0 1px var(--line)!important;overflow:hidden}.mark.has-img img{width:100%;height:100%;object-fit:contain}

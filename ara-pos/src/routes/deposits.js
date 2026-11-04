@@ -26,7 +26,7 @@ router.post('/deposits', can('deposits.manage'), wrap(async (req, res) => {
       ids.push(r.insertId);
       if (method === 'cheque') await q('INSERT INTO customer_cheques (customer_id,cheque_no,bank,cheque_date,amount,deposit_date,deposit_id,status,status_date,note,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
         [cu.id, p.cheque.cheque_no.trim(), p.cheque.bank || null, p.cheque.cheque_date || date, amount, p.cheque.deposit_date || p.cheque.cheque_date || date, r.insertId, 'received', today(), `Advance deposit ${receipt}`, req.user.id], c);
-      else await addLedger(c, { customer_id: cu.id, date, type: 'deposit', amount, ref_type: 'deposit', ref_id: r.insertId, description: `Deposit ${receipt} (${method})${b.note ? ' - ' + b.note : ''}`, user_id: req.user.id });
+      await addLedger(c, { customer_id: cu.id, date, type: 'deposit', amount, ref_type: 'deposit', ref_id: r.insertId, description: `Deposit ${receipt} (${method})${b.note ? ' - ' + b.note : ''}`, user_id: req.user.id });
     }
     return { receipt_no: receipt, ids, balance: await balance(cu.id, c), customer: cu.name };
   });
@@ -37,7 +37,7 @@ router.delete('/deposits/:id', can('deposits.manage'), wrap(async (req, res) => 
   const id = +req.params.id;
   await tx(async c => {
     const d = await one('SELECT * FROM customer_deposits WHERE id=? FOR UPDATE', [id], c); if (!d) bad('Not found', 404);
-    if (d.status === 'cleared') await addLedger(c, { customer_id: d.customer_id, date: today(), type: 'deposit_cancel', amount: -d.amount, ref_type: 'deposit', ref_id: id, description: `Deposit ${d.receipt_no} cancelled`, user_id: req.user.id }); // fails if already spent
+    if (d.status !== 'bounced') await addLedger(c, { customer_id: d.customer_id, date: today(), type: 'deposit_cancel', amount: -d.amount, ref_type: 'deposit', ref_id: id, description: `Deposit ${d.receipt_no} cancelled`, user_id: req.user.id }); // fails if already spent
     await q('UPDATE customer_cheques k JOIN payments p ON p.id=k.payment_id SET k.deposit_id=NULL, k.amount=p.amount WHERE k.deposit_id=?', [id], c);
     await q('DELETE FROM customer_cheques WHERE deposit_id=?', [id], c); await q('DELETE FROM customer_deposits WHERE id=?', [id], c);
   });
@@ -84,7 +84,7 @@ router.get('/customers/:id/account', can('deposits.view', 'customers.view'), wra
     const rows = [{ date: d.from === '1970-01-01' ? '' : d.from, description: 'Opening advance balance', balance: d.opening, _bold: 1 },
       ...d.rows.map(r => ({ date: r.date, type: r.label, description: r.description || '', before: r.balance_before, credit: r.credit, debit: r.debit, balance: r.balance_after })),
       { description: 'CLOSING ADVANCE BALANCE', credit: d.received, debit: round2(d.used + d.refunded), balance: d.closing, _bold: 1 }];
-    if (d.pending > 0) rows.push({ description: `Deposits awaiting cheque clearance (not available): ${money(d.pending)}` });
+    if (d.pending > 0) rows.push({ description: `Cheque deposits not yet cleared (already counted): ${money(d.pending)}` });
     if (d.outstanding_invoices.length) { rows.push({ description: 'OUTSTANDING INVOICE BALANCES (amount in last column)', _bold: 1 }); d.outstanding_invoices.forEach(i => rows.push({ date: i.date, type: 'Invoice', description: `${i.invoice_no} - ${i.status.replace('_', ' ')}${i.due_date ? ' - due ' + i.due_date : ''}`, balance: i.balance })); rows.push({ description: 'TOTAL OUTSTANDING', balance: d.outstanding_total, _bold: 1 }); }
     return res.type('pdf').send(await tablePdf({ title: 'CUSTOMER ACCOUNT STATEMENT', subtitle: `${d.customer.name}\n${req.query.from || 'Start'} → ${d.to}`,
       summary: [{ label: 'Available advance balance', display: money(d.balance), color: '#16a34a' }, { label: 'Deposits received (period)', display: money(d.received) }, { label: 'Used on invoices + refunds', display: money(d.used + d.refunded) }, { label: 'Outstanding invoices', display: money(d.outstanding_total), color: d.outstanding_total > 0 ? '#dc2626' : '#16a34a' }],

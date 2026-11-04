@@ -7,6 +7,8 @@ const { GROUPS, ALL } = require('../permissions');
 const M = require('../services/messaging');
 const backup = require('../services/backup');
 const reminders = require('../services/reminders');
+const fs = require('fs'), path = require('path'), UP = require('../config').uploadsDir;
+const logoUrl = s => s.company_logo ? '/p/logo?v=' + encodeURIComponent(s.company_logo) : '';
 
 // ---------- auth ----------
 router.post('/auth/login', wrap(async (req, res) => {
@@ -18,9 +20,10 @@ router.post('/auth/login', wrap(async (req, res) => {
   req.user = { id: u.id, name: u.name }; await log(req, 'login', 'user', u.id);
   res.json({ token: sign(u), user: await loadUser(u.id) });
 }));
+router.get('/auth/branding', wrap(async (req, res) => { const s = await settings(); res.json({ name: s.company_name, tagline: s.company_tagline, logo: logoUrl(s) }); }));
 router.get('/auth/me', auth, wrap(async (req, res) => {
   const s = await settings();
-  res.json({ user: req.user, company: { name: s.company_name, tagline: s.company_tagline, currency: s.currency, wa_enabled: s.wa_enabled === '1' }, permissionGroups: GROUPS });
+  res.json({ user: req.user, company: { name: s.company_name, tagline: s.company_tagline, logo: logoUrl(s), currency: s.currency, wa_enabled: s.wa_enabled === '1' }, permissionGroups: GROUPS });
 }));
 router.post('/auth/password', auth, wrap(async (req, res) => {
   const { current, password } = req.body;
@@ -106,11 +109,24 @@ router.get('/settings', auth, wrap(async (req, res) => {
 router.put('/settings', auth, can('settings.manage'), wrap(async (req, res) => {
   const cur = await settings();
   for (const [k, v] of Object.entries(req.body || {})) {
-    if (k.startsWith('seq_') || !(k in cur)) continue;
+    if (k.startsWith('seq_') || k === 'company_logo' || !(k in cur)) continue;
     if (SECRET.includes(k) && v === '********') continue;
     await setSetting(k, v);
   }
   await log(req, 'update', 'settings', null, Object.keys(req.body).join(',')); res.json({ ok: true });
+}));
+// company logo (PNG or JPG, max 1.5 MB) - sent as a data URL from the Settings page
+router.post('/settings/logo', auth, can('settings.manage'), wrap(async (req, res) => {
+  const m = /^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body.data || '')); if (!m) bad('Please choose a PNG or JPG image');
+  const buf = Buffer.from(m[2], 'base64'); if (buf.length > 1.5 * 1024 * 1024) bad('Logo is too large (max 1.5 MB)');
+  const png = buf.slice(0, 4).toString('hex') === '89504e47', jpg = buf.slice(0, 3).toString('hex') === 'ffd8ff'; if (!png && !jpg) bad('That file is not a valid PNG or JPG image');
+  const old = (await settings()).company_logo; if (old) fs.rmSync(path.join(UP, path.basename(old)), { force: true });
+  const name = `company-logo-${Date.now()}.${png ? 'png' : 'jpg'}`; fs.writeFileSync(path.join(UP, name), buf); await setSetting('company_logo', name);
+  await log(req, 'update', 'settings', null, 'company logo'); res.json({ ok: true, logo: logoUrl(await settings()) });
+}));
+router.delete('/settings/logo', auth, can('settings.manage'), wrap(async (req, res) => {
+  const old = (await settings()).company_logo; if (old) fs.rmSync(path.join(UP, path.basename(old)), { force: true });
+  await setSetting('company_logo', ''); await log(req, 'delete', 'settings', null, 'company logo'); res.json({ ok: true });
 }));
 router.get('/templates', auth, can('settings.manage', 'invoices.send'), wrap(async (req, res) => res.json(await q('SELECT * FROM wa_templates ORDER BY id'))));
 router.put('/templates/:id', auth, can('settings.manage'), wrap(async (req, res) => {

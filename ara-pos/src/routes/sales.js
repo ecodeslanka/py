@@ -60,7 +60,7 @@ async function statementData(cid, from, to) {
   ].sort((a, b) => a.date.localeCompare(b.date) || a.o - b.o);
   let bal = round2(open.bal); const rows = [{ date: from === '1970-01-01' ? '' : from, ref: '', description: 'Opening balance', debit: '', credit: '', balance: bal, _bold: true }];
   let td = 0, tc = 0;
-  ev.forEach(e => { bal = round2(bal + e.debit - e.credit); td += e.debit; tc += e.credit; rows.push({ date: e.date, ref: e.ref, description: e.description + (e.pendingAmt ? ` (${money(e.pendingAmt)} not cleared)` : ''), debit: e.debit || '', credit: e.credit || '', balance: bal }); });
+  ev.forEach(e => { bal = round2(bal + e.debit - e.credit); td += e.debit; tc += e.credit; rows.push({ date: e.date, ref: e.ref, description: e.description + (e.pendingAmt ? ` (${money(e.pendingAmt)} bounced - not counted)` : ''), debit: e.debit || '', credit: e.credit || '', balance: bal }); });
   rows.push({ date: '', ref: '', description: 'CLOSING BALANCE', debit: round2(td), credit: round2(tc), balance: bal, _bold: true });
   return { customer: c, from, to, rows, closing: bal, totalDebit: round2(td), totalCredit: round2(tc) };
 }
@@ -130,7 +130,7 @@ async function addPaymentTx(conn, req, inv, p) {
   if (method === 'cheque' && !(p.cheque && String(p.cheque.cheque_no || '').trim())) bad('Cheque number is required for cheque payments');
   if (method === 'deposit' && !inv.customer_id) bad('Select a customer to use their deposit');
   const r = await q('INSERT INTO payments (invoice_id,customer_id,date,amount,method,cleared,reference,note,created_by) VALUES (?,?,?,?,?,?,?,?,?)',
-    [inv.id, inv.customer_id, p.date || today(), amount, method, method === 'cheque' ? 0 : 1, method === 'deposit' ? 'Customer deposit' : (p.reference || null), p.note || null, req.user.id], conn);
+    [inv.id, inv.customer_id, p.date || today(), amount, method, 1, method === 'deposit' ? 'Customer deposit' : (p.reference || null), p.note || null, req.user.id], conn);
   if (method === 'deposit') await addLedger(conn, { customer_id: inv.customer_id, date: p.date || today(), type: 'used', amount: -amount, ref_type: 'payment', ref_id: r.insertId, description: `Used for invoice ${inv.invoice_no}`, user_id: req.user.id });
   if (method === 'cheque') {
     const c = p.cheque; await q('INSERT INTO customer_cheques (customer_id,invoice_id,payment_id,cheque_no,bank,cheque_date,amount,deposit_date,status,status_date,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
@@ -195,7 +195,7 @@ router.put('/invoices/:id', can('invoices.edit'), wrap(async (req, res) => {
     }
     const subtotal = round2((await one('SELECT COALESCE(SUM(total),0) t FROM invoice_items WHERE invoice_id=?', [id], c)).t);
     const discount = Math.min(Math.max(0, round2(b.discount ?? old.discount)), subtotal), total = round2(subtotal - discount);
-    const committed = round2(old.paid + old.cheque_pending);
+    const committed = round2(old.paid);
     if (total + 0.004 < committed) bad(`New total (${money(total)}) is less than payments already recorded (${money(committed)})`);
     await q('UPDATE invoices SET customer_id=?,customer_name=?,date=?,due_date=?,subtotal=?,discount=?,total=?,notes=?,had_credit=1,updated_by=? WHERE id=?',
       [customerId, cname, b.date || old.date, b.due_date === '' ? null : (b.due_date || old.due_date), subtotal, discount, total, b.notes ?? old.notes, req.user.id, id], c);
@@ -232,7 +232,7 @@ router.post('/invoices/:id/payments', can('payments.manage'), wrap(async (req, r
     const inv = await one('SELECT * FROM invoices WHERE id=? FOR UPDATE', [id], c); if (!inv) bad('Not found', 404);
     const amount = round2(b.amount); if (!(amount > 0)) bad('Enter a valid amount');
     const advBefore = inv.customer_id ? await depBalance(inv.customer_id, c) : 0;
-    const committed = round2(inv.paid + inv.cheque_pending); const plan = planPayments(inv.total, committed, [{ ...b, amount }]); const it = plan.items[0];
+    const committed = round2(inv.paid); const plan = planPayments(inv.total, committed, [{ ...b, amount }]); const it = plan.items[0];
     if (it.excess > 0.004 && !inv.customer_id) bad(`Amount is more than the remaining ${money(Math.max(inv.total - committed, 0))}. Select a customer on the invoice so the extra can be saved as their advance balance.`);
     if (it.take > 0.004) pid = await addPaymentTx(c, req, inv, { ...b, amount: it.take, cheque_amount: it.amt });
     if (it.excess > 0.004) { await keepOverpayment(c, req, inv, { ...b, amount: it.excess }, pid); overpaid = it.excess; }
@@ -254,7 +254,7 @@ router.put('/payments/:id', can('payments.manage'), wrap(async (req, res) => {
     if (p.method === 'deposit') bad('A payment made from the customer deposit cannot be edited - delete it and add it again');
     const inv = await one('SELECT * FROM invoices WHERE id=?', [p.invoice_id], c); const amount = round2(b.amount ?? p.amount);
     if (!(amount > 0)) bad('Invalid amount');
-    if (amount > round2(inv.total - (inv.paid + inv.cheque_pending - p.amount)) + 0.004) bad('Amount exceeds the invoice balance');
+    if (amount > round2(inv.total - (inv.paid - (p.cleared ? p.amount : 0))) + 0.004) bad('Amount exceeds the invoice balance');
     await q('UPDATE payments SET date=?,amount=?,note=? WHERE id=?', [b.date || p.date, amount, b.note ?? p.note, id], c);
     if (p.method === 'cheque') await q('UPDATE customer_cheques SET amount=? WHERE payment_id=? AND deposit_id IS NULL', [amount, id], c);
     await recalc(p.invoice_id, c);
@@ -300,7 +300,7 @@ router.put('/cheques/customer/:id', can('cheques.manage'), wrap(async (req, res)
     const st = b.status || k.status; if (!['received', 'pending', 'deposited', 'cleared', 'bounced'].includes(st)) bad('Invalid status');
     await q('UPDATE customer_cheques SET cheque_no=?,bank=?,cheque_date=?,deposit_date=?,status=?,status_date=?,note=? WHERE id=?',
       [b.cheque_no || k.cheque_no, b.bank ?? k.bank, b.cheque_date ?? k.cheque_date, b.deposit_date ?? k.deposit_date, st, st !== k.status ? (b.status_date || today()) : k.status_date, b.note ?? k.note, id], c);
-    if (k.payment_id) { await q('UPDATE payments SET cleared=? WHERE id=?', [st === 'cleared' ? 1 : 0, k.payment_id], c); if (k.invoice_id) await recalc(k.invoice_id, c); }
+    if (k.payment_id) { await q('UPDATE payments SET cleared=? WHERE id=?', [st === 'bounced' ? 0 : 1, k.payment_id], c); if (k.invoice_id) await recalc(k.invoice_id, c); }
     if (k.deposit_id) { const dep = await one('SELECT * FROM customer_deposits WHERE id=? FOR UPDATE', [k.deposit_id], c); if (dep) await setDepositStatus(c, dep, st === 'cleared' ? 'cleared' : st === 'bounced' ? 'bounced' : 'pending', req.user.id); }
     if (st === 'bounced' && k.status !== 'bounced') bounced = k;
   });
@@ -331,7 +331,7 @@ router.put('/cheques/supplier/:id', can('cheques.manage'), wrap(async (req, res)
   if (!(+b.amount > 0)) bad('Invalid amount');
   await q('UPDATE supplier_cheques SET supplier_id=?,cheque_no=?,bank=?,amount=?,cheque_date=?,present_date=?,status=?,note=?,status_date=? WHERE id=?', [b.supplier_id || k.supplier_id, ...scVals(b), b.status !== k.status ? today() : k.status_date, k.id]);
   const st = scVals(b)[5];
-  if (k.payment_id) { await q('UPDATE supplier_payments SET cleared=? WHERE id=?', [st === 'cleared' ? 1 : 0, k.payment_id]); if (k.grn_id) await require('../services/grn').recalcGrn(k.grn_id); }
+  if (k.payment_id) { await q('UPDATE supplier_payments SET cleared=? WHERE id=?', [st === 'returned' ? 0 : 1, k.payment_id]); if (k.grn_id) await require('../services/grn').recalcGrn(k.grn_id); }
   await log(req, 'update', 'supplier_cheque', k.id, st); require('../services/reminders').scan().catch(() => { }); res.json({ ok: true });
 }));
 router.delete('/cheques/supplier/:id', can('cheques.manage'), wrap(async (req, res) => { const k = await one('SELECT * FROM supplier_cheques WHERE id=?', [req.params.id]); if (k?.payment_id) { await q('DELETE FROM supplier_payments WHERE id=?', [k.payment_id]); if (k.grn_id) { await q('DELETE FROM supplier_cheques WHERE id=?', [k.id]); await require('../services/grn').recalcGrn(k.grn_id); } } await q('DELETE FROM supplier_cheques WHERE id=?', [req.params.id]); await log(req, 'delete', 'supplier_cheque', +req.params.id); res.json({ ok: true }); }));

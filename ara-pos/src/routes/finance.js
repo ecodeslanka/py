@@ -69,7 +69,7 @@ router.get('/dashboard', can('dashboard.view'), wrap(async (req, res) => {
     today_sales: await sum('SELECT COALESCE(SUM(total),0) v FROM invoices WHERE date=?', [T]),
     today_invoices: await sum('SELECT COUNT(*) v FROM invoices WHERE date=?', [T]),
     month_sales: await sum('SELECT COALESCE(SUM(total),0) v FROM invoices WHERE DATE_FORMAT(date,"%Y-%m")=?', [M]),
-    month_income: (await sum('SELECT COALESCE(SUM(amount),0) v FROM payments WHERE cleared=1 AND method<>\'deposit\' AND DATE_FORMAT(date,"%Y-%m")=?', [M])) + (await sum("SELECT COALESCE(SUM(amount),0) v FROM customer_deposits WHERE status='cleared' AND DATE_FORMAT(COALESCE(cleared_date,date),'%Y-%m')=?", [M])),
+    month_income: (await sum('SELECT COALESCE(SUM(amount),0) v FROM payments WHERE cleared=1 AND method<>\'deposit\' AND DATE_FORMAT(date,"%Y-%m")=?', [M])) + (await sum("SELECT COALESCE(SUM(amount),0) v FROM customer_deposits WHERE status<>'bounced' AND DATE_FORMAT(date,'%Y-%m')=?", [M])),
     deposit_available: await sum('SELECT COALESCE(SUM(amount),0) v FROM customer_account_ledger'),
     month_expenses: await sum('SELECT COALESCE(SUM(amount),0) v FROM expenses WHERE DATE_FORMAT(date,"%Y-%m")=?', [M]),
     stock_value: await sum('SELECT COALESCE(SUM(v.qty*p.cost_price),0) v FROM product_variants v JOIN products p ON p.id=v.product_id WHERE p.active=1'),

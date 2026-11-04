@@ -38,7 +38,7 @@ const FL = {
   method: O('method', 'Payment method', [['cash', 'Cash'], ['bank', 'Bank'], ['cheque', 'Cheque']]),
   art: T('art', 'ART NO.', { placeholder: 'e.g. ARA-M01' }), product: T('product', 'Product name'),
   size: O('size', 'Size', 'sizes'), colour: O('colour', 'Colour', 'colours'), location: O('location', 'Stock location', 'locations'),
-  invstatus: O('status', 'Payment status', [['unpaid', 'Unpaid'], ['partial', 'Partially paid'], ['pending', 'Pending'], ['cheque_pending', 'Cheque pending'], ['paid', 'Paid']]),
+  invstatus: O('status', 'Payment status', [['unpaid', 'Unpaid'], ['partial', 'Partially paid'], ['pending', 'Pending'], ['paid', 'Paid']]),
   cstatus: O('status', 'Cheque status', [['received', 'Received'], ['deposited', 'Deposited'], ['cleared', 'Cleared'], ['bounced', 'Bounced']]),
   sstatus: O('status', 'Cheque status', [['issued', 'Issued'], ['presented', 'Presented'], ['cleared', 'Cleared'], ['returned', 'Returned']]),
   chequeno: T('cheque_no', 'Cheque number'), bank: T('bank', 'Bank'),
@@ -46,7 +46,7 @@ const FL = {
   search: T('search', 'Search'), min: N('min', 'Min. amount'), max: N('max', 'Max. amount'),
   mtype: O('mtype', 'Movement type', Object.entries(MV)), user: O('user', 'Done by (user)', 'users'),
   low: O('low', 'Stock level', [['1', 'Low / out of stock only']]), owing: O('owing', 'Balance', [['1', 'Owing money only']]),
-  dstatus: O('status', 'Deposit status', [['pending', 'Pending (cheque not cleared)'], ['cleared', 'Cleared'], ['bounced', 'Bounced']]), dmethod: O('method', 'Payment method', [['cash', 'Cash'], ['bank', 'Bank transfer'], ['cheque', 'Cheque']]),
+  dstatus: O('status', 'Deposit status', [['pending', 'Cheque not yet cleared (counted)'], ['cleared', 'Cleared'], ['bounced', 'Bounced (taken back)']]), dmethod: O('method', 'Payment method', [['cash', 'Cash'], ['bank', 'Bank transfer'], ['cheque', 'Cheque']]),
   depbal: O('avail', 'Balance', [['1', 'Available balance only']]), ltype: O('ltype', 'Transaction type', Object.entries(TYPE_LABEL)),
   stype: O('stype', 'Supplier type', [['material', 'Material'], ['product', 'Finished goods'], ['other', 'Other']]),
 };
@@ -94,12 +94,12 @@ const REPORTS = {
     const sales = await one('SELECT COALESCE(SUM(total),0) v, COUNT(*) n, COALESCE(SUM(discount),0) disc FROM invoices WHERE date BETWEEN ? AND ?', [f, t]);
     const qty = (await one('SELECT COALESCE(SUM(ii.qty),0) v, COALESCE(SUM(ii.qty*ii.cost),0) cogs, COALESCE(SUM(ii.qty*ii.price),0) listv, COALESCE(SUM(ii.discount),0) ldisc FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE i.date BETWEEN ? AND ?', [f, t]));
     const incP = await q("SELECT method, COALESCE(SUM(amount),0) v FROM payments WHERE cleared=1 AND method<>'deposit' AND date BETWEEN ? AND ? GROUP BY method", [f, t]);
-    const incD = await q("SELECT method, COALESCE(SUM(amount),0) v FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date) BETWEEN ? AND ? GROUP BY method", [f, t]);
+    const incD = await q("SELECT method, COALESCE(SUM(amount),0) v FROM customer_deposits WHERE status<>'bounced' AND date BETWEEN ? AND ? GROUP BY method", [f, t]);
     const inc = [...incP, ...incD]; const depIn = round2(incD.reduce((a, r) => a + r.v, 0));
     const refunds = round2(-(await one("SELECT COALESCE(SUM(amount),0) v FROM customer_account_ledger WHERE type='refund' AND date BETWEEN ? AND ?", [f, t])).v);
     const held = round2((await one('SELECT COALESCE(SUM(amount),0) v FROM customer_account_ledger')).v);
     const exp = await q('SELECT COALESCE(c.name,"Uncategorised") name, COALESCE(SUM(e.amount),0) v, e.method FROM expenses e LEFT JOIN expense_categories c ON c.id=e.category_id WHERE e.date BETWEEN ? AND ? GROUP BY c.name, e.method', [f, t]);
-    const supPaid = (await one('SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE cleared=1 AND date BETWEEN ? AND ?', [f, t])).v + (await one("SELECT COALESCE(SUM(amount),0) v FROM supplier_cheques WHERE status='cleared' AND payment_id IS NULL AND status_date BETWEEN ? AND ?", [f, t])).v;
+    const supPaid = (await one('SELECT COALESCE(SUM(amount),0) v FROM supplier_payments WHERE cleared=1 AND date BETWEEN ? AND ?', [f, t])).v + (await one("SELECT COALESCE(SUM(amount),0) v FROM supplier_cheques WHERE status<>'returned' AND payment_id IS NULL AND COALESCE(cheque_date,status_date) BETWEEN ? AND ?", [f, t])).v;
     const income = round2(inc.reduce((a, r) => a + r.v, 0)), expenses = round2(exp.reduce((a, r) => a + r.v, 0));
     const cheq = (await one("SELECT COALESCE(SUM(amount),0) v FROM customer_cheques WHERE status IN ('received','pending','deposited') AND created_at<=?", [t + ' 23:59:59'])).v;
     const sumM = m => round2(inc.filter(r => r.method === m).reduce((a, r) => a + r.v, 0)); const cash = sumM('cash'), bank = sumM('bank'), chq = sumM('cheque');
@@ -110,8 +110,8 @@ const REPORTS = {
       { label: 'Net Sales (after discounts)', value: sales.v, money: 1, note: `${sales.n} invoices • ${qty.v} pairs` }, { label: 'Cost of goods sold', value: cogs, money: 1 },
       { label: 'Discounts given', value: discounts, money: 1, note: 'line + invoice discounts' }, { label: 'PROFIT (Selling − Cost − Discounts)', value: profit, money: 1, tone: profit >= 0 ? 'good' : 'bad', note: margin ? `Margin ${margin}` : '' },
       { label: 'Expenses', value: expenses, money: 1 }, { label: 'Net Profit after Expenses', value: netProfit, money: 1, tone: netProfit >= 0 ? 'good' : 'bad' },
-      { label: 'Income Received', value: income, money: 1, note: 'cash + bank + cleared cheques + deposits' }, { label: 'Cash Profit (Income − Expenses − refunds)', value: cashProfit, money: 1, tone: cashProfit >= 0 ? 'good' : 'bad' },
-      { label: 'Cheques not yet cleared', value: cheq, money: 1 }, { label: 'Supplier payments made', value: round2(supPaid), money: 1 },
+      { label: 'Income Received', value: income, money: 1, note: 'cash + bank + cheques (not bounced) + deposits' }, { label: 'Cash Profit (Income − Expenses − refunds)', value: cashProfit, money: 1, tone: cashProfit >= 0 ? 'good' : 'bad' },
+      { label: 'Cheques not yet cleared (already counted as paid)', value: cheq, money: 1 }, { label: 'Supplier payments made', value: round2(supPaid), money: 1 },
     ];
     const rows = [
       { item: 'Sales at selling price (qty × price entered on the sales screen)', amount: round2(qty.listv) }, { item: '  less: line discounts', amount: -round2(qty.ldisc) }, { item: '  less: whole-invoice discounts', amount: -round2(sales.disc) },
@@ -119,7 +119,7 @@ const REPORTS = {
       { item: `PROFIT = Selling price − Cost price − Discounts${margin ? '   (margin ' + margin + ')' : ''}`, amount: profit, _bold: 1 },
       ...exp.map(e => ({ item: `Expense - ${e.name} (${e.method})`, amount: -e.v })), { item: 'TOTAL EXPENSES', amount: -expenses, _bold: 1 },
       { item: 'NET PROFIT / (LOSS) after expenses', amount: netProfit, _bold: 1 },
-      { item: '--- Money received (cash position) ---' }, { item: 'Income received - Cash', amount: cash }, { item: 'Income received - Bank transfer', amount: bank }, { item: 'Income received - Cheques cleared', amount: chq },
+      { item: '--- Money received (cash position) ---' }, { item: 'Income received - Cash', amount: cash }, { item: 'Income received - Bank transfer', amount: bank }, { item: 'Income received - Cheques (not bounced)', amount: chq },
       { item: '  of which customer deposits (advance) received', amount: depIn }, { item: 'TOTAL INCOME RECEIVED', amount: income, _bold: 1 },
       { item: 'Customer refunds paid', amount: refunds }, { item: 'Customer deposits held (advance balances, not income yet)', amount: held }, { item: 'Cash paid out (expenses)', amount: cashOut }, { item: 'Bank/cheque paid out (expenses)', amount: bankOut },
       { item: 'CASH PROFIT / (LOSS) = Income − Expenses − Refunds', amount: cashProfit, _bold: 1 },
@@ -129,9 +129,9 @@ const REPORTS = {
   async daily(f, t) {
     const rows = await q(`SELECT d.date, COALESCE((SELECT SUM(total) FROM invoices WHERE date=d.date),0) sales,
       COALESCE((SELECT SUM(ii.qty*ii.cost) FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id WHERE i.date=d.date),0) cost,
-      COALESCE((SELECT SUM(amount) FROM payments WHERE cleared=1 AND method<>'deposit' AND date=d.date),0) + COALESCE((SELECT SUM(amount) FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date)=d.date),0) income,
+      COALESCE((SELECT SUM(amount) FROM payments WHERE cleared=1 AND method<>'deposit' AND date=d.date),0) + COALESCE((SELECT SUM(amount) FROM customer_deposits WHERE status<>'bounced' AND date=d.date),0) income,
       COALESCE((SELECT SUM(amount) FROM expenses WHERE date=d.date),0) expenses
-      FROM (SELECT DISTINCT date FROM (SELECT date FROM invoices UNION SELECT date FROM payments UNION SELECT date FROM expenses UNION SELECT COALESCE(cleared_date,date) AS date FROM customer_deposits WHERE status='cleared') x WHERE date BETWEEN ? AND ?) d ORDER BY d.date`, [f, t]);
+      FROM (SELECT DISTINCT date FROM (SELECT date FROM invoices UNION SELECT date FROM payments UNION SELECT date FROM expenses UNION SELECT date FROM customer_deposits WHERE status<>'bounced') x WHERE date BETWEEN ? AND ?) d ORDER BY d.date`, [f, t]);
     rows.forEach(r => { r.profit = round2(r.sales - r.cost); r.net = round2(r.profit - r.expenses); });
     const tot = rows.reduce((a, r) => ({ sales: a.sales + r.sales, cost: a.cost + r.cost, profit: a.profit + r.profit, expenses: a.expenses + r.expenses, net: a.net + r.net, income: a.income + r.income }), { sales: 0, cost: 0, profit: 0, expenses: 0, net: 0, income: 0 });
     if (rows.length) rows.push({ date: 'TOTAL', ...Object.fromEntries(Object.entries(tot).map(([k, v]) => [k, round2(v)])), _bold: 1 });
@@ -140,7 +140,7 @@ const REPORTS = {
   },
   async cashbook(f, t) {
     const rows = await q(`SELECT date, 'Receipt' type, CONCAT(method,' - ',(SELECT invoice_no FROM invoices WHERE id=invoice_id)) description, method, amount, 0 paid FROM payments WHERE cleared=1 AND method<>'deposit' AND date BETWEEN ? AND ?
-      UNION ALL SELECT COALESCE(cleared_date,date), 'Receipt', CONCAT('Customer deposit ', receipt_no), method, amount, 0 FROM customer_deposits WHERE status='cleared' AND COALESCE(cleared_date,date) BETWEEN ? AND ?
+      UNION ALL SELECT date, 'Receipt', CONCAT('Customer deposit ', receipt_no), method, amount, 0 FROM customer_deposits WHERE status<>'bounced' AND date BETWEEN ? AND ?
       UNION ALL SELECT date, 'Refund', COALESCE(description,'Customer refund'), 'cash', 0, -amount FROM customer_account_ledger WHERE type='refund' AND date BETWEEN ? AND ?
       UNION ALL SELECT date,'Expense', CONCAT((SELECT name FROM expense_categories WHERE id=category_id),' - ',COALESCE(description,'')), method, 0, amount FROM expenses WHERE date BETWEEN ? AND ?
       UNION ALL SELECT date,'Supplier payment', 'Supplier payment', method, 0, amount FROM supplier_payments WHERE cleared=1 AND date BETWEEN ? AND ? ORDER BY date, type`, [f, t, f, t, f, t, f, t, f, t]);
@@ -236,10 +236,10 @@ const REPORTS = {
       .sort((a, b) => a.customer.localeCompare(b.customer) || a.date.localeCompare(b.date) || a.o - b.o);
     const single = custs.length === 1 && has(F.customer) && !has(F.status); let bal = null, rows = [];
     if (single) { const o = await one('SELECT (SELECT COALESCE(SUM(total),0) FROM invoices WHERE customer_id=? AND date<?) - (SELECT COALESCE(SUM(amount),0) FROM payments WHERE customer_id=? AND cleared=1 AND date<?) b', [ids[0], f, ids[0], f]); bal = round2(o.b); rows.push({ date: f === '1970-01-01' ? '' : f, customer: custs[0].name, description: 'Opening balance', balance: bal, _bold: 1 }); }
-    ev.forEach(e => { if (bal !== null) bal = round2(bal + e.debit - e.credit); rows.push({ date: e.date, customer: e.customer, type: e.type, ref: e.ref, description: e.description + (e.pend ? ` (${money(e.pend)} not cleared)` : ''), debit: e.debit || '', credit: e.credit || '', balance: bal === null ? '' : bal }); });
+    ev.forEach(e => { if (bal !== null) bal = round2(bal + e.debit - e.credit); rows.push({ date: e.date, customer: e.customer, type: e.type, ref: e.ref, description: e.description + (e.pend ? ` (${money(e.pend)} bounced - not counted)` : ''), debit: e.debit || '', credit: e.credit || '', balance: bal === null ? '' : bal }); });
     const td = sumBy(ev, 'debit'), tc = sumBy(ev, 'credit'); const out = await one(`SELECT COALESCE(SUM(i.balance),0) v FROM invoices i WHERE i.customer_id IN (?)${st}`, [ids, ...sp]);
     if (ev.length) rows.push({ description: 'TOTAL', debit: td, credit: tc, balance: single ? bal : '', _bold: 1 });
-    return { title: 'Customer Ledger - invoices, payments & outstanding', cards: [{ label: 'Invoiced', value: td, money: 1 }, { label: 'Received (cleared)', value: tc, money: 1, tone: 'good' }, { label: 'Outstanding now', value: round2(out.v), money: 1, tone: out.v > 0 ? 'bad' : 'good', note: `${custs.length} customer(s)` }], columns: cols, rows };
+    return { title: 'Customer Ledger - invoices, payments & outstanding', cards: [{ label: 'Invoiced', value: td, money: 1 }, { label: 'Received (cheques counted)', value: tc, money: 1, tone: 'good' }, { label: 'Outstanding now', value: round2(out.v), money: 1, tone: out.v > 0 ? 'bad' : 'good', note: `${custs.length} customer(s)` }], columns: cols, rows };
   },
   // advance deposits received from customers
   async deposits(f, t, F) {
@@ -247,7 +247,7 @@ const REPORTS = {
     if (has(F.search)) { w.push('(d.receipt_no LIKE ? OR d.reference LIKE ? OR c.name LIKE ?)'); p.push(L(F.search), L(F.search), L(F.search)); }
     const rows = await q(`SELECT d.date, d.receipt_no receipt, c.name customer, d.method, COALESCE(d.reference,'') reference, COALESCE(k.cheque_no,'') cheque_no, COALESCE(k.bank,'') bank, d.amount, d.status FROM customer_deposits d JOIN customers c ON c.id=d.customer_id LEFT JOIN customer_cheques k ON k.deposit_id=d.id WHERE ${w.join(' AND ')} ORDER BY d.date, d.id`, p);
     const by = s => sumBy(rows.filter(r => r.status === s), 'amount'); if (rows.length) rows.push({ date: 'TOTAL', amount: sumBy(rows, 'amount'), _bold: 1 });
-    return { title: 'Customer Deposits (advance payments)', cards: [{ label: 'Deposits', value: rows.length ? rows.length - 1 : 0 }, { label: 'Cleared (available)', value: by('cleared'), money: 1, tone: 'good' }, { label: 'Awaiting cheque clearance', value: by('pending'), money: 1 }, { label: 'Bounced', value: by('bounced'), money: 1, tone: by('bounced') ? 'bad' : '' }],
+    return { title: 'Customer Deposits (advance payments)', cards: [{ label: 'Deposits', value: rows.length ? rows.length - 1 : 0 }, { label: 'Cleared', value: by('cleared'), money: 1, tone: 'good' }, { label: 'Cheque not yet cleared (counted)', value: by('pending'), money: 1 }, { label: 'Bounced', value: by('bounced'), money: 1, tone: by('bounced') ? 'bad' : '' }],
       columns: [C('date', 'Date', { w: 70 }), C('receipt', 'Receipt no.', { w: 85 }), C('customer', 'Customer'), C('method', 'Method', { w: 55 }), C('reference', 'Reference'), C('cheque_no', 'Cheque no.', { w: 70 }), C('bank', 'Bank', { w: 80 }), C('amount', 'Amount', { money: 1 }), C('status', 'Status', { w: 60 })], rows };
   },
   // customer-wise: opening, deposits, used, refunds, closing (available) balance
@@ -262,7 +262,7 @@ const REPORTS = {
       COALESCE((SELECT SUM(amount) FROM customer_deposits WHERE customer_id=c.id AND status='pending'),0) pending
       FROM customers c WHERE ${w.join(' AND ')} HAVING ${F.avail === '1' ? 'closing>0' : '(opening<>0 OR deposits<>0 OR used<>0 OR refunds<>0 OR closing<>0 OR pending>0)'} ORDER BY closing DESC, c.name`, p);
     const tot = { opening: sumBy(rows, 'opening'), deposits: sumBy(rows, 'deposits'), used: sumBy(rows, 'used'), refunds: sumBy(rows, 'refunds'), closing: sumBy(rows, 'closing'), pending: sumBy(rows, 'pending') }; if (rows.length) rows.push({ customer: 'TOTAL', ...tot, _bold: 1 });
-    return { title: 'Customer Deposit Balances', cards: [{ label: 'Customers with advance', value: rows.filter(r => r.closing > 0 && r.customer !== 'TOTAL').length }, { label: 'Available advance (closing)', value: tot.closing, money: 1, tone: 'good' }, { label: 'Deposits received', value: tot.deposits, money: 1 }, { label: 'Used on invoices', value: tot.used, money: 1 }, { label: 'Awaiting cheque clearance', value: tot.pending, money: 1 }],
+    return { title: 'Customer Deposit Balances', cards: [{ label: 'Customers with advance', value: rows.filter(r => r.closing > 0 && r.customer !== 'TOTAL').length }, { label: 'Available advance (closing)', value: tot.closing, money: 1, tone: 'good' }, { label: 'Deposits received', value: tot.deposits, money: 1 }, { label: 'Used on invoices', value: tot.used, money: 1 }, { label: 'Cheque not yet cleared (counted)', value: tot.pending, money: 1 }],
       columns: [C('customer', 'Customer'), C('phone', 'Phone', { w: 80 }), C('opening', 'Opening', { money: 1 }), C('deposits', 'Deposits', { money: 1 }), C('used', 'Used', { money: 1 }), C('refunds', 'Refunds', { money: 1 }), C('closing', 'Available', { money: 1 }), C('pending', 'Awaiting clearance', { money: 1 })], rows };
   },
   // the full traceable ledger
@@ -277,7 +277,7 @@ const REPORTS = {
   async suppliers(f, t, F) {
     const w = ['1=1'], p = [f, t, f, t, f, t]; if (has(F.supplier)) { w.push('s.id=?'); p.push(F.supplier); } if (has(F.stype)) { w.push('s.type=?'); p.push(F.stype); }
     const rows = await q(`SELECT s.name supplier, s.type, COALESCE((SELECT SUM(total) FROM goods_receipts WHERE supplier_id=s.id AND date BETWEEN ? AND ?),0) purchases,
-      COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id=s.id AND cleared=1 AND date BETWEEN ? AND ?),0)+COALESCE((SELECT SUM(amount) FROM supplier_cheques WHERE supplier_id=s.id AND status='cleared' AND payment_id IS NULL AND status_date BETWEEN ? AND ?),0) paid,
+      COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id=s.id AND cleared=1 AND date BETWEEN ? AND ?),0)+COALESCE((SELECT SUM(amount) FROM supplier_cheques WHERE supplier_id=s.id AND status<>'returned' AND payment_id IS NULL AND COALESCE(cheque_date,status_date) BETWEEN ? AND ?),0) paid,
       ${SUP_BAL} balance FROM suppliers s WHERE ${w.join(' AND ')} ORDER BY balance DESC`, p);
     const tot = { purchases: sumBy(rows, 'purchases'), paid: sumBy(rows, 'paid'), balance: sumBy(rows, 'balance') }; if (rows.length) rows.push({ supplier: 'TOTAL', ...tot, _bold: 1 });
     return { title: 'Supplier Transactions & Balances', cards: [{ label: 'Goods received (period)', value: tot.purchases, money: 1 }, { label: 'Paid (period)', value: tot.paid, money: 1 }, { label: 'Balance owed (all time)', value: tot.balance, money: 1, tone: tot.balance > 0 ? 'bad' : 'good' }],
@@ -292,16 +292,16 @@ const REPORTS = {
     const ids = sups.map(s => s.id);
     const grns = await q('SELECT g.date,g.grn_no,g.total,g.supplier_id,s.name supplier,g.ref FROM goods_receipts g JOIN suppliers s ON s.id=g.supplier_id WHERE g.supplier_id IN (?) AND g.date BETWEEN ? AND ?', [ids, f, t]);
     const pays = await q(`SELECT p.date,p.amount,p.method,p.cleared,g.grn_no,p.supplier_id,s.name supplier,k.cheque_no,k.bank,k.status cs FROM supplier_payments p JOIN suppliers s ON s.id=p.supplier_id LEFT JOIN goods_receipts g ON g.id=p.grn_id LEFT JOIN supplier_cheques k ON k.payment_id=p.id WHERE p.supplier_id IN (?) AND p.date BETWEEN ? AND ?`, [ids, f, t]);
-    const chq = await q(`SELECT COALESCE(k.status_date,k.cheque_date) date,k.amount,k.cheque_no,k.bank,k.supplier_id,s.name supplier FROM supplier_cheques k JOIN suppliers s ON s.id=k.supplier_id WHERE k.supplier_id IN (?) AND k.status='cleared' AND k.payment_id IS NULL AND COALESCE(k.status_date,k.cheque_date) BETWEEN ? AND ?`, [ids, f, t]);
+    const chq = await q(`SELECT COALESCE(k.cheque_date,k.status_date) date,k.amount,k.cheque_no,k.bank,k.supplier_id,s.name supplier FROM supplier_cheques k JOIN suppliers s ON s.id=k.supplier_id WHERE k.supplier_id IN (?) AND k.status<>'returned' AND k.payment_id IS NULL AND COALESCE(k.cheque_date,k.status_date) BETWEEN ? AND ?`, [ids, f, t]);
     const ev = [...grns.map(g => ({ date: g.date, o: 0, supplier: g.supplier, type: 'GRN', ref: g.grn_no, description: `Goods received${g.ref ? ' - ' + g.ref : ''}`, debit: g.total, credit: 0 })),
       ...pays.map(p => ({ date: p.date, o: 1, supplier: p.supplier, type: p.method === 'cheque' ? 'Cheque' : 'Payment', ref: p.grn_no || '', description: p.method === 'cheque' ? `Cheque ${p.cheque_no || ''} ${p.bank || ''} [${p.cs}]` : `Payment - ${p.method}`, debit: 0, credit: p.cleared ? p.amount : 0, pend: p.cleared ? 0 : p.amount })),
-      ...chq.map(c => ({ date: c.date, o: 1, supplier: c.supplier, type: 'Cheque', ref: '', description: `Cheque ${c.cheque_no} ${c.bank || ''} [cleared]`, debit: 0, credit: c.amount }))].sort((a, b) => a.supplier.localeCompare(b.supplier) || a.date.localeCompare(b.date) || a.o - b.o);
+      ...chq.map(c => ({ date: c.date, o: 1, supplier: c.supplier, type: 'Cheque', ref: '', description: `Cheque ${c.cheque_no} ${c.bank || ''} [${c.status}]`, debit: 0, credit: c.amount }))].sort((a, b) => a.supplier.localeCompare(b.supplier) || a.date.localeCompare(b.date) || a.o - b.o);
     const single = sups.length === 1 && has(F.supplier); let bal = null, rows = [];
-    if (single) { const o = await one(`SELECT ? + (SELECT COALESCE(SUM(total),0) FROM goods_receipts WHERE supplier_id=? AND date<?) - (SELECT COALESCE(SUM(amount),0) FROM supplier_payments WHERE supplier_id=? AND cleared=1 AND date<?) - (SELECT COALESCE(SUM(amount),0) FROM supplier_cheques WHERE supplier_id=? AND status='cleared' AND payment_id IS NULL AND COALESCE(status_date,cheque_date)<?) b`, [sups[0].opening_balance, ids[0], f, ids[0], f, ids[0], f]); bal = round2(o.b); rows.push({ date: f === '1970-01-01' ? '' : f, supplier: sups[0].name, description: 'Opening balance', balance: bal, _bold: 1 }); }
-    ev.forEach(e => { if (bal !== null) bal = round2(bal + e.debit - e.credit); rows.push({ date: e.date, supplier: e.supplier, type: e.type, ref: e.ref, description: e.description + (e.pend ? ` (${money(e.pend)} not cleared)` : ''), debit: e.debit || '', credit: e.credit || '', balance: bal === null ? '' : bal }); });
+    if (single) { const o = await one(`SELECT ? + (SELECT COALESCE(SUM(total),0) FROM goods_receipts WHERE supplier_id=? AND date<?) - (SELECT COALESCE(SUM(amount),0) FROM supplier_payments WHERE supplier_id=? AND cleared=1 AND date<?) - (SELECT COALESCE(SUM(amount),0) FROM supplier_cheques WHERE supplier_id=? AND status<>'returned' AND payment_id IS NULL AND COALESCE(cheque_date,status_date)<?) b`, [sups[0].opening_balance, ids[0], f, ids[0], f, ids[0], f]); bal = round2(o.b); rows.push({ date: f === '1970-01-01' ? '' : f, supplier: sups[0].name, description: 'Opening balance', balance: bal, _bold: 1 }); }
+    ev.forEach(e => { if (bal !== null) bal = round2(bal + e.debit - e.credit); rows.push({ date: e.date, supplier: e.supplier, type: e.type, ref: e.ref, description: e.description + (e.pend ? ` (${money(e.pend)} bounced - not counted)` : ''), debit: e.debit || '', credit: e.credit || '', balance: bal === null ? '' : bal }); });
     const td = sumBy(ev, 'debit'), tc = sumBy(ev, 'credit'); const owe = await one(`SELECT COALESCE(SUM(${SUP_BAL}),0) v FROM suppliers s WHERE s.id IN (?)`, [ids]);
     if (ev.length) rows.push({ description: 'TOTAL', debit: td, credit: tc, balance: single ? bal : '', _bold: 1 });
-    return { title: 'Supplier Ledger - purchases, payments & outstanding', cards: [{ label: 'Goods received (GRN)', value: td, money: 1 }, { label: 'Paid (cleared)', value: tc, money: 1, tone: 'good' }, { label: 'Balance owed now', value: round2(owe.v), money: 1, tone: owe.v > 0 ? 'bad' : 'good', note: `${sups.length} supplier(s)` }], columns: cols, rows };
+    return { title: 'Supplier Ledger - purchases, payments & outstanding', cards: [{ label: 'Goods received (GRN)', value: td, money: 1 }, { label: 'Paid (cheques counted)', value: tc, money: 1, tone: 'good' }, { label: 'Balance owed now', value: round2(owe.v), money: 1, tone: owe.v > 0 ? 'bad' : 'good', note: `${sups.length} supplier(s)` }], columns: cols, rows };
   },
   async expenses(f, t, F) {
     const w = ['e.date BETWEEN ? AND ?'], p = [f, t]; expenseWhere(strip(F), w, p);
@@ -334,7 +334,7 @@ const REPORTS = {
     if (has(F.customer)) { w.push('k.customer_id=?'); p.push(F.customer); } if (has(F.status)) { w.push('k.status IN (?)'); p.push(String(F.status).split(',')); } if (has(F.cheque_no)) { w.push('k.cheque_no LIKE ?'); p.push(L(F.cheque_no)); } if (has(F.bank)) { w.push('k.bank LIKE ?'); p.push(L(F.bank)); }
     const rows = await q(`SELECT k.cheque_date, k.deposit_date, k.cheque_no, k.bank, COALESCE(c.name,'') customer, COALESCE(i.invoice_no,'') invoice, k.amount, k.status, k.status_date FROM customer_cheques k LEFT JOIN customers c ON c.id=k.customer_id LEFT JOIN invoices i ON i.id=k.invoice_id WHERE ${w.join(' AND ')} ORDER BY k.deposit_date, k.id`, p);
     const total = sumBy(rows, 'amount'), cleared = sumBy(rows.filter(r => r.status === 'cleared'), 'amount'), bounced = sumBy(rows.filter(r => r.status === 'bounced'), 'amount'); if (rows.length) rows.push({ cheque_date: 'TOTAL', amount: total, _bold: 1 });
-    return { title: 'Customer Cheques', cards: [{ label: 'Cheques', value: rows.length ? rows.length - 1 : 0 }, { label: 'Total value', value: total, money: 1 }, { label: 'Cleared', value: cleared, money: 1, tone: 'good' }, { label: 'Not cleared', value: round2(total - cleared - bounced), money: 1 }, { label: 'Bounced', value: bounced, money: 1, tone: bounced ? 'bad' : '' }],
+    return { title: 'Customer Cheques', cards: [{ label: 'Cheques', value: rows.length ? rows.length - 1 : 0 }, { label: 'Total value', value: total, money: 1 }, { label: 'Cleared', value: cleared, money: 1, tone: 'good' }, { label: 'Not yet cleared (counted as paid)', value: round2(total - cleared - bounced), money: 1 }, { label: 'Bounced', value: bounced, money: 1, tone: bounced ? 'bad' : '' }],
       columns: [C('cheque_date', 'Cheque date', { w: 70 }), C('deposit_date', 'Deposit date', { w: 70 }), C('cheque_no', 'Cheque no.', { w: 75 }), C('bank', 'Bank'), C('customer', 'Customer'), C('invoice', 'Invoice', { w: 85 }), C('amount', 'Amount', { money: 1 }), C('status', 'Status', { w: 65 }), C('status_date', 'Status date', { w: 70 })], rows };
   },
   async cheques_supplier(f, t, F) {
@@ -343,7 +343,7 @@ const REPORTS = {
     if (has(F.supplier)) { w.push('k.supplier_id=?'); p.push(F.supplier); } if (has(F.status)) { w.push('k.status IN (?)'); p.push(String(F.status).split(',')); } if (has(F.cheque_no)) { w.push('k.cheque_no LIKE ?'); p.push(L(F.cheque_no)); } if (has(F.bank)) { w.push('k.bank LIKE ?'); p.push(L(F.bank)); }
     const rows = await q(`SELECT k.cheque_date, k.present_date, k.cheque_no, k.bank, s.name supplier, COALESCE(g.grn_no,'') grn, k.amount, k.status, k.status_date FROM supplier_cheques k JOIN suppliers s ON s.id=k.supplier_id LEFT JOIN goods_receipts g ON g.id=k.grn_id WHERE ${w.join(' AND ')} ORDER BY k.present_date, k.id`, p);
     const total = sumBy(rows, 'amount'), cleared = sumBy(rows.filter(r => r.status === 'cleared'), 'amount'), ret = sumBy(rows.filter(r => r.status === 'returned'), 'amount'); if (rows.length) rows.push({ cheque_date: 'TOTAL', amount: total, _bold: 1 });
-    return { title: 'Supplier Cheques', cards: [{ label: 'Cheques', value: rows.length ? rows.length - 1 : 0 }, { label: 'Total value', value: total, money: 1 }, { label: 'Cleared (paid)', value: cleared, money: 1, tone: 'good' }, { label: 'Still to pay', value: round2(total - cleared - ret), money: 1, tone: 'bad' }, { label: 'Returned', value: ret, money: 1 }],
+    return { title: 'Supplier Cheques', cards: [{ label: 'Cheques', value: rows.length ? rows.length - 1 : 0 }, { label: 'Total value', value: total, money: 1 }, { label: 'Cleared', value: cleared, money: 1, tone: 'good' }, { label: 'Not yet cleared (counted as paid)', value: round2(total - cleared - ret), money: 1 }, { label: 'Returned', value: ret, money: 1 }],
       columns: [C('cheque_date', 'Cheque date', { w: 70 }), C('present_date', 'Present date', { w: 70 }), C('cheque_no', 'Cheque no.', { w: 75 }), C('bank', 'Bank'), C('supplier', 'Supplier'), C('grn', 'GRN', { w: 85 }), C('amount', 'Amount', { money: 1 }), C('status', 'Status', { w: 65 }), C('status_date', 'Status date', { w: 70 })], rows };
   },
   // stock position at the end of the selected period (opening + in - out = closing)

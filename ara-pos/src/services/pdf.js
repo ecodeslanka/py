@@ -3,86 +3,102 @@ const { q, one } = require('../db');
 const { settings, money, today } = require('../util');
 const { fullInvoice } = require('./invoices');
 
-const BRAND = '#0f766e', DARK = '#0f172a', GREY = '#64748b', LINE = '#e2e8f0';
+const fs = require('fs'), path = require('path');
+const BRAND = '#1e3a5f', DARK = '#0f172a', GREY = '#64748b', LINE = '#d5dde8', SOFT = '#f1f5fb';
 const done = doc => new Promise(res => { const b = []; doc.on('data', c => b.push(c)); doc.on('end', () => res(Buffer.concat(b))); doc.end(); });
-const STATUS = { unpaid: 'UNPAID', partial: 'PARTIALLY PAID', pending: 'PENDING', cheque_pending: 'CHEQUE PENDING', paid: 'PAID' };
-const SCOL = { unpaid: '#dc2626', partial: '#d97706', pending: '#d97706', cheque_pending: '#2563eb', paid: '#16a34a' };
+const STATUS = { unpaid: 'UNPAID', partial: 'PARTIALLY PAID', pending: 'PENDING', cheque_pending: 'PARTIALLY PAID', paid: 'PAID' };
+const SCOL = { unpaid: '#dc2626', partial: '#d97706', pending: '#d97706', cheque_pending: '#d97706', paid: '#16a34a' };
+const num = v => money(v).replace('Rs. ', '');
+function logoFile(s) { if (!s.company_logo) return null; const f = path.join(require('../config').uploadsDir, path.basename(s.company_logo)); return fs.existsSync(f) ? f : null; }
+function companyLines(s) { return [s.company_tagline, s.company_address, [s.company_phone && 'Tel: ' + s.company_phone, s.company_email, s.company_website].filter(Boolean).join('  |  '), s.company_reg && 'Reg. No: ' + s.company_reg].filter(Boolean); }
 
+// Invoice-style header: logo + company details on the left. Returns the y below it.
+function companyBlock(doc, s, x, y, maxW) {
+  let tx = x; const lg = logoFile(s);
+  if (lg) { try { doc.image(lg, x, y, { fit: [70, 70] }); tx = x + 82; } catch (e) { /* unreadable image - skip */ } }
+  doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(19).text((s.company_name || 'ARA GROUP').toUpperCase(), tx, y + 2, { width: maxW - (tx - x) });
+  doc.fillColor(GREY).font('Helvetica').fontSize(8.5); const t = companyLines(s).join('\n');
+  doc.text(t, tx, doc.y + 2, { width: maxW - (tx - x) });
+  return Math.max(doc.y, y + (lg ? 72 : 0));
+}
+// Dark band header used by reports / statements
 function header(doc, s, title, right) {
-  doc.rect(0, 0, doc.page.width, 92).fill(BRAND);
-  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(24).text((s.company_name || 'ARA GROUP').toUpperCase(), 40, 28);
-  doc.font('Helvetica').fontSize(9).text([s.company_tagline, s.company_address, [s.company_phone, s.company_email].filter(Boolean).join('  |  ')].filter(Boolean).join('\n'), 40, 56, { width: 330 });
+  doc.rect(0, 0, doc.page.width, 92).fill(BRAND); let tx = 40; const lg = logoFile(s);
+  if (lg) { doc.roundedRect(36, 14, 64, 64, 8).fill('#fff'); try { doc.image(lg, 40, 18, { fit: [56, 56], align: 'center', valign: 'center' }); tx = 112; } catch (e) { tx = 40; } }
+  doc.fillColor('#fff').font('Helvetica-Bold').fontSize(22).text((s.company_name || 'ARA GROUP').toUpperCase(), tx, 24, { width: 300, lineBreak: false });
+  doc.font('Helvetica').fontSize(8.5).text(companyLines(s).join('\n'), tx, 50, { width: 330 });
   doc.font('Helvetica-Bold').fontSize(20).text(title, 340, 30, { width: doc.page.width - 380, align: 'right' });
   if (right) doc.font('Helvetica').fontSize(10).text(right, 340, 58, { width: doc.page.width - 380, align: 'right' });
   doc.fillColor(DARK);
 }
-function advanceBox(doc, inv, y) {
+function depositBox(doc, inv, x, y, W) {
   const A = inv.advance, rows = [];
   if (A.mode === 'snapshot') {
-    rows.push(['Available deposit before this invoice', money(A.before)]);
-    if (A.deducted > 0) rows.push(['Deducted from deposit for this invoice', '- ' + money(A.deducted), 'red']);
-    if (A.overpaid > 0) rows.push(['Overpayment saved as advance', '+ ' + money(A.overpaid), 'green']);
-    rows.push(['Remaining available deposit after this invoice', money(A.after), 'big']);
+    rows.push(['Deposit Before Invoice', money(A.before)]);
+    if (A.deducted > 0) rows.push(['Deducted from Deposit', '- ' + money(A.deducted), '#b91c1c']);
+    if (A.overpaid > 0) rows.push(['Overpayment Saved as Deposit', '+ ' + money(A.overpaid), '#047857']);
+    rows.push(['Deposit Balance After', money(A.after), BRAND, 1]);
   } else {
-    if (A.deducted > 0) rows.push(['Deposit used on this invoice', money(A.deducted)]); if (A.overpaid > 0) rows.push(['Overpayment saved as advance', '+ ' + money(A.overpaid), 'green']);
-    rows.push([`Advance balance available (as at ${today()})`, money(A.current), 'big']);
+    if (A.deducted > 0) rows.push(['Deducted from Deposit', '- ' + money(A.deducted), '#b91c1c']); if (A.overpaid > 0) rows.push(['Overpayment Saved as Deposit', '+ ' + money(A.overpaid), '#047857']);
+    rows.push([`Deposit Balance (as at ${today()})`, money(A.current), BRAND, 1]);
   }
-  if (A.pending > 0) rows.push(['Cheque deposits awaiting clearance (NOT included in the available deposit)', money(A.pending), 'amber']);
-  const COL = { red: '#b91c1c', green: '#047857', amber: '#b45309', big: '#065f46' }, X = 250, W = 305, LW = 205;
-  const heights = rows.map(r => { doc.font(r[2] === 'big' ? 'Helvetica-Bold' : 'Helvetica').fontSize(r[2] === 'big' ? 10 : 9); return Math.max(doc.heightOfString(r[0], { width: LW }), 11) + 6; });
-  const h = 26 + heights.reduce((a, b) => a + b, 0) + 4; y += 8; if (y + h > 740) { doc.addPage(); y = 40; }
-  doc.roundedRect(X, y, W, h, 6).fill('#ecfdf5'); doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(8.5).text('CUSTOMER ADVANCE ACCOUNT', X + 10, y + 8, { width: W - 20 });
-  let yy = y + 24; rows.forEach((r, i) => { const big = r[2] === 'big'; if (big) doc.moveTo(X + 10, yy - 2).lineTo(X + W - 10, yy - 2).strokeColor('#a7f3d0').lineWidth(.8).stroke(); const col = COL[r[2]] || '#065f46';
-    doc.font(big ? 'Helvetica-Bold' : 'Helvetica').fontSize(big ? 10 : 9).fillColor(col).text(r[0], X + 10, yy + 1, { width: LW }); doc.text(r[1], X + W - 100, yy + 1, { width: 90, align: 'right', lineBreak: false }); yy += heights[i]; });
-  doc.fillColor(DARK); return y + h + 6;
+  if (A.pending > 0) rows.push(['Cheque deposits not yet cleared (already included)', money(A.pending), '#b45309']);
+  const LW = W - 112, hs = rows.map(r => { doc.font(r[3] ? 'Helvetica-Bold' : 'Helvetica').fontSize(9); return Math.max(doc.heightOfString(r[0], { width: LW }), 11) + 7; });
+  const h = 28 + hs.reduce((p, c) => p + c, 0) + 4;
+  doc.roundedRect(x, y, W, h, 6).lineWidth(.8).fillAndStroke(SOFT, LINE);
+  doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(9).text('Customer Deposit / Payment Summary', x + 10, y + 9, { width: W - 20 });
+  let yy = y + 28; rows.forEach((r, i) => { if (r[3]) doc.moveTo(x + 10, yy - 3).lineTo(x + W - 10, yy - 3).strokeColor(LINE).lineWidth(.8).stroke();
+    doc.font(r[3] ? 'Helvetica-Bold' : 'Helvetica').fontSize(9).fillColor(r[2] || DARK).text(r[0], x + 10, yy, { width: LW }); doc.text(r[1], x + W - 102, yy, { width: 92, align: 'right', lineBreak: false }); yy += hs[i]; });
+  doc.fillColor(DARK); return y + h;
 }
 async function invoicePdf(id) {
   const inv = await fullInvoice(id); if (!inv) return null; const s = await settings();
-  const doc = new PDFDocument({ size: 'A4', margin: 40 });
-  header(doc, s, 'INVOICE', inv.invoice_no);
-  let y = 112;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(GREY).text('BILL TO', 40, y).text('INVOICE DETAILS', 340, y);
-  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(12).text(inv.cname || inv.customer_name || 'Walk-in Customer', 40, y + 14);
-  doc.font('Helvetica').fontSize(9.5).text([inv.address, inv.phone, inv.email].filter(Boolean).join('\n'), 40, y + 30, { width: 260 });
-  doc.font('Helvetica').fontSize(9.5).text(`Invoice No:  ${inv.invoice_no}\nDate:  ${inv.date}\nDue Date:  ${inv.due_date || '-'}\nStatus:  ${STATUS[inv.status]}`, 340, y + 14, { width: 215 });
-  y += 92;
-  const cols = [[40, 'Item', 160, 'left'], [200, 'Colour', 125, 'left'], [325, 'Qty', 40, 'right'], [365, 'Price', 70, 'right'], [435, 'Disc.', 50, 'right'], [485, 'Amount', 70, 'right']];
-  const rowHead = yy => {
-    doc.rect(40, yy, 515, 22).fill(DARK); doc.fillColor('#fff').font('Helvetica-Bold').fontSize(9);
-    cols.forEach(([x, t, w, a]) => doc.text(t, x + 4, yy + 7, { width: w - 8, align: a }));
-    doc.fillColor(DARK);
-  };
+  const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: false });
+  // ---- header: logo + company details, INVOICE pill
+  let y = companyBlock(doc, s, 40, 36, 330);
+  doc.roundedRect(405, 40, 150, 32, 16).fill(BRAND); doc.fillColor('#fff').font('Helvetica-Bold').fontSize(17).text('INVOICE', 405, 48, { width: 150, align: 'center', lineBreak: false });
+  doc.fillColor(GREY).font('Helvetica').fontSize(9).text(inv.invoice_no, 405, 80, { width: 150, align: 'center' });
+  y = Math.max(y, 100) + 14; doc.moveTo(40, y).lineTo(555, y).strokeColor(LINE).lineWidth(1).stroke(); y += 12;
+  // ---- details: two columns
+  doc.fillColor(GREY).font('Helvetica-Bold').fontSize(8.5).text('BILL TO', 40, y).text('INVOICE DETAILS', 330, y);
+  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(12).text(inv.cname || inv.customer_name || 'Walk-in Customer', 40, y + 14, { width: 260 });
+  doc.font('Helvetica').fontSize(9.5).fillColor(DARK).text([inv.address, inv.phone, inv.email].filter(Boolean).join('\n'), 40, doc.y + 2, { width: 260 }); const yl = doc.y;
+  [['Invoice No', inv.invoice_no], ['Date', inv.date], ['Due Date', inv.due_date || '-'], ['Status', STATUS[inv.status] || inv.status]].forEach(([k, v], i) => {
+    doc.font('Helvetica').fontSize(9.5).fillColor(GREY).text(k, 330, y + 14 + i * 15, { width: 70, lineBreak: false }); doc.font('Helvetica-Bold').fillColor(k === 'Status' ? SCOL[inv.status] : DARK).text(String(v), 405, y + 14 + i * 15, { width: 150, lineBreak: false }); });
+  y = Math.max(yl, y + 14 + 4 * 15) + 14;
+  // ---- items table
+  const cols = [[40, '#', 26, 'left'], [66, 'Item', 160, 'left'], [226, 'Pairs', 44, 'right'], [270, 'Colour', 84, 'left'], [354, 'Price (Rs.)', 66, 'right'], [420, 'Discount', 60, 'right'], [480, 'Amount (Rs.)', 75, 'right']];
+  const rowHead = yy => { doc.rect(40, yy, 515, 22).fill(BRAND); doc.fillColor('#fff').font('Helvetica-Bold').fontSize(8.8); cols.forEach(([x, t, w, a]) => doc.text(t, x + 4, yy + 7, { width: w - 8, align: a, lineBreak: false })); doc.fillColor(DARK); };
   rowHead(y); y += 22;
   inv.items.forEach((it, i) => {
-    if (y > 700) { doc.addPage(); y = 40; rowHead(y); y += 22; }
-    if (i % 2) doc.rect(40, y, 515, 22).fill('#f8fafc'); doc.fillColor(DARK).font('Helvetica').fontSize(9.5);
-    const v = [it.description, it.colour || '-', it.qty, money(it.price).replace('Rs. ', ''), it.discount ? money(it.discount).replace('Rs. ', '') : '-', money(it.total).replace('Rs. ', '')];
-    cols.forEach(([x, , w, a], k) => doc.text(String(v[k]), x + 4, y + 6, { width: w - 8, align: a, lineBreak: false, ellipsis: true }));
-    y += 22;
+    if (y > 690) { doc.addPage(); y = 40; rowHead(y); y += 22; }
+    if (i % 2) doc.rect(40, y, 515, 21).fill(SOFT); doc.fillColor(DARK).font('Helvetica').fontSize(9.3);
+    const v = [i + 1, it.description, it.qty, it.colour || '-', num(it.price), it.discount ? num(it.discount) : '-', num(it.total)];
+    cols.forEach(([x, , w, a], k) => doc.text(String(v[k]), x + 4, y + 6, { width: w - 8, align: a, lineBreak: false, ellipsis: true })); y += 21;
   });
-  doc.moveTo(40, y).lineTo(555, y).strokeColor(LINE).stroke(); y += 10;
-  if (y > 640) { doc.addPage(); y = 40; }
-  const tot = (label, val, bold, color) => {
-    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(bold ? 12 : 10).fillColor(color || DARK).text(label, 340, y, { width: 110 }).text(val, 450, y, { width: 105, align: 'right' }); y += bold ? 20 : 16;
-  };
-  tot('Subtotal', money(inv.subtotal)); if (inv.discount) tot('Discount', '- ' + money(inv.discount));
-  tot('TOTAL', money(inv.total), true, BRAND); tot('Paid', money(inv.paid));
-  if (inv.cheque_pending) tot('Cheque (not cleared)', money(inv.cheque_pending), false, '#2563eb');
-  tot('BALANCE DUE', money(inv.balance), true, inv.balance > 0 ? '#dc2626' : '#16a34a');
-  if (inv.advance) y = advanceBox(doc, inv, y);
-  if (inv.payments.length) {
-    y += 8; doc.font('Helvetica-Bold').fontSize(10).fillColor(DARK).text('Payment History', 40, y); y += 16;
-    inv.payments.forEach(p => {
-      if (y > 760) { doc.addPage(); y = 40; }
-      const m = p.method === 'cheque' ? `Cheque #${p.cheque_no || ''} ${p.bank || ''} (${p.cheque_status || ''})` : p.method === 'bank' ? 'Bank transfer' : p.method === 'deposit' ? 'Customer deposit (advance)' : 'Cash';
-      doc.font('Helvetica').fontSize(9).fillColor(GREY).text(`${p.date}   ${m}`, 40, y, { width: 380 }).fillColor(DARK).text(money(p.amount), 440, y, { width: 115, align: 'right' }); y += 14;
-    });
-  }
-  doc.rect(40, doc.page.height - 100, 80, 4).fill(BRAND);
-  doc.fillColor(GREY).font('Helvetica').fontSize(9).text(inv.notes ? 'Note: ' + inv.notes : '', 40, doc.page.height - 88, { width: 515 });
-  doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(10).text(s.invoice_footer || '', 40, doc.page.height - 70, { width: 515, align: 'center' });
-  doc.fillColor(GREY).font('Helvetica').fontSize(8).text('This is a computer generated invoice.', 40, doc.page.height - 54, { width: 515, align: 'center' });
-  if (inv.status === 'paid') { doc.save().rotate(-20, { origin: [300, 400] }).fillOpacity(.12).fillColor(SCOL.paid).font('Helvetica-Bold').fontSize(90).text('PAID', 170, 340).restore(); }
+  doc.moveTo(40, y).lineTo(555, y).strokeColor(LINE).lineWidth(1).stroke(); y += 10;
+  if (y > 560) { doc.addPage(); y = 40; }
+  // ---- right column: totals + paid lines + balance bar;  left column: deposit summary box
+  const RX = 310, RW = 245, top = y; let ry = y;
+  const line = (label, val, o = {}) => { doc.font(o.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(o.bold ? 11 : 9.5).fillColor(o.color || DARK).text(label, RX, ry, { width: RW - 100, lineBreak: false, ellipsis: true }).text(val, RX + RW - 100, ry, { width: 100, align: 'right', lineBreak: false }); ry += o.bold ? 19 : 15; };
+  line('Sub Total', num(inv.subtotal)); if (inv.discount) line('Discount', '- ' + num(inv.discount), { color: '#b91c1c' });
+  doc.moveTo(RX, ry).lineTo(555, ry).strokeColor(LINE).stroke(); ry += 5; line('Total', money(inv.total), { bold: true, color: BRAND }); ry += 3;
+  const lbl = { cash: 'Cash', bank: 'Bank Transfer', deposit: 'Customer Deposit' };
+  inv.payments.forEach(p => {
+    if (p.method === 'cheque') { if (p.cleared) line(`Paid - Cheque ${p.cheque_no || ''}${p.bank ? ' (' + p.bank + ')' : ''}`, money(p.amount)); else line(`Cheque ${p.cheque_no || ''} BOUNCED (not counted)`, money(p.amount), { color: '#b91c1c' }); }
+    else line(`Paid - ${lbl[p.method] || p.method}`, money(p.amount));
+  });
+  ry += 2; doc.roundedRect(RX, ry, RW, 30, 6).fill(inv.balance > 0 ? BRAND : '#16a34a'); doc.fillColor('#fff').font('Helvetica-Bold').fontSize(12).text('Balance Due', RX + 12, ry + 9, { width: 110, lineBreak: false }).text(money(inv.balance), RX + RW - 130, ry + 9, { width: 118, align: 'right', lineBreak: false }); ry += 36;
+  let ly = top; if (inv.advance) ly = depositBox(doc, inv, 40, top, 252) + 8;
+  y = Math.max(ry, ly) + 10;
+  // ---- bank details / notes / footer
+  if (y > doc.page.height - 190) { doc.addPage(); y = 40; }
+  if (s.company_bank) { doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(9).text('Bank Details', 40, y); doc.fillColor(DARK).font('Helvetica').fontSize(9).text(s.company_bank, 40, doc.y + 2, { width: 300 }); y = doc.y + 8; }
+  if (inv.notes) { doc.fillColor(GREY).font('Helvetica').fontSize(9).text('Note: ' + inv.notes, 40, y, { width: 515 }); }
+  const fy = doc.page.height - 78; doc.moveTo(40, fy - 8).lineTo(555, fy - 8).strokeColor(LINE).lineWidth(1).stroke();
+  doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(10).text(s.invoice_footer || '', 40, fy, { width: 515, align: 'center', lineBreak: false });
+  doc.fillColor(GREY).font('Helvetica').fontSize(8).text('This is a computer generated invoice.', 40, fy + 16, { width: 515, align: 'center', lineBreak: false });
+  if (inv.status === 'paid') { doc.save().rotate(-20, { origin: [300, 420] }).fillOpacity(.10).fillColor(SCOL.paid).font('Helvetica-Bold').fontSize(90).text('PAID', 170, 360, { lineBreak: false }).restore(); }
   return done(doc);
 }
 

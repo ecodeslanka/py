@@ -18,7 +18,7 @@ const TEMPLATES = [
 ];
 const SETTINGS = {
   company_name: 'ARA GROUP', company_tagline: 'Footwear Manufacturers & Distributors', company_address: 'Sri Lanka',
-  public_url: '', company_phone: '', company_email: '', currency: 'LKR', invoice_prefix: 'ARA-', invoice_footer: 'Thank you for your business!',
+  public_url: '', company_website: '', company_reg: '', company_bank: '', company_logo: '', company_phone: '', company_email: '', currency: 'LKR', invoice_prefix: 'ARA-', invoice_footer: 'Thank you for your business!',
   payment_terms_days: '30', allow_negative_stock: '0', default_country_code: '94', remind_days_before: '3',
   smtp_host: '', smtp_port: '587', smtp_secure: '0', smtp_user: '', smtp_pass: '', smtp_from: '',
   auto_email_invoice: '1', auto_whatsapp_invoice: '1',
@@ -70,6 +70,15 @@ async function setup(log = console.log) {
   }
   await q("ALTER TABLE supplier_payments MODIFY method ENUM('cash','bank','cheque') NOT NULL DEFAULT 'cash'");
   await q('UPDATE goods_receipts SET balance=total WHERE paid=0 AND balance=0 AND total>0'); // legacy receipts
+  if (!(await one("SELECT v FROM settings WHERE k='migr_cheque_paid'"))) { // new rule: a cheque counts as PAID at once; only bounced / returned ones go back to the balance
+    await q("UPDATE payments p LEFT JOIN customer_cheques k ON k.payment_id=p.id SET p.cleared=1 WHERE p.method='cheque' AND (k.id IS NULL OR k.status<>'bounced')");
+    await q("UPDATE supplier_payments p LEFT JOIN supplier_cheques k ON k.payment_id=p.id SET p.cleared=1 WHERE p.method='cheque' AND (k.id IS NULL OR k.status<>'returned')");
+    const L = require('./services/ledger'), { recalc } = require('./services/invoices'), { recalcGrn } = require('./services/grn');
+    for (const d of await q("SELECT * FROM customer_deposits WHERE method='cheque' AND status='pending'")) await L.addLedger(null, { customer_id: d.customer_id, date: d.date, type: 'deposit', amount: d.amount, ref_type: 'deposit', ref_id: d.id, description: `Deposit ${d.receipt_no} (cheque) counted as received` });
+    for (const r of await q('SELECT id FROM invoices')) await recalc(r.id);
+    for (const r of await q('SELECT id FROM goods_receipts')) await recalcGrn(r.id);
+    await q("INSERT INTO settings (k,v) VALUES ('migr_cheque_paid','1')");
+  }
   for (const r of DEFAULT_ROLES) {
     const ex = await one('SELECT id FROM roles WHERE name=?', [r.name]);
     if (!ex) await q('INSERT INTO roles (name,description,permissions,is_system) VALUES (?,?,?,?)', [r.name, r.description, JSON.stringify(r.permissions), r.is_system || 0]);
