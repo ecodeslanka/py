@@ -10,9 +10,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/base.css">
+<link rel="stylesheet" href="assets/fx.css">
 <style>
 /* ===== Dark "catalogue" style – intentionally different from the homepage ===== */
 body{background:#14100a;color:#efe6d2}
+body::after{mix-blend-mode:screen;opacity:.05}
+.page-hero h1{background:linear-gradient(100deg,#fff 40%,var(--gold-l),#fff 60%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:sheen 6s linear infinite}
+.page-hero h1 em{-webkit-text-fill-color:var(--gold-l)}
 header.site{background:rgba(20,16,10,.94);border-color:#2e2619;color:#efe6d2}
 header.site .logo b{color:#fff}
 header.site .burger{border-color:#3a3022}
@@ -155,6 +159,7 @@ header.site .burger span,header.site .burger span::before,header.site .burger sp
 <div id="site-footer"></div>
 <script src="assets/data.js"></script>
 <script src="assets/common.js"></script>
+<script src="assets/fx.js" defer></script>
 <script>
 const S={cat:"",sub:"",svc:"All",av:"All",col:"",size:"",date:"",sort:"new",dyn:{}};
 const q=new URLSearchParams(location.search);
