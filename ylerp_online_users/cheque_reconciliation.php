@@ -1082,7 +1082,7 @@ include 'header.php';
           <div class="crs-box">
             <h4><i class="fa-solid fa-magnifying-glass"></i> Reconcile cheques in the bank statement</h4>
             <div class="crs-grid">
-              <div><label for="crsFrom">Txn date from</label><input type="date" id="crsFrom" value="<?= date('Y-m-d') ?>"></div>
+              <div><label for="crsFrom">Txn date from</label><input type="date" id="crsFrom" value="<?= date('Y-m-d', strtotime('-1 day')) ?>"></div>
               <div><label for="crsTo">Txn date to</label><input type="date" id="crsTo" value="<?= date('Y-m-d') ?>"></div>
               <div><button type="button" class="btn-primary" id="crsLoadBtn" style="width:100%;justify-content:center;" onclick="stmtLoad()"><i class="fa-solid fa-link"></i> Load &amp; Match</button></div>
             </div>
