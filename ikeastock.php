@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-//  bulk_adjustment_import4.php  –  IKEA vs YMS RECONCILIATION   (Sampath Operation)
+//  ikeastock.php  –  IKEA vs YMS STOCK RECONCILIATION   (Sampath Operation)
 //
 //  Upload the IKEA (Sampath) stock Excel. It is reconciled, item by item, with OUR (YMS) Good stock closing balance as at the date
 //  (same basis as the Sampath Inventory Report: Primary Purchase − Primary Returned − Secondary − Good Rejected + Adjustment).
@@ -326,7 +326,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
 .bk-map{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;} .bk-map .fld{margin:0;} .bk-map select,.bk-map input{padding:6px 8px;border:1.5px solid #e2e6f0;border-radius:8px;font-size:12.5px;max-width:200px;}
 </style>
 <div class="idm">
-  <h2><i class="fa-solid fa-code-compare"></i> IKEA Reconciliation</h2>
+  <h2><i class="fa-solid fa-code-compare"></i> IKEA vs YMS Stock Reconciliation</h2>
   <div class="sub">Upload the <b>IKEA stock Excel</b>. It is reconciled with <b>YMS Good stock</b> item by item: <b>Short</b> (YMS below IKEA), <b>Excess</b> (YMS above IKEA), <b>items new in IKEA</b> (not in YMS) and <b>items only in YMS</b> (not in the Excel) are listed separately. Tick the lines, enter the <b>reason</b> and post — YMS stock is adjusted to the IKEA quantity. Or just export the reconciliation.</div>
 
   <div class="idm-kp">
@@ -370,7 +370,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
 
 <div class="idm-modal" id="idmModal" onclick="if(event.target===this)idmClose('idmModal')">
   <div class="idm-mb" style="max-width:1050px;">
-    <h3><i class="fa-solid fa-code-compare"></i> IKEA Reconciliation</h3>
+    <h3><i class="fa-solid fa-code-compare"></i> IKEA vs YMS Stock Reconciliation</h3>
     <div class="bk-map" id="bkMap"></div>
     <div id="idmSummary" style="font-size:13px;color:#334155;background:#f8fafc;border:1px solid #e2e6f0;border-radius:8px;padding:10px 12px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
@@ -419,7 +419,7 @@ function idmPreview(first, map){
     const fd_ = new FormData(); fd_.append('action', 'preview'); fd_.append('xlsx_file', idmFile); fd_.append('adj_date', $i('idmDate').value);
     Object.keys(m).forEach(k => fd_.append(k, m[k]));
     $i('idmPB').innerHTML = '<tr><td colspan="7" style="padding:16px;color:#94a3b8;">Reconciling…</td></tr>';
-    fetch('bulk_adjustment_import4.php', {method:'POST', body:fd_, credentials:'same-origin'}).then(r => r.json()).then(d => {
+    fetch('ikeastock.php', {method:'POST', body:fd_, credentials:'same-origin'}).then(r => r.json()).then(d => {
         $i('idmDropTxt').textContent = idmFile.name;
         if (!d.ok) {
             if (d.need_map || d.meta) { bkRenderMap(d.meta || d, d); $i('idmSummary').innerHTML = '<span style="color:#991b1b">' + esc(d.msg) + '</span>'; $i('idmPB').innerHTML = ''; $i('idmTabs'); $i('idmModal').classList.add('open'); return; }
@@ -473,7 +473,7 @@ function idmImport(){
     $i('idmGo').disabled = true; $i('idmGo').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Posting…';
     const f = new FormData(); f.append('action', 'import'); f.append('xlsx_file', idmFile); f.append('adj_date', $i('idmDate').value); f.append('reason', reason); f.append('skus', JSON.stringify(skus));
     const m = bkMapVals(); Object.keys(m).forEach(k => f.append(k, m[k]));
-    fetch('bulk_adjustment_import4.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()).then(d => {
+    fetch('ikeastock.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()).then(d => {
         if (!d.ok) { idmMsg($i('idmMMsg'), 'err', d.msg); $i('idmGo').disabled = false; $i('idmGo').innerHTML = '<i class="fa-solid fa-scale-balanced"></i> Post adjustments'; return; }
         idmMsg($i('idmMMsg'), 'ok', d.rows + ' adjustment(s) posted' + (d.created ? ', ' + d.created + ' new item(s) created' : '') + '.'); setTimeout(() => location.reload(), 800);
     }).catch(e => { idmMsg($i('idmMMsg'), 'err', 'Import failed: ' + e.message); $i('idmGo').disabled = false; });
@@ -490,16 +490,16 @@ async function bkExport(){
     add('Matched', bk.matched); add('New in IKEA', bk.new); add('Only in YMS', bk.only);
     const buf = await wb.xlsx.writeBuffer();
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-    a.download = 'IKEA_Reconciliation_' + $i('idmDate').value + '.xlsx'; document.body.appendChild(a); a.click(); a.remove();
+    a.download = 'IKEA_vs_YMS_Stock_Reconciliation_' + $i('idmDate').value + '.xlsx'; document.body.appendChild(a); a.click(); a.remove();
 }
-function idmPost(data){ const f = new FormData(); Object.keys(data).forEach(k => f.append(k, data[k])); return fetch('bulk_adjustment_import4.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()); }
+function idmPost(data){ const f = new FormData(); Object.keys(data).forEach(k => f.append(k, data[k])); return fetch('ikeastock.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()); }
 function idmDel(id){
     if (!confirm('Delete reconciliation #' + id + '? Its adjustments are removed and the YMS stock goes back.')) return;
     idmPost({action:'delete_import', id:id}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
 }
 function idmView(id){
     idmViewId = id; $i('idmVT').textContent = 'Adjustment lines — reconciliation #' + id; $i('idmVB').innerHTML = '<tr><td colspan="7" style="padding:18px;color:#94a3b8;">Loading…</td></tr>'; $i('idmView').classList.add('open');
-    fetch('bulk_adjustment_import4.php?ajax=items&id=' + id, {credentials:'same-origin'}).then(r => r.json()).then(d => {
+    fetch('ikeastock.php?ajax=items&id=' + id, {credentials:'same-origin'}).then(r => r.json()).then(d => {
         $i('idmVB').innerHTML = d.items.map(i => { const s = +i.signed_qty; return '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td>' + esc(String(i.transaction_type).replace('IKEA Recon ', '')) + '</td><td><b>' + esc(i.sku_code) + '</b></td><td>' + esc(i.item_name) + '</td><td class="n">' + (i.system_qty == null ? '—' : fmt(i.system_qty, 2)) + '</td><td class="n">' + (i.excel_qty == null ? '—' : fmt(i.excel_qty, 2)) + '</td><td class="n ' + (s < 0 ? 'negq' : 'pos') + '">' + (s < 0 ? '−' : '+') + fmt(Math.abs(s), 2) + '</td></tr>'; }).join('') || '<tr><td colspan="7" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
     });
 }
