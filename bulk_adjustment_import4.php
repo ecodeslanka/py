@@ -326,7 +326,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
 .bk-map{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;} .bk-map .fld{margin:0;} .bk-map select,.bk-map input{padding:6px 8px;border:1.5px solid #e2e6f0;border-radius:8px;font-size:12.5px;max-width:200px;}
 </style>
 <div class="idm">
-  <h2><i class="fa-solid fa-code-compare"></i> IKEA vs YMS Reconciliation</h2>
+  <h2><i class="fa-solid fa-code-compare"></i> IKEA Reconciliation</h2>
   <div class="sub">Upload the <b>IKEA stock Excel</b>. It is reconciled with <b>YMS Good stock</b> item by item: <b>Short</b> (YMS below IKEA), <b>Excess</b> (YMS above IKEA), <b>items new in IKEA</b> (not in YMS) and <b>items only in YMS</b> (not in the Excel) are listed separately. Tick the lines, enter the <b>reason</b> and post — YMS stock is adjusted to the IKEA quantity. Or just export the reconciliation.</div>
 
   <div class="idm-kp">
@@ -370,7 +370,7 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
 
 <div class="idm-modal" id="idmModal" onclick="if(event.target===this)idmClose('idmModal')">
   <div class="idm-mb" style="max-width:1050px;">
-    <h3><i class="fa-solid fa-code-compare"></i> IKEA vs YMS</h3>
+    <h3><i class="fa-solid fa-code-compare"></i> IKEA Reconciliation</h3>
     <div class="bk-map" id="bkMap"></div>
     <div id="idmSummary" style="font-size:13px;color:#334155;background:#f8fafc;border:1px solid #e2e6f0;border-radius:8px;padding:10px 12px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
@@ -490,7 +490,7 @@ async function bkExport(){
     add('Matched', bk.matched); add('New in IKEA', bk.new); add('Only in YMS', bk.only);
     const buf = await wb.xlsx.writeBuffer();
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-    a.download = 'IKEA_vs_YMS_' + $i('idmDate').value + '.xlsx'; document.body.appendChild(a); a.click(); a.remove();
+    a.download = 'IKEA_Reconciliation_' + $i('idmDate').value + '.xlsx'; document.body.appendChild(a); a.click(); a.remove();
 }
 function idmPost(data){ const f = new FormData(); Object.keys(data).forEach(k => f.append(k, data[k])); return fetch('bulk_adjustment_import4.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()); }
 function idmDel(id){

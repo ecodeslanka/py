@@ -1014,7 +1014,7 @@ if (isset($conn) && $conn) {
         <i class="fa-solid fa-scale-balanced"></i><span>Stock Sync (Current Stock)</span>
     </a>
     <a href="bulk_adjustment_import4.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bulk_adjustment_import4.php') ? 'active' : ''; ?>">
-        <i class="fa-solid fa-code-compare"></i><span>IKEA vs YMS Reconciliation</span>
+        <i class="fa-solid fa-code-compare"></i><span>IKEA Reconciliation</span>
     </a>
     <a href="bulk_damage_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bulk_damage_import.php') ? 'active' : ''; ?>">
         <i class="fa-solid fa-triangle-exclamation"></i><span>Bulk Damage Import</span>
