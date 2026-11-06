@@ -14,7 +14,9 @@
 //  Tick the lines to adjust, enter the REASON (required) and post: one stock adjustment per line (Short = + units, Excess = − units,
 //  New = + IKEA qty, Only in YMS = − YMS qty) so YMS equals IKEA. Saved in stock_manual_adjustments (visible on Item Adjustment and
 //  in every stock report). A whole import or single lines can be deleted and the stock goes back.
-//  The reconciliation can also be exported to Excel without adjusting anything.
+//  SAVE: a reconciliation can be SAVED (with its date) WITHOUT any adjustment, listed, viewed and deleted; adjustments are only posted
+//  when you ask (at once with "Save & post", or later with "Adjust" on the saved reconciliation), and can be removed again
+//  ("Remove adjustments" keeps the record; delete removes both). It can also be exported to Excel.
 // ============================================================
 include 'config.php';
 include_once 'auth.php';
@@ -55,6 +57,58 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS stock_adjustment_import_lines (
 foreach (['system_qty' => 'DECIMAL(14,2) NULL', 'excel_qty' => 'DECIMAL(14,2) NULL'] as $col => $def) {
     $c = mysqli_query($conn, "SHOW COLUMNS FROM stock_adjustment_import_lines LIKE '$col'");
     if ($c && mysqli_num_rows($c) === 0) mysqli_query($conn, "ALTER TABLE stock_adjustment_import_lines ADD COLUMN $col $def");
+}
+
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS ikea_recons (
+    id INT AUTO_INCREMENT PRIMARY KEY, recon_date DATE NOT NULL, reason VARCHAR(500) NULL, filename VARCHAR(255) NULL,
+    n_items INT NOT NULL DEFAULT 0, n_tally INT NOT NULL DEFAULT 0, n_short INT NOT NULL DEFAULT 0, n_excess INT NOT NULL DEFAULT 0,
+    n_new INT NOT NULL DEFAULT 0, n_only INT NOT NULL DEFAULT 0, created_by VARCHAR(100) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_date (recon_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS ikea_recon_lines (
+    id INT AUTO_INCREMENT PRIMARY KEY, recon_id INT NOT NULL, sku VARCHAR(100) NOT NULL, item_name VARCHAR(500) NULL, kind VARCHAR(10) NOT NULL,
+    ikea_qty DECIMAL(14,2) NOT NULL DEFAULT 0, yms_qty DECIMAL(14,2) NOT NULL DEFAULT 0, diff DECIMAL(14,2) NOT NULL DEFAULT 0,
+    adjusted TINYINT(1) NOT NULL DEFAULT 0, adjustment_id INT NULL, adj_reason VARCHAR(400) NULL, adj_date DATE NULL, adj_by VARCHAR(100) NULL,
+    INDEX idx_recon (recon_id), INDEX idx_adj (adjustment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+/** save a reconciliation snapshot (all lines, nothing adjusted yet); returns the id */
+function bik_save($conn, $who, $date, $reason, $filename, $matched, $new, $only) {
+    $c = ['tally' => 0, 'short' => 0, 'excess' => 0];
+    foreach ($matched as $r) $c[$r['kind']]++;
+    $n = count($matched) + count($new);
+    $st = mysqli_prepare($conn, "INSERT INTO ikea_recons (recon_date, reason, filename, n_items, n_tally, n_short, n_excess, n_new, n_only, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)");
+    $nn = count($new); $no = count($only);
+    mysqli_stmt_bind_param($st, 'sssiiiiiis', $date, $reason, $filename, $n, $c['tally'], $c['short'], $c['excess'], $nn, $no, $who);
+    mysqli_stmt_execute($st);
+    $rid = mysqli_insert_id($conn);
+    $il = mysqli_prepare($conn, "INSERT INTO ikea_recon_lines (recon_id, sku, item_name, kind, ikea_qty, yms_qty, diff) VALUES (?,?,?,?,?,?,?)");
+    foreach (array_merge($matched, $new, $only) as $r) {
+        mysqli_stmt_bind_param($il, 'isssddd', $rid, $r['sku'], $r['name'], $r['kind'], $r['ikea'], $r['yms'], $r['diff']);
+        mysqli_stmt_execute($il);
+    }
+    return $rid;
+}
+
+/** post stock adjustments for the not-yet-adjusted lines of a saved reconciliation (only the given SKUs). Returns [count, created items] */
+function bik_adjust($conn, $who, $rid, $skus, $reason, $date) {
+    $rid = (int)$rid; $made = 0; $new_items = [];
+    $q = mysqli_query($conn, "SELECT * FROM ikea_recon_lines WHERE recon_id=$rid AND adjusted=0 AND diff<>0");
+    $todo = [];
+    while ($q && $r = mysqli_fetch_assoc($q)) if (isset($skus[$r['sku']])) $todo[] = $r;
+    foreach ($todo as $r) if ($r['kind'] === 'new') $new_items[$r['sku']] = ['name' => $r['item_name'], 'basepack' => ''];
+    $created = im_create_missing_items($conn, $new_items, $who);
+    $ia = mysqli_prepare($conn, "INSERT INTO stock_manual_adjustments (item_code, entry_date, adjustment_qty, note, created_by) VALUES (?,?,?,?,?)");
+    foreach ($todo as $r) {
+        $d = (float)$r['diff'];
+        $note = mb_substr('IKEA recon #' . $rid . ' · ' . strtoupper($r['kind']) . ' · YMS ' . round($r['yms_qty'], 2) . ' → IKEA ' . round($r['ikea_qty'], 2) . ' · ' . $reason, 0, 255);
+        mysqli_stmt_bind_param($ia, 'ssdss', $r['sku'], $date, $d, $note, $who); mysqli_stmt_execute($ia);
+        $aid = mysqli_insert_id($conn);
+        $st = mysqli_prepare($conn, "UPDATE ikea_recon_lines SET adjusted=1, adjustment_id=?, adj_reason=?, adj_date=?, adj_by=? WHERE id=?");
+        $lid = (int)$r['id']; mysqli_stmt_bind_param($st, 'isssi', $aid, $reason, $date, $who, $lid); mysqli_stmt_execute($st);
+        $made++;
+    }
+    return [$made, $created];
 }
 
 function bik_json($a) { while (ob_get_level()) ob_end_clean(); header('Content-Type: application/json; charset=utf-8'); echo json_encode($a, JSON_UNESCAPED_UNICODE); exit; }
@@ -202,7 +256,7 @@ function bik_compare($conn, $matrix, $hr, $ci_sku, $ci_qty, $ci_name, $date) {
 /* ── JSON endpoints ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $act = $_POST['action'];
-    if ($act === 'preview' || $act === 'import') {
+    if (in_array($act, ['preview', 'save', 'import'], true)) {
         if (!isset($_FILES['xlsx_file']) || $_FILES['xlsx_file']['error'] !== UPLOAD_ERR_OK) bik_json(['ok' => false, 'msg' => 'File upload failed. Please try again.']);
         $f = $_FILES['xlsx_file'];
         if (strtolower(pathinfo($f['name'], PATHINFO_EXTENSION)) !== 'xlsx') bik_json(['ok' => false, 'msg' => 'Please upload an .xlsx file.']);
@@ -233,31 +287,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                       'matched' => $matched, 'new' => $new, 'only' => $only]);
         }
         $reason = trim($_POST['reason'] ?? '');
+        $name = mb_substr($f['name'], 0, 255);
+        if ($act === 'save') {                                   // SAVE ONLY: no stock adjustment
+            $rid = bik_save($conn, $who, $date, $reason, $name, $matched, $new, $only);
+            bik_json(['ok' => true, 'id' => $rid, 'rows' => count($matched) + count($new) + count($only)]);
+        }
+        // SAVE & POST: reason required
         if ($reason === '') bik_json(['ok' => false, 'msg' => 'Please enter the reason for the adjustment.']);
         $pick = json_decode($_POST['skus'] ?? '[]', true); $pick = is_array($pick) ? array_flip(array_map('strval', $pick)) : [];
-        $todo = [];
-        foreach (array_merge($matched, $new, $only) as $r) if (isset($pick[$r['sku']]) && round($r['diff'], 2) != 0) $todo[] = $r;
-        if (!$todo) bik_json(['ok' => false, 'msg' => 'Nothing to adjust — no line with a difference is selected.']);
-        $new_items = [];
-        foreach ($todo as $r) if ($r['kind'] === 'new') $new_items[$r['sku']] = ['name' => $r['name'], 'basepack' => ''];
-        $created = im_create_missing_items($conn, $new_items, $who);
-        $name = mb_substr($f['name'], 0, 255);
-        $st = mysqli_prepare($conn, "INSERT INTO stock_adjustment_imports (adj_date, reason, filename, created_by) VALUES (?,?,?,?)");
-        mysqli_stmt_bind_param($st, 'ssss', $date, $reason, $name, $who); mysqli_stmt_execute($st);
-        $iid = mysqli_insert_id($conn);
-        $ia = mysqli_prepare($conn, "INSERT INTO stock_manual_adjustments (item_code, entry_date, adjustment_qty, note, created_by) VALUES (?,?,?,?,?)");
-        $il = mysqli_prepare($conn, "INSERT INTO stock_adjustment_import_lines (import_id, adjustment_id, sku_code, basepack_code, item_name, transaction_type, txn_ref, txn_date, party_name, qty_units, signed_qty, tur, line_value, system_qty, excel_qty) VALUES (?,?,?,'',?,?,'',?, '',?,?,0,0,?,?)");
-        $label = ['short' => 'IKEA Recon Short', 'excess' => 'IKEA Recon Excess', 'new' => 'IKEA Recon New Item', 'only' => 'IKEA Recon Only in YMS', 'tally' => 'IKEA Recon'];
-        foreach ($todo as $r) {
-            $d = $r['diff']; $abs = abs($d); $tt = $label[$r['kind']] ?? 'IKEA Recon';
-            $note = mb_substr('IKEA recon #' . $iid . ' · ' . strtoupper($r['kind']) . ' · YMS ' . round($r['yms'], 2) . ' → IKEA ' . round($r['ikea'], 2) . ' · ' . $reason, 0, 255);
-            mysqli_stmt_bind_param($ia, 'ssdss', $r['sku'], $date, $d, $note, $who); mysqli_stmt_execute($ia);
-            $aid = mysqli_insert_id($conn);
-            mysqli_stmt_bind_param($il, 'iissssddd' . 'd', $iid, $aid, $r['sku'], $r['name'], $tt, $date, $abs, $d, $r['yms'], $r['ikea']);
-            mysqli_stmt_execute($il);
-        }
-        bik_json(['ok' => true, 'id' => $iid, 'rows' => count($todo), 'created' => $created]);
+        $has = false; foreach (array_merge($matched, $new, $only) as $r) if (isset($pick[$r['sku']]) && round($r['diff'], 2) != 0) { $has = true; break; }
+        if (!$has) bik_json(['ok' => false, 'msg' => 'Nothing to adjust — no line with a difference is selected.']);
+        $rid = bik_save($conn, $who, $date, $reason, $name, $matched, $new, $only);
+        [$made, $created] = bik_adjust($conn, $who, $rid, $pick, $reason, $date);
+        bik_json(['ok' => true, 'id' => $rid, 'rows' => $made, 'created' => $created]);
     }
+    if ($act === 'adjust_saved') {                               // adjust a saved reconciliation later
+        $rid = (int)($_POST['id'] ?? 0);
+        $reason = trim($_POST['reason'] ?? '');
+        if ($reason === '') bik_json(['ok' => false, 'msg' => 'Please enter the reason for the adjustment.']);
+        $date = trim($_POST['adj_date'] ?? '');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !checkdate((int)substr($date, 5, 2), (int)substr($date, 8, 2), (int)substr($date, 0, 4))) bik_json(['ok' => false, 'msg' => 'Choose a valid adjustment date.']);
+        $pick = json_decode($_POST['skus'] ?? '[]', true); $pick = is_array($pick) ? array_flip(array_map('strval', $pick)) : [];
+        if (!$pick) bik_json(['ok' => false, 'msg' => 'Tick the lines to adjust.']);
+        [$made, $created] = bik_adjust($conn, $who, $rid, $pick, $reason, $date);
+        if (!$made) bik_json(['ok' => false, 'msg' => 'Nothing to adjust — the selected lines are already adjusted or have no difference.']);
+        bik_json(['ok' => true, 'rows' => $made, 'created' => $created]);
+    }
+    if ($act === 'unadjust') {                                   // take the adjustments back, keep the saved reconciliation
+        $rid = (int)($_POST['id'] ?? 0);
+        mysqli_query($conn, "DELETE a FROM stock_manual_adjustments a JOIN ikea_recon_lines l ON l.adjustment_id = a.id WHERE l.recon_id=$rid");
+        mysqli_query($conn, "UPDATE ikea_recon_lines SET adjusted=0, adjustment_id=NULL, adj_reason=NULL, adj_date=NULL, adj_by=NULL WHERE recon_id=$rid");
+        bik_json(['ok' => true]);
+    }
+    if ($act === 'delete_recon') {                               // delete the record AND its adjustments
+        $rid = (int)($_POST['id'] ?? 0);
+        mysqli_query($conn, "DELETE a FROM stock_manual_adjustments a JOIN ikea_recon_lines l ON l.adjustment_id = a.id WHERE l.recon_id=$rid");
+        mysqli_query($conn, "DELETE FROM ikea_recon_lines WHERE recon_id=$rid");
+        mysqli_query($conn, "DELETE FROM ikea_recons WHERE id=$rid");
+        bik_json(['ok' => true]);
+    }
+    if ($act === 'delete_lines') {
+        $rid = (int)($_POST['id'] ?? 0);
+        $ids = array_filter(array_map('intval', explode(',', $_POST['ids'] ?? '')));
+        if (!$ids) bik_json(['ok' => false, 'msg' => 'Nothing selected.']);
+        $in = implode(',', $ids);
+        mysqli_query($conn, "DELETE a FROM stock_manual_adjustments a JOIN ikea_recon_lines l ON l.adjustment_id = a.id WHERE l.recon_id=$rid AND l.id IN ($in)");
+        mysqli_query($conn, "DELETE FROM ikea_recon_lines WHERE recon_id=$rid AND id IN ($in)");
+        $c = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) c FROM ikea_recon_lines WHERE recon_id=$rid"));
+        if ((int)$c['c'] === 0) mysqli_query($conn, "DELETE FROM ikea_recons WHERE id=$rid");
+        bik_json(['ok' => true]);
+    }
+    /* reconciliations posted with the first version of this page (before saving existed) */
     if ($act === 'delete_import') {
         $id = (int)($_POST['id'] ?? 0);
         mysqli_query($conn, "DELETE a FROM stock_manual_adjustments a JOIN stock_adjustment_import_lines l ON l.adjustment_id = a.id WHERE l.import_id=$id");
@@ -265,27 +345,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         mysqli_query($conn, "DELETE FROM stock_adjustment_imports WHERE id=$id");
         bik_json(['ok' => true]);
     }
-    if ($act === 'delete_items') {
-        $id = (int)($_POST['id'] ?? 0);
-        $ids = array_filter(array_map('intval', explode(',', $_POST['ids'] ?? '')));
-        if (!$ids) bik_json(['ok' => false, 'msg' => 'Nothing selected.']);
-        $in = implode(',', $ids);
-        mysqli_query($conn, "DELETE a FROM stock_manual_adjustments a JOIN stock_adjustment_import_lines l ON l.adjustment_id = a.id WHERE l.import_id=$id AND l.id IN ($in)");
-        mysqli_query($conn, "DELETE FROM stock_adjustment_import_lines WHERE import_id=$id AND id IN ($in)");
-        $c = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) c FROM stock_adjustment_import_lines WHERE import_id=$id"));
-        if ((int)$c['c'] === 0) mysqli_query($conn, "DELETE FROM stock_adjustment_imports WHERE id=$id");
-        bik_json(['ok' => true]);
-    }
     bik_json(['ok' => false, 'msg' => 'Unknown action.']);
 }
-if (($_GET['ajax'] ?? '') === 'items') {
+if (($_GET['ajax'] ?? '') === 'lines') {
+    $id = (int)($_GET['id'] ?? 0); $items = [];
+    $q = mysqli_query($conn, "SELECT * FROM ikea_recon_lines WHERE recon_id=$id ORDER BY FIELD(kind,'short','excess','new','only','tally'), sku");
+    if ($q) while ($r = mysqli_fetch_assoc($q)) $items[] = $r;
+    $h = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM ikea_recons WHERE id=$id"));
+    bik_json(['ok' => (bool)$h, 'recon' => $h, 'items' => $items]);
+}
+if (($_GET['ajax'] ?? '') === 'items') {                       // legacy (first version) posted reconciliations
     $id = (int)($_GET['id'] ?? 0); $items = [];
     $q = mysqli_query($conn, "SELECT l.* FROM stock_adjustment_import_lines l JOIN stock_manual_adjustments a ON a.id = l.adjustment_id WHERE l.import_id=$id ORDER BY l.transaction_type, l.sku_code");
     if ($q) while ($r = mysqli_fetch_assoc($q)) $items[] = $r;
     bik_json(['ok' => true, 'items' => $items]);
 }
 
-$imports = [];
+$recons = [];
+$q = mysqli_query($conn, "SELECT r.*, COALESCE(SUM(l.adjusted),0) AS n_adj,
+        COALESCE(SUM(CASE WHEN l.adjusted=1 AND l.diff>0 THEN l.diff ELSE 0 END),0) AS q_in,
+        COALESCE(SUM(CASE WHEN l.adjusted=1 AND l.diff<0 THEN -l.diff ELSE 0 END),0) AS q_out,
+        COALESCE(SUM(CASE WHEN l.diff<>0 THEN 1 ELSE 0 END),0) AS n_diff
+    FROM ikea_recons r LEFT JOIN ikea_recon_lines l ON l.recon_id = r.id GROUP BY r.id ORDER BY r.recon_date DESC, r.id DESC");
+if ($q) while ($r = mysqli_fetch_assoc($q)) $recons[] = $r;
+$legacy = [];
 $q = mysqli_query($conn, "SELECT i.*, COUNT(a.id) AS n, COALESCE(SUM(CASE WHEN l.signed_qty > 0 THEN l.signed_qty ELSE 0 END),0) AS q_in,
         COALESCE(SUM(CASE WHEN l.signed_qty < 0 THEN -l.signed_qty ELSE 0 END),0) AS q_out
     FROM stock_adjustment_imports i
@@ -293,9 +376,9 @@ $q = mysqli_query($conn, "SELECT i.*, COUNT(a.id) AS n, COALESCE(SUM(CASE WHEN l
     LEFT JOIN stock_manual_adjustments a ON a.id = l.adjustment_id
     WHERE EXISTS (SELECT 1 FROM stock_adjustment_import_lines v WHERE v.import_id = i.id AND v.transaction_type LIKE 'IKEA Recon%')
     GROUP BY i.id ORDER BY i.adj_date DESC, i.id DESC");
-if ($q) while ($r = mysqli_fetch_assoc($q)) $imports[] = $r;
-$sum = ['n' => count($imports), 'rows' => 0, 'in' => 0, 'out' => 0];
-foreach ($imports as $r) { $sum['rows'] += $r['n']; $sum['in'] += $r['q_in']; $sum['out'] += $r['q_out']; }
+if ($q) while ($r = mysqli_fetch_assoc($q)) $legacy[] = $r;
+$sum = ['n' => count($recons), 'adj' => 0, 'in' => 0, 'out' => 0];
+foreach ($recons as $r) { $sum['adj'] += $r['n_adj']; $sum['in'] += $r['q_in']; $sum['out'] += $r['q_out']; }
 include 'header.php';
 ?>
 <style>
@@ -327,11 +410,11 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
 </style>
 <div class="idm">
   <h2><i class="fa-solid fa-code-compare"></i> IKEA vs YMS Stock Reconciliation</h2>
-  <div class="sub">Upload the <b>IKEA stock Excel</b>. It is reconciled with <b>YMS Good stock</b> item by item: <b>Short</b> (YMS below IKEA), <b>Excess</b> (YMS above IKEA), <b>items new in IKEA</b> (not in YMS) and <b>items only in YMS</b> (not in the Excel) are listed separately. Tick the lines, enter the <b>reason</b> and post — YMS stock is adjusted to the IKEA quantity. Or just export the reconciliation.</div>
+  <div class="sub">Upload the <b>IKEA stock Excel</b>. It is reconciled with <b>YMS Good stock</b> item by item: <b>Short</b> (YMS below IKEA), <b>Excess</b> (YMS above IKEA), <b>items new in IKEA</b> and <b>items only in YMS</b> are listed separately. You can <b>save the reconciliation with its date without adjusting anything</b>, and <b>adjust only if you want</b> — now, or later from the saved list (with a reason). Saved reconciliations and their adjustments can be deleted.</div>
 
   <div class="idm-kp">
-    <div><small>Reconciliations posted</small><b><?php echo number_format($sum['n']); ?></b></div>
-    <div><small>Adjusted items</small><b><?php echo number_format($sum['rows']); ?></b></div>
+    <div><small>Saved reconciliations</small><b><?php echo number_format($sum['n']); ?></b></div>
+    <div><small>Lines adjusted</small><b><?php echo number_format($sum['adj']); ?></b></div>
     <div><small>Units added (+)</small><b class="pos">+<?php echo number_format($sum['in'], 0); ?></b></div>
     <div><small>Units taken out (−)</small><b class="negq">−<?php echo number_format($sum['out'], 0); ?></b></div>
   </div>
@@ -344,38 +427,53 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
     <div class="idm-msg" id="idmMsg"></div>
   </div>
 
-  <h3 style="font-size:15px;margin:6px 0 8px;">Posted reconciliations</h3>
+  <h3 style="font-size:15px;margin:6px 0 8px;">Saved reconciliations</h3>
   <div class="idm-wrap">
   <table class="idm-t">
-    <thead><tr><th>#</th><th>Date</th><th>Reason</th><th>File</th><th class="n">Items</th><th class="n">Units in</th><th class="n">Units out</th><th>By</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Date</th><th>Reason / remark</th><th>File</th><th class="n">Items</th><th class="n">Short</th><th class="n">Excess</th><th class="n">New</th><th class="n">Only YMS</th><th>Adjustment</th><th>By</th><th></th></tr></thead>
     <tbody>
-    <?php foreach ($imports as $r): $id = (int)$r['id']; ?>
+    <?php foreach ($recons as $r): $id = (int)$r['id']; $na = (int)$r['n_adj']; $nd = (int)$r['n_diff']; ?>
       <tr>
-        <td>#<?php echo $id; ?></td><td><b><?php echo date('d/m/Y', strtotime($r['adj_date'])); ?></b></td>
-        <td style="white-space:normal;max-width:260px;"><?php echo htmlspecialchars($r['reason'] ?: '—'); ?></td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="<?php echo htmlspecialchars($r['filename']); ?>"><?php echo htmlspecialchars($r['filename']); ?></td>
-        <td class="n"><?php echo (int)$r['n']; ?></td><td class="n pos">+<?php echo number_format($r['q_in'], 0); ?></td><td class="n negq">−<?php echo number_format($r['q_out'], 0); ?></td>
+        <td>#<?php echo $id; ?></td><td><b><?php echo date('d/m/Y', strtotime($r['recon_date'])); ?></b></td>
+        <td style="white-space:normal;max-width:240px;"><?php echo htmlspecialchars($r['reason'] ?: '—'); ?></td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;" title="<?php echo htmlspecialchars($r['filename']); ?>"><?php echo htmlspecialchars($r['filename']); ?></td>
+        <td class="n"><?php echo (int)$r['n_items']; ?></td><td class="n"><?php echo (int)$r['n_short']; ?></td><td class="n"><?php echo (int)$r['n_excess']; ?></td><td class="n"><?php echo (int)$r['n_new']; ?></td><td class="n"><?php echo (int)$r['n_only']; ?></td>
+        <td><?php if ($na === 0): ?><span class="bk-pill k-only">Saved only</span><?php elseif ($na >= $nd): ?><span class="bk-pill k-tally">Adjusted (<?php echo $na; ?>)</span><?php else: ?><span class="bk-pill k-excess"><?php echo $na; ?> of <?php echo $nd; ?> adjusted</span><?php endif; ?>
+            <?php if ($na): ?><div style="font-size:10.5px;"><span class="pos">+<?php echo number_format($r['q_in'], 0); ?></span> <span class="negq">−<?php echo number_format($r['q_out'], 0); ?></span></div><?php endif; ?></td>
         <td><?php echo htmlspecialchars($r['created_by'] ?? ''); ?><div style="font-size:10.5px;color:#94a3b8;"><?php echo htmlspecialchars(substr((string)$r['created_at'], 0, 16)); ?></div></td>
         <td style="white-space:nowrap;">
-          <button class="idm-b l s" onclick="idmView(<?php echo $id; ?>)"><i class="fa-solid fa-eye"></i> View</button>
-          <button class="idm-b r s" onclick="idmDel(<?php echo $id; ?>)"><i class="fa-solid fa-trash"></i> Delete</button>
+          <button class="idm-b l s" onclick="rcView(<?php echo $id; ?>)"><i class="fa-solid fa-eye"></i> View</button>
+          <button class="idm-b g s" onclick="rcView(<?php echo $id; ?>)" title="Open and adjust the lines you choose"><i class="fa-solid fa-scale-balanced"></i> Adjust</button>
+          <button class="idm-b r s" onclick="rcDel(<?php echo $id; ?>, <?php echo $na; ?>)"><i class="fa-solid fa-trash"></i> Delete</button>
         </td>
       </tr>
     <?php endforeach; ?>
-    <?php if (!$imports): ?><tr><td colspan="9" style="text-align:center;padding:30px;color:#94a3b8;">Nothing posted yet.</td></tr><?php endif; ?>
+    <?php if (!$recons): ?><tr><td colspan="12" style="text-align:center;padding:30px;color:#94a3b8;">Nothing saved yet.</td></tr><?php endif; ?>
     </tbody>
   </table>
   </div>
+
+  <?php if ($legacy): ?>
+  <h3 style="font-size:14px;margin:18px 0 8px;color:#64748b;">Earlier posted reconciliations <small>(before saving was added)</small></h3>
+  <div class="idm-wrap"><table class="idm-t">
+    <thead><tr><th>#</th><th>Date</th><th>Reason</th><th>File</th><th class="n">Items</th><th class="n">Units in</th><th class="n">Units out</th><th></th></tr></thead><tbody>
+    <?php foreach ($legacy as $r): $id = (int)$r['id']; ?>
+      <tr><td>#<?php echo $id; ?></td><td><b><?php echo date('d/m/Y', strtotime($r['adj_date'])); ?></b></td><td style="white-space:normal;max-width:260px;"><?php echo htmlspecialchars($r['reason'] ?: '—'); ?></td>
+        <td><?php echo htmlspecialchars($r['filename']); ?></td><td class="n"><?php echo (int)$r['n']; ?></td><td class="n pos">+<?php echo number_format($r['q_in'], 0); ?></td><td class="n negq">−<?php echo number_format($r['q_out'], 0); ?></td>
+        <td><button class="idm-b r s" onclick="idmDelLegacy(<?php echo $id; ?>)"><i class="fa-solid fa-trash"></i> Delete</button></td></tr>
+    <?php endforeach; ?></tbody></table></div>
+  <?php endif; ?>
 </div>
 
+<!-- live reconciliation (after the file is read) -->
 <div class="idm-modal" id="idmModal" onclick="if(event.target===this)idmClose('idmModal')">
   <div class="idm-mb" style="max-width:1050px;">
     <h3><i class="fa-solid fa-code-compare"></i> IKEA vs YMS Stock Reconciliation</h3>
     <div class="bk-map" id="bkMap"></div>
     <div id="idmSummary" style="font-size:13px;color:#334155;background:#f8fafc;border:1px solid #e2e6f0;border-radius:8px;padding:10px 12px;margin-bottom:10px;"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
-      <div class="fld" style="margin:0"><label>As at / adjustment date</label><input class="idm-in" type="date" id="idmDate" onchange="idmPreview()" style="width:170px"></div>
-      <div class="fld" style="margin:0;flex:1;min-width:240px"><label>Reason <span style="color:#dc2626">*</span></label><input class="idm-in" type="text" id="idmReason" maxlength="400" placeholder="Required — e.g. Stock variance found in IKEA vs YMS reconciliation"></div>
+      <div class="fld" style="margin:0"><label>Reconciliation date</label><input class="idm-in" type="date" id="idmDate" onchange="idmPreview()" style="width:170px"></div>
+      <div class="fld" style="margin:0;flex:1;min-width:240px"><label>Reason / remark <span style="font-weight:400;text-transform:none">(required only to adjust)</span></label><input class="idm-in" type="text" id="idmReason" maxlength="400" placeholder="e.g. Stock variance found in IKEA vs YMS reconciliation"></div>
     </div>
     <div class="bk-tabs" id="bkTabs"></div>
     <div class="idm-wrap" style="max-height:40vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" id="idmAll" onclick="bkAll(this.checked)"></th><th>SKU</th><th>Item</th><th class="n">IKEA qty</th><th class="n">YMS qty</th><th class="n">Difference</th><th>Status</th></tr></thead><tbody id="idmPB"></tbody></table></div>
@@ -383,18 +481,31 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
     <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px;flex-wrap:wrap;">
       <span id="idmSel" style="margin-right:auto;font-size:12.5px;color:#475569;"></span>
       <button class="idm-b l" onclick="idmClose('idmModal')">Close</button>
-      <button class="idm-b l" onclick="bkExport()"><i class="fa-solid fa-file-excel"></i> Export reconciliation</button>
-      <button class="idm-b g" id="idmGo" onclick="idmImport()"><i class="fa-solid fa-scale-balanced"></i> Post adjustments</button>
+      <button class="idm-b l" onclick="bkExport()"><i class="fa-solid fa-file-excel"></i> Export</button>
+      <button class="idm-b" id="idmSave" onclick="idmSave()"><i class="fa-solid fa-floppy-disk"></i> Save (no adjustment)</button>
+      <button class="idm-b g" id="idmGo" onclick="idmImport()"><i class="fa-solid fa-scale-balanced"></i> Save &amp; post adjustments</button>
     </div>
   </div>
 </div>
 
-<div class="idm-modal" id="idmView" onclick="if(event.target===this)idmClose('idmView')">
+<!-- saved reconciliation: view / adjust / remove adjustments / delete lines -->
+<div class="idm-modal" id="rcView" onclick="if(event.target===this)idmClose('rcView')">
   <div class="idm-mb" style="max-width:1100px;">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;"><h3 style="margin:0;" id="idmVT">Adjustment lines</h3>
-      <button class="idm-b r s" style="margin-left:auto;" onclick="idmDelLines()"><i class="fa-solid fa-trash"></i> Delete selected</button>
-      <button class="idm-b l s" onclick="idmClose('idmView')">Close</button></div>
-    <div class="idm-wrap" style="max-height:62vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.idm-ic').forEach(c=>c.checked=this.checked)"></th><th>Type</th><th>SKU</th><th>Item</th><th class="n">YMS (then)</th><th class="n">IKEA</th><th class="n">Adjustment</th></tr></thead><tbody id="idmVB"></tbody></table></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;"><h3 style="margin:0;" id="rcT">Reconciliation</h3>
+      <button class="idm-b l s" style="margin-left:auto;" onclick="idmClose('rcView')">Close</button></div>
+    <div class="bk-tabs" id="rcTabs"></div>
+    <div class="idm-wrap" style="max-height:44vh;"><table class="idm-t"><thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.rc-c').forEach(c=>c.checked=this.checked);rcCount()"></th><th>SKU</th><th>Item</th><th class="n">IKEA qty</th><th class="n">YMS qty</th><th class="n">Difference</th><th>Status</th><th>Adjusted</th></tr></thead><tbody id="rcB"></tbody></table></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin:10px 0 4px;">
+      <div class="fld" style="margin:0"><label>Adjustment date</label><input class="idm-in" type="date" id="rcDate" style="width:170px"></div>
+      <div class="fld" style="margin:0;flex:1;min-width:240px"><label>Reason <span style="color:#dc2626">*</span></label><input class="idm-in" type="text" id="rcReason" maxlength="400" placeholder="Required to adjust"></div>
+    </div>
+    <div class="idm-msg" id="rcMsg"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:8px;flex-wrap:wrap;">
+      <span id="rcSel" style="margin-right:auto;font-size:12.5px;color:#475569;"></span>
+      <button class="idm-b r s" onclick="rcDelLines()"><i class="fa-solid fa-trash"></i> Delete selected lines</button>
+      <button class="idm-b l s" onclick="rcUnadjust()" title="Take the stock adjustments back; the saved reconciliation stays"><i class="fa-solid fa-rotate-left"></i> Remove adjustments</button>
+      <button class="idm-b g" id="rcAdj" onclick="rcAdjust()"><i class="fa-solid fa-scale-balanced"></i> Adjust selected</button>
+    </div>
   </div>
 </div>
 
@@ -402,9 +513,11 @@ table.idm-t td{padding:6px 10px;border-bottom:1px solid #eef0f6;white-space:nowr
 const $i = id => document.getElementById(id);
 const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = (n, d) => (+n || 0).toLocaleString('en-US', {minimumFractionDigits:d || 0, maximumFractionDigits:d || 0});
-let idmFile = null, idmViewId = 0, bk = null, bkTab = 'matched', bkSel = new Set();
+const LAB = {tally:'Tally', short:'Short', excess:'Excess', new:'New in IKEA', only:'Only in YMS'};
+let idmFile = null, bk = null, bkTab = 'matched', bkSel = new Set(), rc = null, rcId = 0, rcTab = 'all';
 function idmClose(id){ $i(id).classList.remove('open'); }
 function idmMsg(el, cls, txt){ el.className = 'idm-msg ' + cls; el.textContent = txt; }
+function idmPost(data){ const f = new FormData(); Object.keys(data).forEach(k => f.append(k, data[k])); return fetch('ikeastock.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()); }
 $i('idmDrop').addEventListener('dragover', e => e.preventDefault());
 $i('idmDrop').addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) idmPick(e.dataTransfer.files[0]); });
 $i('idmFile').addEventListener('change', e => { if (e.target.files[0]) idmPick(e.target.files[0]); });
@@ -422,19 +535,18 @@ function idmPreview(first, map){
     fetch('ikeastock.php', {method:'POST', body:fd_, credentials:'same-origin'}).then(r => r.json()).then(d => {
         $i('idmDropTxt').textContent = idmFile.name;
         if (!d.ok) {
-            if (d.need_map || d.meta) { bkRenderMap(d.meta || d, d); $i('idmSummary').innerHTML = '<span style="color:#991b1b">' + esc(d.msg) + '</span>'; $i('idmPB').innerHTML = ''; $i('idmTabs'); $i('idmModal').classList.add('open'); return; }
+            if (d.need_map || d.meta) { bkRenderMap(d.meta || d, d); $i('idmSummary').innerHTML = '<span style="color:#991b1b">' + esc(d.msg) + '</span>'; $i('idmPB').innerHTML = ''; $i('idmModal').classList.add('open'); return; }
             if (first) idmMsg($i('idmMsg'), 'err', d.msg); else idmMsg($i('idmMMsg'), 'err', d.msg); return;
         }
         $i('idmMsg').className = 'idm-msg'; $i('idmMMsg').className = 'idm-msg';
         bk = d; $i('idmDate').value = d.date; bkRenderMap(d.meta, d);
         const c = d.counts;
         $i('idmSummary').innerHTML = '<b>' + d.ikea_items + '</b> item(s) in the IKEA Excel · <span class="bk-pill k-tally">' + c.tally + ' tally</span> <span class="bk-pill k-short">' + c.short + ' short (+' + fmt(d.short_units) + ')</span> <span class="bk-pill k-excess">' + c.excess + ' excess (−' + fmt(d.excess_units) + ')</span> · <span class="bk-pill k-new">' + d.new.length + ' new in IKEA</span> <span class="bk-pill k-only">' + d.only.length + ' only in YMS</span>' + (d.skipped ? ' · ' + d.skipped + ' row(s) without a numeric qty skipped' : '');
-        // default selection: matched short/excess ticked; new in IKEA ticked; only in YMS NOT ticked
         bkSel = new Set(); d.matched.filter(r => r.diff != 0).forEach(r => bkSel.add(r.sku)); d.new.forEach(r => bkSel.add(r.sku));
         bkRender(); $i('idmModal').classList.add('open');
     }).catch(e => idmMsg($i('idmMsg'), 'err', 'Upload failed: ' + e.message));
 }
-function bkRenderMap(meta, d){
+function bkRenderMap(meta){
     if (!meta) { $i('bkMap').innerHTML = ''; return; }
     const sheets = meta.sheets || [], cols = meta.cols || [];
     const opt = (v, t, sel) => '<option value="' + esc(v) + '"' + (String(sel) === String(v) ? ' selected' : '') + '>' + esc(t) + '</option>';
@@ -451,9 +563,7 @@ function bkRender(){
     if (!bk) return;
     const tabs = [['matched', 'Matched (' + bk.matched.length + ')'], ['new', 'New in IKEA (' + bk.new.length + ')'], ['only', 'Only in YMS (' + bk.only.length + ')']];
     $i('bkTabs').innerHTML = tabs.map(t => '<span class="bk-tab' + (bkTab === t[0] ? ' on' : '') + '" onclick="bkTab=\'' + t[0] + '\';bkRender()">' + t[1] + '</span>').join('');
-    const rows = bk[bkTab];
-    const lab = {tally:'Tally', short:'Short', excess:'Excess', new:'New in IKEA', only:'Only in YMS'};
-    $i('idmPB').innerHTML = rows.map(r => '<tr><td>' + (r.diff != 0 ? '<input type="checkbox" class="idm-pc" value="' + esc(r.sku) + '"' + (bkSel.has(r.sku) ? ' checked' : '') + ' onchange="bkTog(this)">' : '') + '</td><td><b>' + esc(r.sku) + '</b></td><td>' + esc(r.name) + '</td><td class="n">' + fmt(r.ikea, 2) + '</td><td class="n">' + fmt(r.yms, 2) + '</td><td class="n ' + (r.diff < 0 ? 'negq' : (r.diff > 0 ? 'pos' : '')) + '">' + (r.diff == 0 ? '—' : (r.diff < 0 ? '−' : '+') + fmt(Math.abs(r.diff), 2)) + '</td><td><span class="bk-pill k-' + r.kind + '">' + lab[r.kind] + '</span></td></tr>').join('') || '<tr><td colspan="7" style="padding:18px;color:#94a3b8;">Nothing in this list.</td></tr>';
+    $i('idmPB').innerHTML = bk[bkTab].map(r => '<tr><td>' + (r.diff != 0 ? '<input type="checkbox" class="idm-pc" value="' + esc(r.sku) + '"' + (bkSel.has(r.sku) ? ' checked' : '') + ' onchange="bkTog(this)">' : '') + '</td><td><b>' + esc(r.sku) + '</b></td><td>' + esc(r.name) + '</td><td class="n">' + fmt(r.ikea, 2) + '</td><td class="n">' + fmt(r.yms, 2) + '</td><td class="n ' + (r.diff < 0 ? 'negq' : (r.diff > 0 ? 'pos' : '')) + '">' + (r.diff == 0 ? '—' : (r.diff < 0 ? '−' : '+') + fmt(Math.abs(r.diff), 2)) + '</td><td><span class="bk-pill k-' + r.kind + '">' + LAB[r.kind] + '</span></td></tr>').join('') || '<tr><td colspan="7" style="padding:18px;color:#94a3b8;">Nothing in this list.</td></tr>';
     $i('idmAll').checked = false; bkCount();
 }
 function bkTog(c){ if (c.checked) bkSel.add(c.value); else bkSel.delete(c.value); bkCount(); }
@@ -462,21 +572,30 @@ function bkCount(){
     if (!bk) return;
     const all = [].concat(bk.matched, bk.new, bk.only).filter(r => bkSel.has(r.sku) && r.diff != 0);
     let a = 0, b = 0; all.forEach(r => { if (r.diff > 0) a += r.diff; else b -= r.diff; });
-    $i('idmSel').innerHTML = '<b>' + all.length + '</b> selected · <span class="pos">+' + fmt(a, 2) + '</span> · <span class="negq">−' + fmt(b, 2) + '</span>';
+    $i('idmSel').innerHTML = '<b>' + all.length + '</b> selected to adjust · <span class="pos">+' + fmt(a, 2) + '</span> · <span class="negq">−' + fmt(b, 2) + '</span>';
     $i('idmGo').disabled = all.length === 0;
+}
+function liveForm(action){
+    const f = new FormData(); f.append('action', action); f.append('xlsx_file', idmFile); f.append('adj_date', $i('idmDate').value); f.append('reason', $i('idmReason').value.trim());
+    const m = bkMapVals(); Object.keys(m).forEach(k => f.append(k, m[k])); return f;
+}
+function idmSave(){
+    $i('idmSave').disabled = true; $i('idmSave').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
+    fetch('ikeastock.php', {method:'POST', body:liveForm('save'), credentials:'same-origin'}).then(r => r.json()).then(d => {
+        if (!d.ok) { idmMsg($i('idmMMsg'), 'err', d.msg); $i('idmSave').disabled = false; $i('idmSave').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save (no adjustment)'; return; }
+        idmMsg($i('idmMMsg'), 'ok', 'Saved reconciliation #' + d.id + ' (' + d.rows + ' lines) — no stock was adjusted.'); setTimeout(() => location.reload(), 900);
+    }).catch(e => { idmMsg($i('idmMMsg'), 'err', 'Save failed: ' + e.message); $i('idmSave').disabled = false; });
 }
 function idmImport(){
     const reason = $i('idmReason').value.trim();
-    if (!reason) { idmMsg($i('idmMMsg'), 'err', 'Please enter the reason for the adjustment.'); $i('idmReason').focus(); return; }
-    const skus = Array.from(bkSel);
-    if (!confirm('Post the selected adjustments so YMS stock matches IKEA?')) return;
+    if (!reason) { idmMsg($i('idmMMsg'), 'err', 'Please enter the reason to post adjustments (or use Save to keep it without adjusting).'); $i('idmReason').focus(); return; }
+    if (!confirm('Save this reconciliation and post the selected adjustments so YMS stock matches IKEA?')) return;
     $i('idmGo').disabled = true; $i('idmGo').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Posting…';
-    const f = new FormData(); f.append('action', 'import'); f.append('xlsx_file', idmFile); f.append('adj_date', $i('idmDate').value); f.append('reason', reason); f.append('skus', JSON.stringify(skus));
-    const m = bkMapVals(); Object.keys(m).forEach(k => f.append(k, m[k]));
+    const f = liveForm('import'); f.append('skus', JSON.stringify(Array.from(bkSel)));
     fetch('ikeastock.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()).then(d => {
-        if (!d.ok) { idmMsg($i('idmMMsg'), 'err', d.msg); $i('idmGo').disabled = false; $i('idmGo').innerHTML = '<i class="fa-solid fa-scale-balanced"></i> Post adjustments'; return; }
-        idmMsg($i('idmMMsg'), 'ok', d.rows + ' adjustment(s) posted' + (d.created ? ', ' + d.created + ' new item(s) created' : '') + '.'); setTimeout(() => location.reload(), 800);
-    }).catch(e => { idmMsg($i('idmMMsg'), 'err', 'Import failed: ' + e.message); $i('idmGo').disabled = false; });
+        if (!d.ok) { idmMsg($i('idmMMsg'), 'err', d.msg); $i('idmGo').disabled = false; $i('idmGo').innerHTML = '<i class="fa-solid fa-scale-balanced"></i> Save &amp; post adjustments'; return; }
+        idmMsg($i('idmMMsg'), 'ok', 'Saved #' + d.id + ' — ' + d.rows + ' adjustment(s) posted' + (d.created ? ', ' + d.created + ' new item(s) created' : '') + '.'); setTimeout(() => location.reload(), 900);
+    }).catch(e => { idmMsg($i('idmMMsg'), 'err', 'Failed: ' + e.message); $i('idmGo').disabled = false; });
 }
 async function bkExport(){
     if (!bk || typeof ExcelJS === 'undefined') { alert('Nothing to export yet (or the Excel library is still loading).'); return; }
@@ -492,21 +611,63 @@ async function bkExport(){
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
     a.download = 'IKEA_vs_YMS_Stock_Reconciliation_' + $i('idmDate').value + '.xlsx'; document.body.appendChild(a); a.click(); a.remove();
 }
-function idmPost(data){ const f = new FormData(); Object.keys(data).forEach(k => f.append(k, data[k])); return fetch('ikeastock.php', {method:'POST', body:f, credentials:'same-origin'}).then(r => r.json()); }
-function idmDel(id){
-    if (!confirm('Delete reconciliation #' + id + '? Its adjustments are removed and the YMS stock goes back.')) return;
-    idmPost({action:'delete_import', id:id}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
+
+/* ── saved reconciliations ── */
+function rcView(id){
+    rcId = id; rcTab = 'all'; $i('rcMsg').className = 'idm-msg'; $i('rcReason').value = '';
+    $i('rcT').textContent = 'Reconciliation #' + id; $i('rcB').innerHTML = '<tr><td colspan="8" style="padding:18px;color:#94a3b8;">Loading…</td></tr>'; $i('rcView').classList.add('open');
+    rcLoad();
 }
-function idmView(id){
-    idmViewId = id; $i('idmVT').textContent = 'Adjustment lines — reconciliation #' + id; $i('idmVB').innerHTML = '<tr><td colspan="7" style="padding:18px;color:#94a3b8;">Loading…</td></tr>'; $i('idmView').classList.add('open');
-    fetch('ikeastock.php?ajax=items&id=' + id, {credentials:'same-origin'}).then(r => r.json()).then(d => {
-        $i('idmVB').innerHTML = d.items.map(i => { const s = +i.signed_qty; return '<tr><td><input type="checkbox" class="idm-ic" value="' + i.id + '"></td><td>' + esc(String(i.transaction_type).replace('IKEA Recon ', '')) + '</td><td><b>' + esc(i.sku_code) + '</b></td><td>' + esc(i.item_name) + '</td><td class="n">' + (i.system_qty == null ? '—' : fmt(i.system_qty, 2)) + '</td><td class="n">' + (i.excel_qty == null ? '—' : fmt(i.excel_qty, 2)) + '</td><td class="n ' + (s < 0 ? 'negq' : 'pos') + '">' + (s < 0 ? '−' : '+') + fmt(Math.abs(s), 2) + '</td></tr>'; }).join('') || '<tr><td colspan="7" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
+function rcLoad(){
+    fetch('ikeastock.php?ajax=lines&id=' + rcId, {credentials:'same-origin'}).then(r => r.json()).then(d => {
+        if (!d.ok) { $i('rcB').innerHTML = '<tr><td colspan="8" style="padding:18px;color:#991b1b;">Reconciliation not found.</td></tr>'; return; }
+        rc = d; $i('rcT').textContent = 'Reconciliation #' + rcId + ' · ' + d.recon.recon_date + (d.recon.reason ? ' · ' + d.recon.reason : '') + ' · ' + d.recon.filename;
+        if (!$i('rcDate').value) $i('rcDate').value = d.recon.recon_date;
+        rcRender();
     });
 }
-function idmDelLines(){
-    const ids = Array.from(document.querySelectorAll('.idm-ic:checked')).map(c => c.value);
+function rcRender(){
+    if (!rc) return;
+    const kinds = ['all', 'short', 'excess', 'new', 'only', 'tally'];
+    $i('rcTabs').innerHTML = kinds.map(k => { const n = k === 'all' ? rc.items.length : rc.items.filter(r => r.kind === k).length; return '<span class="bk-tab' + (rcTab === k ? ' on' : '') + '" onclick="rcTab=\'' + k + '\';rcRender()">' + (k === 'all' ? 'All' : LAB[k]) + ' (' + n + ')</span>'; }).join('');
+    const rows = rc.items.filter(r => rcTab === 'all' || r.kind === rcTab);
+    $i('rcB').innerHTML = rows.map(r => { const d = +r.diff; const can = d !== 0 && +r.adjusted === 0;
+        return '<tr><td><input type="checkbox" class="rc-c" value="' + r.id + '" data-sku="' + esc(r.sku) + '" data-d="' + d + '" data-adj="' + (can ? 0 : 1) + '" onchange="rcCount()"></td><td><b>' + esc(r.sku) + '</b></td><td>' + esc(r.item_name) + '</td><td class="n">' + fmt(r.ikea_qty, 2) + '</td><td class="n">' + fmt(r.yms_qty, 2) + '</td><td class="n ' + (d < 0 ? 'negq' : (d > 0 ? 'pos' : '')) + '">' + (d === 0 ? '—' : (d < 0 ? '−' : '+') + fmt(Math.abs(d), 2)) + '</td><td><span class="bk-pill k-' + r.kind + '">' + LAB[r.kind] + '</span></td><td>' + (+r.adjusted ? '<span style="color:#166534;font-weight:700;">&#10003; ' + esc(r.adj_date || '') + '</span><div style="font-size:10.5px;color:#64748b;max-width:200px;white-space:normal;">' + esc(r.adj_reason || '') + '</div>' : (d === 0 ? '' : '<span style="color:#92400e">not adjusted</span>')) + '</td></tr>'; }).join('') || '<tr><td colspan="8" style="padding:18px;color:#94a3b8;">No lines.</td></tr>';
+    rcCount();
+}
+function rcCount(){
+    const cs = Array.from(document.querySelectorAll('.rc-c:checked'));
+    const adj = cs.filter(c => c.dataset.adj === '0'); let a = 0, b = 0; adj.forEach(c => { const v = +c.dataset.d; if (v > 0) a += v; else b -= v; });
+    $i('rcSel').innerHTML = '<b>' + cs.length + '</b> ticked · <b>' + adj.length + '</b> can be adjusted (<span class="pos">+' + fmt(a, 2) + '</span> <span class="negq">−' + fmt(b, 2) + '</span>)';
+    $i('rcAdj').disabled = adj.length === 0;
+}
+function rcAdjust(){
+    const reason = $i('rcReason').value.trim();
+    if (!reason) { idmMsg($i('rcMsg'), 'err', 'Please enter the reason for the adjustment.'); $i('rcReason').focus(); return; }
+    const skus = Array.from(document.querySelectorAll('.rc-c:checked')).filter(c => c.dataset.adj === '0').map(c => c.dataset.sku);
+    if (!skus.length) return;
+    if (!confirm('Adjust ' + skus.length + ' line(s) using the figures saved in this reconciliation? (YMS stock may have changed since it was saved.)')) return;
+    idmPost({action:'adjust_saved', id:rcId, skus:JSON.stringify(skus), reason:reason, adj_date:$i('rcDate').value}).then(d => {
+        if (!d.ok) { idmMsg($i('rcMsg'), 'err', d.msg); return; }
+        idmMsg($i('rcMsg'), 'ok', d.rows + ' adjustment(s) posted' + (d.created ? ', ' + d.created + ' new item(s) created' : '') + '.'); setTimeout(() => location.reload(), 800);
+    });
+}
+function rcUnadjust(){
+    if (!confirm('Remove all stock adjustments made from this reconciliation? The saved reconciliation stays.')) return;
+    idmPost({action:'unadjust', id:rcId}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
+}
+function rcDelLines(){
+    const ids = Array.from(document.querySelectorAll('.rc-c:checked')).map(c => c.value);
     if (!ids.length) { alert('Tick the lines to delete.'); return; }
-    if (!confirm('Delete ' + ids.length + ' line(s)? Their stock adjustments are removed too.')) return;
-    idmPost({action:'delete_items', id:idmViewId, ids:ids.join(',')}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
+    if (!confirm('Delete ' + ids.length + ' line(s)? Any stock adjustment made from them is removed too.')) return;
+    idmPost({action:'delete_lines', id:rcId, ids:ids.join(',')}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
+}
+function rcDel(id, nAdj){
+    if (!confirm('Delete saved reconciliation #' + id + (nAdj ? ' and its ' + nAdj + ' stock adjustment(s)' : '') + '?')) return;
+    idmPost({action:'delete_recon', id:id}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
+}
+function idmDelLegacy(id){
+    if (!confirm('Delete this earlier reconciliation and its adjustments?')) return;
+    idmPost({action:'delete_import', id:id}).then(d => { if (d.ok) location.reload(); else alert(d.msg); });
 }
 </script>
