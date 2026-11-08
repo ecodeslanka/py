@@ -28,7 +28,7 @@
 <body>
 <main>
   <h1>🎥 My Video Generator</h1>
-  <p class="sub">Runs 100% in your browser. No API, no key, no upload. Type a story, get a video with animated scenes, captions and music.</p>
+  <p class="sub">Runs 100% in your browser. No API, no key, no upload. Type a story, or add your own videos, and get a NEW video with scenes, captions, filters and music.</p>
 
   <div class="card">
     <label for="story">Your story / prompt <small>(one line = one scene; words like ocean, space, night city, fire, forest, rain, snow, sunset pick the visuals)</small></label>
@@ -48,6 +48,18 @@ Fire warms the winter night</textarea>
 
     <label for="imgs">Your own photos <small>(optional – used as Ken-Burns backgrounds, in order)</small></label>
     <input id="imgs" type="file" accept="image/*" multiple>
+
+    <label for="vids">Source videos <small>(optional – your clips are cut, remixed and combined into a NEW video; story lines become captions)</small></label>
+    <input id="vids" type="file" accept="video/*" multiple>
+    <div class="row">
+      <div><label for="cuts">Number of cuts <small>(if no story lines)</small></label><input id="cuts" type="number" min="1" max="60" value="8"></div>
+      <div><label for="filt">Look</label>
+        <select id="filt"><option value="none">Original</option><option value="contrast(1.15) saturate(1.25) sepia(.15)">Cinematic</option><option value="grayscale(1) contrast(1.2)">Black &amp; white</option><option value="sepia(.7) contrast(.95) brightness(1.05)">Vintage</option><option value="saturate(1.8) contrast(1.1)">Vivid</option></select></div>
+      <div><label for="spd">Speed</label>
+        <select id="spd"><option value="1">Normal</option><option value="0.6">Slow-mo</option><option value="1.5">Fast</option><option value="2">Very fast</option></select></div>
+    </div>
+    <div class="chk"><input type="checkbox" id="shuf" checked><label for="shuf" style="margin:0;color:var(--text)">Shuffle clips and pick random moments</label></div>
+    <div class="chk"><input type="checkbox" id="keepaud"><label for="keepaud" style="margin:0;color:var(--text)">Keep original clip audio</label></div>
 
     <div class="chk"><input type="checkbox" id="music" checked><label for="music" style="margin:0;color:var(--text)">Add generated background music</label></div>
 
@@ -138,6 +150,12 @@ function makeMusic(ac,dest,sec){
 // ---------- main ----------
 const loadImgs=async files=>Promise.all([...files].map(f=>new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=URL.createObjectURL(f)})));
 
+const loadVids=files=>Promise.all([...files].map(f=>new Promise((res,rej)=>{
+  const v=document.createElement('video');v.preload='auto';v.playsInline=true;v.crossOrigin='anonymous';
+  v.onloadedmetadata=()=>res(v);v.onerror=()=>rej(new Error('Cannot read '+f.name));v.src=URL.createObjectURL(f)})));
+const seekTo=(v,t)=>new Promise(r=>{if(Math.abs(v.currentTime-t)<.05)return r();v.onseeked=()=>r();v.currentTime=t});
+const cover=(c,W,H,src,sw,sh,alpha)=>{const sc=Math.max(W/sw,H/sh);c.globalAlpha=alpha;c.drawImage(src,(W-sw*sc)/2,(H-sh*sc)/2,sw*sc,sh*sc);c.globalAlpha=1};
+
 function caption(c,W,H,text,a,fontTpl){
   const s=Math.round(Math.min(W,H)*.075);c.save();c.globalAlpha=a;c.font=fontTpl.replace('{s}',s);
   c.textAlign='center';c.textBaseline='middle';c.shadowColor='rgba(0,0,0,.65)';c.shadowBlur=18;c.fillStyle='#fff';
@@ -146,35 +164,62 @@ function caption(c,W,H,text,a,fontTpl){
 }
 
 $('go').onclick=async()=>{
-  const lines=$('story').value.split('\n').map(s=>s.trim()).filter(Boolean);
-  if(!lines.length)return st('Write at least one line.');
+  let lines=$('story').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const hasVids=$('vids').files.length>0;
+  if(!lines.length&&!hasVids)return st('Write at least one line or add source videos.');
+  const capLines=lines.length>0;
+  if(!capLines)lines=Array.from({length:Math.max(1,+$('cuts').value||8)},()=>'');
   if(!window.MediaRecorder)return st('This browser cannot record video. Try Chrome or Edge.');
   const [W,H]=$('aspect').value.split('x').map(Number),sec=Math.max(1,+$('sec').value||3),fontTpl=$('font').value;
   const cv=$('cv');cv.width=W;cv.height=H;const c=cv.getContext('2d');
   const imgs=await loadImgs($('imgs').files);
   const total=lines.length*sec;
+  let vids=[];
+  if(hasVids){try{st('Loading videos…');vids=await loadVids($('vids').files)}catch(e){return st(e.message)}}
+  const order=[...vids.keys()];const filt=$('filt').value,spd=+$('spd').value,keepAud=$('keepaud').checked;
+  // plan: which clip + start time for every scene
+  const plan=lines.map((_,i)=>{if(!vids.length)return null;
+    const idx=$('shuf').checked?Math.floor(Math.random()*vids.length):i%vids.length,v=vids[idx];
+    const need=sec*spd,room=Math.max(0,(v.duration||need)-need);
+    return {v,start:$('shuf').checked?Math.random()*room:Math.min(room,(Math.floor(i/vids.length)*need)%(room+.001))}});
 
   const stream=cv.captureStream(30);let ac=null;
-  if($('music').checked){ac=new AudioContext();const d=ac.createMediaStreamDestination();makeMusic(ac,d,total+1);d.stream.getAudioTracks().forEach(t=>stream.addTrack(t))}
+  if($('music').checked||(keepAud&&vids.length)){ac=new AudioContext();const d=ac.createMediaStreamDestination();
+    if($('music').checked)makeMusic(ac,d,total+1);
+    if(keepAud)vids.forEach(v=>{ac.createMediaElementSource(v).connect(d)});
+    d.stream.getAudioTracks().forEach(t=>stream.addTrack(t))}
+  vids.forEach(v=>{v.muted=!keepAud;v.playbackRate=spd});
   const mime=['video/mp4;codecs=avc1,mp4a.40.2','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'';
   const rec=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:6e6}:{});
   const chunks=[];rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
   const stopped=new Promise(r=>rec.onstop=r);
 
   $('go').disabled=true;$('out').classList.add('hide');$('dl').classList.add('hide');$('cv').classList.remove('hide');
+  const snap=document.createElement('canvas');snap.width=W;snap.height=H;const sc2=snap.getContext('2d');
+  let cur=-1,tr=0;
+  if(plan[0]){await seekTo(plan[0].v,plan[0].start)}
   rec.start();const t0=performance.now();
   await new Promise(done=>(function loop(){
     const T=(performance.now()-t0)/1000;if(T>=total)return done();
     const i=Math.min(lines.length-1,Math.floor(T/sec)),t=(T-i*sec)/sec;
-    if(imgs.length){const im=imgs[i%imgs.length],z=1.05+t*.12,sc=Math.max(W/im.width,H/im.height)*z;
+    if(i!==cur){ // new scene: snapshot last frame for crossfade, start the next clip
+      if(cur>=0){sc2.drawImage(cv,0,0);tr=1;if(plan[cur])plan[cur].v.pause()}
+      cur=i;const pl=plan[i];if(pl){pl.v.currentTime=pl.start;pl.v.play().catch(()=>{})}}
+    if(plan[i]){const v=plan[i].v;c.filter='none';c.fillStyle='#000';c.fillRect(0,0,W,H);
+      if(tr>0&&cur>0){c.drawImage(snap,0,0);}
+      c.filter=filt;const fa=cur>0?Math.min(1,t/.35):1;
+      if(v.readyState>=2)cover(c,W,H,v,v.videoWidth,v.videoHeight,fa);c.filter='none';
+      if(capLines)c.fillStyle='rgba(0,0,0,.25)',c.fillRect(0,0,W,H)}
+    else if(imgs.length){const im=imgs[i%imgs.length],z=1.05+t*.12,sc=Math.max(W/im.width,H/im.height)*z;
       c.fillStyle='#000';c.fillRect(0,0,W,H);c.drawImage(im,(W-im.width*sc)/2,(H-im.height*sc)/2,im.width*sc,im.height*sc);
       c.fillStyle='rgba(0,0,0,.28)';c.fillRect(0,0,W,H)}
     else DRAW[themeOf(lines[i],i)](c,W,H,t,T);
-    const a=Math.min(1,t*5,(1-t)*5);caption(c,W,H,lines[i],a,fontTpl);
+    const a=Math.min(1,t*5,(1-t)*5);if(capLines)caption(c,W,H,lines[i],a,fontTpl);
     c.fillStyle='rgba(255,255,255,.7)';c.fillRect(0,H-6,W*(T/total),6);
     st(`Rendering… ${Math.round(T/total*100)}%  (scene ${i+1}/${lines.length})`);
     requestAnimationFrame(loop);
   })());
+  vids.forEach(v=>v.pause());
   rec.stop();await stopped;if(ac)ac.close();
   const type=rec.mimeType||'video/webm',ext=type.includes('mp4')?'mp4':'webm';
   const url=URL.createObjectURL(new Blob(chunks,{type}));
