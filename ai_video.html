@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Video Generator</title>
+<style>
+  :root { --bg:#0f1117; --card:#181b24; --line:#2a2f3d; --text:#e8eaf0; --mute:#8b92a5; --accent:#7c5cff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:860px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { font-size:1.6rem; margin:0 0 4px; }
+  p.sub { color:var(--mute); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  label { display:block; font-size:.85rem; color:var(--mute); margin:12px 0 4px; }
+  label:first-child { margin-top:0; }
+  input, select, textarea { width:100%; padding:10px; border-radius:8px; border:1px solid var(--line); background:#0f1117; color:var(--text); font:inherit; }
+  textarea { min-height:90px; resize:vertical; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:600px){ .row{grid-template-columns:1fr;} }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:12px 18px; font:inherit; font-weight:600; cursor:pointer; margin-top:16px; }
+  button:disabled { opacity:.5; cursor:wait; }
+  button.alt { background:transparent; border:1px solid var(--line); color:var(--text); }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tabs button { margin:0; flex:1; }
+  .tabs button:not(.on) { background:transparent; border:1px solid var(--line); color:var(--mute); }
+  #status { color:var(--mute); margin-top:12px; min-height:1.2em; white-space:pre-wrap; }
+  #status.err { color:#ff7b7b; }
+  video, canvas { width:100%; border-radius:10px; background:#000; margin-top:12px; }
+  small { color:var(--mute); }
+  .hide { display:none; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>🎬 AI Video Generator</h1>
+  <p class="sub">Type a prompt, get a video. Use a real AI model (fal.ai) or the free in-browser mode.</p>
+
+  <div class="tabs">
+    <button id="tabAi" class="on">AI model (fal.ai)</button>
+    <button id="tabLocal">Free (in-browser)</button>
+  </div>
+
+  <!-- AI MODE -->
+  <section id="aiPanel" class="card">
+    <label for="key">fal.ai API key <small>(get one at <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal.ai/dashboard/keys</a>; stored only in your browser)</small></label>
+    <input id="key" type="password" placeholder="xxxxxxxx-xxxx:xxxxxxxx" autocomplete="off">
+
+    <label for="model">Model</label>
+    <select id="model">
+      <option value="fal-ai/ltx-video">LTX Video (fast, cheap)</option>
+      <option value="fal-ai/kling-video/v1.6/standard/text-to-video">Kling 1.6 Standard</option>
+      <option value="fal-ai/minimax/video-01">MiniMax Video-01</option>
+      <option value="fal-ai/hunyuan-video">Hunyuan Video</option>
+      <option value="custom">Custom model id…</option>
+    </select>
+    <input id="custom" class="hide" placeholder="e.g. fal-ai/some-model" style="margin-top:8px">
+
+    <label for="prompt">Prompt</label>
+    <textarea id="prompt" placeholder="A golden retriever surfing a big wave at sunset, cinematic, 4k"></textarea>
+
+    <label for="img">Start image URL <small>(optional, image-to-video models only)</small></label>
+    <input id="img" placeholder="https://…/photo.jpg">
+
+    <button id="goAi">Generate video</button>
+  </section>
+
+  <!-- LOCAL MODE -->
+  <section id="localPanel" class="card hide">
+    <label for="lText">Scenes <small>(one line per scene)</small></label>
+    <textarea id="lText">Hello from AI Video
+Type your own lines
+Each line becomes a scene</textarea>
+    <div class="row">
+      <div><label for="lSec">Seconds per scene</label><input id="lSec" type="number" min="1" max="10" value="2"></div>
+      <div><label for="lStyle">Style</label>
+        <select id="lStyle"><option>Sunset</option><option>Ocean</option><option>Neon</option><option>Forest</option></select></div>
+    </div>
+    <button id="goLocal">Create video</button>
+    <canvas id="cv" width="1280" height="720"></canvas>
+  </section>
+
+  <div class="card">
+    <div id="status"></div>
+    <video id="out" controls class="hide"></video>
+    <a id="dl" class="hide" download="video.mp4"><button class="alt" type="button">Download</button></a>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const status = (m, err) => { $('status').textContent = m; $('status').className = err ? 'err' : ''; };
+const show = (url, name) => {
+  $('out').src = url; $('out').classList.remove('hide'); $('out').play().catch(()=>{});
+  $('dl').href = url; $('dl').download = name; $('dl').classList.remove('hide');
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// tabs
+function tab(ai) {
+  $('aiPanel').classList.toggle('hide', !ai); $('localPanel').classList.toggle('hide', ai);
+  $('tabAi').classList.toggle('on', ai); $('tabLocal').classList.toggle('on', !ai);
+}
+$('tabAi').onclick = () => tab(true);
+$('tabLocal').onclick = () => tab(false);
+$('model').onchange = () => $('custom').classList.toggle('hide', $('model').value !== 'custom');
+
+try { $('key').value = localStorage.getItem('fal_key') || ''; } catch {}
+
+// ---------- AI mode: fal.ai queue API ----------
+$('goAi').onclick = async () => {
+  const key = $('key').value.trim();
+  const prompt = $('prompt').value.trim();
+  let model = $('model').value === 'custom' ? $('custom').value.trim() : $('model').value;
+  if (!key || !prompt || !model) return status('Enter API key, model and prompt.', true);
+  try { localStorage.setItem('fal_key', key); } catch {}
+
+  const body = { prompt };
+  if ($('img').value.trim()) body.image_url = $('img').value.trim();
+  const headers = { 'Authorization': 'Key ' + key, 'Content-Type': 'application/json' };
+
+  $('goAi').disabled = true; $('out').classList.add('hide'); $('dl').classList.add('hide');
+  try {
+    status('Submitting job…');
+    let r = await fetch('https://queue.fal.run/' + model, { method:'POST', headers, body:JSON.stringify(body) });
+    if (!r.ok) throw new Error(r.status + ' ' + await r.text());
+    const job = await r.json();
+
+    const t0 = Date.now();
+    while (true) {
+      await sleep(3000);
+      r = await fetch(job.status_url, { headers });
+      if (!r.ok) throw new Error(r.status + ' ' + await r.text());
+      const s = await r.json();
+      const secs = Math.round((Date.now() - t0) / 1000);
+      status(`Status: ${s.status}` + (s.queue_position != null ? ` (queue ${s.queue_position})` : '') + ` — ${secs}s`);
+      if (s.status === 'COMPLETED') break;
+      if (s.status === 'FAILED' || s.error) throw new Error(JSON.stringify(s));
+    }
+    r = await fetch(job.response_url, { headers });
+    if (!r.ok) throw new Error(r.status + ' ' + await r.text());
+    const res = await r.json();
+    const url = res.video?.url || res.videos?.[0]?.url;
+    if (!url) throw new Error('No video in response: ' + JSON.stringify(res));
+    status('Done ✅'); show(url, 'ai-video.mp4');
+  } catch (e) {
+    status('Error: ' + e.message + '\n(If this is a network/CORS error, check the key and model id.)', true);
+  } finally { $('goAi').disabled = false; }
+};
+
+// ---------- Free mode: canvas + MediaRecorder ----------
+const PALETTES = {
+  Sunset:['#ff7e5f','#feb47b','#6a1b9a'], Ocean:['#00c6ff','#0072ff','#001f4d'],
+  Neon:['#ff00cc','#3333ff','#00ffd5'], Forest:['#56ab2f','#a8e063','#0b3d2e']
+};
+$('goLocal').onclick = async () => {
+  const lines = $('lText').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const sec = Math.max(1, +$('lSec').value || 2);
+  if (!lines.length) return status('Add at least one line.', true);
+  if (!window.MediaRecorder) return status('MediaRecorder not supported in this browser.', true);
+
+  const cv = $('cv'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const pal = PALETTES[$('lStyle').value];
+  const mime = ['video/mp4;codecs=avc1','video/webm;codecs=vp9','video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+  const rec = new MediaRecorder(cv.captureStream(30), mime ? { mimeType: mime, videoBitsPerSecond: 5e6 } : {});
+  const chunks = []; rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  const done = new Promise(res => rec.onstop = res);
+
+  function frame(i, t) { // t = 0..1 within scene
+    const a = (i * 0.7 + t * 0.7);
+    const g = ctx.createLinearGradient(W * (0.5 + 0.5 * Math.cos(a)), 0, W * (0.5 - 0.5 * Math.cos(a)), H);
+    pal.forEach((c, k) => g.addColorStop(k / (pal.length - 1), c));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    for (let k = 0; k < 14; k++) { // floating bubbles
+      const x = (k * 197 + t * 120 * (k % 3 + 1)) % W, y = H - ((k * 83 + t * 300) % (H + 100)) + 50;
+      ctx.beginPath(); ctx.arc(x, y, 20 + (k % 5) * 14, 0, 7);
+      ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fill();
+    }
+    const fade = Math.min(1, t * 5, (1 - t) * 5), scale = 0.9 + 0.1 * t;
+    ctx.save(); ctx.globalAlpha = fade; ctx.translate(W / 2, H / 2); ctx.scale(scale, scale);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 72px system-ui,sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 20;
+    const words = lines[i].split(' '); let row = '', rows = [];
+    for (const w of words) { if (ctx.measureText(row + w).width > W - 200 && row) { rows.push(row); row = ''; } row += w + ' '; }
+    rows.push(row);
+    rows.forEach((r, k) => ctx.fillText(r.trim(), 0, (k - (rows.length - 1) / 2) * 90));
+    ctx.restore();
+  }
+
+  $('goLocal').disabled = true; $('out').classList.add('hide'); $('dl').classList.add('hide');
+  status('Rendering…'); rec.start();
+  for (let i = 0; i < lines.length; i++) {
+    const t0 = performance.now();
+    await new Promise(res => (function loop() {
+      const t = (performance.now() - t0) / (sec * 1000);
+      if (t >= 1) return res();
+      frame(i, t); requestAnimationFrame(loop);
+    })());
+  }
+  rec.stop(); await done;
+  const type = rec.mimeType || 'video/webm';
+  const url = URL.createObjectURL(new Blob(chunks, { type }));
+  status('Done ✅'); show(url, 'video.' + (type.includes('mp4') ? 'mp4' : 'webm'));
+  $('goLocal').disabled = false;
+};
+</script>
+</body>
+</html>
