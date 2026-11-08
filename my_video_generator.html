@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Video Generator</title>
+<style>
+  :root{--bg:#0e1016;--card:#171a23;--line:#2a2f3d;--text:#e8eaf0;--mute:#8b92a5;--accent:#ff5c8a}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--text)}
+  main{max-width:900px;margin:0 auto;padding:24px 16px 60px}
+  h1{margin:0 0 4px;font-size:1.6rem} .sub{color:var(--mute);margin:0 0 18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  label{display:block;font-size:.85rem;color:var(--mute);margin:12px 0 4px} label:first-child{margin-top:0}
+  input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0e1016;color:var(--text);font:inherit}
+  textarea{min-height:110px;resize:vertical}
+  .row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  @media(max-width:600px){.row{grid-template-columns:1fr}}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:12px 18px;font:inherit;font-weight:600;cursor:pointer;margin-top:16px}
+  button:disabled{opacity:.5;cursor:wait}
+  button.alt{background:transparent;border:1px solid var(--line);color:var(--text)}
+  canvas,video{width:100%;max-height:70vh;object-fit:contain;border-radius:10px;background:#000;margin-top:12px}
+  #st{color:var(--mute);min-height:1.2em} .hide{display:none}
+  .chk{display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--text)} .chk input{width:auto}
+  small{color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+  <h1>🎥 My Video Generator</h1>
+  <p class="sub">Runs 100% in your browser. No API, no key, no upload. Type a story, get a video with animated scenes, captions and music.</p>
+
+  <div class="card">
+    <label for="story">Your story / prompt <small>(one line = one scene; words like ocean, space, night city, fire, forest, rain, snow, sunset pick the visuals)</small></label>
+    <textarea id="story">A calm ocean at sunrise
+Night falls over the city
+We travel through space
+Into a quiet forest
+Fire warms the winter night</textarea>
+
+    <div class="row">
+      <div><label for="aspect">Format</label>
+        <select id="aspect"><option value="1280x720">16:9 (YouTube)</option><option value="720x1280">9:16 (Reels/Shorts)</option><option value="960x960">1:1 (Square)</option></select></div>
+      <div><label for="sec">Seconds / scene</label><input id="sec" type="number" min="1" max="15" value="3"></div>
+      <div><label for="font">Caption style</label>
+        <select id="font"><option value="bold {s}px system-ui">Bold</option><option value="italic {s}px Georgia,serif">Serif</option><option value="{s}px 'Courier New',monospace">Typewriter</option></select></div>
+    </div>
+
+    <label for="imgs">Your own photos <small>(optional – used as Ken-Burns backgrounds, in order)</small></label>
+    <input id="imgs" type="file" accept="image/*" multiple>
+
+    <div class="chk"><input type="checkbox" id="music" checked><label for="music" style="margin:0;color:var(--text)">Add generated background music</label></div>
+
+    <button id="go">Generate video</button>
+    <div id="st"></div>
+  </div>
+
+  <div class="card">
+    <canvas id="cv"></canvas>
+    <video id="out" controls class="hide"></video>
+    <a id="dl" class="hide" download="my-video.webm"><button class="alt" type="button">⬇ Download video</button></a>
+  </div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const st=m=>$('st').textContent=m;
+const rnd=(function(seed){return()=>(seed=(seed*16807)%2147483647)/2147483647})(42);
+
+// ---------- themes (keyword -> procedural scene) ----------
+const THEMES=[
+  {k:/space|star|galaxy|planet|universe|moon/,n:'space'},
+  {k:/ocean|sea|wave|beach|water|surf/,n:'ocean'},
+  {k:/city|night|street|urban|neon/,n:'city'},
+  {k:/fire|flame|burn|warm|campfire/,n:'fire'},
+  {k:/forest|tree|jungle|wood|nature|green/,n:'forest'},
+  {k:/rain|storm|cloud|thunder/,n:'rain'},
+  {k:/snow|winter|ice|cold/,n:'snow'},
+  {k:/sun|sunset|sunrise|dawn|dusk|sky|desert/,n:'sunset'}
+];
+const themeOf=(t,i)=>{t=t.toLowerCase();for(const x of THEMES)if(x.k.test(t))return x.n;return THEMES[i%THEMES.length].n};
+
+const grad=(c,W,H,stops)=>{const g=c.createLinearGradient(0,0,0,H);stops.forEach((s,i)=>g.addColorStop(i/(stops.length-1),s));c.fillStyle=g;c.fillRect(0,0,W,H)};
+
+// Each draws a frame: c=ctx, W,H, t=0..1 scene progress, T=seconds elapsed
+const DRAW={
+  space(c,W,H,t,T){grad(c,W,H,['#02020a','#10062b','#240a45']);
+    for(let i=0;i<220;i++){const z=((rnd.s=i*7919)%1000)/1000,x=((i*9301+49297)%233280)/233280,y=((i*4421+1117)%233280)/233280;
+      const r=(((T*0.03+z)%1)),px=W/2+(x-.5)*W*(0.2+r*2.5),py=H/2+(y-.5)*H*(0.2+r*2.5);
+      c.fillStyle=`rgba(255,255,255,${r})`;c.beginPath();c.arc(px,py,r*2.2,0,7);c.fill()}
+    const g=c.createRadialGradient(W*.7,H*.35,10,W*.7,H*.35,H*.25);g.addColorStop(0,'#ffd9a0');g.addColorStop(1,'#b0472a');
+    c.fillStyle=g;c.beginPath();c.arc(W*.7,H*.35,H*.2+t*20,0,7);c.fill();
+    c.strokeStyle='rgba(255,220,180,.5)';c.lineWidth=6;c.beginPath();c.ellipse(W*.7,H*.35,H*.38,H*.07,-.4,0,7);c.stroke()},
+  ocean(c,W,H,t,T){grad(c,W,H,['#ffb36b','#ff7a8a','#5a3a8c']);
+    c.fillStyle='#fff3c4';c.beginPath();c.arc(W/2,H*(.55-t*.12),H*.09,0,7);c.fill();
+    for(let l=0;l<6;l++){c.fillStyle=`rgba(${10+l*8},${60+l*18},${120+l*15},${.45+l*.1})`;c.beginPath();c.moveTo(0,H);
+      for(let x=0;x<=W;x+=10)c.lineTo(x,H*(.58+l*.07)+Math.sin(x/(90+l*30)+T*(1+l*.3))*(10+l*4));c.lineTo(W,H);c.fill()}},
+  city(c,W,H,t,T){grad(c,W,H,['#05060f','#1a1040','#4b1d6b']);
+    for(let i=0;i<60;i++){c.fillStyle='rgba(255,255,255,.7)';c.fillRect(((i*977)%W),((i*313)%(H*.5)),2,2)}
+    c.fillStyle='#f4eed0';c.beginPath();c.arc(W*.8,H*.2,H*.05,0,7);c.fill();
+    for(let L=0;L<2;L++){let x=-(T*(15+L*25))%200;let k=0;while(x<W){const w=80+((k*37)%60),h=H*(.25+(((k*53+L*17)%100)/100)*.35);
+      c.fillStyle=L?'#0b0b1c':'#15152e';c.fillRect(x,H-h,w,h);
+      if(L)for(let wy=H-h+14;wy<H-10;wy+=22)for(let wx=x+8;wx<x+w-10;wx+=18)if(((wx*7+wy*3+Math.floor(T))|0)%5>1){c.fillStyle='#ffd36b';c.fillRect(wx,wy,8,10)}
+      x+=w+6;k++}}},
+  fire(c,W,H,t,T){grad(c,W,H,['#120503','#3a0e05','#8a2a08']);
+    for(let i=0;i<90;i++){const p=((T*.4+i/90*3.7+((i*13)%10)/10)%1),x=W/2+Math.sin(i*5.1+T)*H*.15*(1-p)+(((i*31)%100)-50)*1.5*(1-p),y=H*.9-p*H*.8;
+      c.fillStyle=`rgba(255,${Math.floor(220-p*180)},${Math.floor(60-p*50)},${1-p})`;c.beginPath();c.arc(x,y,(1-p)*H*.045+2,0,7);c.fill()}},
+  forest(c,W,H,t,T){grad(c,W,H,['#9fe0c0','#3b9a6b','#0b3d2e']);
+    for(let L=0;L<3;L++){c.fillStyle=['#2b7a55','#1c5a3e','#0d3a28'][L];const off=-(T*(8+L*14))%160;
+      for(let x=off-160;x<W+160;x+=90+L*10){const h=H*(.35+L*.12+(((x*7)|0)%30)/200);c.beginPath();c.moveTo(x,H);c.lineTo(x+40,H-h);c.lineTo(x+80,H);c.fill()}}
+    for(let i=0;i<30;i++){c.fillStyle=`rgba(255,255,150,${.5+.5*Math.sin(T*3+i)})`;c.beginPath();c.arc((i*211+T*20*(i%3))%W,H*.5+Math.sin(T+i)*H*.2+(i%5)*20,3,0,7);c.fill()}},
+  rain(c,W,H,t,T){grad(c,W,H,['#1b2433','#2f3b50','#4a5a73']);
+    c.strokeStyle='rgba(180,200,230,.5)';c.lineWidth=1.5;
+    for(let i=0;i<220;i++){const x=(i*173)%W,y=((i*91)%H+T*700*(0.6+(i%5)/8))%H;c.beginPath();c.moveTo(x,y);c.lineTo(x-4,y+22);c.stroke()}
+    if(Math.sin(T*1.7)>.97){c.fillStyle='rgba(255,255,255,.35)';c.fillRect(0,0,W,H)}},
+  snow(c,W,H,t,T){grad(c,W,H,['#9db8d8','#c7d8ec','#eef4fb']);
+    c.fillStyle='#fff';c.beginPath();c.moveTo(0,H);for(let x=0;x<=W;x+=20)c.lineTo(x,H*.8+Math.sin(x/120)*20);c.lineTo(W,H);c.fill();
+    for(let i=0;i<160;i++){const s=1+(i%4),x=((i*131)%W+Math.sin(T+i)*20+W)%W,y=((i*97)%H+T*40*s)%H;c.beginPath();c.arc(x,y,s,0,7);c.fill()}},
+  sunset(c,W,H,t,T){grad(c,W,H,['#2b1055','#d53a6a','#ffb347','#ffe29a']);
+    c.fillStyle='#fff4c9';c.beginPath();c.arc(W/2,H*(.62-t*.1),H*.12,0,7);c.fill();
+    c.fillStyle='#1a0a2e';c.beginPath();c.moveTo(0,H);for(let x=0;x<=W;x+=20)c.lineTo(x,H*.78+Math.sin(x/140+1)*30);c.lineTo(W,H);c.fill()}
+};
+
+// ---------- music (WebAudio -> recorded track) ----------
+function makeMusic(ac,dest,sec){
+  const g=ac.createGain();g.gain.value=.12;g.connect(dest);
+  const scale=[0,3,5,7,10,12,15];const base=196,beat=.5;
+  for(let t=0,i=0;t<sec;t+=beat,i++){
+    const o=ac.createOscillator(),e=ac.createGain();o.type=i%4==0?'triangle':'sine';
+    o.frequency.value=base*Math.pow(2,scale[(i*3+(i>>2))%scale.length]/12);
+    e.gain.setValueAtTime(0,ac.currentTime+t);e.gain.linearRampToValueAtTime(.9,ac.currentTime+t+.03);e.gain.exponentialRampToValueAtTime(.001,ac.currentTime+t+beat*1.8);
+    o.connect(e);e.connect(g);o.start(ac.currentTime+t);o.stop(ac.currentTime+t+beat*2);
+    if(i%8==0){const p=ac.createOscillator(),pe=ac.createGain();p.type='sine';p.frequency.value=base/2*Math.pow(2,scale[(i/8*2)%scale.length]/12);
+      pe.gain.value=.5;p.connect(pe);pe.connect(g);p.start(ac.currentTime+t);p.stop(ac.currentTime+t+beat*8)}
+  }
+}
+
+// ---------- main ----------
+const loadImgs=async files=>Promise.all([...files].map(f=>new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=URL.createObjectURL(f)})));
+
+function caption(c,W,H,text,a,fontTpl){
+  const s=Math.round(Math.min(W,H)*.075);c.save();c.globalAlpha=a;c.font=fontTpl.replace('{s}',s);
+  c.textAlign='center';c.textBaseline='middle';c.shadowColor='rgba(0,0,0,.65)';c.shadowBlur=18;c.fillStyle='#fff';
+  const rows=[];let row='';for(const w of text.split(' ')){if(c.measureText(row+w).width>W*.82&&row){rows.push(row.trim());row=''}row+=w+' '}rows.push(row.trim());
+  rows.forEach((r,k)=>c.fillText(r,W/2,H*.5+(k-(rows.length-1)/2)*s*1.25));c.restore();
+}
+
+$('go').onclick=async()=>{
+  const lines=$('story').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!lines.length)return st('Write at least one line.');
+  if(!window.MediaRecorder)return st('This browser cannot record video. Try Chrome or Edge.');
+  const [W,H]=$('aspect').value.split('x').map(Number),sec=Math.max(1,+$('sec').value||3),fontTpl=$('font').value;
+  const cv=$('cv');cv.width=W;cv.height=H;const c=cv.getContext('2d');
+  const imgs=await loadImgs($('imgs').files);
+  const total=lines.length*sec;
+
+  const stream=cv.captureStream(30);let ac=null;
+  if($('music').checked){ac=new AudioContext();const d=ac.createMediaStreamDestination();makeMusic(ac,d,total+1);d.stream.getAudioTracks().forEach(t=>stream.addTrack(t))}
+  const mime=['video/mp4;codecs=avc1,mp4a.40.2','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'';
+  const rec=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:6e6}:{});
+  const chunks=[];rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  const stopped=new Promise(r=>rec.onstop=r);
+
+  $('go').disabled=true;$('out').classList.add('hide');$('dl').classList.add('hide');$('cv').classList.remove('hide');
+  rec.start();const t0=performance.now();
+  await new Promise(done=>(function loop(){
+    const T=(performance.now()-t0)/1000;if(T>=total)return done();
+    const i=Math.min(lines.length-1,Math.floor(T/sec)),t=(T-i*sec)/sec;
+    if(imgs.length){const im=imgs[i%imgs.length],z=1.05+t*.12,sc=Math.max(W/im.width,H/im.height)*z;
+      c.fillStyle='#000';c.fillRect(0,0,W,H);c.drawImage(im,(W-im.width*sc)/2,(H-im.height*sc)/2,im.width*sc,im.height*sc);
+      c.fillStyle='rgba(0,0,0,.28)';c.fillRect(0,0,W,H)}
+    else DRAW[themeOf(lines[i],i)](c,W,H,t,T);
+    const a=Math.min(1,t*5,(1-t)*5);caption(c,W,H,lines[i],a,fontTpl);
+    c.fillStyle='rgba(255,255,255,.7)';c.fillRect(0,H-6,W*(T/total),6);
+    st(`Rendering… ${Math.round(T/total*100)}%  (scene ${i+1}/${lines.length})`);
+    requestAnimationFrame(loop);
+  })());
+  rec.stop();await stopped;if(ac)ac.close();
+  const type=rec.mimeType||'video/webm',ext=type.includes('mp4')?'mp4':'webm';
+  const url=URL.createObjectURL(new Blob(chunks,{type}));
+  $('out').src=url;$('out').classList.remove('hide');$('cv').classList.add('hide');$('out').play().catch(()=>{});
+  $('dl').href=url;$('dl').download='my-video.'+ext;$('dl').classList.remove('hide');
+  st('Done ✅ — press Download to save.');$('go').disabled=false;
+};
+</script>
+</body>
+</html>
