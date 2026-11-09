@@ -127,7 +127,8 @@ include 'header.php';
             <p>Create roles and choose which main menu and sub menu pages each role can view, add, edit and delete.</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <a href="role_export.php" class="rb-btn rb-btn-out" title="Roles, permission matrix (menu / sub menu / page) and users"><i class="fa-solid fa-file-excel" style="color:#15803d"></i> Export Excel</a>
+            <a href="role_export.php" id="rxAllBtn" class="rb-btn rb-btn-out" title="All roles: summary, permission matrix, permission list and users"><i class="fa-solid fa-file-excel" style="color:#15803d"></i> Export Excel</a>
+            <a href="role_export.php" id="rxSelBtn" class="rb-btn rb-btn-out" style="display:none" title="Export only the ticked roles"><i class="fa-solid fa-file-excel" style="color:#15803d"></i> Export selected (<span id="rxCnt">0</span>)</a>
             <?php if ($can_add): ?>
                 <a href="role_form.php" class="rb-btn rb-btn-pri"><i class="fa-solid fa-plus"></i> Add New Role</a>
             <?php endif; ?>
@@ -170,7 +171,7 @@ include 'header.php';
         <div class="rb-wrap">
             <table class="rb-table" id="roleTable">
                 <thead><tr>
-                    <th style="width:50px">#</th><th>Role</th><th>Access</th><th>Users</th><th>Status</th><th>Updated</th><th style="width:150px">Actions</th>
+                    <th style="width:34px"><input type="checkbox" id="rxAll" title="Select all roles" aria-label="Select all roles"></th><th style="width:50px">#</th><th>Role</th><th>Access</th><th>Users</th><th>Status</th><th>Updated</th><th style="width:150px">Actions</th>
                 </tr></thead>
                 <tbody>
                 <?php foreach ($roles as $i => $r):
@@ -178,6 +179,7 @@ include 'header.php';
                     $pc = intval($r['page_count']);
                     $users = $users_by_role[$rid] ?? []; ?>
                     <tr data-search="<?php echo htmlspecialchars(strtolower($r['role_name'] . ' ' . $r['description'])); ?>">
+                        <td><input type="checkbox" class="rx-pick" value="<?php echo (int)$r['id']; ?>" aria-label="Select role"></td>
                         <td style="color:var(--rb-muted)"><?php echo $i + 1; ?></td>
                         <td>
                             <div class="rb-name"><?php echo htmlspecialchars($r['role_name']); ?>
@@ -295,5 +297,20 @@ function openDelete(r) {
 }
 function closeDelete() { document.getElementById('delModal').classList.remove('open'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDelete && document.getElementById('delModal') && closeDelete(); });
+
+/* select roles -> export only those (with their permission list) */
+(function(){
+    var picks = document.querySelectorAll('.rx-pick'), all = document.getElementById('rxAll'),
+        btn = document.getElementById('rxSelBtn'), cnt = document.getElementById('rxCnt');
+    function upd(){
+        var ids = [].filter.call(picks, function(c){ return c.checked; }).map(function(c){ return c.value; });
+        cnt.textContent = ids.length;
+        btn.style.display = ids.length ? '' : 'none';
+        btn.href = 'role_export.php?role_ids=' + ids.join(',');
+        if (all) all.checked = ids.length && ids.length === picks.length;
+    }
+    picks.forEach(function(c){ c.addEventListener('change', upd); });
+    if (all) all.addEventListener('change', function(){ picks.forEach(function(c){ if (!c.closest('tr').classList.contains('rb-hide')) c.checked = all.checked; }); upd(); });
+})();
 </script>
 <?php include 'footer.php'; ?>

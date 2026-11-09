@@ -2,8 +2,8 @@
 /**
  * role_export.php — Export Roles & Permissions to a formatted Excel file
  *   role_export.php              all roles
- *   role_export.php?role_id=5    one role
- * Sheets: Summary · Permission Matrix (menu → sub menu → page × role) · Users by Role
+ *   role_export.php?role_ids=5,7 only the selected roles (role_id=5 = one role)
+ * Sheets: Summary · Permission Matrix (menu → sub menu → page × role) · Permission List · Users by Role
  * Needs the View right on User Role. Falls back to CSV when PhpSpreadsheet is not installed.
  */
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -21,12 +21,15 @@ requireLogin();
 if (!canView('role')) rbac_deny('view', 'role');
 
 /* ── data ───────────────────────────────────────────────────── */
-$only = intval($_GET['role_id'] ?? 0);
+$ids_in = array_values(array_unique(array_filter(array_map('intval', explode(',', (string)($_GET['role_ids'] ?? ($_GET['role_id'] ?? '')))))));
+$only = count($ids_in) === 1 ? $ids_in[0] : 0;          // exactly one role selected
+$where = $ids_in ? 'WHERE r.id IN (' . implode(',', $ids_in) . ') ' : '';
 $roles = [];
 $res = rbac_q("SELECT r.*, (SELECT COUNT(*) FROM users u WHERE u.role_id = r.id) AS user_count
-               FROM roles r " . ($only ? "WHERE r.id = $only " : '') . "ORDER BY r.full_access DESC, r.role_name ASC");
+               FROM roles r " . $where . "ORDER BY r.full_access DESC, r.role_name ASC");
 while ($res && ($r = mysqli_fetch_assoc($res))) $roles[$r['id']] = $r;
 if (!$roles) { http_response_code(404); exit('Role not found.'); }
+$sel = count($ids_in) > 0;
 
 $perm = [];   // role_id => page => [v,c,e,d]
 $res = rbac_q("SELECT role_id, module_name, can_access, can_create, can_edit, can_delete FROM permissions");
@@ -186,7 +189,35 @@ foreach ([['V A E D', 'Full rights', $C['full']], ['V · · ·', 'View only', $C
     $s2->setCellValue("D$rr", $t . '   ' . $d); $s2->getStyle("D$rr")->applyFromArray(['fill' => $fill($bg), 'font' => ['name' => 'Consolas']]);
 }
 
-/* Sheet 3 — Users by Role */
+/* Sheet 3 — Permission List (flat: one line per role + page, ready to filter / pivot) */
+$sp = $ss->createSheet(); $sp->setTitle('Permission List');
+$sp->fromArray(['Role', 'Section', 'Main Menu', 'Sub Menu', 'Page', 'File', 'View', 'Add', 'Edit', 'Delete', 'Rights'], null, 'A1');
+$sp->getStyle('A1:K1')->applyFromArray(['font' => ['bold' => true, 'color' => ['argb' => $C['white']]], 'fill' => $fill($C['dark']),
+    'alignment' => ['horizontal' => 'center']]);
+$pr = 2;
+foreach ($roles as $role) {
+    foreach ($rows as $row) {
+        $x = rights_of($role, $perm, $row[4]);
+        $yn = fn($v) => $v ? 'Yes' : 'No';
+        $sp->fromArray([$role['role_name'], $row[0], $row[1], $row[2], $row[3], $row[4] . '.php', $yn($x[0]), $yn($x[1]), $yn($x[2]), $yn($x[3]), array_sum($x) . '/4'], null, "A$pr");
+        $pr++;
+    }
+}
+$plast = max(2, $pr - 1);
+$sp->getStyle("A1:K$plast")->applyFromArray($thin);
+$sp->getStyle("G2:K$plast")->getAlignment()->setHorizontal('center');
+foreach (['Yes' => 'FF15803D', 'No' => 'FFD1D5DB'] as $txt => $clr) {
+    $cf = new \PhpOffice\PhpSpreadsheet\Style\Conditional();
+    $cf->setConditionType(\PhpOffice\PhpSpreadsheet\Style\Conditional::CONDITION_CELLIS)->setOperatorType(\PhpOffice\PhpSpreadsheet\Style\Conditional::OPERATOR_EQUAL)->addCondition('"' . $txt . '"');
+    $cf->getStyle()->applyFromArray(['font' => ['bold' => $txt === 'Yes', 'color' => ['argb' => $clr]]]);
+    $cfs[] = $cf;
+}
+$sp->getStyle("G2:J$plast")->setConditionalStyles($cfs);
+foreach (['A' => 24, 'B' => 18, 'C' => 22, 'D' => 22, 'E' => 34, 'F' => 28, 'G' => 8, 'H' => 8, 'I' => 8, 'J' => 8, 'K' => 9] as $c => $w) $sp->getColumnDimension($c)->setWidth($w);
+$sp->freezePane('F2');
+$sp->setAutoFilter("A1:K$plast");
+
+/* Sheet 4 — Users by Role */
 $s3 = $ss->createSheet(); $s3->setTitle('Users by Role');
 $s3->fromArray(['Role', 'Username', 'Status'], null, 'A1');
 $s3->getStyle('A1:C1')->applyFromArray(['font' => ['bold' => true, 'color' => ['argb' => $C['white']]], 'fill' => $fill($C['dark'])]);
@@ -202,10 +233,10 @@ foreach (['A' => 28, 'B' => 28, 'C' => 12] as $c => $w) $s3->getColumnDimension(
 $s3->freezePane('A2');
 
 $ss->setActiveSheetIndex(0);
-rbac_audit($only ?: null, $only ? $roles[$only]['role_name'] : 'All roles', 'export', 'Exported roles & permissions to Excel');
+rbac_audit($only ?: null, $only ? $roles[$only]['role_name'] : ($sel ? count($roles) . ' selected roles' : 'All roles'), 'export', 'Exported roles & permissions to Excel');
 
 while (ob_get_level()) ob_end_clean();
-$fn = 'roles_permissions_' . ($only ? preg_replace('/\W+/', '_', $roles[$only]['role_name']) . '_' : '') . date('Ymd_His') . '.xlsx';
+$fn = 'roles_permissions_' . ($only ? preg_replace('/\W+/', '_', $roles[$only]['role_name']) . '_' : ($sel ? count($roles) . 'roles_' : '')) . date('Ymd_His') . '.xlsx';
 header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 header('Content-Disposition: attachment; filename="' . $fn . '"');
 header('Cache-Control: max-age=0');
