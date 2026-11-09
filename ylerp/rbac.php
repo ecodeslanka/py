@@ -54,6 +54,7 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     'role_edit'            => ['role', 'edit'],
     'role_delete'          => ['role', 'delete'],
     'role_list'            => ['role', 'view'],
+    'role_export'          => ['role', 'view'],
     // Customers
     'add_customer'         => ['customers', 'create'],
     'quick_add_customer'   => ['customers', 'create'],
