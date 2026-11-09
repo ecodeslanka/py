@@ -3,7 +3,7 @@
  * role_export.php — Export Roles & Permissions to a formatted Excel file
  *   role_export.php              all roles
  *   role_export.php?role_ids=5,7 only the selected roles (role_id=5 = one role)
- * Sheets: Summary · Permission Matrix (menu → sub menu → page × role) · Permission List · Users by Role
+ * Sheets: Summary · Role Cards · Permission List · Users by Role — ONLY permitted pages / rights are listed
  * Needs the View right on User Role. Falls back to CSV when PhpSpreadsheet is not installed.
  */
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -151,63 +151,6 @@ if ($r > 8) {   // data bar on coverage
 }
 foreach (['A' => 28, 'B' => 14, 'C' => 16, 'D' => 12, 'E' => 14, 'F' => 14, 'G' => 14, 'H' => 14, 'I' => 12, 'J' => 46] as $c => $w) $s1->getColumnDimension($c)->setWidth($w);
 
-/* Sheet 2 — Permission Matrix */
-$s2 = $ss->createSheet(); $s2->setTitle('Permission Matrix');
-$heads = ['Section', 'Main Menu', 'Sub Menu', 'Page', 'File'];
-foreach ($heads as $i => $h) $s2->setCellValue(Coordinate::stringFromColumnIndex($i + 1) . '1', $h);
-$ci = count($heads) + 1; $roleCols = [];
-foreach ($roles as $role) {
-    $a = Coordinate::stringFromColumnIndex($ci); $roleCols[$role['id']] = $a;
-    $s2->setCellValue($a . '1', $role['role_name'] . ($role['full_access'] ? ' ★' : ''));
-    $s2->getColumnDimension($a)->setWidth(11); $ci++;
-}
-$lastCol = Coordinate::stringFromColumnIndex($ci - 1);
-$s2->getStyle("A1:{$lastCol}1")->applyFromArray(['font' => ['bold' => true, 'color' => ['argb' => $C['white']]], 'fill' => $fill($C['dark']),
-    'alignment' => ['horizontal' => 'center', 'vertical' => 'center', 'wrapText' => true]]);
-$s2->getRowDimension(1)->setRowHeight(64);
-$firstRole = Coordinate::stringFromColumnIndex(count($heads) + 1);
-if ($ci - 1 >= count($heads) + 1) $s2->getStyle("{$firstRole}1:{$lastCol}1")->getAlignment()->setTextRotation(90);
-
-$secIdx = []; $rn = 2; $prevMenu = null;
-$matrixRows = array_values(array_filter($rows, function ($row) use ($roles, $perm) {
-    $allFull = !array_filter($roles, fn($r) => !$r['full_access']);
-    foreach ($roles as $role) {
-        if ($role['full_access'] && !$allFull) continue;          // Full Access shows on the rows other roles were given
-        if (has_any(rights_of($role, $perm, $row[4]))) return true;
-    }
-    return false;
-}));
-foreach ($matrixRows as $row) {
-    [$sec, $menu, $grp, $label, $page] = $row;
-    if (!isset($secIdx[$sec])) $secIdx[$sec] = count($secIdx);
-    $s2->fromArray([$sec, $menu, $grp, $label, $page . '.php'], null, "A$rn");
-    $s2->getStyle("A$rn")->applyFromArray(['font' => ['bold' => true, 'color' => ['argb' => $C['white']]], 'fill' => $fill($secColors[$secIdx[$sec] % count($secColors)])]);
-    if ($prevMenu !== $sec . '|' . $menu) { $s2->getStyle("B$rn")->getFont()->setBold(true); $prevMenu = $sec . '|' . $menu; }
-    $s2->getStyle("E$rn")->getFont()->getColor()->setARGB('FF9CA3AF');
-    foreach ($roles as $role) {
-        $x = rights_of($role, $perm, $page); $n = array_sum($x); $a = $roleCols[$role['id']] . $rn;
-        $s2->setCellValueExplicit($a, rights_text($x), \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
-        $bg = $role['full_access'] ? $C['gold'] : ($n == 4 ? $C['full'] : ($n == 0 ? $C['none'] : ($n == 1 && $x[0] ? $C['view'] : $C['part'])));
-        $s2->getStyle($a)->applyFromArray(['fill' => $fill($bg), 'alignment' => ['horizontal' => 'center'],
-            'font' => ['name' => 'Consolas', 'size' => 10, 'color' => ['argb' => $n ? 'FF111827' : 'FFD1D5DB']]]);
-    }
-    $rn++;
-}
-$lastRow = max(2, $rn - 1);
-$s2->getStyle("A1:{$lastCol}{$lastRow}")->applyFromArray($thin);
-foreach (['A' => 22, 'B' => 24, 'C' => 22, 'D' => 36, 'E' => 30] as $c => $w) $s2->getColumnDimension($c)->setWidth($w);
-$s2->freezePane('F2');
-$s2->setAutoFilter("A1:{$lastCol}{$lastRow}");
-
-/* legend under the matrix */
-$lg = $lastRow + 2;
-$s2->setCellValue("D$lg", 'Legend'); $s2->getStyle("D$lg")->getFont()->setBold(true);
-foreach ([['V A E D', 'Full rights', $C['full']], ['V · · ·', 'View only', $C['view']], ['V A · ·', 'Partial rights', $C['part']],
-          ['–', 'No access', $C['none']], ['★', 'Full Access role (every page)', $C['gold']]] as $i => [$t, $d, $bg]) {
-    $rr = $lg + 1 + $i;
-    $s2->setCellValue("D$rr", $t . '   ' . $d); $s2->getStyle("D$rr")->applyFromArray(['fill' => $fill($bg), 'font' => ['name' => 'Consolas']]);
-}
-
 /* Sheet — Role Cards: one block per role = who has it + only the pages / rights it was given */
 $sc = $ss->createSheet(); $sc->setTitle('Role Cards'); $sc->setShowGridlines(false);
 foreach (['A' => 3, 'B' => 24, 'C' => 26, 'D' => 38, 'E' => 9, 'F' => 9, 'G' => 9, 'H' => 9] as $c => $w) $sc->getColumnDimension($c)->setWidth($w);
@@ -246,7 +189,7 @@ foreach ($roles as $role) {
             $a = Coordinate::stringFromColumnIndex($k + 5);
             $sc->setCellValue($a . $cr, $x[$k] ? '✔' : '');
             $sc->getStyle($a . $cr)->applyFromArray(['alignment' => ['horizontal' => 'center'],
-                'font' => ['bold' => true, 'color' => ['argb' => 'FF15803D']], 'fill' => $fill($x[$k] ? $C['full'] : $C['none'])]);
+                'font' => ['bold' => true, 'color' => ['argb' => 'FF15803D']]] + ($x[$k] ? ['fill' => $fill($C['full'])] : []));
         }
         $sc->getStyle("B$cr")->getFont()->setBold(true);
         $sc->getStyle("B$cr:H$cr")->applyFromArray($thin);
@@ -263,12 +206,12 @@ $sp->getStyle('A1:K1')->applyFromArray(['font' => ['bold' => true, 'color' => ['
 $pr = 2;
 foreach ($roles as $role) {
     if ($role['full_access']) {
-        $sp->fromArray([$role['role_name'], 'ALL', 'ALL PAGES', '', 'Every page in the system', '', 'Yes', 'Yes', 'Yes', 'Yes', '4/4'], null, "A$pr"); $pr++;
+        $sp->fromArray([$role['role_name'], 'ALL', 'ALL PAGES', '', 'Every page in the system', '', '✔', '✔', '✔', '✔', '4/4'], null, "A$pr"); $pr++;
         continue;
     }
     foreach ($granted[$role['id']] as $row) {
         $x = rights_of($role, $perm, $row[4]);
-        $yn = fn($v) => $v ? 'Yes' : 'No';
+        $yn = fn($v) => $v ? '✔' : '';
         $sp->fromArray([$role['role_name'], $row[0], $row[1], $row[2], $row[3], $row[4] . '.php', $yn($x[0]), $yn($x[1]), $yn($x[2]), $yn($x[3]), array_sum($x) . '/4'], null, "A$pr");
         $pr++;
     }
@@ -276,13 +219,7 @@ foreach ($roles as $role) {
 $plast = max(2, $pr - 1);
 $sp->getStyle("A1:K$plast")->applyFromArray($thin);
 $sp->getStyle("G2:K$plast")->getAlignment()->setHorizontal('center');
-foreach (['Yes' => 'FF15803D', 'No' => 'FFD1D5DB'] as $txt => $clr) {
-    $cf = new \PhpOffice\PhpSpreadsheet\Style\Conditional();
-    $cf->setConditionType(\PhpOffice\PhpSpreadsheet\Style\Conditional::CONDITION_CELLIS)->setOperatorType(\PhpOffice\PhpSpreadsheet\Style\Conditional::OPERATOR_EQUAL)->addCondition('"' . $txt . '"');
-    $cf->getStyle()->applyFromArray(['font' => ['bold' => $txt === 'Yes', 'color' => ['argb' => $clr]]]);
-    $cfs[] = $cf;
-}
-$sp->getStyle("G2:J$plast")->setConditionalStyles($cfs);
+$sp->getStyle("G2:J$plast")->getFont()->setBold(true)->getColor()->setARGB('FF15803D');
 foreach (['A' => 24, 'B' => 18, 'C' => 22, 'D' => 22, 'E' => 34, 'F' => 28, 'G' => 8, 'H' => 8, 'I' => 8, 'J' => 8, 'K' => 9] as $c => $w) $sp->getColumnDimension($c)->setWidth($w);
 $sp->freezePane('F2');
 $sp->setAutoFilter("A1:K$plast");
