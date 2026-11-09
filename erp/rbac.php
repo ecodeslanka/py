@@ -206,6 +206,26 @@ function rbac_ensure_schema() {
  *       ]],
  * ]] ]
  */
+/* ---------- small file cache (keeps every request fast) ----------
+ * The folder scans (pages not in the sidebar, tagged buttons, the final tree) are
+ * stored for RBAC_CACHE_TTL seconds and are dropped when header.php / rbac.php change.
+ * The Role page always rebuilds them, so a new page or button shows up there at once.   */
+if (!defined('RBAC_CACHE_TTL')) define('RBAC_CACHE_TTL', 900);
+function rbac_cache_file($name) { return rtrim(sys_get_temp_dir(), '/\\') . '/yms_rbac_' . $name . '_' . md5(__DIR__) . '.json'; }
+function rbac_cache_ver() {
+    static $v = null;
+    if ($v === null) $v = @filemtime(__DIR__ . '/header.php') . '-' . @filemtime(__FILE__);
+    return $v;
+}
+function rbac_cache_read($name) {
+    $f = rbac_cache_file($name);
+    if (!is_file($f) || time() - (int)@filemtime($f) > RBAC_CACHE_TTL) return null;
+    $c = json_decode((string)@file_get_contents($f), true);
+    return (is_array($c) && ($c['v'] ?? '') === rbac_cache_ver() && array_key_exists('d', $c)) ? $c['d'] : null;
+}
+function rbac_cache_write($name, $data) { @file_put_contents(rbac_cache_file($name), json_encode(['v' => rbac_cache_ver(), 'd' => $data])); }
+function rbac_cache_clear() { foreach (['extra', 'btns', 'tree'] as $n) @unlink(rbac_cache_file($n)); }
+
 function rbac_sidebar_tree() {
     static $tree = null;
     if ($tree !== null) return $tree;
@@ -371,6 +391,7 @@ function rbac_menu_pages() {
 function rbac_menu_tree() {
     static $tree = null;
     if ($tree !== null) return $tree;
+    if (($c = rbac_cache_read('tree')) !== null) return $tree = $c;
     $tree = rbac_sidebar_tree();
     $extra = rbac_unlisted_pages();
     if (!$extra) return $tree;
@@ -427,6 +448,7 @@ function rbac_menu_tree() {
         $menus[] = ['type'=>'menu','label'=>$g,'icon'=>$gicons[$g],'items'=>$items];
     }
     if ($menus) $tree[] = ['title'=>'Other Pages (not linked to a menu)', 'icon'=>'fa-folder-tree', 'menus'=>$menus];
+    rbac_cache_write('tree', $tree);
     return $tree;
 }
 
@@ -477,16 +499,11 @@ function rbac_infer_related($p) {
 function rbac_unlisted_pages() {
     static $out = null;
     if ($out !== null) return $out;
+    if (($c = rbac_cache_read('extra')) !== null) return $out = $c;
     $files = glob(__DIR__ . '/*.php') ?: [];
     $names = [];
     foreach ($files as $f) $names[] = strtolower(basename($f, '.php'));
     sort($names);
-    $sig = md5(implode('|', $names) . '|' . implode(',', array_keys(rbac_sidebar_pages())) . '|' . filemtime(__FILE__));
-    $cache = rtrim(sys_get_temp_dir(), '/\\') . '/yms_rbac_extra_' . md5(__DIR__) . '.json';
-    if (is_file($cache)) {
-        $c = json_decode((string)@file_get_contents($cache), true);
-        if (is_array($c) && ($c['sig'] ?? '') === $sig) return $out = $c['pages'];
-    }
     $side = rbac_sidebar_pages();
     $skip = $GLOBALS['RBAC_ALWAYS_ALLOWED'];
     $out = [];
@@ -535,7 +552,7 @@ function rbac_unlisted_pages() {
         }
         $out[$p] = ['label' => $label, 'group' => $g, 'parent' => $parent];
     }
-    @file_put_contents($cache, json_encode(['sig' => $sig, 'pages' => $out]));
+    rbac_cache_write('extra', $out);
     return $out;
 }
 
@@ -697,15 +714,8 @@ function rbac_require($action = 'view', $page = null) {
 function rbac_all_buttons() {
     static $all = null;
     if ($all !== null) return $all;
+    if (($c = rbac_cache_read('btns')) !== null) return $all = $c;
     $files = glob(__DIR__ . '/*.php') ?: [];
-    $sig = '';
-    foreach ($files as $f) $sig .= basename($f) . filemtime($f);
-    $sig = md5($sig . filemtime(__FILE__));
-    $cache = rtrim(sys_get_temp_dir(), '/\\') . '/yms_rbac_btns_' . md5(__DIR__) . '.json';
-    if (is_file($cache)) {
-        $c = json_decode((string)@file_get_contents($cache), true);
-        if (is_array($c) && ($c['sig'] ?? '') === $sig) return $all = $c['btns'];
-    }
     $all = [];
     foreach ($files as $f) {
         $src = (string)@file_get_contents($f);
@@ -720,7 +730,7 @@ function rbac_all_buttons() {
             $all[$page][$key] = ['label' => $label, 'right' => $right];
         }
     }
-    @file_put_contents($cache, json_encode(['sig' => $sig, 'btns' => $all]));
+    rbac_cache_write('btns', $all);
     return $all;
 }
 function rbac_buttons_for($page) { $a = rbac_all_buttons(); return $a[strtolower($page)] ?? []; }

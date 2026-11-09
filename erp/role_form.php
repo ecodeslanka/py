@@ -9,6 +9,7 @@ include_once 'auth.php';
 require_once __DIR__ . '/rbac.php';
 requireLogin();
 rbac_ensure_schema();
+rbac_cache_clear();   // the Role page always shows the current pages / buttons
 
 $id      = intval($_GET['id'] ?? $_POST['role_id'] ?? 0);
 $is_edit = $id > 0;
