@@ -1039,6 +1039,9 @@ if (isset($conn) && $conn) {
                     <a href="role.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'role.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-calendar-plus"></i><span>User Role</span>
                     </a>
+                    <a href="user_role_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'user_role_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-clipboard-list"></i><span>User Role Report</span>
+                    </a>
                 </div>
 
                 <div class="menu-item has-submenu" data-tooltip="IT" onclick="toggleSubmenu(this)">
