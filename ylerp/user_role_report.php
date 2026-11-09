@@ -17,6 +17,7 @@ if (!canView('user_role_report')) rbac_deny('view', 'user_role_report');
 $f_role   = intval($_GET['role_id'] ?? 0);
 $f_status = $_GET['status'] ?? '';                       // '', 1, 0
 $f_q      = trim($_GET['q'] ?? '');
+$f_users  = array_values(array_filter(array_map('intval', (array)($_GET['users'] ?? []))));   // selected users only
 $f_page   = trim($_GET['page_q'] ?? '');                 // filter By Menu list
 $view     = ($_GET['view'] ?? 'user') === 'menu' ? 'menu' : 'user';
 
@@ -56,7 +57,11 @@ function urr_letters($r) { return ($r[0] ? 'V' : '') . ($r[1] ? 'A' : '') . ($r[
 $where = [];
 if ($f_role)            $where[] = "u.role_id = $f_role";
 if ($f_status !== '')   $where[] = "u.active = " . ($f_status ? 1 : 0);
+if ($f_users)           $where[] = 'u.id IN (' . implode(',', $f_users) . ')';
 if ($f_q !== '')        $where[] = "u.username LIKE '%" . mysqli_real_escape_string($conn, $f_q) . "%'";
+$allUsers = [];
+$au = rbac_q("SELECT id, username FROM users ORDER BY username");
+while ($au && ($x = mysqli_fetch_assoc($au))) $allUsers[] = $x;
 $users = [];
 $ur = rbac_q("SELECT u.* FROM users u " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . " ORDER BY u.username");
 while ($ur && ($u = mysqli_fetch_assoc($ur))) {
@@ -102,7 +107,7 @@ if (isset($_GET['export'])) {
     $s1->set(1, 2, 'User Role Report — users with their permissions', ['b' => 1, 'sz' => 18, 'color' => $C['white'], 'bg' => $C['teal'], 'indent' => 1]);
     for ($c = 3; $c <= 8; $c++) $s1->set(1, $c, '', ['bg' => $C['teal']]);
     $s1->merge(1, 2, 1, 8); $s1->heights[1] = 34;
-    $s1->set(2, 2, 'Generated ' . date('d M Y, H:i') . ' by ' . $me . '  ·  ' . count($users) . ' users  ·  only permitted pages are listed  ·  each View / Add / Edit / Delete cell lists every role that has that right', ['i' => 1, 'color' => '6B7280']);
+    $s1->set(2, 2, 'Generated ' . date('d M Y, H:i') . ' by ' . $me . '  ·  ' . count($users) . ' users  ·  all pages are listed, “No permission” where nothing was given  ·  each View / Add / Edit / Delete cell lists every role that has that right', ['i' => 1, 'color' => '6B7280']);
     $s1->merge(2, 2, 2, 8);
     $r = 4; $ri = 0;
     foreach ($users as $u) {
@@ -112,13 +117,15 @@ if (isset($_GET['export'])) {
             . '     ·     Pages: ' . ($full ? 'ALL' : count($u['granted'])), ['b' => 1, 'sz' => 13, 'color' => $C['white'], 'bg' => $accent, 'indent' => 1]);
         for ($c = 3; $c <= 8; $c++) $s1->set($r, $c, '', ['bg' => $accent]);
         $s1->merge($r, 2, $r, 8); $s1->heights[$r] = 26; $r++;
-        if ($full) { $s1->set($r, 2, 'Full Access — can open, add, edit and delete on every page.', ['bg' => $C['gold'], 'indent' => 1]);
-            for ($c = 3; $c <= 8; $c++) $s1->set($r, $c, '', ['bg' => $C['gold']]); $s1->merge($r, 2, $r, 8); $r += 3; continue; }
-        if (!$role)            { $s1->set($r, 2, 'No role assigned — dashboard only.', ['color' => 'B91C1C', 'indent' => 1]); $s1->merge($r, 2, $r, 8); $r += 3; continue; }
-        if (!$u['granted'])    { $s1->set($r, 2, 'Role has no page permission added yet.', ['color' => 'B91C1C', 'indent' => 1]); $s1->merge($r, 2, $r, 8); $r += 3; continue; }
+        if ($full || !$role || !$u['granted']) {
+            $note = $full ? 'Full Access — can open, add, edit and delete on every page.' : (!$role ? 'No role assigned — dashboard only.' : 'This role has no page permission added yet.');
+            $s1->set($r, 2, $note, ['bg' => $full ? $C['gold'] : 'FEE2E2', 'color' => $full ? '111827' : 'B91C1C', 'indent' => 1]);
+            for ($c = 3; $c <= 8; $c++) $s1->set($r, $c, '', ['bg' => $full ? $C['gold'] : 'FEE2E2']);
+            $s1->merge($r, 2, $r, 8); $r++;
+        }
         foreach (['Main Menu', 'Sub Menu', 'Page', 'View', 'Add', 'Edit', 'Delete'] as $i => $h) $s1->set($r, $i + 2, $h, $H);
         $r++; $prev = null;
-        foreach ($u['granted'] as $row) {
+        foreach ($rows as $row) {            // ALL pages, granted or not
             $x = urr_rights($role, $perm, $row[4]); $mk = $row[0] . '|' . $row[1];
             $s1->set($r, 2, $prev === $mk ? '' : $row[1], ['b' => 1, 'border' => 1]); $prev = $mk;
             $s1->set($r, 3, $row[2], ['border' => 1]); $s1->set($r, 4, $row[3], ['border' => 1]);
@@ -126,7 +133,9 @@ if (isset($_GET['export'])) {
             foreach ([0, 1, 2, 3] as $k) {
                 $names = $x[$k] ? urr_roles_with($k, $row[4], $roles, $perm) : [];     // every role that has this right on this page
                 $lines = max($lines, count($names));
-                $s1->set($r, $k + 5, implode("\n", $names), ['b' => 1, 'color' => '15803D', 'h' => 'center', 'wrap' => 1, 'border' => 1] + ($x[$k] ? ['bg' => $C['full']] : []));
+                $s1->set($r, $k + 5, $x[$k] ? implode("\n", $names) : 'No permission', $x[$k]
+                    ? ['b' => 1, 'color' => '15803D', 'h' => 'center', 'wrap' => 1, 'border' => 1, 'bg' => $C['full']]
+                    : ['color' => 'B91C1C', 'h' => 'center', 'border' => 1, 'sz' => 9, 'bg' => 'FEF2F2']);
             }
             $s1->heights[$r] = max(18, 15 * $lines);
             $r++;
@@ -212,7 +221,7 @@ include 'header.php';
 .urr-user th,.urr-menu th{background:#134e4a;color:#fff;padding:6px 8px;text-align:left;font-size:11px;text-transform:uppercase}
 .urr-user td,.urr-menu td{padding:6px 8px;border-top:1px solid #f1f5f9;vertical-align:top}
 .urr-r{display:inline-block;text-align:center;border-radius:5px;font-weight:700;font-size:11.5px;padding:1px 8px;margin-right:2px}
-.urr-r.on{background:#d1fae5;color:#15803d}.urr-r.off{background:#f3f4f6;color:#d1d5db}
+.urr-r.on{background:#d1fae5;color:#15803d}.urr-r.off{background:#f3f4f6;color:#d1d5db}.urr-r.no{background:#fef2f2;color:#b91c1c;font-weight:600;font-size:10.5px}
 .urr-note{padding:12px 14px;font-size:13px;color:#b91c1c}.urr-gold{padding:12px 14px;background:#fef3c7;font-size:13px}
 .urr-mw{background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:auto}
 .urr-ub{display:inline-block;background:#f0fdfa;border:1px solid #99f6e4;border-radius:20px;padding:1px 9px;margin:1px 3px 1px 0;font-size:11.5px}
@@ -227,7 +236,9 @@ include 'header.php';
     <div><label>Role</label><select name="role_id"><option value="">All roles</option>
       <?php foreach ($roles as $r): ?><option value="<?= (int)$r['id'] ?>" <?= $f_role == $r['id'] ? 'selected' : '' ?>><?= htmlspecialchars($r['role_name']) ?></option><?php endforeach; ?></select></div>
     <div><label>User status</label><select name="status"><option value="">All</option><option value="1" <?= $f_status === '1' ? 'selected' : '' ?>>Active</option><option value="0" <?= $f_status === '0' ? 'selected' : '' ?>>Inactive</option></select></div>
-    <div><label>User</label><input name="q" value="<?= htmlspecialchars($f_q) ?>" placeholder="username"></div>
+    <div><label>Select users (Ctrl / ⌘ click for several)</label><select name="users[]" multiple size="4" style="min-width:190px">
+      <?php foreach ($allUsers as $au_): ?><option value="<?= (int)$au_['id'] ?>" <?= in_array((int)$au_['id'], $f_users, true) ? 'selected' : '' ?>><?= htmlspecialchars($au_['username']) ?></option><?php endforeach; ?></select></div>
+    <div><label>User search</label><input name="q" value="<?= htmlspecialchars($f_q) ?>" placeholder="username"></div>
     <?php if ($view === 'menu'): ?><div><label>Page / menu</label><input name="page_q" value="<?= htmlspecialchars($f_page) ?>" placeholder="search menu or page"></div><?php endif; ?>
     <button class="urr-btn pri"><i class="fa-solid fa-filter"></i> Apply</button>
     <a class="urr-btn" href="user_role_report.php?view=<?= $view ?>">Reset</a>
@@ -260,14 +271,12 @@ include 'header.php';
       </summary>
       <?php if ($full): ?><div class="urr-gold">★ Full Access — can open, add, edit and delete on every page.</div>
       <?php elseif (!$role): ?><div class="urr-note">No role assigned — this user can only open the Dashboard.</div>
-      <?php elseif (!$u['granted']): ?><div class="urr-note">This role has no page permission added yet.</div>
-      <?php else: ?>
-        <table><thead><tr><th>Main menu</th><th>Sub menu</th><th>Page</th><th>View</th><th>Add</th><th>Edit</th><th>Delete</th></tr></thead><tbody>
-        <?php $prev = null; foreach ($u['granted'] as $row): $x = urr_rights($role, $perm, $row[4]); $mk = $row[0] . '|' . $row[1]; ?>
-          <tr><td style="font-weight:700"><?= $prev === $mk ? '' : htmlspecialchars($row[1]) ?></td><td><?= htmlspecialchars($row[2]) ?></td><td><?= htmlspecialchars($row[3]) ?></td>
-              <?php foreach ([0, 1, 2, 3] as $i): ?><td><?php if ($x[$i]): foreach (urr_roles_with($i, $row[4], $roles, $perm) as $rn): ?><span class="urr-r on"><?= htmlspecialchars($rn) ?></span><br><?php endforeach; endif; ?></td><?php endforeach; ?></tr>
-        <?php $prev = $mk; endforeach; ?></tbody></table>
-      <?php endif; ?>
+      <?php elseif (!$u['granted']): ?><div class="urr-note">This role has no page permission added yet.</div><?php endif; ?>
+      <table><thead><tr><th>Main menu</th><th>Sub menu</th><th>Page</th><th>View</th><th>Add</th><th>Edit</th><th>Delete</th></tr></thead><tbody>
+      <?php $prev = null; foreach ($rows as $row): $x = urr_rights($role, $perm, $row[4]); $mk = $row[0] . '|' . $row[1]; ?>
+        <tr><td style="font-weight:700"><?= $prev === $mk ? '' : htmlspecialchars($row[1]) ?></td><td><?= htmlspecialchars($row[2]) ?></td><td><?= htmlspecialchars($row[3]) ?></td>
+          <?php foreach ([0, 1, 2, 3] as $i): ?><td><?php if ($x[$i]): foreach (urr_roles_with($i, $row[4], $roles, $perm) as $rn): ?><span class="urr-r on"><?= htmlspecialchars($rn) ?></span><br><?php endforeach; else: ?><span class="urr-r no">No permission</span><?php endif; ?></td><?php endforeach; ?></tr>
+      <?php $prev = $mk; endforeach; ?></tbody></table>
     </details>
   <?php endforeach; ?>
   <p style="font-size:12px;color:#6b7280">Click a user to open or close the permission list. the role name under View / Add / Edit / Delete = that right is given.</p>
