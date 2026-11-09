@@ -45,6 +45,11 @@ function urr_rights($role, $perm, $page) {
     if ($role['full_access']) return [1, 1, 1, 1];
     return $perm[$role['id']][$page] ?? [0, 0, 0, 0];
 }
+function urr_roles_with($k, $page, $roles, $perm) {
+    $o = [];
+    foreach ($roles as $r) if ($r['active'] && ($r['full_access'] || !empty($perm[$r['id']][$page][$k]))) $o[] = $r['role_name'];
+    return $o;
+}
 function urr_any($r) { return $r[0] || $r[1] || $r[2] || $r[3]; }
 function urr_letters($r) { return ($r[0] ? 'V' : '') . ($r[1] ? 'A' : '') . ($r[2] ? 'E' : '') . ($r[3] ? 'D' : ''); }
 
@@ -93,11 +98,11 @@ if (isset($_GET['export'])) {
 
     /* Sheet 1: each user = header band, that user's permission list below */
     $s1 = $X->sheet('Users & Permissions');
-    foreach ([3, 22, 24, 38, 17, 17, 17, 17] as $i => $w) $s1->widths[$i + 1] = $w;
+    foreach ([3, 22, 24, 38, 19, 19, 19, 19] as $i => $w) $s1->widths[$i + 1] = $w;
     $s1->set(1, 2, 'User Role Report — users with their permissions', ['b' => 1, 'sz' => 18, 'color' => $C['white'], 'bg' => $C['teal'], 'indent' => 1]);
     for ($c = 3; $c <= 8; $c++) $s1->set(1, $c, '', ['bg' => $C['teal']]);
     $s1->merge(1, 2, 1, 8); $s1->heights[1] = 34;
-    $s1->set(2, 2, 'Generated ' . date('d M Y, H:i') . ' by ' . $me . '  ·  ' . count($users) . ' users  ·  only permitted pages are listed  ·  the role name under View / Add / Edit / Delete = right given', ['i' => 1, 'color' => '6B7280']);
+    $s1->set(2, 2, 'Generated ' . date('d M Y, H:i') . ' by ' . $me . '  ·  ' . count($users) . ' users  ·  only permitted pages are listed  ·  each View / Add / Edit / Delete cell lists every role that has that right', ['i' => 1, 'color' => '6B7280']);
     $s1->merge(2, 2, 2, 8);
     $r = 4; $ri = 0;
     foreach ($users as $u) {
@@ -117,8 +122,13 @@ if (isset($_GET['export'])) {
             $x = urr_rights($role, $perm, $row[4]); $mk = $row[0] . '|' . $row[1];
             $s1->set($r, 2, $prev === $mk ? '' : $row[1], ['b' => 1, 'border' => 1]); $prev = $mk;
             $s1->set($r, 3, $row[2], ['border' => 1]); $s1->set($r, 4, $row[3], ['border' => 1]);
-            foreach ([0, 1, 2, 3] as $k)
-                $s1->set($r, $k + 5, $x[$k] ? $role['role_name'] : '', ['b' => 1, 'color' => '15803D', 'h' => 'center', 'border' => 1] + ($x[$k] ? ['bg' => $C['full']] : []));
+            $lines = 1;
+            foreach ([0, 1, 2, 3] as $k) {
+                $names = $x[$k] ? urr_roles_with($k, $row[4], $roles, $perm) : [];     // every role that has this right on this page
+                $lines = max($lines, count($names));
+                $s1->set($r, $k + 5, implode("\n", $names), ['b' => 1, 'color' => '15803D', 'h' => 'center', 'wrap' => 1, 'border' => 1] + ($x[$k] ? ['bg' => $C['full']] : []));
+            }
+            $s1->heights[$r] = max(18, 15 * $lines);
             $r++;
         }
         $r += 2;
@@ -255,7 +265,7 @@ include 'header.php';
         <table><thead><tr><th>Main menu</th><th>Sub menu</th><th>Page</th><th>View</th><th>Add</th><th>Edit</th><th>Delete</th></tr></thead><tbody>
         <?php $prev = null; foreach ($u['granted'] as $row): $x = urr_rights($role, $perm, $row[4]); $mk = $row[0] . '|' . $row[1]; ?>
           <tr><td style="font-weight:700"><?= $prev === $mk ? '' : htmlspecialchars($row[1]) ?></td><td><?= htmlspecialchars($row[2]) ?></td><td><?= htmlspecialchars($row[3]) ?></td>
-              <?php foreach ([0, 1, 2, 3] as $i): ?><td><?php if ($x[$i]): ?><span class="urr-r on"><?= htmlspecialchars($role['role_name']) ?></span><?php endif; ?></td><?php endforeach; ?></tr>
+              <?php foreach ([0, 1, 2, 3] as $i): ?><td><?php if ($x[$i]): foreach (urr_roles_with($i, $row[4], $roles, $perm) as $rn): ?><span class="urr-r on"><?= htmlspecialchars($rn) ?></span><br><?php endforeach; endif; ?></td><?php endforeach; ?></tr>
         <?php $prev = $mk; endforeach; ?></tbody></table>
       <?php endif; ?>
     </details>

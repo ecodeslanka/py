@@ -26,9 +26,21 @@ $sel = count($ids_in) > 0;
 
 $perm = [];   // role_id => page => [v,c,e,d]
 $res = rbac_q("SELECT role_id, module_name, can_access, can_create, can_edit, can_delete FROM permissions");
+$permAll = [];   // every role's rights, used to list ALL roles that have a right on a page
 while ($res && ($p = mysqli_fetch_assoc($res))) {
-    if (!isset($roles[$p['role_id']])) continue;
-    $perm[$p['role_id']][strtolower($p['module_name'])] = [(int)$p['can_access'], (int)$p['can_create'], (int)$p['can_edit'], (int)$p['can_delete']];
+    $rights = [(int)$p['can_access'], (int)$p['can_create'], (int)$p['can_edit'], (int)$p['can_delete']];
+    $permAll[$p['role_id']][strtolower($p['module_name'])] = $rights;
+    if (isset($roles[$p['role_id']])) $perm[$p['role_id']][strtolower($p['module_name'])] = $rights;
+}
+$allRoles = [];
+$ar = rbac_q("SELECT id, role_name, full_access FROM roles WHERE active = 1 ORDER BY full_access DESC, role_name");
+while ($ar && ($x = mysqli_fetch_assoc($ar))) $allRoles[] = $x;
+/** names of ALL active roles that have right $k (0 view, 1 add, 2 edit, 3 delete) on $page */
+function roles_with($k, $page) {
+    global $allRoles, $permAll;
+    $o = [];
+    foreach ($allRoles as $r) if ($r['full_access'] || !empty($permAll[$r['id']][$page][$k])) $o[] = $r['role_name'];
+    return $o;
 }
 
 /* page rows from the sidebar tree: Section → Main menu → Sub menu → Page */
@@ -119,7 +131,7 @@ foreach ([28, 12, 18, 18, 16, 12, 12, 13, 48] as $i => $w) $s1->widths[$i + 1] =
 
 /* Sheet 2 — Role Cards: who has the role + only the pages / rights it was given */
 $sc = $X->sheet('Role Cards');
-foreach ([3, 24, 26, 38, 9, 9, 9, 9] as $i => $w) $sc->widths[$i + 1] = $w;
+foreach ([3, 24, 26, 38, 19, 19, 19, 19] as $i => $w) $sc->widths[$i + 1] = $w;
 $cr = 1; $ri = 0;
 foreach ($roles as $role) {
     $accent = $role['full_access'] ? 'B45309' : $accents[$ri++ % count($accents)];
@@ -147,8 +159,13 @@ foreach ($roles as $role) {
         $x = rights_of($role, $perm, $row[4]); $mk = $row[0] . '|' . $row[1];
         $sc->set($cr, 2, $prev === $mk ? '' : $row[1], ['b' => 1, 'border' => 1]); $prev = $mk;
         $sc->set($cr, 3, $row[2], ['border' => 1]); $sc->set($cr, 4, $row[3], ['border' => 1]);
-        foreach ([0, 1, 2, 3] as $k)
-            $sc->set($cr, $k + 5, $x[$k] ? '✔' : '', ['b' => 1, 'color' => '15803D', 'h' => 'center', 'border' => 1] + ($x[$k] ? ['bg' => $C['full']] : []));
+        $lines = 1;
+        foreach ([0, 1, 2, 3] as $k) {
+            $names = $x[$k] ? roles_with($k, $row[4]) : [];          // every role that has this right on this page
+            $lines = max($lines, count($names));
+            $sc->set($cr, $k + 5, implode("\n", $names), ['b' => 1, 'color' => '15803D', 'h' => 'center', 'wrap' => 1, 'border' => 1] + ($x[$k] ? ['bg' => $C['full']] : []));
+        }
+        $sc->heights[$cr] = max(18, 15 * $lines);
         $cr++;
     }
     $cr += 2;
