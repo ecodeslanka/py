@@ -476,8 +476,8 @@ mark.hl{background:#fef08a;color:#713f12;border-radius:2px;padding:0 1px}
     <p class="page-subtitle">Aging: delivery date → cheque date. Cleared &amp; fully-settled cheques excluded. Totals reflect unsettled balances. Filter by received date if needed.</p>
   </div>
   <div style="display:flex;gap:8px;" class="no-print">
-    <button onclick="window.print()" class="btn btn-secondary btn-sm"><i class="fa-solid fa-print"></i> Print</button>
-    <button onclick="exportExcel()" class="btn btn-success btn-sm"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
+    <button data-btn="print" data-btn-label="Print" onclick="window.print()" class="btn btn-secondary btn-sm"><i class="fa-solid fa-print"></i> Print</button>
+    <button data-btn="export_excel" data-btn-label="Export Excel" onclick="exportExcel()" class="btn btn-success btn-sm"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
   </div>
 </div>
 

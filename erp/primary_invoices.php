@@ -134,6 +134,7 @@ if (isset($_GET['action'])) {
 
     // ── Save settlements ─────────────────────────────────────────
     if ($action === 'save_settlements' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (function_exists('rbac_require_btn')) rbac_require_btn('settle_payment');
         $pi_id = intval($_POST['pi_id'] ?? 0);
         if (!$pi_id) { echo json_encode(['success' => false, 'message' => 'Invalid record.']); exit; }
         $rows_data = json_decode($_POST['rows'] ?? '[]', true);
@@ -465,6 +466,7 @@ while ($rows_result && ($r = mysqli_fetch_assoc($rows_result))) {
 //  EXPORT TO EXCEL  (?export=xlsx — honours every active filter / As At Date)
 // ══════════════════════════════════════════════════════════════════
 if (($_GET['export'] ?? '') === 'xlsx') {
+    if (function_exists('rbac_require_btn')) rbac_require_btn('export_excel');
     $hdr = ['#','Invoice Date','Invoice No','Sampath Super','Note','DP Days','Company','Invoice Value','Status',
             'Credit Note','Credit Note Value','Auto CN','Bal (Inv-CN)','Capture Date','Capture Time','GRN Date',
             'Aging (days)','Sched. Due Date','Banking Date','Total Paid','Net Balance','Last Paid','Cheque Nos','Leaf Balance'];
@@ -882,13 +884,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
             <p class="page-subtitle">Manage invoices, credit notes, DP days and payment settlements</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <a class="btn btn-light" href="?<?php echo htmlspecialchars(http_build_query(array_merge($_GET, ['export' => 'xlsx']))); ?>" title="Export the invoices currently shown (respects filters / As At Date)">
+            <a class="btn btn-light" data-btn="export_excel" data-btn-label="Export Excel" href="?<?php echo htmlspecialchars(http_build_query(array_merge($_GET, ['export' => 'xlsx']))); ?>" title="Export the invoices currently shown (respects filters / As At Date)">
                 <i class="fa-solid fa-file-excel" style="color:#16a34a;"></i> Export Excel
             </a>
-            <a class="btn btn-light" href="pi_cheque_bank_recon.php">
+            <a class="btn btn-light" data-btn="bank_recon" data-btn-label="Cheque Bank Reconcile" href="pi_cheque_bank_recon.php">
                 <i class="fa-solid fa-money-check-dollar"></i> Cheque Bank Reconcile
             </a>
-            <button class="btn btn-primary" onclick="openAddModal()">
+            <button class="btn btn-primary" data-btn="add_invoice" data-btn-label="Add New Invoice" data-perm="create" onclick="openAddModal()">
                 <i class="fa-solid fa-plus"></i> Add New Invoice
             </button>
         </div>
@@ -1298,14 +1300,14 @@ $bal2_total    = $bal1_total - $total_paid_s;
                     <td class="tc" id="td-cheques-<?php echo $r['id']; ?>"><?php echo $leaf_html; ?></td>
                     <td class="tc">
                         <div class="action-buttons">
-                            <button class="<?php echo $pay_btn_class; ?>"
+                            <button data-btn="settle_payment" data-btn-label="Pay / Settlements" data-perm="edit" class="<?php echo $pay_btn_class; ?>"
                                     id="paybtn-<?php echo $r['id']; ?>"
                                     onclick="openSettleModal(<?php echo $r['id']; ?>,'<?php echo addslashes(htmlspecialchars($r['invoice_no'])); ?>',<?php echo $inv_val; ?>,<?php echo $cn_val; ?>)">
                                 <i class="fa-solid fa-<?php echo $pay_btn_icon; ?>"></i>
                                 <?php echo $pay_btn_label; ?>
                             </button>
-                            <button class="btn-action btn-edit-r" onclick="editRow(<?php echo $r['id']; ?>)" title="Edit"><i class="fa-solid fa-pen"></i></button>
-                            <button class="btn-action btn-del-r" onclick="deleteRow(<?php echo $r['id']; ?>)" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                            <button data-btn="edit_invoice" data-btn-label="Edit Invoice" data-perm="edit" class="btn-action btn-edit-r" onclick="editRow(<?php echo $r['id']; ?>)" title="Edit"><i class="fa-solid fa-pen"></i></button>
+                            <button data-btn="delete_invoice" data-btn-label="Delete Invoice" data-perm="delete" class="btn-action btn-del-r" onclick="deleteRow(<?php echo $r['id']; ?>)" title="Delete"><i class="fa-solid fa-trash"></i></button>
                         </div>
                     </td>
                 </tr>

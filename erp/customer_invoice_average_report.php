@@ -374,8 +374,8 @@ body.cia-lock{overflow:hidden;}
   <div class="chips" id="chips"></div>
 
   <div class="tools">
-    <button class="btn grn" type="button" id="btnCsv"><i class="fa-solid fa-file-excel"></i> Export Excel (CSV)</button>
-    <button class="btn" type="button" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+    <button class="btn grn" type="button" id="btnCsv" data-btn="export_csv" data-btn-label="Export Excel (CSV)"><i class="fa-solid fa-file-excel"></i> Export Excel (CSV)</button>
+    <button class="btn" type="button" data-btn="print" data-btn-label="Print" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
     <span class="meta" id="meta"></span>
   </div>
 

@@ -159,6 +159,17 @@ function rbac_ensure_schema() {
         KEY idx_role (role_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+    // per-button rights (only rows that differ from the page-level default are stored)
+    rbac_q("CREATE TABLE IF NOT EXISTS role_page_buttons (
+        id INT(11) AUTO_INCREMENT PRIMARY KEY,
+        role_id INT(11) NOT NULL,
+        page VARCHAR(150) NOT NULL,
+        btn_key VARCHAR(80) NOT NULL,
+        allowed TINYINT(1) NOT NULL DEFAULT 0,
+        UNIQUE KEY uq_role_page_btn (role_id, page, btn_key),
+        CONSTRAINT fk_rpb_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
     // ── Lock-out protection on first install ─────────────────────
     if ($first_install) {
         // Any role whose name contains "admin" becomes Full Access
@@ -583,7 +594,7 @@ function rbac_context() {
     $uid_now = $_SESSION['user_id'] ?? null;
     if ($ctx !== null && $for_user === $uid_now) return $ctx;
     $for_user = $uid_now;
-    $ctx = ['role_id' => null, 'role_name' => null, 'full' => false, 'perms' => [], 'enforced' => false];
+    $ctx = ['role_id' => null, 'role_name' => null, 'full' => false, 'perms' => [], 'btns' => [], 'enforced' => false];
 
     if (empty($_SESSION['user_id'])) return $ctx;
     if (!rbac_installed()) { $ctx['full'] = true; return $ctx; }     // not installed yet → no enforcement
@@ -613,6 +624,10 @@ function rbac_context() {
             'edit'   => (int)$p['can_edit'],
             'delete' => (int)$p['can_delete'],
         ];
+    }
+    $res = rbac_q("SELECT page, btn_key, allowed FROM role_page_buttons WHERE role_id = " . $ctx['role_id']);
+    while ($res && ($b = mysqli_fetch_assoc($res))) {
+        $ctx['btns'][strtolower($b['page'])][$b['btn_key']] = (int)$b['allowed'];
     }
     return $ctx;
 }
@@ -664,6 +679,82 @@ function canDelete($page = null) { return rbac_can('delete', $page); }
 /** Stop the request when the right is missing. */
 function rbac_require($action = 'view', $page = null) {
     if (!rbac_can($action, $page)) rbac_deny($action, $page ?? rbac_current_page());
+}
+
+/* ================================================================
+ *  BUTTON PERMISSIONS
+ *  Tag a button / link in any page:
+ *      <button data-btn="export_excel" data-btn-label="Export Excel">            (needs only View)
+ *      <button data-btn="add_invoice" data-btn-label="Add Invoice" data-perm="create">
+ *  The tag makes it appear under that page on the Role page, where each button
+ *  can be switched on / off for a role.  data-perm (create|edit|delete) is the
+ *  default: a role that has that page right gets the button until it is switched off.
+ *  The button is hidden automatically; protect the server side with
+ *      rbac_require_btn('export_excel');      // or  if (rbac_can_btn('export_excel')) …
+ * ================================================================ */
+
+/** page => [ key => ['label'=>, 'right'=>view|create|edit|delete] ]  (cached; rescanned when a file changes) */
+function rbac_all_buttons() {
+    static $all = null;
+    if ($all !== null) return $all;
+    $files = glob(__DIR__ . '/*.php') ?: [];
+    $sig = '';
+    foreach ($files as $f) $sig .= basename($f) . filemtime($f);
+    $sig = md5($sig . filemtime(__FILE__));
+    $cache = rtrim(sys_get_temp_dir(), '/\\') . '/yms_rbac_btns_' . md5(__DIR__) . '.json';
+    if (is_file($cache)) {
+        $c = json_decode((string)@file_get_contents($cache), true);
+        if (is_array($c) && ($c['sig'] ?? '') === $sig) return $all = $c['btns'];
+    }
+    $all = [];
+    foreach ($files as $f) {
+        $src = (string)@file_get_contents($f);
+        if (strpos($src, 'data-btn=') === false) continue;
+        $page = strtolower(basename($f, '.php'));
+        if (!preg_match_all('/<[a-z]+\b[^>]*\bdata-btn="([a-z0-9_]+)"[^>]*>/i', $src, $m, PREG_SET_ORDER)) continue;
+        foreach ($m as $tag) {
+            $key = $tag[1];
+            if (isset($all[$page][$key])) continue;
+            $label = preg_match('/data-btn-label="([^"]+)"/', $tag[0], $l) ? $l[1] : ucwords(str_replace('_', ' ', $key));
+            $right = preg_match('/data-perm="[^"]*\b(create|edit|delete)\b/', $tag[0], $r) ? $r[1] : 'view';
+            $all[$page][$key] = ['label' => $label, 'right' => $right];
+        }
+    }
+    @file_put_contents($cache, json_encode(['sig' => $sig, 'btns' => $all]));
+    return $all;
+}
+function rbac_buttons_for($page) { $a = rbac_all_buttons(); return $a[strtolower($page)] ?? []; }
+
+/** May the current user use this button?  (page view right is always needed) */
+function rbac_can_btn($key, $page = null) {
+    $page = strtolower(preg_replace('/\.php$/i', '', $page ?? rbac_current_page()));
+    if (empty($_SESSION['user_id'])) return false;
+    $ctx = rbac_context();
+    if ($ctx['full']) return true;
+    if (in_array($page, $GLOBALS['RBAC_ALWAYS_ALLOWED'], true)) return true;
+    [$target] = rbac_resolve($page);
+    if ($target === null) return true;                        // page not under permission control
+    if (!rbac_can('view', $page)) return false;
+    if (isset($ctx['btns'][$target][$key])) return (bool)$ctx['btns'][$target][$key];   // explicit setting of the role
+    $def = rbac_buttons_for($target)[$key]['right'] ?? 'view';                          // otherwise the page-level right
+    return $def === 'view' ? true : rbac_can($def, $target);
+}
+function rbac_require_btn($key, $page = null) {
+    if (!rbac_can_btn($key, $page)) {
+        $p = $page ?? rbac_current_page();
+        $lbl = rbac_buttons_for($p)[$key]['label'] ?? $key;
+        $GLOBALS['RBAC_BTN_DENIED'] = $lbl;
+        rbac_deny('btn:' . $lbl, $p);
+    }
+}
+/** CSS that hides the buttons of the current page this user may not use */
+function rbac_btn_css() {
+    if (empty($_SESSION['user_id'])) return '';
+    $css = '';
+    foreach (array_keys(rbac_buttons_for(rbac_current_page())) as $k) {
+        if (!rbac_can_btn($k)) $css .= '[data-btn="' . $k . '"]{display:none!important}';
+    }
+    return $css;
 }
 
 /* ================================================================
@@ -725,7 +816,9 @@ function rbac_deny($action, $page) {
     $pages  = rbac_menu_pages();
     [$target] = rbac_resolve($page);
     $pname  = $pages[$target ?? $page]['label'] ?? ucwords(str_replace('_', ' ', $page));
-    $msg    = "You do not have permission to " . ($labels[$action] ?? $action) . " \"$pname\".";
+    $msg    = strpos($action, 'btn:') === 0
+        ? "You do not have permission to use \"" . substr($action, 4) . "\" on \"$pname\"."
+        : "You do not have permission to " . ($labels[$action] ?? $action) . " \"$pname\".";
 
     if (!headers_sent()) http_response_code(403);
     if (rbac_is_ajax()) {
