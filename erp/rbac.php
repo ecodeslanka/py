@@ -470,9 +470,7 @@ function rbac_is_helper_page($p) {
 
 /** Action prefixes / suffixes → the right needed on the parent page */
 function rbac_action_right($p) {
-    static $pre = ['delete_'=>'delete','remove_'=>'delete','edit_'=>'edit','update_'=>'edit','approve_'=>'edit','reverse_'=>'edit',
-                   'mark_'=>'edit','link_'=>'edit','unlink_'=>'edit','settle_'=>'edit','bulk_'=>'edit','move_'=>'edit',
-                   'add_'=>'create','quick_add_'=>'create','generate_'=>'create','genarate_'=>'create'];
+    static $pre = ['delete_'=>'delete','remove_'=>'delete','edit_'=>'edit','update_'=>'edit','approve_'=>'edit','add_'=>'create','quick_add_'=>'create'];
     foreach ($pre as $k => $r) if (strpos($p, $k) === 0) return [$k, $r];
     if (preg_match('/_(edit|add|delete)$/', $p, $m)) return ['_' . $m[1], ['edit'=>'edit','add'=>'create','delete'=>'delete'][$m[1]]];
     return null;
@@ -685,6 +683,9 @@ function rbac_can($action = 'view', $page = null) {
         $action = $need;                              // e.g. opening add_employee needs employees.create
     }
     $p = $ctx['perms'][$target] ?? null;
+    if ((!$p || empty($p['view'])) && ($par = (rbac_unlisted_pages()[$target]['parent'] ?? ''))) {
+        $p = $ctx['perms'][$par] ?? null;             // a page opened from a menu page (form, history, view…) with no setting of its own → rights of that menu page
+    }
     if (!$p || empty($p['view'])) return false;       // no view right = nothing on that page
     return !empty($p[$action]);
 }
@@ -761,9 +762,11 @@ function rbac_require_btn($key, $page = null) {
 function rbac_btn_css() {
     if (empty($_SESSION['user_id'])) return '';
     $css = '';
-    foreach (array_keys(rbac_buttons_for(rbac_current_page())) as $k) {
-        if (!rbac_can_btn($k)) $css .= '[data-btn="' . $k . '"]{display:none!important}';
-    }
+    try {
+        foreach (array_keys(rbac_buttons_for(rbac_current_page())) as $k) {
+            if (!rbac_can_btn($k)) $css .= '[data-btn="' . $k . '"]{display:none!important}';
+        }
+    } catch (Throwable $e) { return ''; }
     return $css;
 }
 
