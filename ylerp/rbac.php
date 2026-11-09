@@ -87,6 +87,52 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     // Vehicles
     'view_vehicle'         => ['vehicles', 'view'],
     'vehicle_schedule_view'=> ['vehicle_schedule', 'view'],
+    // ── Pages that are not in the sidebar but write / delete data: they follow their menu page ──
+    'attendance_monthly_report' => ['attendance_monthly_roster', 'view'],
+    'attendance_batches'   => ['attendance_import', 'view'],
+    'backup_helper'        => ['backup_settings', 'edit'],
+    'api_reconcile'        => ['unilever_reconcile', 'edit'],
+    'api_reconcile_unloading' => ['reconcile_unloading', 'edit'],
+    'api_unloading_data'   => ['unloading_import_history', 'view'],
+    'cheque_recon_history' => ['cheque_reconciliation', 'view'],
+    'credit_bill_upload_history' => ['bulk_credit_bill_upload', 'view'],
+    'emergency_credit_bill_upload_history' => ['emergency_credit_bill_upload', 'view'],
+    'customer_claim_ajax'  => ['customer_claim', 'edit'],
+    'delete_fs_update'     => ['field_summary_list', 'delete'],
+    'delete_se_charge'     => ['fs_se', 'delete'],
+    'difference_fix'       => ['difference_fix_history', 'edit'],
+    'epf_report'           => ['epf_batches', 'view'],
+    'etf_report'           => ['etf_batches', 'view'],
+    'field_summary_scan_api' => ['field_summary_list', 'edit'],
+    'import_fsum'          => ['import_history', 'create'],
+    'import_unloading'     => ['unloading_import_history', 'create'],
+    'process_unloading_import' => ['unloading_import_history', 'create'],
+    'process_reimport_unloading' => ['unloading_import_history', 'edit'],
+    'unloading_reimport_logs' => ['unloading_import_history', 'view'],
+    'import_scheme_discount' => ['scheme_discount_receivable', 'create'],
+    'scheme_import_history' => ['scheme_discount_receivable', 'view'],
+    'invoice_wise_sales_upload' => ['invoice_wise_sales_history', 'create'],
+    'primary_invoice_wise_sales_upload' => ['primary_invoice_wise_sales_history', 'create'],
+    'process_secondary_import' => ['invoice_wise_sales_history', 'create'],
+    'process_secondary_import_multidate' => ['invoice_wise_sales_history', 'create'],
+    'secondary_import_multi' => ['invoice_wise_sales_history', 'create'],
+    'ushop_items_import'   => ['ushop_items_import_history', 'create'],
+    'invoices_data'        => ['invoices', 'view'],
+    'outlet_day_transfer'  => ['outlet_service_map', 'edit'],
+    'primary_sales_return' => ['purchase_return_summary_report', 'view'],
+    'process_credit_bills' => ['bulk_credit_bill_upload', 'create'],
+    'public_holidays'      => ['bank_holidays', 'view'],
+    'save_cash_dp_pay'     => ['cc_cash_deposit_dp', 'edit'],
+    'save_cash_shortage_report' => ['cash_shortage_employee_report', 'edit'],
+    'save_credit_bill_issue' => ['credit_bill_issue', 'edit'],
+    'save_credit_bill_verify' => ['credit_bill_issue', 'edit'],
+    'save_scheme_settlement' => ['daily_scheme_discounts', 'edit'],
+    'scheme_settlement_ajax' => ['daily_scheme_discounts', 'edit'],
+    'save_sentback_issue'  => ['sentback_cheques', 'edit'],
+    'save_unloading_pay'   => ['reconcile_unloading', 'edit'],
+    'sscl_vat_new'         => ['sscl_vat', 'view'],
+    'dal_cheque_ack'       => ['cheque_acknowledgments', 'view'],
+    'dl_cheque_ack_new'    => ['cheque_acknowledgments', 'view'],
     // Cash float
     'cash_float_create'      => ['cash_float', 'create'],
     'cash_float_add_expense' => ['cash_float', 'create'],
@@ -597,20 +643,42 @@ function rbac_require($action = 'view', $page = null) {
 /** Guess what the request is trying to do. Returns view|create|edit|delete|create_or_edit */
 function rbac_detect_action() {
     $req = $_GET + $_POST;
-    foreach (['delete', 'delete_id', 'del', 'del_id', 'remove', 'remove_id', 'trash'] as $k) {
-        if (isset($req[$k]) && $req[$k] !== '') return 'delete';
+    // keys that look like date / status filters, not delete requests
+    $notDelete = '/^(deleted|delivery\w*|del_(from|to|date\w*)|delete_(from|to|date\w*)|deleted_\w+)$/i';
+
+    // 1. ?delete=5, ?delete_import=3, ?del_id=7, ?remove_doc=1 ... (any non-empty value)
+    foreach ($req as $k => $v) {
+        if (!is_string($k) || is_array($v) && !$v) continue;
+        if (preg_match('/^(delete|del|remove|trash|destroy|purge)(_[a-z0-9_]+)?$/i', $k) && !preg_match($notDelete, $k)
+            && $v !== '' && $v !== '0' && $v !== 0) return 'delete';
     }
-    $act = strtolower((string)($req['action'] ?? $req['act'] ?? $req['op'] ?? ''));
+    // 2. action / act / op / do / mode = "delete_x" ...
+    $act = '';
+    foreach (['action', 'act', 'op', 'do', 'mode', 'task', 'type_action'] as $k) {
+        if (isset($req[$k]) && is_string($req[$k]) && $req[$k] !== '') { $act = strtolower($req[$k]); break; }
+    }
     if ($act !== '') {
-        if (preg_match('/^(get|fetch|load|list|search|lookup|view|print|export|download|preview|validate|template|check|test)/', $act)) return 'view';
-        if (preg_match('/delete|remove|trash|destroy|purge/', $act)) return 'delete';
+        if (preg_match('/delete|remove|trash|destroy|purge|clear|reset_all|truncate/', $act)) return 'delete';
+        if (preg_match('/^(get|fetch|load|list|search|lookup|view|print|export|download|preview|validate|template|check|test|show|read|find|count|filter)/', $act)) return 'view';
         if (preg_match('/^(save)/', $act)) return 'create_or_edit';
-        if (preg_match('/^(add|create|insert|new|upload|import|quick_add|store|generate|process)|_(add|create)$/', $act)) return 'create';
-        if (preg_match('/edit|update|modify|toggle|approve|reject|settle|reverse|lock|unlock|bulk|rename|change|assign/', $act)) return 'edit';
+        if (preg_match('/^(add|create|insert|new|upload|import|quick_add|store|generate|process)|_(add|create|import|upload)$/', $act)) return 'create';
+        if (preg_match('/edit|update|modify|toggle|approve|reject|settle|reverse|lock|unlock|bulk|rename|change|assign|set_|mark|cancel|verify|activate|deactivate|transfer|link/', $act)) return 'edit';
     }
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-        foreach (['update', 'edit', 'edit_id', 'update_id'] as $k) if (isset($_POST[$k])) return 'edit';
-        foreach (['add', 'create', 'insert', 'save', 'submit'] as $k) if (isset($_POST[$k])) return 'create_or_edit';
+        // submit buttons named like the action: name="update_x", "edit_x", "add_x", "save_x", "delete_x"
+        foreach ($_POST as $k => $v) {
+            if (!is_string($k)) continue;
+            if (preg_match('/^(delete|remove)(_|$)/i', $k) && !preg_match($notDelete, $k)) return 'delete';
+        }
+        foreach ($_POST as $k => $v) {
+            if (!is_string($k)) continue;
+            if (preg_match('/^(update|edit|modify|approve|reverse|settle|mark|toggle)(_|$)/i', $k)) return 'edit';
+        }
+        foreach ($_POST as $k => $v) {
+            if (!is_string($k)) continue;
+            if (preg_match('/^(add|create|insert|new|import|upload)(_|$)/i', $k)) return 'create';
+            if (preg_match('/^(save|submit)(_|$)/i', $k)) return 'create_or_edit';
+        }
     }
     return 'view';
 }
@@ -735,6 +803,63 @@ function rbac_js() {
         'full' => (bool)$ctx['full'],
         'can'  => ['view'=>rbac_can('view'),'create'=>rbac_can('create'),'edit'=>rbac_can('edit'),'delete'=>rbac_can('delete')],
     ]);
+}
+
+/**
+ * Blocks delete / edit controls on EVERY page for roles without that right: the control is dimmed
+ * and clicking it shows "Permission blocked" instead of doing anything. (The server also refuses the
+ * request in rbac_guard(), this just gives immediate feedback.) Add data-perm="delete|edit|create" to
+ * a control to force it, or data-perm-skip to leave a control alone.
+ */
+function rbac_client_script() {
+    if (rbac_context()['full']) return '';
+    return <<<'JS'
+<style>.rbac-blocked{opacity:.4!important;cursor:not-allowed!important;filter:grayscale(1)}
+#rbacToast{position:fixed;top:18px;right:18px;z-index:2147483647;background:#991b1b;color:#fff;padding:11px 16px;border-radius:9px;font:600 13px/1.3 system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.3);display:none;max-width:340px}</style>
+<script>
+(function(){
+  var R = window.RBAC || {}; var can = R.can || {};
+  if (R.full) return;
+  var SEL = {
+    delete: '[data-perm="delete"],a[href*="delete" i],a[href*="remove" i],a[href*="del="],a[href*="del_id"],button[onclick*="delete" i],button[onclick*="remove" i],a[onclick*="delete" i],.btn-delete,.delete-btn,.btn-danger[onclick],.fa-trash,.fa-trash-can,.fa-trash-alt,.fa-xmark-circle',
+    edit:   '[data-perm="edit"],a[href*="edit" i],a[href*="update" i],button[onclick*="edit" i],a[onclick*="edit" i],.btn-edit,.edit-btn,.fa-pen,.fa-pen-to-square,.fa-edit,.fa-pencil',
+    create: '[data-perm="create"]'
+  };
+  var MSG = {delete:'delete records here', edit:'edit records here', create:'add records here'};
+  function toast(a){
+    var t = document.getElementById('rbacToast');
+    if(!t){ t = document.createElement('div'); t.id='rbacToast'; document.body.appendChild(t); }
+    t.textContent = '⛔ Permission blocked: you are not allowed to ' + MSG[a] + '.';
+    t.style.display='block'; clearTimeout(t._h); t._h = setTimeout(function(){ t.style.display='none'; }, 3500);
+  }
+  function target(el){ return el.closest('a,button,[onclick],.btn') || el; }
+  function mark(root){
+    ['delete','edit','create'].forEach(function(a){
+      if (can[a] !== false) return;
+      root.querySelectorAll(SEL[a]).forEach(function(el){
+        var t = target(el);
+        if (t.closest('#sidebar,.sidebar,nav,[data-perm-skip]') || t.dataset.rbacBlock) return;
+        if (t.closest('form') && /(^|\s)(btn-primary|btn-save)(\s|$)/.test(t.className) && a!=='create') return;
+        t.dataset.rbacBlock = a; t.classList.add('rbac-blocked');
+      });
+    });
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest && e.target.closest('[data-rbac-block]');
+    if (!t) return;
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    toast(t.dataset.rbacBlock);
+  }, true);
+  document.addEventListener('submit', function(e){
+    var f = e.target, s = e.submitter;
+    if (s && s.dataset && s.dataset.rbacBlock){ e.preventDefault(); e.stopImmediatePropagation(); toast(s.dataset.rbacBlock); }
+  }, true);
+  function run(){ mark(document); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run); else run();
+  try { new MutationObserver(function(m){ mark(document); }).observe(document.documentElement, {childList:true, subtree:true}); } catch(e){}
+})();
+</script>
+JS;
 }
 
 /* ================================================================
