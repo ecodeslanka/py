@@ -364,10 +364,47 @@ function rbac_menu_tree() {
     $extra = rbac_unlisted_pages();
     if (!$extra) return $tree;
 
-    $groups = [];   // group label => [icon, items]
+    // 1. pages that belong to a sidebar page → shown right under it, in the same menu / sub menu
+    $byParent = []; $loose = [];
+    foreach ($extra as $page => $info) {
+        if (!empty($info['parent'])) $byParent[$info['parent']][$page] = $info; else $loose[$page] = $info;
+    }
+    $placed = [];
+    $kids = function ($parent) use (&$byParent, &$placed) {
+        if (empty($byParent[$parent]) || isset($placed[$parent])) return [];
+        $placed[$parent] = true;
+        $list = [];
+        foreach ($byParent[$parent] as $pg => $in) {
+            $list[] = ['type'=>'page','label'=>'↳ ' . $in['label'],'page'=>$pg,'icon'=>'fa-arrow-turn-down','related'=>$parent];
+        }
+        usort($list, fn($x, $y) => strcasecmp($x['label'], $y['label']));
+        return $list;
+    };
+    $withKids = function ($items) use ($kids) {
+        $out = [];
+        foreach ($items as $it) { $out[] = $it; if ($it['type'] === 'page') foreach ($kids($it['page']) as $k) $out[] = $k; }
+        return $out;
+    };
+    foreach ($tree as &$sec) {
+        foreach ($sec['menus'] as &$m) {
+            if ($m['type'] !== 'menu') continue;
+            foreach ($m['items'] as &$it) if ($it['type'] === 'group') $it['items'] = $withKids($it['items']);
+            unset($it);
+            $m['items'] = $withKids($m['items']);
+        }
+        unset($m);
+        $sec['menus'] = $withKids($sec['menus']);
+    }
+    unset($sec);
+    foreach ($byParent as $par => $list) {            // parent not found in the tree → treat as loose
+        if (!isset($placed[$par])) foreach ($list as $pg => $in) $loose[$pg] = $in;
+    }
+
+    // 2. pages with no obvious parent → one extra section
+    $groups = [];
     $gicons = ['Reports'=>'fa-chart-line', 'History & Logs'=>'fa-clock-rotate-left', 'Imports & Uploads'=>'fa-file-import',
                'Add / Edit / Delete Pages'=>'fa-pen-to-square', 'Detail / View Pages'=>'fa-eye', 'Other Pages'=>'fa-file'];
-    foreach ($extra as $page => $info) {
+    foreach ($loose as $page => $info) {
         $g = $info['group'];
         $groups[$g][] = ['type'=>'page','label'=>$info['label'],'page'=>$page,'icon'=>$gicons[$g] ?? 'fa-file'];
     }
@@ -375,10 +412,10 @@ function rbac_menu_tree() {
     foreach (array_keys($gicons) as $g) {
         if (empty($groups[$g])) continue;
         $items = $groups[$g];
-        usort($items, fn($a, $b) => strcasecmp($a['label'], $b['label']));
+        usort($items, fn($x, $y) => strcasecmp($x['label'], $y['label']));
         $menus[] = ['type'=>'menu','label'=>$g,'icon'=>$gicons[$g],'items'=>$items];
     }
-    $tree[] = ['title'=>'Other Pages (not in sidebar)', 'icon'=>'fa-folder-tree', 'menus'=>$menus];
+    if ($menus) $tree[] = ['title'=>'Other Pages (not linked to a menu)', 'icon'=>'fa-folder-tree', 'menus'=>$menus];
     return $tree;
 }
 
@@ -442,6 +479,17 @@ function rbac_unlisted_pages() {
     $side = rbac_sidebar_pages();
     $skip = $GLOBALS['RBAC_ALWAYS_ALLOWED'];
     $out = [];
+    // text of every sidebar page, used to see which page opens / calls which
+    $sideSrc = [];
+    foreach (array_keys($side) as $sp) {
+        $f = __DIR__ . '/' . $sp . '.php';
+        $sideSrc[$sp] = is_file($f) ? (string)@file_get_contents($f) : '';
+    }
+    $lead = function ($a, $b) {                       // number of leading "_" words two page names share
+        $x = explode('_', $a); $y = explode('_', $b); $n = 0;
+        while ($n < count($x) && $n < count($y) && $x[$n] === $y[$n]) $n++;
+        return $n;
+    };
     foreach ($names as $p) {
         if (isset($side[$p]) || in_array($p, $skip, true) || isset($GLOBALS['RBAC_RELATED_PAGES'][$p])) continue;
         if (rbac_is_helper_page($p)) continue;
@@ -460,7 +508,21 @@ function rbac_unlisted_pages() {
         elseif (preg_match('/import|upload/', $p))                    $g = 'Imports & Uploads';
         elseif (preg_match('/^view_|_view$/', $p))                    $g = 'Detail / View Pages';
         else                                                          $g = 'Other Pages';
-        $out[$p] = ['label' => $label, 'group' => $g];
+        // parent: the sidebar page that links to / calls this page; else the one with the most similar name
+        $parent = ''; $best = 0;
+        foreach ($sideSrc as $sp => $txt) {
+            if ($txt !== '' && preg_match('/[\'"\/=\s(]' . preg_quote($p, '/') . '\.php/', $txt)) {
+                $score = 100 + $lead($sp, $p);
+                if ($score > $best) { $best = $score; $parent = $sp; }
+            }
+        }
+        if ($parent === '') {
+            foreach ($side as $sp => $_) {
+                $n = $lead($sp, $p);
+                if ($n >= 2 && $n > $best) { $best = $n; $parent = $sp; }
+            }
+        }
+        $out[$p] = ['label' => $label, 'group' => $g, 'parent' => $parent];
     }
     @file_put_contents($cache, json_encode(['sig' => $sig, 'pages' => $out]));
     return $out;
