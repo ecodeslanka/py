@@ -50,6 +50,7 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     'edit_employee'        => ['employees', 'edit'],
     'delete_employee'      => ['employees', 'delete'],
     'view_employee'        => ['employees', 'view'],
+    'rbac_repair'          => ['role', 'edit'],
     'role_add'             => ['role', 'create'],
     'role_edit'            => ['role', 'edit'],
     'role_delete'          => ['role', 'delete'],
@@ -166,8 +167,7 @@ function rbac_ensure_schema() {
         page VARCHAR(150) NOT NULL,
         btn_key VARCHAR(80) NOT NULL,
         allowed TINYINT(1) NOT NULL DEFAULT 0,
-        UNIQUE KEY uq_role_page_btn (role_id, page, btn_key),
-        CONSTRAINT fk_rpb_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+        UNIQUE KEY uq_role_page_btn (role_id, page, btn_key)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
     // ── Lock-out protection on first install ─────────────────────
