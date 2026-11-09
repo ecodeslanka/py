@@ -129,47 +129,42 @@ foreach ($roles as $role) {
 }
 foreach ([28, 12, 18, 18, 16, 12, 12, 13, 48] as $i => $w) $s1->widths[$i + 1] = $w;
 
-/* Sheet 2 — Role Cards: who has the role + only the pages / rights it was given */
+/* Sheet 2 — Role Cards: ONE table, ALL pages. Each View / Add / Edit / Delete box lists the (selected) roles that have that right,
+   or "No permission" when none has it. */
 $sc = $X->sheet('Role Cards');
-foreach ([3, 24, 26, 38, 19, 19, 19, 19] as $i => $w) $sc->widths[$i + 1] = $w;
-$cr = 1; $ri = 0;
-foreach ($roles as $role) {
-    $accent = $role['full_access'] ? 'B45309' : $accents[$ri++ % count($accents)];
+foreach ([3, 24, 26, 38, 22, 22, 22, 22] as $i => $w) $sc->widths[$i + 1] = $w;
+$sc->set(1, 2, '🛡  Role Cards — all permissions', ['b' => 1, 'sz' => 18, 'color' => $C['white'], 'bg' => $C['teal'], 'indent' => 1]);
+for ($c = 3; $c <= 8; $c++) $sc->set(1, $c, '', ['bg' => $C['teal']]);
+$sc->merge(1, 2, 1, 8); $sc->heights[1] = 34;
+$cr = 2;
+foreach ($roles as $role) {                                   // one line per selected role: name, status, users
     $us = $users_of[$role['id']] ?? [];
-    $sc->set($cr, 2, '👤  ' . $role['role_name'] . ($role['full_access'] ? '   ★ FULL ACCESS' : '') . ($role['active'] ? '' : '   (inactive)'),
-        ['b' => 1, 'sz' => 15, 'color' => $C['white'], 'bg' => $accent, 'indent' => 1]);
-    for ($c = 3; $c <= 8; $c++) $sc->set($cr, $c, '', ['bg' => $accent]);
-    $sc->merge($cr, 2, $cr, 8); $sc->heights[$cr] = 30; $cr++;
-    $line = 'Users (' . count($us) . '):  ' . ($us ? implode('   •   ', array_map(fn($u) => $u['username'] . ($u['active'] ? '' : ' (inactive)'), $us)) : 'no user assigned')
-          . '        Pages given: ' . ($role['full_access'] ? 'ALL' : count($granted[$role['id']]));
-    $sc->set($cr, 2, $line, ['i' => 1, 'bg' => $C['light'], 'wrap' => 1, 'indent' => 1]);
-    for ($c = 3; $c <= 8; $c++) $sc->set($cr, $c, '', ['bg' => $C['light']]);
-    $sc->merge($cr, 2, $cr, 8); $sc->heights[$cr] = max(22, 16 * ceil(mb_strlen($line) / 100)); $cr++;
-    if ($role['full_access']) {
-        $sc->set($cr, 2, 'Can open, add, edit and delete on every page.', ['bg' => $C['gold'], 'indent' => 1]);
-        for ($c = 3; $c <= 8; $c++) $sc->set($cr, $c, '', ['bg' => $C['gold']]);
-        $sc->merge($cr, 2, $cr, 8); $cr += 3; continue;
-    }
-    if (!$granted[$role['id']]) {
-        $sc->set($cr, 2, 'No page permission added yet.', ['color' => 'B91C1C', 'indent' => 1]); $sc->merge($cr, 2, $cr, 8); $cr += 3; continue;
-    }
-    foreach (['Main Menu', 'Sub Menu', 'Page', 'View', 'Add', 'Edit', 'Delete'] as $i => $h) $sc->set($cr, $i + 2, $h, $H);
-    $cr++; $prev = null;
-    foreach ($granted[$role['id']] as $row) {
-        $x = rights_of($role, $perm, $row[4]); $mk = $row[0] . '|' . $row[1];
-        $sc->set($cr, 2, $prev === $mk ? '' : $row[1], ['b' => 1, 'border' => 1]); $prev = $mk;
-        $sc->set($cr, 3, $row[2], ['border' => 1]); $sc->set($cr, 4, $row[3], ['border' => 1]);
-        $lines = 1;
-        foreach ([0, 1, 2, 3] as $k) {
-            $names = $x[$k] ? roles_with($k, $row[4]) : [];          // every role that has this right on this page
-            $lines = max($lines, count($names));
-            $sc->set($cr, $k + 5, implode("\n", $names), ['b' => 1, 'color' => '15803D', 'h' => 'center', 'wrap' => 1, 'border' => 1] + ($x[$k] ? ['bg' => $C['full']] : []));
-        }
-        $sc->heights[$cr] = max(18, 15 * $lines);
-        $cr++;
-    }
-    $cr += 2;
+    $txt = '👤 ' . $role['role_name'] . ($role['full_access'] ? ' ★ FULL ACCESS' : '') . ($role['active'] ? '' : ' (inactive)')
+         . '   —   Users (' . count($us) . '): ' . ($us ? implode(', ', array_column($us, 'username')) : 'none');
+    $sc->set($cr, 2, $txt, ['b' => 1, 'bg' => $role['full_access'] ? $C['gold'] : $C['light'], 'indent' => 1, 'wrap' => 1]);
+    for ($c = 3; $c <= 8; $c++) $sc->set($cr, $c, '', ['bg' => $role['full_access'] ? $C['gold'] : $C['light']]);
+    $sc->merge($cr, 2, $cr, 8); $sc->heights[$cr] = max(20, 15 * ceil(mb_strlen($txt) / 120)); $cr++;
 }
+$cr++;
+foreach (['Main Menu', 'Sub Menu', 'Page', 'View', 'Add', 'Edit', 'Delete'] as $i => $h) $sc->set($cr, $i + 2, $h, $H);
+$sc->heights[$cr] = 22; $hdrRow = $cr; $cr++; $prev = null;
+foreach ($rows as $row) {                                     // EVERY page, granted or not
+    $mk = $row[0] . '|' . $row[1];
+    $sc->set($cr, 2, $prev === $mk ? '' : $row[1], ['b' => 1, 'border' => 1, 'v' => 'top']); $prev = $mk;
+    $sc->set($cr, 3, $row[2], ['border' => 1, 'v' => 'top']); $sc->set($cr, 4, $row[3], ['border' => 1, 'v' => 'top']);
+    $lines = 1;
+    foreach ([0, 1, 2, 3] as $k) {
+        $names = [];
+        foreach ($roles as $role) { $x = rights_of($role, $perm, $row[4]); if ($x[$k]) $names[] = $role['role_name']; }
+        $lines = max($lines, count($names));
+        $sc->set($cr, $k + 5, $names ? implode("\n", $names) : 'No permission', $names
+            ? ['b' => 1, 'color' => '15803D', 'h' => 'center', 'wrap' => 1, 'border' => 1, 'bg' => $C['full']]
+            : ['color' => 'B91C1C', 'h' => 'center', 'border' => 1, 'sz' => 9, 'bg' => 'FEF2F2']);
+    }
+    $sc->heights[$cr] = max(18, 15 * $lines);
+    $cr++;
+}
+$sc->freeze = [$hdrRow, 0];
 
 /* Sheet 3 — Permission List (flat, filterable): granted rows only */
 $sp = $X->sheet('Permission List');
