@@ -73,6 +73,15 @@ foreach ($rows as $row) {
     }
     if ($list) $menuUsers[$row[4]] = $list;
 }
+/* page => right(0 view,1 add,2 edit,3 delete) => role name => [usernames] */
+$menuRoles = [];
+foreach ($menuUsers as $page => $list) foreach ($list as $e) foreach ([0, 1, 2, 3] as $k)
+    if ($e['r'][$k]) $menuRoles[$page][$k][$e['role']][] = $e['name'];
+function urr_cell($byRole) {          // "Manager (Akila, Manura)" lines
+    $o = [];
+    foreach ($byRole as $role => $names) $o[] = $role . ' (' . implode(', ', $names) . ')';
+    return $o;
+}
 
 /* ── Excel export ── */
 if (isset($_GET['export'])) {
@@ -115,24 +124,28 @@ if (isset($_GET['export'])) {
         $r += 2;
     }
 
-    /* Sheet 2: menu → users (same menu given to which users) */
-    $s2 = $X->sheet('Menu → Users');
-    foreach (['Section', 'Main Menu', 'Sub Menu', 'Page', 'Users', 'Who can open it  (V view · A add · E edit · D delete)'] as $i => $h) $s2->set(1, $i + 1, $h, $H);
+    /* Sheet 2: per page, which user ROLES (and their users) have View / Add / Edit / Delete */
+    $s2 = $X->sheet('Menu → Roles');
+    foreach (['Main Menu', 'Sub Menu', 'Page', 'View', 'Add', 'Edit', 'Delete'] as $i => $h) $s2->set(1, $i + 1, $h, $H);
     $k = 2;
-    if ($fullUsers) { $s2->set($k, 1, '★ Full Access users (every page)', ['b' => 1, 'bg' => $C['gold'], 'border' => 1]);
-        for ($c = 2; $c <= 5; $c++) $s2->set($k, $c, '', ['bg' => $C['gold'], 'border' => 1]);
-        $s2->set($k, 6, implode('   •   ', $fullUsers), ['bg' => $C['gold'], 'border' => 1, 'wrap' => 1]); $k++; }
+    if ($fullUsers) { $s2->set($k, 1, '★ Full Access (every page, every right): ' . implode(', ', $fullUsers), ['b' => 1, 'bg' => $C['gold'], 'border' => 1]);
+        for ($c = 2; $c <= 7; $c++) $s2->set($k, $c, '', ['bg' => $C['gold'], 'border' => 1]);
+        $s2->merge($k, 1, $k, 7); $k++; }
     foreach ($rows as $row) {
-        if (empty($menuUsers[$row[4]])) continue;
-        $l = $menuUsers[$row[4]];
-        $bg = $k % 2 ? ['bg' => $C['grey']] : [];
-        foreach ([$row[0], $row[1], $row[2], $row[3]] as $i => $v) $s2->set($k, $i + 1, $v, ['border' => 1] + ($i == 1 ? ['b' => 1] : []) + $bg);
-        $s2->set($k, 5, count($l), ['border' => 1, 'h' => 'center', 'b' => 1] + $bg);
-        $s2->set($k, 6, implode('   •   ', array_map(fn($e) => $e['name'] . ($e['full'] ? ' ★' : ' (' . urr_letters($e['r']) . ')') . ' [' . $e['role'] . ']', $l)), ['border' => 1, 'wrap' => 1] + $bg);
-        $s2->heights[$k] = max(18, 15 * ceil(count($l) / 3)); $k++;
+        if (empty($menuRoles[$row[4]])) continue;
+        $bg = $k % 2 ? ['bg' => $C['grey']] : []; $lines = 1;
+        $s2->set($k, 1, $row[1], ['b' => 1, 'border' => 1, 'v' => 'top'] + $bg);
+        $s2->set($k, 2, $row[2], ['border' => 1, 'v' => 'top'] + $bg);
+        $s2->set($k, 3, $row[3], ['border' => 1, 'v' => 'top'] + $bg);
+        foreach ([0, 1, 2, 3] as $q) {
+            $cell = urr_cell($menuRoles[$row[4]][$q] ?? []);
+            $lines = max($lines, count($cell));
+            $s2->set($k, $q + 4, implode("\n", $cell), ['border' => 1, 'wrap' => 1, 'v' => 'top'] + ($cell ? ['bg' => $C['full']] : $bg));
+        }
+        $s2->heights[$k] = max(18, 15 * $lines); $k++;
     }
-    foreach ([18, 24, 22, 36, 8, 90] as $i => $w) $s2->widths[$i + 1] = $w;
-    $s2->freeze = [1, 0]; $s2->filter = 'A1:F' . max(2, $k - 1);
+    foreach ([24, 22, 36, 34, 34, 34, 34] as $i => $w) $s2->widths[$i + 1] = $w;
+    $s2->freeze = [1, 0]; $s2->filter = 'A1:G' . max(2, $k - 1);
 
     /* Sheet 3: users */
     $s3 = $X->sheet('Users');
@@ -221,7 +234,7 @@ include 'header.php';
 
   <div class="urr-tabs">
     <a class="<?= $view === 'user' ? 'on' : '' ?>" href="<?= htmlspecialchars($base(['view' => 'user'])) ?>"><i class="fa-solid fa-user"></i> By User</a>
-    <a class="<?= $view === 'menu' ? 'on' : '' ?>" href="<?= htmlspecialchars($base(['view' => 'menu'])) ?>"><i class="fa-solid fa-sitemap"></i> By Menu (same menu → users)</a>
+    <a class="<?= $view === 'menu' ? 'on' : '' ?>" href="<?= htmlspecialchars($base(['view' => 'menu'])) ?>"><i class="fa-solid fa-sitemap"></i> By Menu (View / Add / Edit / Delete → roles)</a>
   </div>
 
 <?php if ($view === 'user'): ?>
@@ -249,14 +262,16 @@ include 'header.php';
   <?php endforeach; ?>
   <p style="font-size:12px;color:#6b7280">Click a user to open or close the permission list. V view · A add · E edit · D delete.</p>
 <?php else: ?>
-  <div class="urr-mw"><table class="urr-menu"><thead><tr><th>Main menu</th><th>Sub menu</th><th>Page</th><th style="width:60px">Users</th><th>Who can open it</th></tr></thead><tbody>
+  <div class="urr-mw"><table class="urr-menu"><thead><tr><th>Main menu</th><th>Sub menu</th><th>Page</th>
+    <?php foreach (['View', 'Add', 'Edit', 'Delete'] as $h): ?><th><?= $h ?> — roles</th><?php endforeach; ?></tr></thead><tbody>
   <?php $shown = 0; foreach ($rows as $row):
-      if (empty($menuUsers[$row[4]])) continue;
+      if (empty($menuRoles[$row[4]])) continue;
       if ($f_page !== '' && stripos($row[1] . ' ' . $row[2] . ' ' . $row[3], $f_page) === false) continue; $shown++; ?>
     <tr><td style="font-weight:700"><?= htmlspecialchars($row[1]) ?></td><td><?= htmlspecialchars($row[2]) ?></td><td><?= htmlspecialchars($row[3]) ?></td>
-        <td style="text-align:center;font-weight:800"><?= count($menuUsers[$row[4]]) ?></td>
-        <td><?php foreach ($menuUsers[$row[4]] as $e): ?><span class="urr-ub <?= $e['full'] ? 'f' : '' ?>" title="<?= htmlspecialchars($e['role']) ?>"><?= htmlspecialchars($e['name']) ?><?= $e['full'] ? ' ★' : ' · ' . urr_letters($e['r']) ?></span><?php endforeach; ?></td></tr>
-  <?php endforeach; if (!$shown): ?><tr><td colspan="5" class="urr-note">No page matches.</td></tr><?php endif; ?></tbody></table></div>
+      <?php foreach ([0, 1, 2, 3] as $q): $cell = $menuRoles[$row[4]][$q] ?? []; ?>
+        <td style="min-width:150px"><?php foreach ($cell as $role => $names): ?><span class="urr-ub" title="<?= htmlspecialchars(implode(', ', $names)) ?>"><b><?= htmlspecialchars($role) ?></b> <span style="color:#6b7280"><?= htmlspecialchars(implode(', ', $names)) ?></span></span><br><?php endforeach; ?></td>
+      <?php endforeach; ?></tr>
+  <?php endforeach; if (!$shown): ?><tr><td colspan="7" class="urr-note">No page matches.</td></tr><?php endif; ?></tbody></table></div>
 <?php endif; ?>
 </div>
 <?php include 'footer.php'; ?>
