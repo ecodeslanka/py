@@ -93,11 +93,11 @@ if (isset($_GET['export'])) {
 
     /* Sheet 1: each user = header band, that user's permission list below */
     $s1 = $X->sheet('Users & Permissions');
-    foreach ([3, 22, 24, 38, 9, 9, 9, 9] as $i => $w) $s1->widths[$i + 1] = $w;
+    foreach ([3, 22, 24, 38, 17, 17, 17, 17] as $i => $w) $s1->widths[$i + 1] = $w;
     $s1->set(1, 2, 'User Role Report — users with their permissions', ['b' => 1, 'sz' => 18, 'color' => $C['white'], 'bg' => $C['teal'], 'indent' => 1]);
     for ($c = 3; $c <= 8; $c++) $s1->set(1, $c, '', ['bg' => $C['teal']]);
     $s1->merge(1, 2, 1, 8); $s1->heights[1] = 34;
-    $s1->set(2, 2, 'Generated ' . date('d M Y, H:i') . ' by ' . $me . '  ·  ' . count($users) . ' users  ·  only permitted pages are listed  ·  ✔ = right given', ['i' => 1, 'color' => '6B7280']);
+    $s1->set(2, 2, 'Generated ' . date('d M Y, H:i') . ' by ' . $me . '  ·  ' . count($users) . ' users  ·  only permitted pages are listed  ·  the role name under View / Add / Edit / Delete = right given', ['i' => 1, 'color' => '6B7280']);
     $s1->merge(2, 2, 2, 8);
     $r = 4; $ri = 0;
     foreach ($users as $u) {
@@ -118,7 +118,7 @@ if (isset($_GET['export'])) {
             $s1->set($r, 2, $prev === $mk ? '' : $row[1], ['b' => 1, 'border' => 1]); $prev = $mk;
             $s1->set($r, 3, $row[2], ['border' => 1]); $s1->set($r, 4, $row[3], ['border' => 1]);
             foreach ([0, 1, 2, 3] as $k)
-                $s1->set($r, $k + 5, $x[$k] ? '✔' : '', ['b' => 1, 'color' => '15803D', 'h' => 'center', 'border' => 1] + ($x[$k] ? ['bg' => $C['full']] : []));
+                $s1->set($r, $k + 5, $x[$k] ? $role['role_name'] : '', ['b' => 1, 'color' => '15803D', 'h' => 'center', 'border' => 1] + ($x[$k] ? ['bg' => $C['full']] : []));
             $r++;
         }
         $r += 2;
@@ -201,7 +201,7 @@ include 'header.php';
 .urr-user table,.urr-menu{width:100%;border-collapse:collapse;font-size:12.5px}
 .urr-user th,.urr-menu th{background:#134e4a;color:#fff;padding:6px 8px;text-align:left;font-size:11px;text-transform:uppercase}
 .urr-user td,.urr-menu td{padding:6px 8px;border-top:1px solid #f1f5f9;vertical-align:top}
-.urr-r{display:inline-block;min-width:20px;text-align:center;border-radius:5px;font-weight:800;font-size:11px;padding:1px 4px;margin-right:2px}
+.urr-r{display:inline-block;text-align:center;border-radius:5px;font-weight:700;font-size:11.5px;padding:1px 8px;margin-right:2px}
 .urr-r.on{background:#d1fae5;color:#15803d}.urr-r.off{background:#f3f4f6;color:#d1d5db}
 .urr-note{padding:12px 14px;font-size:13px;color:#b91c1c}.urr-gold{padding:12px 14px;background:#fef3c7;font-size:13px}
 .urr-mw{background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:auto}
@@ -252,15 +252,15 @@ include 'header.php';
       <?php elseif (!$role): ?><div class="urr-note">No role assigned — this user can only open the Dashboard.</div>
       <?php elseif (!$u['granted']): ?><div class="urr-note">This role has no page permission added yet.</div>
       <?php else: ?>
-        <table><thead><tr><th>Main menu</th><th>Sub menu</th><th>Page</th><th style="width:150px">Rights</th></tr></thead><tbody>
+        <table><thead><tr><th>Main menu</th><th>Sub menu</th><th>Page</th><th>View</th><th>Add</th><th>Edit</th><th>Delete</th></tr></thead><tbody>
         <?php $prev = null; foreach ($u['granted'] as $row): $x = urr_rights($role, $perm, $row[4]); $mk = $row[0] . '|' . $row[1]; ?>
           <tr><td style="font-weight:700"><?= $prev === $mk ? '' : htmlspecialchars($row[1]) ?></td><td><?= htmlspecialchars($row[2]) ?></td><td><?= htmlspecialchars($row[3]) ?></td>
-              <td><?php foreach (['V', 'A', 'E', 'D'] as $i => $l): ?><span class="urr-r <?= $x[$i] ? 'on' : 'off' ?>"><?= $l ?></span><?php endforeach; ?></td></tr>
+              <?php foreach ([0, 1, 2, 3] as $i): ?><td><?php if ($x[$i]): ?><span class="urr-r on"><?= htmlspecialchars($role['role_name']) ?></span><?php endif; ?></td><?php endforeach; ?></tr>
         <?php $prev = $mk; endforeach; ?></tbody></table>
       <?php endif; ?>
     </details>
   <?php endforeach; ?>
-  <p style="font-size:12px;color:#6b7280">Click a user to open or close the permission list. V view · A add · E edit · D delete.</p>
+  <p style="font-size:12px;color:#6b7280">Click a user to open or close the permission list. the role name under View / Add / Edit / Delete = that right is given.</p>
 <?php else: ?>
   <div class="urr-mw"><table class="urr-menu"><thead><tr><th>Main menu</th><th>Sub menu</th><th>Page</th>
     <?php foreach (['View', 'Add', 'Edit', 'Delete'] as $h): ?><th><?= $h ?> — roles</th><?php endforeach; ?></tr></thead><tbody>
