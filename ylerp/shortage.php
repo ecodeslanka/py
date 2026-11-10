@@ -1238,10 +1238,20 @@ function calculateTotals() {
     const netUn = sugCharge - exUnpaid;
     const finalCharge = savCharge + Math.max(0, netUn);
     const excessLeft  = Math.max(0, -netUn);
-    let chargeText = '—', chargeExcess = false;
+    /* shown as: Short (green) · Excess (red) · FINAL charge (bold) */
+    const shortTot = savCharge + sugCharge;
+    const fmt2 = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    let chargeText = '—', chargeHtml = '—', chargeExcess = false;
     if (finalCharge > 0.004) chargeText = finalCharge.toFixed(2) + (excessLeft > 0.004 ? '  /  (' + excessLeft.toFixed(2) + ') Ex' : '');
     else if (excessLeft > 0.004) { chargeText = '(' + excessLeft.toFixed(2) + ') Ex'; chargeExcess = true; }
     else if (hasCharge) chargeText = '0.00';
+    if (shortTot > 0.004 || exUnpaid > 0.004) {
+        const finalHtml = finalCharge > 0.004 ? fmt2(finalCharge) + (excessLeft > 0.004 ? ' <span style="color:#b91c1c">/ (' + fmt2(excessLeft) + ') Ex</span>' : '')
+                        : (excessLeft > 0.004 ? '<span style="color:#b91c1c">(' + fmt2(excessLeft) + ') Ex</span>' : '0.00');
+        chargeHtml = (shortTot > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#15803d;line-height:1.25">Short ' + fmt2(shortTot) + '</div>' : '')
+                   + (exUnpaid > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#b91c1c;line-height:1.25">Excess ' + fmt2(exUnpaid) + '</div>' : '')
+                   + '<div style="font-weight:800;border-top:1px solid #d1d5db;margin-top:2px;padding-top:1px">Final ' + finalHtml + '</div>';
+    } else if (hasCharge) chargeHtml = '0.00';
     const chargeTip = 'Short charge ' + (savCharge + sugCharge).toFixed(2) + ' − Excess ' + exUnpaid.toFixed(2) + ' = ' + (netUn >= 0 ? 'charge ' + finalCharge.toFixed(2) : 'excess ' + excessLeft.toFixed(2));
 
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -1250,8 +1260,7 @@ function calculateTotals() {
     const seEl = document.getElementById('ts_se');
     if (seEl) { seEl.textContent = (totalSE > 0 ? '+' : '') + totalSE.toFixed(2); seEl.className = 'ts-val ' + (totalSE < 0 ? 'ts-red' : totalSE > 0 ? 'ts-green' : ''); }
     setVal('ts_seval', totalSEVal.toFixed(2));
-    setVal('ts_charge', chargeText);
-    { const e = document.getElementById('ts_charge'); if (e) { e.title = chargeTip; e.style.color = chargeExcess ? '#16a34a' : ''; } }
+    { const e = document.getElementById('ts_charge'); if (e) { e.innerHTML = chargeHtml; e.title = chargeTip; } }
     setVal('ts_absorb', hasAbsorb ? totalAbsorb.toFixed(2) : '—');
     const varEl = document.getElementById('ts_var');
     if (varEl) {
@@ -1268,8 +1277,7 @@ function calculateTotals() {
     const thSe = document.getElementById('th_se');
     if (thSe) { thSe.textContent = (totalSE > 0 ? '+' : '') + totalSE.toFixed(2); thSe.className = 'num ' + (totalSE < 0 ? 'th-red' : totalSE > 0 ? 'th-green' : ''); }
     setVal('th_seval', totalSEVal.toFixed(2));
-    setVal('th_charge', chargeText);
-    { const e = document.getElementById('th_charge'); if (e) { e.title = chargeTip; e.style.color = chargeExcess ? '#16a34a' : ''; } }
+    { const e = document.getElementById('th_charge'); if (e) { e.innerHTML = chargeHtml; e.title = chargeTip; } }
     setVal('th_absorb', hasAbsorb ? totalAbsorb.toFixed(2) : '—');
     const thVar = document.getElementById('th_var');
     if (thVar) {
@@ -2152,13 +2160,13 @@ function openBulkPayModal(){
     });
     document.getElementById('bp_row_count').textContent=bpSelectedRows.length;
     const sevEl=document.getElementById('bp_total_seval');
-    if(bpNetVal>=0){sevEl.textContent=bpTotalSeValue.toFixed(2);sevEl.style.color='#dc2626';}
-    else{sevEl.textContent='('+Math.abs(bpNetVal).toFixed(2)+') Excess';sevEl.style.color='#16a34a';}
+    if(bpNetVal>=0){sevEl.textContent=bpTotalSeValue.toFixed(2);sevEl.style.color='#15803d';}
+    else{sevEl.textContent='('+Math.abs(bpNetVal).toFixed(2)+') Excess';sevEl.style.color='#b91c1c';}
     sevEl.title='Short '+bpShortVal.toFixed(2)+' − Excess '+bpExcessVal.toFixed(2);
     let note=document.getElementById('bp_net_note');
     if(!note){note=document.createElement('div');note.id='bp_net_note';note.style.cssText='font-size:12px;font-weight:600;margin:-4px 0 10px;color:#6b7280;';document.querySelector('.bulk-total-bar').insertAdjacentElement('afterend',note);}
     note.innerHTML=(bpExcessVal>0&&bpShortVal>0)
-        ?'Short <b style="color:#dc2626">'+bpShortVal.toFixed(2)+'</b> − Excess <b style="color:#16a34a">'+bpExcessVal.toFixed(2)+'</b> = '+(bpNetVal>=0?'<b style="color:#dc2626">'+bpNetVal.toFixed(2)+' to charge</b>':'<b style="color:#16a34a">'+Math.abs(bpNetVal).toFixed(2)+' EXCESS — nothing to charge</b>')
+        ?'Short <b style="color:#15803d">'+bpShortVal.toFixed(2)+'</b> − Excess <b style="color:#b91c1c">'+bpExcessVal.toFixed(2)+'</b> = Final '+(bpNetVal>=0?'<b>'+bpNetVal.toFixed(2)+' to charge</b>':'<b style="color:#b91c1c">'+Math.abs(bpNetVal).toFixed(2)+' EXCESS — nothing to charge</b>')
         :(bpExcessVal>0?'Only excess rows selected — nothing to charge.':'');
     document.getElementById('bp_total_seqty').textContent=bpTotalSeQty.toFixed(2);
     document.getElementById('bp_sub').textContent=bpSelectedRows.length+' rows · '+(bpNetVal>=0?'Final charge (Short − Excess): '+bpTotalSeValue.toFixed(2):'Excess: '+Math.abs(bpNetVal).toFixed(2));

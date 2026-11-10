@@ -16,11 +16,16 @@ function fmtChgCash($charged, $cash_se){
 }
 /* Good S/E 'Charged to Employee' cell — FINAL charge = short − excess (the difference), same rule as shortage.php:
    a charge shows as a plain amount; when the excess is bigger than the short the difference is an EXCESS → "(n) Ex" (green). */
-function fmtChgNet($charge, $excess){
-    $charge = floatval($charge); $excess = floatval($excess);
-    $out = ($charge >= 0.5 || $excess < 0.5) ? fmtAuto($charge) : '';
-    if ($excess >= 0.5) $out .= ($out !== '' ? '<br>' : '') . fmtSE(-$excess);
-    return $out;
+function fmtChgNet($charge, $excess, $short = 0, $excess_val = 0){
+    $charge = floatval($charge); $excess = floatval($excess); $short = floatval($short); $excess_val = floatval($excess_val);
+    /* Final: the amount charged, or the excess left over (red) when the excess is bigger than the short */
+    $final = ($charge >= 0.5 || $excess < 0.5) ? fmtAuto($charge) : '';
+    if ($excess >= 0.5) $final .= ($final !== '' ? ' ' : '') . '<span style="color:#b91c1c;font-weight:700">(' . number_format($excess) . ') Ex</span>';
+    if ($short < 0.5 && $excess_val < 0.5) return $final;                    // nothing to net — just the figure
+    /* Short charge (green) · Excess (red) · Final */
+    return ($short >= 0.5 ? '<span style="display:block;color:#15803d;font-size:10px;font-weight:700;line-height:1.25">S ' . number_format($short) . '</span>' : '')
+         . ($excess_val >= 0.5 ? '<span style="display:block;color:#b91c1c;font-size:10px;font-weight:700;line-height:1.25">E ' . number_format($excess_val) . '</span>' : '')
+         . '<span style="display:block;border-top:1px solid #d1d5db;margin-top:1px;font-weight:800">= ' . $final . '</span>';
 }
 function fmtPct($v,$tot){ $tot=floatval($tot); if($tot==0) return '-'; $p=floatval($v)/$tot*100; if($p==0) return '-'; return number_format($p,1).'%'; }
 
@@ -910,8 +915,8 @@ buildRow('rc','Good Short / Excess as YMS', false, fmtSEg($T['good_se']), $all_d
 
 /* Charged — same per-row rule as the shortage page (stored, else suggested for shorts).
    Absorbed — real saved absorb only (stored column / ledger); no excess suggestion. */
-$gchg_v=[]; foreach ($all_dps as $dp) $gchg_v[$dp]=fmtChgNet($D[$dp]['gs_charged_net'], $D[$dp]['gs_excess_rem']);
-buildRow('rn','Charged to Employee', true, fmtChgNet($T['gs_charged_net'], $T['gs_excess_rem']),  $all_dps, $gchg_v,  'val');
+$gchg_v=[]; foreach ($all_dps as $dp) $gchg_v[$dp]=fmtChgNet($D[$dp]['gs_charged_net'], $D[$dp]['gs_excess_rem'], $D[$dp]['gs_saved_charge']+$D[$dp]['gs_sugg_short'], $D[$dp]['gs_unalloc_excess']);
+buildRow('rn','Charged to Employee', true, fmtChgNet($T['gs_charged_net'], $T['gs_excess_rem'], $T['gs_saved_charge']+$T['gs_sugg_short'], $T['gs_unalloc_excess']),  $all_dps, $gchg_v,  'val');
 buildRow('ra','Absorbed by Company', true, fmtAuto($T['gs_absorbed']), $all_dps, buildMap($all_dps,$D,'gs_absorbed','fmtAuto'), 'val');
 
 /* Diff (Unsettled) = (short − excess) − charged − absorbed.  Short left over → "n Sh" (red); excess left → "(n) Ex" (green); settled → 0. */
