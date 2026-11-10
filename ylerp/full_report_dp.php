@@ -21,11 +21,7 @@ function fmtChgNet($charge, $excess, $short = 0, $excess_val = 0){
     /* Final: the amount charged, or the excess left over (red) when the excess is bigger than the short */
     $final = ($charge >= 0.5 || $excess < 0.5) ? fmtAuto($charge) : '';
     if ($excess >= 0.5) $final .= ($final !== '' ? ' ' : '') . '<span style="color:#b91c1c;font-weight:700">(' . number_format($excess) . ') Ex</span>';
-    if ($short < 0.5 && $excess_val < 0.5) return $final;                    // nothing to net — just the figure
-    /* Short charge (green) · Excess (red) · Final */
-    return ($short >= 0.5 ? '<span style="display:block;color:#15803d;font-size:10px;font-weight:700;line-height:1.25">S ' . number_format($short) . '</span>' : '')
-         . ($excess_val >= 0.5 ? '<span style="display:block;color:#b91c1c;font-size:10px;font-weight:700;line-height:1.25">E ' . number_format($excess_val) . '</span>' : '')
-         . '<span style="display:block;border-top:1px solid #d1d5db;margin-top:1px;font-weight:800">= ' . $final . '</span>';
+    return $final;      // the Full Report shows ONLY the final charge amount (short/excess breakdown is on the shortage page)
 }
 function fmtPct($v,$tot){ $tot=floatval($tot); if($tot==0) return '-'; $p=floatval($v)/$tot*100; if($p==0) return '-'; return number_format($p,1).'%'; }
 
