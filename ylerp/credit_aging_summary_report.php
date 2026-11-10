@@ -8,7 +8,7 @@
  *   1. Credit customers            → credit policy EXCEEDED      (customers.payment_mode = credit)
  *   2. Cheque customers (only)     → cheque policy EXCEEDED      (payment_mode = cheque, NOT "cheques will delay")
  *   3. Cheques-will-delay customers→ cheques-will-delay EXCEEDED (customers.cheques_will_delay = 1)
- *   4. Cash customers              → NORMAL (no policy-exceed test, shown as normal)
+ *   4. Cash customers              → cash policy EXCEEDED        (payment_mode = cash)
  *
  * Click a set row → modal with that set's invoices and details.
  * A bill is "exceeded" when  as-at date − (delivery date + the customer's credit policy days) > 0
@@ -38,7 +38,7 @@ $GROUPS = [
     'credit' => ['label' => 'Credit customers',          'exceed' => 'Credit policy exceeded',         'icon' => 'fa-credit-card',     'color' => '#2563eb', 'bg' => '#eff6ff', 'view' => 'pay_mode=credit', 'test' => true],
     'cheque' => ['label' => 'Cheque customers (only)',   'exceed' => 'Cheque policy exceeded',         'icon' => 'fa-money-check',     'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
     'cwd'    => ['label' => 'Cheques will delay',        'exceed' => 'Cheques-will-delay exceeded',    'icon' => 'fa-hourglass-half',  'color' => '#d97706', 'bg' => '#fffbeb', 'view' => 'pay_mode=cwd',    'test' => true],
-    'cash'   => ['label' => 'Cash customers',            'exceed' => 'Normal (no policy test)',        'icon' => 'fa-money-bill-wave', 'color' => '#15803d', 'bg' => '#f0fdf4', 'view' => 'pay_mode=cash',   'test' => false],
+    'cash'   => ['label' => 'Cash customers',            'exceed' => 'Cash policy exceeded',           'icon' => 'fa-money-bill-wave', 'color' => '#15803d', 'bg' => '#f0fdf4', 'view' => 'pay_mode=cash',   'test' => true],
 ];
 $S = [];
 foreach ($GROUPS as $k => $g) $S[$k] = ['n' => 0, 'v' => 0.0, 'ok_n' => 0, 'ok_v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'customers' => [], 'ex_customers' => []];
@@ -127,7 +127,7 @@ if (isset($_GET['export'])) {
     $sh->set(1, 1, 'Credit Aging Summary Report — as at ' . date('d M Y', $as_at_ts), ['b' => 1, 'sz' => 16, 'color' => 'FFFFFF', 'bg' => 'B91C1C', 'indent' => 1]);
     for ($c = 2; $c <= 10; $c++) $sh->set(1, $c, '', ['bg' => 'B91C1C']);
     $sh->merge(1, 1, 1, 10); $sh->heights[1] = 30;
-    $sh->set(2, 1, 'Outstanding credit bills · exceeded = past (delivery date + customer credit policy days) · cash customers are shown as normal'
+    $sh->set(2, 1, 'Outstanding credit bills · exceeded = past (delivery date + customer credit policy days) '
         . ($f_route !== '' ? ' · Route ' . $f_route : '') . ($f_sr !== '' ? ' · SR ' . $f_sr : ''), ['i' => 1, 'color' => '6B7280']);
     $sh->merge(2, 1, 2, 10);
     foreach (['Set', 'Policy test', 'Customers', 'Customers exceeded', 'Credit bills', 'Value (Rs.)', 'Normal bills', 'Normal value (Rs.)', 'Exceeded bills', 'Exceeded value (Rs.)'] as $i => $h) $sh->set(4, $i + 1, $h, $H);
@@ -220,7 +220,7 @@ include 'header.php';
 <div class="cas">
     <h1><span class="ic"><i class="fa-solid fa-chart-pie"></i></span> Credit Aging Summary Report <span class="asat"><i class="fa-regular fa-calendar"></i> As at <?= cas_h(date('d M Y', $as_at_ts)) ?></span></h1>
     <p class="sub">Outstanding <b>credit bills</b> (count and value) as at the chosen date, by the way each customer pays. A bill is <b style="color:#b91c1c">exceeded</b> when it is past its delivery date + the customer's credit policy days.
-        <b>Credit</b>, <b>Cheque (only)</b> and <b>Cheques will delay</b> customers show their policy exceeded; <b style="color:#15803d">Cash</b> customers are shown as normal.</p>
+        <b>Credit</b>, <b>Cheque (only)</b>, <b>Cheques will delay</b> and <b>Cash</b> customers each show how much exceeded their policy.</p>
 
     <form class="card flt" method="get" action="credit_aging_summary_report.php">
         <div class="fld"><label for="asAt">As at date</label><input type="date" id="asAt" name="as_at_date" value="<?= cas_h($f_as_at) ?>" required></div>
@@ -229,7 +229,7 @@ include 'header.php';
         <div class="fld"><label for="sr">SR code</label><select id="sr" name="sr_code"><option value="">All SR</option>
             <?php foreach ($all_sr as $c): ?><option value="<?= cas_h($c) ?>"<?= $f_sr === $c ? ' selected' : '' ?>><?= cas_h($c) ?></option><?php endforeach; ?></select></div>
         <div class="fld"><label for="ex">Show customers</label><select id="ex" name="exceed" style="min-width:230px">
-            <?php foreach (['all' => 'All customers', 'with' => 'With exceeded (any bill past policy)', 'only' => 'Only exceeded (all bills past policy)', 'none' => 'Not exceeded (within policy / cash)'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_ex === $k ? ' selected' : '' ?>><?= cas_h($l) ?></option><?php endforeach; ?></select></div>
+            <?php foreach (['all' => 'All customers', 'with' => 'With exceeded (any bill past policy)', 'only' => 'Only exceeded (all bills past policy)', 'none' => 'Not exceeded (within policy)'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_ex === $k ? ' selected' : '' ?>><?= cas_h($l) ?></option><?php endforeach; ?></select></div>
         <button class="btn" type="submit"><i class="fa-solid fa-play"></i> Run report</button>
         <a class="btn light" href="credit_aging_summary_report.php">Reset</a>
         <a class="btn xl" href="<?= cas_h($exp_url) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a>
