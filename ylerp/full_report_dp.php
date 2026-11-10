@@ -7,13 +7,12 @@ mysqli_report(MYSQLI_REPORT_OFF);
 function fmtN($v)  { $v=floatval($v); if($v==0) return '-'; return number_format(abs($v)); }
 function fmtNeg($v){ $v=floatval($v); if($v==0) return '-'; return '('.number_format(abs($v)).')'; }
 function fmtAuto($v){ $v=floatval($v); if($v==0) return '-'; if($v<0) return '('.number_format(abs($v)).')'; return number_format($v); }
-/* Good S/E 'Charged to Employee' cell: a charge shows as a plain amount; when the EXCESS is bigger than the SHORT
-   the net is an excess — shown as "(n) Ex" (green) instead of a charge. */
-function fmtChgNet($charge, $excess){
-    $charge = floatval($charge); $excess = floatval($excess);
-    $out = ($charge >= 0.5 || $excess < 0.5) ? fmtAuto($charge) : '';
-    if ($excess >= 0.5) $out .= ($out !== '' ? '<br>' : '') . fmtSE(-$excess);   // negative to fmtSE = Excess  →  "(n) Ex"
-    return $out;
+/* Cash 'Charged to Employee' cell: when the cash is an EXCESS (deposited / handed over MORE than collected) there is
+   nothing to charge — the cell shows the excess value as "(n) Ex" (green). A shortage shows what was actually charged. */
+function fmtChgCash($charged, $cash_se){
+    $cash_se = floatval($cash_se);
+    if ($cash_se <= -0.5) return fmtSE($cash_se);        // negative = excess → "(n) Ex"
+    return fmtAuto($charged);
 }
 function fmtPct($v,$tot){ $tot=floatval($tot); if($tot==0) return '-'; $p=floatval($v)/$tot*100; if($p==0) return '-'; return number_format($p,1).'%'; }
 
@@ -155,7 +154,6 @@ $keys = [
     'ikea_unload','actual_unload','good_se','good_se_yms','good_se_abs',
     'adj_good_val','adj_dmg_val','act_good_val','act_dmg_val',
     'gs_charged','gs_absorbed',
-    'gs_short_amt','gs_excess_amt','gs_charged_net','gs_excess_rem','gs_diff',   /* Good S/E: short vs excess netting */
 ];
 /* normalized name → canonical delivery person (so every source links to one row) */
 $dp_lookup = [];
@@ -516,8 +514,6 @@ if ($submitted && count($all_dps)) {
         $D[$dp]['adj_dmg_val']    +=$adj_dmg*$tur;    /* Adj Qty (Damage) × TUR */
         $D[$dp]['act_good_val']   +=$act_good*$tur;   /* Good Value  = Actual Qty × TUR   */
         $D[$dp]['act_dmg_val']    +=$act_dmg*$tur;    /* Damage Value = Actual Dmg × TUR  */
-        if($se<0&&$tur>0) $D[$dp]['gs_short_amt'] +=$tur*abs($se);     /* total SHORT value  (Σ TUR × |S/E|, S/E < 0) */
-        if($se>0&&$tur>0) $D[$dp]['gs_excess_amt']+=$tur*$se;          /* total EXCESS value (Σ TUR × S/E,   S/E > 0) */
         if($se!=0&&$tur>0){
             $D[$dp]['good_se']    +=$tur*$se;       /* signed: NEGATIVE = short (S/E Value = TUR × S/E) */
             $D[$dp]['good_se_abs']+=$tur*abs($se);  /* magnitude charges are made against */
@@ -553,16 +549,6 @@ if ($submitted && count($all_dps)) {
     foreach ($all_dps as $dp) {
         $D[$dp]['unloading_value']=abs($D[$dp]['unloading_value']);
         $D[$dp]['actual_unload']=abs($D[$dp]['actual_unload']);
-        /* Good S/E — SHORT charged vs EXCESS:
-             final = (short charged) − (excess).
-             final ≥ 0  → that amount is charged to the employee;
-             final < 0  → the excess is bigger than the short: nothing is charged, the EXCESS value is shown. */
-        $final = round($D[$dp]['gs_charged'] - $D[$dp]['gs_excess_amt'], 2);
-        $D[$dp]['gs_charged_net'] = $final > 0 ? $final : 0.0;
-        $D[$dp]['gs_excess_rem']  = $final < 0 ? $D[$dp]['gs_excess_amt'] : 0.0;   // excess bigger than the short → show the EXCESS value itself
-        /* Unsettled = net position (short − excess) − what is charged − what is absorbed; an excess that covers the short = 0 */
-        $net_pos = $D[$dp]['gs_short_amt'] - $D[$dp]['gs_excess_amt'];
-        $D[$dp]['gs_diff'] = round($net_pos - $final - $D[$dp]['gs_absorbed'], 2);
     }
 
     /* ── Computed totals per DP ── */
@@ -853,7 +839,8 @@ buildRow('rn','Handover to BO', false, fmtNeg($T['handover_bo']),    $all_dps, b
 
 $cse_vals=[]; foreach ($all_dps as $dp) $cse_vals[$dp]=fmtSE($D[$dp]['cash_se']);
 buildRow('rc','Cash Shortage / Excess', false, fmtSE($T['cash_se']), $all_dps, $cse_vals, 'valt');
-buildRow('rn','Charged to Employee', true, fmtAuto($T['cash_charged']),  $all_dps, buildMap($all_dps,$D,'cash_charged','fmtAuto'),  'val');
+$cchg_v=[]; foreach ($all_dps as $dp) $cchg_v[$dp]=fmtChgCash($D[$dp]['cash_charged'], $D[$dp]['cash_se']);
+buildRow('rn','Charged to Employee', true, fmtChgCash($T['cash_charged'], $T['cash_se']),  $all_dps, $cchg_v,  'val');
 buildRow('ra','Absorbed by Company', true, fmtAuto($T['cash_absorbed']), $all_dps, buildMap($all_dps,$D,'cash_absorbed','fmtAuto'), 'val');
 
 /* Diff = unreconciled remainder after charge & absorb are applied to the base.
@@ -861,8 +848,10 @@ buildRow('ra','Absorbed by Company', true, fmtAuto($T['cash_absorbed']), $all_dp
      • A fully-settled shortage  -> 0
      • Leftover shortage         -> "n Sh"  (red)   still to be charged/absorbed
      • An excess (nothing to charge) -> "(n) Ex" (green) carried down unchanged */
-$cdiff_t=$T['cash_se']-$T['cash_charged']-$T['cash_absorbed'];
-$cdiff_v=[]; foreach ($all_dps as $dp) $cdiff_v[$dp]=fmtSE($D[$dp]['cash_se']-$D[$dp]['cash_charged']-$D[$dp]['cash_absorbed']);
+/* An EXCESS (negative) is shown in the Charged cell, so it is settled there: it adds nothing to the Diff. */
+$cdiff_of=function($se,$chg,$abs){ return ($se<=-0.5) ? 0.0 : $se-$chg-$abs; };
+$cdiff_t=0.0; $cdiff_v=[];
+foreach ($all_dps as $dp) { $x=$cdiff_of($D[$dp]['cash_se'],$D[$dp]['cash_charged'],$D[$dp]['cash_absorbed']); $cdiff_t+=$x; $cdiff_v[$dp]=fmtSE($x); }
 buildRow('rd','Diff (Short / Excess)', false, fmtSE($cdiff_t), $all_dps, $cdiff_v);
 buildBlank($N);
 
@@ -889,15 +878,13 @@ buildRow('rc','Good Short / Excess as YMS', false, fmtSEg($T['good_se']), $all_d
 
 /* Charged — same per-row rule as the shortage page (stored, else suggested for shorts).
    Absorbed — real saved absorb only (stored column / ledger); no excess suggestion. */
-$gchg_v=[]; foreach ($all_dps as $dp) $gchg_v[$dp]=fmtChgNet($D[$dp]['gs_charged_net'], $D[$dp]['gs_excess_rem']);
-buildRow('rn','Charged to Employee', true, fmtChgNet($T['gs_charged_net'], $T['gs_excess_rem']),  $all_dps, $gchg_v,  'val');
+buildRow('rn','Charged to Employee', true, fmtAuto($T['gs_charged']),  $all_dps, buildMap($all_dps,$D,'gs_charged','fmtAuto'),  'val');
 buildRow('ra','Absorbed by Company', true, fmtAuto($T['gs_absorbed']), $all_dps, buildMap($all_dps,$D,'gs_absorbed','fmtAuto'), 'val');
 
-/* Diff (Unsettled) = (Short − Excess) − Charged − Absorbed, per delivery person.
-   Short left over → "n Sh" (red); an excess still unsettled → "(n) Ex" (green); fully settled → 0.
-   (Excess is netted against the short — it is no longer added on top as if it were another amount to charge.) */
-$gdiff_v=[]; foreach ($all_dps as $dp) $gdiff_v[$dp]=fmtSE($D[$dp]['gs_diff']);
-buildRow('rd','Diff (Unsettled)', false, fmtSE($T['gs_diff']), $all_dps, $gdiff_v);
+/* Diff (Unsettled) = S/E magnitude (Σ TUR × |S/E|) − Charged − Absorbed. */
+$gdiff_t=$T['good_se_abs']-$T['gs_charged']-$T['gs_absorbed'];
+$gdiff_v=[]; foreach ($all_dps as $dp) $gdiff_v[$dp]=fmtAuto($D[$dp]['good_se_abs']-$D[$dp]['gs_charged']-$D[$dp]['gs_absorbed']);
+buildRow('rd','Diff (Unsettled)', false, fmtAuto($gdiff_t), $all_dps, $gdiff_v);
 
 ?>
 </tbody>
