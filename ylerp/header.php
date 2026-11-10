@@ -1757,6 +1757,9 @@ if (isset($conn) && $conn) {
                          <a href="bulk_cheque_verify.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bulk_cheque_verify.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-file-import"></i><span>Import Cheques</span>
                     </a>
+                         <a href="fc_verify.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'fc_verify.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-magnifying-glass-chart"></i><span>FC Verify</span>
+                    </a>
                 </div>
 
                 <div class="menu-item has-submenu" data-tooltip="Customer Ledger" onclick="toggleSubmenu(this)">
