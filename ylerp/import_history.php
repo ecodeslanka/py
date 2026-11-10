@@ -331,8 +331,7 @@ $stats = mysqli_fetch_assoc($stats_result);
                         </td>
 
                         <!-- Final Bill Value -->
-                        <td class="td-num td-amount"><?php echo $ls ? number_format($ls_amount, 2) : '<span class="td-empty">—</span>'; ?>
-                            <?php if ($ls && $ls_cancel > 0): ?><div style="font-size:10.5px;font-weight:600;color:#b45309;line-height:1.3;" title="Cancelled bills are included in the Pre-Secondary value">incl. cancelled <?php echo number_format($ls_cancel, 2); ?></div><?php endif; ?></td>
+                        <td class="td-num td-amount"><?php echo $ls ? number_format($ls_amount, 2) : '<span class="td-empty">—</span>'; ?></td>
                         <td class="td-num td-amount"><?php echo $si ? number_format($si_amount, 2) : '<span class="td-empty">—</span>'; ?></td>
                         <td class="td-num td-amount td-variance <?php echo $amt_variance > 0 ? 'var-positive' : ($amt_variance < 0 ? 'var-negative' : 'var-zero'); ?>">
                             <?php
