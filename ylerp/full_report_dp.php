@@ -840,7 +840,10 @@ buildRow('rn','Handover to BO', false, fmtNeg($T['handover_bo']),    $all_dps, b
 $cse_vals=[]; foreach ($all_dps as $dp) $cse_vals[$dp]=fmtSE($D[$dp]['cash_se']);
 buildRow('rc','Cash Shortage / Excess', false, fmtSE($T['cash_se']), $all_dps, $cse_vals, 'valt');
 $cchg_v=[]; foreach ($all_dps as $dp) $cchg_v[$dp]=fmtChgCash($D[$dp]['cash_charged'], $D[$dp]['cash_se']);
-buildRow('rn','Charged to Employee', true, fmtChgCash($T['cash_charged'], $T['cash_se']),  $all_dps, $cchg_v,  'val');
+$cex_t=0.0; foreach ($all_dps as $dp) if ($D[$dp]['cash_se'] <= -0.5) $cex_t += -$D[$dp]['cash_se'];
+$cchg_t = ($T['cash_charged'] >= 0.5 || $cex_t < 0.5) ? fmtAuto($T['cash_charged']) : '';
+if ($cex_t >= 0.5) $cchg_t .= ($cchg_t !== '' ? '<br>' : '') . fmtSE(-$cex_t);      /* total of the excesses, shown beside what was charged */
+buildRow('rn','Charged to Employee', true, $cchg_t,  $all_dps, $cchg_v,  'val');
 buildRow('ra','Absorbed by Company', true, fmtAuto($T['cash_absorbed']), $all_dps, buildMap($all_dps,$D,'cash_absorbed','fmtAuto'), 'val');
 
 /* Diff = unreconciled remainder after charge & absorb are applied to the base.
