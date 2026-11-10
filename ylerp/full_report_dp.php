@@ -23,6 +23,18 @@ function fmtChgNet($charge, $excess, $short = 0, $excess_val = 0){
     if ($excess >= 0.5) $final .= ($final !== '' ? ' ' : '') . '<span style="color:#15803d;font-weight:700">(' . number_format($excess) . ') Ex</span>';
     return $final;      // the Full Report shows ONLY the final charge amount (short/excess breakdown is on the shortage page)
 }
+/* TOTAL cell of 'Charged to Employee': Short (red) · Excess (green) · FINAL.
+   Final = short − excess: a charge when the short is bigger, otherwise the excess difference "(n) Ex" (green). */
+function fmtChgTotal($short, $excess){
+    $short = floatval($short); $excess = floatval($excess);
+    $final = round($short - $excess, 2);
+    $fin = ($final >= 0.5) ? number_format($final)
+         : (($final <= -0.5) ? '<span style="color:#15803d;font-weight:700">(' . number_format(abs($final)) . ') Ex</span>' : '-');
+    if ($excess < 0.5) return $fin;                                   // no excess → just the charge total
+    return ($short >= 0.5 ? '<span style="display:block;color:#b91c1c;font-size:10px;font-weight:700;line-height:1.25">Short ' . number_format($short) . '</span>' : '')
+         . '<span style="display:block;color:#15803d;font-size:10px;font-weight:700;line-height:1.25">Excess ' . number_format($excess) . '</span>'
+         . '<span style="display:block;border-top:1px solid #d1d5db;margin-top:1px;font-weight:800">= ' . $fin . '</span>';
+}
 function fmtPct($v,$tot){ $tot=floatval($tot); if($tot==0) return '-'; $p=floatval($v)/$tot*100; if($p==0) return '-'; return number_format($p,1).'%'; }
 
 /* ── Short / Excess identification ──
@@ -877,8 +889,8 @@ buildRow('rn','Handover to BO', false, fmtNeg($T['handover_bo']),    $all_dps, b
 $cse_vals=[]; foreach ($all_dps as $dp) $cse_vals[$dp]=fmtSE($D[$dp]['cash_se']);
 buildRow('rc','Cash Shortage / Excess', false, fmtSE($T['cash_se']), $all_dps, $cse_vals, 'valt');
 $cchg_v=[]; foreach ($all_dps as $dp) $cchg_v[$dp]=fmtChgCash($D[$dp]['cash_charged'], $D[$dp]['cash_se']);
-/* TOTAL = the sum of what was actually charged to the delivery persons (an excess is shown per person, not in this total) */
-buildRow('rn','Charged to Employee', true, fmtAuto($T['cash_charged']),  $all_dps, $cchg_v,  'val');
+$cex_t=0.0; foreach ($all_dps as $dp) if ($D[$dp]['cash_se'] <= -0.5) $cex_t += -$D[$dp]['cash_se'];
+buildRow('rn','Charged to Employee', true, fmtChgTotal($T['cash_charged'], $cex_t),  $all_dps, $cchg_v,  'val');
 buildRow('ra','Absorbed by Company', true, fmtAuto($T['cash_absorbed']), $all_dps, buildMap($all_dps,$D,'cash_absorbed','fmtAuto'), 'val');
 
 /* Diff = unreconciled remainder after charge & absorb are applied to the base.
@@ -917,9 +929,8 @@ buildRow('rc','Good Short / Excess as YMS', false, fmtSEg($T['good_se']), $all_d
 /* Charged — same per-row rule as the shortage page (stored, else suggested for shorts).
    Absorbed — real saved absorb only (stored column / ledger); no excess suggestion. */
 $gchg_v=[]; foreach ($all_dps as $dp) $gchg_v[$dp]=fmtChgNet($D[$dp]['gs_charged_net'], $D[$dp]['gs_excess_rem'], $D[$dp]['gs_short_chg'], $D[$dp]['gs_excess_val']);
-/* TOTAL = the sum of what is actually charged to the employees (each delivery person's final charge). An excess of one
-   delivery person is not set against another person's charge, so it is not part of this total. */
-buildRow('rn','Charged to Employee', true, fmtAuto($T['gs_charged_net']),  $all_dps, $gchg_v,  'val');
+/* TOTAL = Short (Σ charged) · Excess (Σ excess) · FINAL (short − excess) */
+buildRow('rn','Charged to Employee', true, fmtChgTotal($T['gs_charged_net'], $T['gs_excess_rem']),  $all_dps, $gchg_v,  'val');
 buildRow('ra','Absorbed by Company', true, fmtAuto($T['gs_absorbed']), $all_dps, buildMap($all_dps,$D,'gs_absorbed','fmtAuto'), 'val');
 
 /* Diff (Unsettled) = (short − excess) − charged − absorbed.  Short left over → "n Sh" (red); excess left → "(n) Ex" (green); settled → 0. */
