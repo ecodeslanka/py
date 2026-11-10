@@ -2017,6 +2017,9 @@ if (isset($conn) && $conn) {
                     <a href="credit_aging_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'credit_aging_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Credit Aging Report</span>
                     </a>
+                    <a href="credit_aging_summary_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'credit_aging_summary_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-chart-pie"></i><span>Credit Aging Summary Report</span>
+                    </a>
                     <a href="rep_wise_credit_aging_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'rep_wise_credit_aging_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Credit Aging Report (Rep)</span>
                     </a>
