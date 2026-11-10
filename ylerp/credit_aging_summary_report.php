@@ -52,7 +52,7 @@ if ($f_route !== '') $where[] = "fs.route = '" . mysqli_real_escape_string($conn
 if ($f_sr !== '')    $where[] = "fs.sr_code = '" . mysqli_real_escape_string($conn, $f_sr) . "'";
 $P = rx_inv_parts($conn, $f_as_at);
 $sql = "
-SELECT fs.delivery_date, fs.route, fs.sr_code, fsd.t_code, COALESCE(NULLIF(fsd.customer_name,''), c.shop_name, fsd.t_code) AS customer_name, {$P['balance']} AS balance,
+SELECT fs.delivery_date, fsd.invoice_num, fs.route, fs.sr_code, fsd.t_code, COALESCE(NULLIF(fsd.customer_name,''), c.shop_name, fsd.t_code) AS customer_name, {$P['balance']} AS balance,
        COALESCE(c.credit_days, 0) AS credit_days,
        LOWER(TRIM(COALESCE(c.payment_mode, ''))) AS payment_mode,
        " . ($HAS_CWD ? "COALESCE(c.cheques_will_delay,0)" : "0") . " AS cwd
@@ -73,33 +73,50 @@ if ($res) while ($r = mysqli_fetch_assoc($res)) {
     else                                $k = 'none';
     $del = $r['delivery_date'] ? strtotime($r['delivery_date']) : $as_at_ts;
     $over = (int)floor(($as_at_ts - ($del + (int)$r['credit_days'] * 86400)) / 86400);   // days past the policy due date
-    $s = &$S[$k];
     $tc = (string)$r['t_code'];
     if (!isset($CUST[$tc])) $CUST[$tc] = ['t_code' => $tc, 'name' => $r['customer_name'], 'set' => $k, 'days' => (int)$r['credit_days'], 'route' => $r['route'], 'sr' => $r['sr_code'],
-                                          'n' => 0, 'v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'max_over' => 0, 'oldest' => $r['delivery_date']];
+                                          'n' => 0, 'v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'max_over' => 0, 'oldest' => $r['delivery_date'], 'bills' => []];
     $cu = &$CUST[$tc];
+    $exceeded = ($GROUPS[$k]['test'] && $over > 0);
     $cu['n']++; $cu['v'] += $bal;
     if ($r['delivery_date'] && ($cu['oldest'] === null || $r['delivery_date'] < $cu['oldest'])) $cu['oldest'] = $r['delivery_date'];
-    $s['n']++; $s['v'] += $bal; $s['customers'][$tc] = 1;
-    if ($GROUPS[$k]['test'] && $over > 0) {
-        $s['ex_n']++; $s['ex_v'] += $bal; $s['ex_customers'][$tc] = 1;
-        $cu['ex_n']++; $cu['ex_v'] += $bal; if ($over > $cu['max_over']) $cu['max_over'] = $over;
-    } else { $s['ok_n']++; $s['ok_v'] += $bal; }
-    unset($s, $cu);
+    if ($exceeded) { $cu['ex_n']++; $cu['ex_v'] += $bal; if ($over > $cu['max_over']) $cu['max_over'] = $over; }
+    $cu['bills'][] = ['inv' => (string)$r['invoice_num'], 'del' => $r['delivery_date'], 'due' => date('Y-m-d', $del + (int)$r['credit_days'] * 86400),
+                      'bal' => round($bal, 2), 'over' => $over, 'ex' => $exceeded ? 1 : 0];
+    unset($cu);
 }
-$T = ['n' => 0, 'v' => 0.0, 'ok_n' => 0, 'ok_v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0];
-foreach ($S as $s) foreach (['n', 'v', 'ok_n', 'ok_v', 'ex_n', 'ex_v'] as $f) $T[$f] += $s[$f];
+
+/* ── exceeded filter (applies to the summary, the customer list and the Excel) ──
+   all  = every customer
+   with = customers who have AT LEAST ONE bill past policy
+   only = customers whose bills are ALL past policy
+   none = customers with NO bill past policy (within policy / normal) */
+$f_ex = in_array($_GET['exceed'] ?? 'all', ['all', 'with', 'only', 'none'], true) ? ($_GET['exceed'] ?? 'all') : 'all';
+$CUST = array_filter($CUST, function ($c) use ($f_ex) {
+    if ($f_ex === 'with') return $c['ex_n'] > 0;
+    if ($f_ex === 'only') return $c['ex_n'] > 0 && $c['ex_n'] === $c['n'];
+    if ($f_ex === 'none') return $c['ex_n'] === 0;
+    return true;
+});
 /* customer list: exceeded customers first (largest exceeded value), then the rest by value */
 uasort($CUST, function ($a, $b) {
     if (($a['ex_v'] > 0) !== ($b['ex_v'] > 0)) return ($a['ex_v'] > 0) ? -1 : 1;
     return $b['ex_v'] <=> $a['ex_v'] ?: $b['v'] <=> $a['v'];
 });
+/* summary by set, built from the customers that passed the filter */
+foreach ($CUST as $tc => $c) {
+    $s = &$S[$c['set']];
+    $s['n'] += $c['n']; $s['v'] += $c['v']; $s['customers'][$tc] = 1;
+    $s['ex_n'] += $c['ex_n']; $s['ex_v'] += $c['ex_v']; $s['ok_n'] += $c['n'] - $c['ex_n']; $s['ok_v'] += $c['v'] - $c['ex_v'];
+    if ($c['ex_n'] > 0) $s['ex_customers'][$tc] = 1;
+    unset($s);
+}
+$T = ['n' => 0, 'v' => 0.0, 'ok_n' => 0, 'ok_v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0];
+foreach ($S as $s) foreach (['n', 'v', 'ok_n', 'ok_v', 'ex_n', 'ex_v'] as $f) $T[$f] += $s[$f];
 $f_set = $_GET['set'] ?? '';
 $f_cust_q = trim($_GET['q'] ?? '');
-$f_only_ex = ($_GET['only_exceeded'] ?? '') === '1';
-$CUST_VIEW = array_filter($CUST, function ($c) use ($f_set, $f_cust_q, $f_only_ex) {
+$CUST_VIEW = array_filter($CUST, function ($c) use ($f_set, $f_cust_q) {
     if ($f_set !== '' && $c['set'] !== $f_set) return false;
-    if ($f_only_ex && $c['ex_n'] === 0) return false;
     if ($f_cust_q !== '' && stripos($c['t_code'] . ' ' . $c['name'], $f_cust_q) === false) return false;
     return true;
 });
@@ -201,7 +218,7 @@ include 'header.php';
 .cas h2 { margin:6px 0 10px; font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .cas .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; } .cas .tabs a { padding:6px 14px; border-radius:99px; border:1px solid var(--line); background:#fff; color:#374151; font-weight:700; font-size:12px; text-decoration:none; }
 .cas .tabs a.on { background:#111827; border-color:#111827; color:#fff; } .cas .tabs a .cnt { opacity:.7; font-weight:600; margin-left:4px; }
-.cas .cust tbody tr:hover td { background:#fafafb; } .cas .cust tr.exrow td { background:#fff8f8; }
+.cas .cust tbody tr.clk { cursor:pointer; } .cas .cust tbody tr:hover td { background:#eef6ff; } .cas .cust tr.exrow td { background:#fff8f8; }
 .cas .cust .nm { font-weight:700; text-align:left; } .cas .cust .tc { font-size:11px; color:var(--muted); display:block; font-weight:600; }
 .cas .st { display:inline-block; padding:2px 10px; border-radius:99px; font-size:11px; font-weight:800; border:1px solid; white-space:nowrap; }
 .cas .st.bad { color:#b91c1c; background:#fef2f2; border-color:#fecaca; } .cas .st.good { color:#15803d; background:#f0fdf4; border-color:#bbf7d0; }
@@ -223,6 +240,8 @@ include 'header.php';
             <?php foreach ($all_routes as $r): ?><option value="<?= cas_h($r['route_code']) ?>"<?= $f_route === $r['route_code'] ? ' selected' : '' ?>><?= cas_h($r['route_name']) ?></option><?php endforeach; ?></select></div>
         <div class="fld"><label for="sr">SR code</label><select id="sr" name="sr_code"><option value="">All SR</option>
             <?php foreach ($all_sr as $c): ?><option value="<?= cas_h($c) ?>"<?= $f_sr === $c ? ' selected' : '' ?>><?= cas_h($c) ?></option><?php endforeach; ?></select></div>
+        <div class="fld"><label for="ex">Show customers</label><select id="ex" name="exceed" style="min-width:230px">
+            <?php foreach (['all' => 'All customers', 'with' => 'With exceeded (any bill past policy)', 'only' => 'Only exceeded (all bills past policy)', 'none' => 'Not exceeded (within policy / cash)'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_ex === $k ? ' selected' : '' ?>><?= cas_h($l) ?></option><?php endforeach; ?></select></div>
         <input type="hidden" name="set" value="<?= cas_h($f_set) ?>">
         <button class="btn" type="submit"><i class="fa-solid fa-play"></i> Run report</button>
         <a class="btn light" href="credit_aging_summary_report.php">Reset</a>
@@ -278,17 +297,16 @@ include 'header.php';
         <?php endforeach; ?>
     </div>
     <form class="card flt noprint" method="get" action="credit_aging_summary_report.php#customers" style="padding:10px 14px">
-        <input type="hidden" name="as_at_date" value="<?= cas_h($f_as_at) ?>"><input type="hidden" name="route" value="<?= cas_h($f_route) ?>"><input type="hidden" name="sr_code" value="<?= cas_h($f_sr) ?>"><input type="hidden" name="set" value="<?= cas_h($f_set) ?>">
+        <input type="hidden" name="as_at_date" value="<?= cas_h($f_as_at) ?>"><input type="hidden" name="route" value="<?= cas_h($f_route) ?>"><input type="hidden" name="sr_code" value="<?= cas_h($f_sr) ?>"><input type="hidden" name="set" value="<?= cas_h($f_set) ?>"><input type="hidden" name="exceed" value="<?= cas_h($f_ex) ?>">
         <div class="fld"><label for="cq">Customer</label><input type="search" id="cq" name="q" value="<?= cas_h($f_cust_q) ?>" placeholder="T code or name"></div>
-        <label style="display:flex;gap:6px;align-items:center;font-weight:700;height:36px"><input type="checkbox" name="only_exceeded" value="1" <?= $f_only_ex ? 'checked' : '' ?> style="min-width:0;height:auto"> Only customers who exceeded</label>
         <button class="btn" type="submit">Filter</button>
     </form>
     <div class="card wrap">
     <table class="cust">
         <thead><tr><th>#</th><th class="l">Customer</th><th class="l">Set</th><th>Policy status</th><th>Policy days</th><th>Route</th><th>SR</th><th>Oldest bill</th><th>Bills</th><th>Value (Rs.)</th><th>Exceeded bills</th><th>Exceeded value (Rs.)</th><th>Max days over</th></tr></thead>
         <tbody>
-        <?php $i = 0; foreach ($CUST_VIEW as $c): $i++; $g = $GROUPS[$c['set']]; $ex = $g['test'] && $c['ex_n'] > 0; ?>
-            <tr class="<?= $ex ? 'exrow' : '' ?>">
+        <?php $i = 0; $MODAL = []; foreach ($CUST_VIEW as $c): $g = $GROUPS[$c['set']]; $ex = $g['test'] && $c['ex_n'] > 0; $MODAL[] = ['c' => $c, 'g' => ['label' => $g['label'], 'exceed' => $g['exceed'], 'test' => $g['test'], 'color' => $g['color']]]; $i++; ?>
+            <tr class="<?= $ex ? 'exrow' : '' ?> clk" data-i="<?= $i - 1 ?>" title="Click to see this customer's bills">
                 <td class="c"><?= $i ?></td>
                 <td class="nm"><?= cas_h($c['name']) ?><span class="tc"><?= cas_h($c['t_code']) ?></span></td>
                 <td class="l"><span class="setb"><i class="fa-solid <?= $g['icon'] ?>" style="color:<?= $g['color'] ?>"></i><?= cas_h($g['label']) ?></span></td>
@@ -306,4 +324,74 @@ include 'header.php';
     </div>
     <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. A customer is “exceeded” when at least one of their bills is. “Cheques will delay” customers are counted only in their own set. Customers whose pay mode is not set are listed separately so every outstanding bill is counted once. For the bills of a customer open the Credit Aging Report with the same as-at date.</p>
 </div>
+
+<!-- customer bills viewer: moved to <body> by the script so it always sits above the site header / sidebar -->
+<div class="casm" id="casm" role="dialog" aria-modal="true" aria-label="Customer bills">
+    <div class="box">
+        <div class="top">
+            <div><div class="ttl" id="mName">Customer</div><div class="sb" id="mSub"></div></div>
+            <span class="cnt" id="mCnt"></span><span class="sp"></span>
+            <button class="nb" id="mPrev" type="button">◀ Previous</button><button class="nb" id="mNext" type="button">Next ▶</button>
+            <button class="x" id="mClose" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div class="sum" id="mSum"></div>
+        <div class="tw"><table><thead><tr><th>#</th><th class="l">Invoice</th><th>Delivery date</th><th>Policy due date</th><th>Days over policy</th><th>Status</th><th>Balance (Rs.)</th></tr></thead><tbody id="mBills"></tbody></table></div>
+        <div class="foot"><a id="mOpen" class="btn" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square"></i> Open in Credit Aging Report</a><span class="hint">← → previous / next customer · Esc closes</span></div>
+    </div>
+</div>
+<style>
+.casm { display:none; position:fixed; inset:0; z-index:2147483000; background:rgba(15,23,42,.8); backdrop-filter:blur(3px); padding:2.5vh 2.5vw; font-family:'Inter',system-ui,sans-serif; font-size:13px; color:#111827; }
+.casm.open { display:block; } .casm *, .casm *::before, .casm *::after { box-sizing:border-box; }
+.casm .box { background:#fff; border-radius:16px; width:100%; max-width:1100px; height:100%; margin:0 auto; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 80px rgba(0,0,0,.55); }
+.casm .top { display:flex; align-items:center; gap:12px; padding:14px 20px; background:linear-gradient(90deg,#134e4a,#0f766e); color:#fff; flex-shrink:0; }
+.casm .ttl { font-size:18px; font-weight:800; } .casm .sb { font-size:12px; opacity:.85; margin-top:2px; } .casm .cnt { background:rgba(255,255,255,.2); border-radius:99px; padding:3px 14px; font-weight:800; font-size:12.5px; } .casm .sp { flex:1; }
+.casm .nb { height:36px; padding:0 16px; border:1px solid rgba(255,255,255,.5); border-radius:9px; background:rgba(255,255,255,.15); color:#fff; font:inherit; font-weight:700; cursor:pointer; } .casm .nb:hover:not(:disabled) { background:rgba(255,255,255,.3); } .casm .nb:disabled { opacity:.4; cursor:default; }
+.casm .x { width:36px; height:36px; border-radius:50%; border:none; background:#dc2626; color:#fff; font-size:20px; cursor:pointer; line-height:1; }
+.casm .sum { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; padding:14px 20px; background:#f8fafc; border-bottom:1px solid #e5e7eb; flex-shrink:0; }
+.casm .sum > div { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:9px 12px; } .casm .sum .l { font-size:10px; font-weight:800; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; } .casm .sum .v { font-size:17px; font-weight:800; margin-top:2px; font-variant-numeric:tabular-nums; }
+.casm .tw { flex:1; min-height:0; overflow:auto; } .casm table { width:100%; border-collapse:collapse; }
+.casm th { position:sticky; top:0; padding:9px 12px; background:#134e4a; color:#fff; font-size:11px; font-weight:700; text-align:center; white-space:nowrap; } .casm th.l { text-align:left; }
+.casm td { padding:9px 12px; border-bottom:1px solid #eef0f3; text-align:center; font-variant-numeric:tabular-nums; } .casm td.l { text-align:left; font-weight:700; } .casm td.r { text-align:right; font-weight:700; }
+.casm tr.ex td { background:#fff5f5; } .casm .st { display:inline-block; padding:2px 10px; border-radius:99px; font-size:11px; font-weight:800; border:1px solid; } .casm .st.bad { color:#b91c1c; background:#fef2f2; border-color:#fecaca; } .casm .st.good { color:#15803d; background:#f0fdf4; border-color:#bbf7d0; }
+.casm .foot { display:flex; align-items:center; gap:12px; padding:12px 20px; border-top:1px solid #e5e7eb; background:#f8fafc; flex-shrink:0; } .casm .foot .btn { display:inline-flex; align-items:center; gap:6px; height:36px; padding:0 16px; border-radius:8px; background:#111827; color:#fff; font-weight:700; text-decoration:none; } .casm .hint { margin-left:auto; color:#6b7280; font-size:11.5px; }
+@media (max-width:760px) { .casm { padding:0; } .casm .box { border-radius:0; } .casm .sum { grid-template-columns:1fr 1fr; } .casm .hint { display:none; } }
+</style>
+<script>
+(function(){
+  var DATA = <?= json_encode($MODAL ?? [], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+  var AS_AT = <?= json_encode($f_as_at) ?>, cur = -1;
+  var $ = function(id){ return document.getElementById(id); };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function money(v){ return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function fd(d){ if(!d) return '—'; var t=new Date(String(d).replace(/-/g,'/')); return isNaN(t)?d:t.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
+  function show(i){
+    if(i<0||i>=DATA.length) return; cur=i; var c=DATA[i].c, g=DATA[i].g, ex=g.test&&c.ex_n>0;
+    $('mName').textContent=c.name+' ('+c.t_code+')';
+    $('mSub').textContent=g.label+' · policy '+c.days+' days · route '+(c.route||'—')+' · SR '+(c.sr||'—')+' · as at '+fd(AS_AT);
+    $('mCnt').textContent=(i+1)+' / '+DATA.length;
+    $('mPrev').disabled=(i===0); $('mNext').disabled=(i===DATA.length-1);
+    $('mSum').innerHTML='<div><div class="l">Policy status</div><div class="v" style="color:'+(ex?'#b91c1c':'#15803d')+';font-size:14px">'+esc(!g.test?'Normal (cash)':(ex?g.exceed:'Within policy'))+'</div></div>'
+      +'<div><div class="l">Credit bills</div><div class="v">'+c.n+'</div></div><div><div class="l">Total value</div><div class="v">Rs. '+money(c.v)+'</div></div>'
+      +'<div><div class="l">Exceeded bills</div><div class="v" style="color:'+(ex?'#b91c1c':'#111827')+'">'+(g.test?c.ex_n:'–')+'</div></div>'
+      +'<div><div class="l">Exceeded value</div><div class="v" style="color:'+(ex?'#b91c1c':'#111827')+'">'+(g.test?'Rs. '+money(c.ex_v):'–')+'</div></div>';
+    var bills=c.bills.slice().sort(function(a,b){ return b.over-a.over; }), h='';
+    bills.forEach(function(b,k){
+      h+='<tr class="'+(b.ex?'ex':'')+'"><td>'+(k+1)+'</td><td class="l">'+esc(b.inv||'—')+'</td><td>'+fd(b.del)+'</td><td>'+(g.test?fd(b.due):'—')+'</td>'
+        +'<td style="font-weight:800;color:'+(b.ex?'#b91c1c':'#6b7280')+'">'+(g.test?(b.over>0?'+'+b.over+'d':b.over+'d'):'—')+'</td>'
+        +'<td><span class="st '+(b.ex?'bad':'good')+'">'+(!g.test?'Normal':(b.ex?'Exceeded':'Within policy'))+'</span></td><td class="r">'+money(b.bal)+'</td></tr>';
+    });
+    $('mBills').innerHTML=h||'<tr><td colspan="7" style="padding:24px;color:#6b7280">No bills</td></tr>';
+    var pm={credit:'credit',cheque:'cheque',cwd:'cwd',cash:'cash',none:'none'}[c.set]||'';
+    $('mOpen').href='credit_aging_report.php?as_at_date='+encodeURIComponent(AS_AT)+'&pay_mode='+pm+(c.route?'&route='+encodeURIComponent(c.route):'');
+  }
+  function openAt(i){ $('casm').classList.add('open'); document.body.style.overflow='hidden'; show(i); }
+  function closeM(){ $('casm').classList.remove('open'); document.body.style.overflow=''; }
+  $('mClose').onclick=closeM; $('mPrev').onclick=function(){ show(cur-1); }; $('mNext').onclick=function(){ show(cur+1); };
+  $('casm').addEventListener('mousedown',function(e){ if(e.target===$('casm')) closeM(); });
+  document.addEventListener('keydown',function(e){ if(!$('casm').classList.contains('open')) return;
+    if(e.key==='Escape') closeM(); else if(e.key==='ArrowLeft'){ e.preventDefault(); show(cur-1); } else if(e.key==='ArrowRight'){ e.preventDefault(); show(cur+1); } });
+  [].forEach.call(document.querySelectorAll('.cust tbody tr.clk'),function(tr){ tr.addEventListener('click',function(){ openAt(parseInt(tr.dataset.i,10)); }); });
+  document.body.appendChild($('casm'));     // out of the page wrapper: always above the site header & sidebar
+})();
+</script>
 <?php include 'footer.php'; ?>
