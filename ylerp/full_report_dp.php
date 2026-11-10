@@ -167,7 +167,7 @@ $keys = [
     'ikea_unload','actual_unload','good_se','good_se_yms','good_se_abs',
     'adj_good_val','adj_dmg_val','act_good_val','act_dmg_val',
     'gs_charged','gs_absorbed',
-    'gs_short_amt','gs_saved_charge','gs_sugg_short','gs_unalloc_excess','gs_charged_net','gs_excess_rem','gs_diff','gs_alloc_var',   /* Good S/E: final charge = short − excess */
+    'gs_short_chg','gs_excess_val','gs_charged_net','gs_excess_rem','gs_diff','gs_alloc_var',   /* Good S/E: final charge = short charge − excess (from the Pay Allocation modal) */
 ];
 /* normalized name → canonical delivery person (so every source links to one row) */
 $dp_lookup = [];
@@ -528,7 +528,6 @@ if ($submitted && count($all_dps)) {
         $D[$dp]['adj_dmg_val']    +=$adj_dmg*$tur;    /* Adj Qty (Damage) × TUR */
         $D[$dp]['act_good_val']   +=$act_good*$tur;   /* Good Value  = Actual Qty × TUR   */
         $D[$dp]['act_dmg_val']    +=$act_dmg*$tur;    /* Damage Value = Actual Dmg × TUR  */
-        if($se<0&&$tur>0) $D[$dp]['gs_short_amt'] += $tur*abs($se);
         if($se!=0&&$tur>0){
             $D[$dp]['good_se']    +=$tur*$se;       /* signed: NEGATIVE = short (S/E Value = TUR × S/E) */
             $D[$dp]['good_se_abs']+=$tur*abs($se);  /* magnitude charges are made against */
@@ -557,18 +556,23 @@ if ($submitted && count($all_dps)) {
            unloading_pay_transactions. NO excess suggestion — nothing is
            "absorbed by company" until it is actually saved via the Pay modal. */
         $row_absorb = ($sa > 0) ? $sa : 0;
-        /* shortage.php rule: a row already saved in the Pay modal keeps its saved charge (it is already final);
-           only rows NOT saved yet are netted — suggested short charge − unsaved excess. */
+        /* What the Pay Allocation modal records:
+             • SHORT row  → "Charge to Employee" (+ optional "Absorb by Company")
+             • EXCESS row → "Pay to Employee"  — the excess paid OUT to the employee; it is stored in the same
+                            charge_to_employee column, but it is NOT a charge: it is the EXCESS amount.
+           So per delivery person:   short charge  = Σ charge on the short rows (saved, else suggested)
+                                     excess        = Σ amount paid out on the excess rows (saved, else the full excess value)
+                                     FINAL charge  = short charge − excess. */
+        if ($se > 0 && $tur > 0)  $D[$dp]['gs_excess_val'] += $allocated ? $row_charge : $tur*$se;
+        else                      $D[$dp]['gs_short_chg']  += $row_charge;
         if ($allocated) {
-            $D[$dp]['gs_saved_charge'] += $row_charge;
-            /* what is still unsettled on a saved row = the variance saved with it (short value − charge − absorb,
-               after any excess it was netted with); legacy rows without one are worked out from the row itself */
-            $D[$dp]['gs_alloc_var'] += ($r['pay_variance'] !== null && $r['pay_variance'] !== '')
+            /* still unsettled on a saved row = the variance saved with it (value − charge/pay − absorb);
+               legacy rows without one are worked out from the row itself.  Unsettled EXCESS offsets a short. */
+            $uv = ($r['pay_variance'] !== null && $r['pay_variance'] !== '')
                 ? floatval($r['pay_variance'])
-                : (($se < 0 && $tur > 0) ? $se_amt - $row_charge - $row_absorb : 0);
+                : (($se < 0 && $tur > 0) ? $se_amt - $row_charge - $row_absorb : (($se > 0 && $tur > 0) ? $se_amt - $row_charge : 0));
+            $D[$dp]['gs_alloc_var'] += ($se > 0) ? -$uv : $uv;
         }
-        elseif ($se < 0 && $tur > 0) $D[$dp]['gs_sugg_short']     += $se_amt;
-        elseif ($se > 0 && $tur > 0) $D[$dp]['gs_unalloc_excess'] += $tur*$se;
         $D[$dp]['gs_charged']  += $row_charge;
         $D[$dp]['gs_absorbed'] += $row_absorb;
     }
@@ -576,12 +580,11 @@ if ($submitted && count($all_dps)) {
     foreach ($all_dps as $dp) {
         $D[$dp]['unloading_value']=abs($D[$dp]['unloading_value']);
         $D[$dp]['actual_unload']=abs($D[$dp]['actual_unload']);
-        /* FINAL charge = short − excess (the difference) */
-        $net_un = round($D[$dp]['gs_sugg_short'] - $D[$dp]['gs_unalloc_excess'], 2);
-        $D[$dp]['gs_charged_net'] = $D[$dp]['gs_saved_charge'] + max(0.0, $net_un);
-        $D[$dp]['gs_excess_rem']  = max(0.0, -$net_un);                 // excess bigger than the short → the excess difference
-        /* Unsettled = what is left on the saved rows (their variance). Rows not saved yet are fully covered by the
-           net charge / excess shown above, so they add nothing. */
+        /* FINAL charge = short charge − excess (the difference) */
+        $final = round($D[$dp]['gs_short_chg'] - $D[$dp]['gs_excess_val'], 2);
+        $D[$dp]['gs_charged_net'] = max(0.0, $final);
+        $D[$dp]['gs_excess_rem']  = max(0.0, -$final);               // excess bigger than the short → the excess difference
+        /* Unsettled = what is left on the saved rows (their variance); rows not saved yet are fully covered by the figures above */
         $D[$dp]['gs_diff'] = round($D[$dp]['gs_alloc_var'], 2);
     }
 
@@ -915,8 +918,8 @@ buildRow('rc','Good Short / Excess as YMS', false, fmtSEg($T['good_se']), $all_d
 
 /* Charged — same per-row rule as the shortage page (stored, else suggested for shorts).
    Absorbed — real saved absorb only (stored column / ledger); no excess suggestion. */
-$gchg_v=[]; foreach ($all_dps as $dp) $gchg_v[$dp]=fmtChgNet($D[$dp]['gs_charged_net'], $D[$dp]['gs_excess_rem'], $D[$dp]['gs_saved_charge']+$D[$dp]['gs_sugg_short'], $D[$dp]['gs_unalloc_excess']);
-buildRow('rn','Charged to Employee', true, fmtChgNet($T['gs_charged_net'], $T['gs_excess_rem'], $T['gs_saved_charge']+$T['gs_sugg_short'], $T['gs_unalloc_excess']),  $all_dps, $gchg_v,  'val');
+$gchg_v=[]; foreach ($all_dps as $dp) $gchg_v[$dp]=fmtChgNet($D[$dp]['gs_charged_net'], $D[$dp]['gs_excess_rem'], $D[$dp]['gs_short_chg'], $D[$dp]['gs_excess_val']);
+buildRow('rn','Charged to Employee', true, fmtChgNet($T['gs_charged_net'], $T['gs_excess_rem'], $T['gs_short_chg'], $T['gs_excess_val']),  $all_dps, $gchg_v,  'val');
 buildRow('ra','Absorbed by Company', true, fmtAuto($T['gs_absorbed']), $all_dps, buildMap($all_dps,$D,'gs_absorbed','fmtAuto'), 'val');
 
 /* Diff (Unsettled) = (short − excess) − charged − absorbed.  Short left over → "n Sh" (red); excess left → "(n) Ex" (green); settled → 0. */

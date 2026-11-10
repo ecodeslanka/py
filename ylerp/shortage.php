@@ -1191,7 +1191,7 @@ function calculateTotals() {
     let totalGood = 0, totalDmg = 0, totalSE = 0, totalSEVal = 0;
     let totalCharge = 0, totalAbsorb = 0, totalVar = 0;
     let hasCharge = false, hasAbsorb = false, hasVar = false;
-    let savCharge = 0, sugCharge = 0, exUnpaid = 0;   // saved (final) charges · suggested short charges · excess of rows not yet saved
+    let shortChg = 0, excessVal = 0;   // from the Pay Allocation modal: short rows = charge to employee · excess rows = excess paid out (else the full excess value)
     let sumAdjGood = 0, sumAdjDmg = 0, sumTotalQty = 0, sumActual = 0, sumActualDmg = 0;
 
     document.querySelectorAll('#tableBody tr:not(.hidden-row)').forEach(tr => {
@@ -1215,14 +1215,14 @@ function calculateTotals() {
         if (sevalSpan) totalSEVal += parseFloat(String(sevalSpan.textContent).replace(/,/g, '')) || 0;
         const chargeSpan = document.querySelector('#charge-' + rid + ' .val-charge');
         const rowPaid = ((document.getElementById('paybtn-' + rid) || {}).className || '').indexOf('paid-') > -1;
-        if (chargeSpan) {
-            const cv = parseFloat(String(chargeSpan.textContent).replace(/,/g, '')) || 0;
-            totalCharge += cv; hasCharge = true;
-            if (rowPaid) savCharge += cv; else sugCharge += cv;
-        }
-        if (!rowPaid && se !== null && !isNaN(se) && se > 0) {                 // an excess row that is not saved yet
-            const evSpan = (document.getElementById('seval-' + rid) || {}).querySelector ? document.getElementById('seval-' + rid).querySelector('span') : null;
-            if (evSpan) exUnpaid += parseFloat(String(evSpan.textContent).replace(/,/g, '')) || 0;
+        const cv = chargeSpan ? (parseFloat(String(chargeSpan.textContent).replace(/,/g, '')) || 0) : 0;
+        if (chargeSpan) { totalCharge += cv; hasCharge = true; }
+        if (se !== null && !isNaN(se) && se > 0) {
+            /* EXCESS row: the Pay modal's "Pay to Employee" — what was paid out (saved), else the whole excess value */
+            if (rowPaid) excessVal += cv;
+            else { const evEl = document.getElementById('seval-' + rid); const evSpan = evEl ? evEl.querySelector('span') : null; if (evSpan) excessVal += parseFloat(String(evSpan.textContent).replace(/,/g, '')) || 0; }
+        } else {
+            shortChg += cv;                     // SHORT row: the charge to the employee (saved, else suggested)
         }
         const absorbSpan = document.querySelector('#absorb-' + rid + ' .val-absorb');
         if (absorbSpan) { totalAbsorb += parseFloat(String(absorbSpan.textContent).replace(/,/g, '')) || 0; hasAbsorb = true; }
@@ -1231,28 +1231,27 @@ function calculateTotals() {
         if (varSpan) { totalVar += parseFloat(String(varSpan.textContent).replace(/[+,]/g, '')) || 0; hasVar = true; }
     });
 
-    /* FINAL CHARGE = short charge − excess (the difference).
-       Saved rows keep their saved charge (already final); only the not-yet-saved rows are netted:
-         short charge (suggested) − excess  ≥ 0 → that difference is charged;
-         excess bigger than the short       → nothing is charged, the excess difference is shown as "(n) Ex". */
-    const netUn = sugCharge - exUnpaid;
-    const finalCharge = savCharge + Math.max(0, netUn);
-    const excessLeft  = Math.max(0, -netUn);
+    /* FINAL CHARGE = short charge − excess (the difference):
+         ≥ 0 → that amount is charged;   excess bigger than the short → nothing is charged, the excess difference is shown. */
+    const finalNet    = shortChg - excessVal;
+    const finalCharge = Math.max(0, finalNet);
+    const excessLeft  = Math.max(0, -finalNet);
+
     /* shown as: Short (green) · Excess (red) · FINAL charge (bold) */
-    const shortTot = savCharge + sugCharge;
+    const shortTot = shortChg;
     const fmt2 = n => n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
     let chargeText = '—', chargeHtml = '—', chargeExcess = false;
     if (finalCharge > 0.004) chargeText = finalCharge.toFixed(2) + (excessLeft > 0.004 ? '  /  (' + excessLeft.toFixed(2) + ') Ex' : '');
     else if (excessLeft > 0.004) { chargeText = '(' + excessLeft.toFixed(2) + ') Ex'; chargeExcess = true; }
     else if (hasCharge) chargeText = '0.00';
-    if (shortTot > 0.004 || exUnpaid > 0.004) {
+    if (shortTot > 0.004 || excessVal > 0.004) {
         const finalHtml = finalCharge > 0.004 ? fmt2(finalCharge) + (excessLeft > 0.004 ? ' <span style="color:#b91c1c">/ (' + fmt2(excessLeft) + ') Ex</span>' : '')
                         : (excessLeft > 0.004 ? '<span style="color:#b91c1c">(' + fmt2(excessLeft) + ') Ex</span>' : '0.00');
         chargeHtml = (shortTot > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#15803d;line-height:1.25">Short ' + fmt2(shortTot) + '</div>' : '')
-                   + (exUnpaid > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#b91c1c;line-height:1.25">Excess ' + fmt2(exUnpaid) + '</div>' : '')
+                   + (excessVal > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#b91c1c;line-height:1.25">Excess ' + fmt2(excessVal) + '</div>' : '')
                    + '<div style="font-weight:800;border-top:1px solid #d1d5db;margin-top:2px;padding-top:1px">Final ' + finalHtml + '</div>';
     } else if (hasCharge) chargeHtml = '0.00';
-    const chargeTip = 'Short charge ' + (savCharge + sugCharge).toFixed(2) + ' − Excess ' + exUnpaid.toFixed(2) + ' = ' + (netUn >= 0 ? 'charge ' + finalCharge.toFixed(2) : 'excess ' + excessLeft.toFixed(2));
+    const chargeTip = 'Short charge ' + shortChg.toFixed(2) + ' − Excess ' + excessVal.toFixed(2) + ' = ' + (finalNet >= 0 ? 'charge ' + finalCharge.toFixed(2) : 'excess ' + excessLeft.toFixed(2));
 
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     setVal('ts_good', totalGood.toFixed(2));
