@@ -576,10 +576,14 @@ if ($submitted && count($all_dps)) {
     foreach ($all_dps as $dp) {
         $D[$dp]['unloading_value']=abs($D[$dp]['unloading_value']);
         $D[$dp]['actual_unload']=abs($D[$dp]['actual_unload']);
-        /* FINAL charge = short charge − excess (the difference) */
-        $final = round($D[$dp]['gs_short_chg'] - $D[$dp]['gs_excess_val'], 2);
-        $D[$dp]['gs_charged_net'] = max(0.0, $final);
-        $D[$dp]['gs_excess_rem']  = max(0.0, -$final);               // excess bigger than the short → the excess difference
+        /* FINAL charge — based on ALL the short and excess available for this delivery person
+           (Σ TUR × S/E, the "Good Short / Excess as YMS" figure: negative = short, positive = excess):
+             net short   = −(Σ TUR × S/E)
+             net short > 0  → final charge = net short − what the company absorbed
+             net excess     → nothing is charged; the net excess is shown */
+        $net_short = round(-$D[$dp]['good_se'], 2);
+        if ($net_short >= 0) { $D[$dp]['gs_charged_net'] = max(0.0, round($net_short - $D[$dp]['gs_absorbed'], 2)); $D[$dp]['gs_excess_rem'] = 0.0; }
+        else                 { $D[$dp]['gs_charged_net'] = 0.0; $D[$dp]['gs_excess_rem'] = -$net_short; }
         /* Unsettled = what is left on the saved rows (their variance); rows not saved yet are fully covered by the figures above */
         $D[$dp]['gs_diff'] = round($D[$dp]['gs_alloc_var'], 2);
     }
