@@ -1245,10 +1245,10 @@ function calculateTotals() {
     else if (excessLeft > 0.004) { chargeText = '(' + excessLeft.toFixed(2) + ') Ex'; chargeExcess = true; }
     else if (hasCharge) chargeText = '0.00';
     if (shortTot > 0.004 || excessVal > 0.004) {
-        const finalHtml = finalCharge > 0.004 ? fmt2(finalCharge) + (excessLeft > 0.004 ? ' <span style="color:#b91c1c">/ (' + fmt2(excessLeft) + ') Ex</span>' : '')
-                        : (excessLeft > 0.004 ? '<span style="color:#b91c1c">(' + fmt2(excessLeft) + ') Ex</span>' : '0.00');
-        chargeHtml = (shortTot > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#15803d;line-height:1.25">Short ' + fmt2(shortTot) + '</div>' : '')
-                   + (excessVal > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#b91c1c;line-height:1.25">Excess ' + fmt2(excessVal) + '</div>' : '')
+        const finalHtml = finalCharge > 0.004 ? fmt2(finalCharge) + (excessLeft > 0.004 ? ' <span style="color:#15803d">/ (' + fmt2(excessLeft) + ') Ex</span>' : '')
+                        : (excessLeft > 0.004 ? '<span style="color:#15803d">(' + fmt2(excessLeft) + ') Ex</span>' : '0.00');
+        chargeHtml = (shortTot > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#b91c1c;line-height:1.25">Short ' + fmt2(shortTot) + '</div>' : '')
+                   + (excessVal > 0.004 ? '<div style="font-size:10.5px;font-weight:700;color:#15803d;line-height:1.25">Excess ' + fmt2(excessVal) + '</div>' : '')
                    + '<div style="font-weight:800;border-top:1px solid #d1d5db;margin-top:2px;padding-top:1px">Final ' + finalHtml + '</div>';
     } else if (hasCharge) chargeHtml = '0.00';
     const chargeTip = 'Short charge ' + shortChg.toFixed(2) + ' − Excess ' + excessVal.toFixed(2) + ' = ' + (finalNet >= 0 ? 'charge ' + finalCharge.toFixed(2) : 'excess ' + excessLeft.toFixed(2));
@@ -2159,13 +2159,13 @@ function openBulkPayModal(){
     });
     document.getElementById('bp_row_count').textContent=bpSelectedRows.length;
     const sevEl=document.getElementById('bp_total_seval');
-    if(bpNetVal>=0){sevEl.textContent=bpTotalSeValue.toFixed(2);sevEl.style.color='#15803d';}
-    else{sevEl.textContent='('+Math.abs(bpNetVal).toFixed(2)+') Excess';sevEl.style.color='#b91c1c';}
+    if(bpNetVal>=0){sevEl.textContent=bpTotalSeValue.toFixed(2);sevEl.style.color='#b91c1c';}
+    else{sevEl.textContent='('+Math.abs(bpNetVal).toFixed(2)+') Excess';sevEl.style.color='#15803d';}
     sevEl.title='Short '+bpShortVal.toFixed(2)+' − Excess '+bpExcessVal.toFixed(2);
     let note=document.getElementById('bp_net_note');
     if(!note){note=document.createElement('div');note.id='bp_net_note';note.style.cssText='font-size:12px;font-weight:600;margin:-4px 0 10px;color:#6b7280;';document.querySelector('.bulk-total-bar').insertAdjacentElement('afterend',note);}
     note.innerHTML=(bpExcessVal>0&&bpShortVal>0)
-        ?'Short <b style="color:#15803d">'+bpShortVal.toFixed(2)+'</b> − Excess <b style="color:#b91c1c">'+bpExcessVal.toFixed(2)+'</b> = Final '+(bpNetVal>=0?'<b>'+bpNetVal.toFixed(2)+' to charge</b>':'<b style="color:#b91c1c">'+Math.abs(bpNetVal).toFixed(2)+' EXCESS — nothing to charge</b>')
+        ?'Short <b style="color:#b91c1c">'+bpShortVal.toFixed(2)+'</b> − Excess <b style="color:#15803d">'+bpExcessVal.toFixed(2)+'</b> = Final '+(bpNetVal>=0?'<b>'+bpNetVal.toFixed(2)+' to charge</b>':'<b style="color:#15803d">'+Math.abs(bpNetVal).toFixed(2)+' EXCESS — nothing to charge</b>')
         :(bpExcessVal>0?'Only excess rows selected — nothing to charge.':'');
     document.getElementById('bp_total_seqty').textContent=bpTotalSeQty.toFixed(2);
     document.getElementById('bp_sub').textContent=bpSelectedRows.length+' rows · '+(bpNetVal>=0?'Final charge (Short − Excess): '+bpTotalSeValue.toFixed(2):'Excess: '+Math.abs(bpNetVal).toFixed(2));
