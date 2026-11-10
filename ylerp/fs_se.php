@@ -834,8 +834,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Disposition: attachment; filename="short_excess_report_'.$date_from.'_to_'.$date_to.'.csv"');
     $out = fopen('php://output', 'w');
     fputcsv($out, ['Delivery Date','Field Summary Code','Delivery Person','Invoice','T-Code','Customer',
-                   'Net Invoice Value (Before Ikea)','Ikea Value (After Ikea)','Diff 1 (Net - Ikea)','Cancel Reason',
-                   'Final B.V (Final Bill Value)','Diff 2 (Final B.V - Ikea)','Action Remarks',
+                   'Before Ikea value','After Ikea value','Diff 1 (Net - Ikea)','Cancel Reason',
+                   'Final B.V','Diff 2 (Final B.V - Ikea)','Action Remarks',
                    'Action / Link Offset','Net After Actions']);
     foreach ($groups as $d => $codes) {
         foreach ($codes as $fc => $g) {
@@ -1159,11 +1159,11 @@ tr.code-subtotal td.num,tr.grand-total td.num{text-align:right;}
     </colgroup>
     <thead><tr>
       <th>#</th><th>Invoice</th><th>T-Code</th><th>Customer</th>
-      <th class="th-sep">Net Invoice Value<span class="th-sub">Before Ikea value</span></th>
-      <th>Ikea Value<span class="th-sub">After Ikea value</span></th>
+      <th class="th-sep" style="font-weight:800">Before Ikea value</th>
+      <th style="font-weight:800">After Ikea value</th>
       <th>Diff 1<span class="th-sub">Net Inv. − Ikea</span></th>
       <th>Remarks<span class="th-sub">Cancel bill reason</span></th>
-      <th class="th-sep">Final B.V<span class="th-sub">Final bill value</span></th>
+      <th class="th-sep">Final B.V</th>
       <th>Diff 2<span class="th-sub">Final B.V − Ikea</span></th>
       <th>Remarks<span class="th-sub">Saved actions</span></th>
       <th class="th-sep">Action</th>
