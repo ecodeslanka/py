@@ -556,10 +556,10 @@ if ($submitted && count($all_dps)) {
         /* Good S/E — SHORT charged vs EXCESS:
              final = (short charged) − (excess).
              final ≥ 0  → that amount is charged to the employee;
-             final < 0  → the excess is bigger than the short: nothing is charged, the net EXCESS amount is shown. */
+             final < 0  → the excess is bigger than the short: nothing is charged, the EXCESS value is shown. */
         $final = round($D[$dp]['gs_charged'] - $D[$dp]['gs_excess_amt'], 2);
         $D[$dp]['gs_charged_net'] = $final > 0 ? $final : 0.0;
-        $D[$dp]['gs_excess_rem']  = $final < 0 ? -$final : 0.0;
+        $D[$dp]['gs_excess_rem']  = $final < 0 ? $D[$dp]['gs_excess_amt'] : 0.0;   // excess bigger than the short → show the EXCESS value itself
         /* Unsettled = net position (short − excess) − what is charged − what is absorbed; an excess that covers the short = 0 */
         $net_pos = $D[$dp]['gs_short_amt'] - $D[$dp]['gs_excess_amt'];
         $D[$dp]['gs_diff'] = round($net_pos - $final - $D[$dp]['gs_absorbed'], 2);
