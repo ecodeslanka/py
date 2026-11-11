@@ -34,8 +34,9 @@ class MiniXlsx {
             if (isset($st['h']) || isset($st['v']) || !empty($st['wrap']) || !empty($st['indent']))
                 $al = '<alignment' . (isset($st['h']) ? ' horizontal="' . $st['h'] . '"' : '') . ' vertical="' . ($st['v'] ?? 'center') . '"'
                     . (!empty($st['wrap']) ? ' wrapText="1"' : '') . (!empty($st['indent']) ? ' indent="' . $st['indent'] . '"' : '') . '/>';
-            $xfs[] = '<xf numFmtId="' . (!empty($st['pct']) ? 9 : 0) . '" fontId="' . $f . '" fillId="' . $fill . '" borderId="' . $b . '" xfId="0" applyFont="1" applyFill="1" applyBorder="1"'
-                . ($st['pct'] ?? 0 ? ' applyNumberFormat="1"' : '') . ($al ? ' applyAlignment="1">' . $al . '</xf>' : '/>');
+            $nf = isset($st['nf']) ? (int)$st['nf'] : (!empty($st['pct']) ? 9 : 0);      // nf: 3 = #,##0   4 = #,##0.00   9 = 0%
+            $xfs[] = '<xf numFmtId="' . $nf . '" fontId="' . $f . '" fillId="' . $fill . '" borderId="' . $b . '" xfId="0" applyFont="1" applyFill="1" applyBorder="1"'
+                . ($nf ? ' applyNumberFormat="1"' : '') . ($al ? ' applyAlignment="1">' . $al . '</xf>' : '/>');
         }
         $bd = '<left style="thin"><color rgb="FFE5E7EB"/></left><right style="thin"><color rgb="FFE5E7EB"/></right><top style="thin"><color rgb="FFE5E7EB"/></top><bottom style="thin"><color rgb="FFE5E7EB"/></bottom><diagonal/>';
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'

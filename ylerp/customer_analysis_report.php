@@ -84,6 +84,108 @@ if ($ajax !== '') {
         $ok = $id > 0 && mysqli_query($conn, "DELETE FROM customer_analysis_reports WHERE id = $id");
         echo json_encode(['success' => (bool)$ok, 'message' => $ok ? '' : 'Could not delete.']); exit;
     }
+    /* ---- styled Excel export of what is on screen (same design as the other exports) ---- */
+    if ($ajax === 'export_report') {
+        require_once __DIR__ . '/rbac_xlsx.php';
+        if (!class_exists('ZipArchive')) { header('Content-Type: text/plain'); echo 'The PHP zip extension is required for Excel export.'; exit; }
+        $rows = json_decode($_POST['rows'] ?? '', true); $viol = json_decode($_POST['viol'] ?? '[]', true);
+        $title = trim($_POST['title'] ?? 'Analyze the Customers'); $asat = trim($_POST['as_at'] ?? date('Y-m-d'));
+        if (!is_array($rows) || !$rows) { header('Content-Type: text/plain'); echo 'Nothing to export.'; exit; }
+        $C = ['teal' => '0F766E', 'dark' => '134E4A', 'light' => 'F0FDFA', 'grey' => 'F3F4F6', 'white' => 'FFFFFF'];
+        $H = ['b' => 1, 'color' => $C['white'], 'bg' => $C['dark'], 'h' => 'center', 'border' => 1, 'wrap' => 1];
+        $X = new MiniXlsx();
+        $found = array_values(array_filter($rows, fn($r) => !empty($r['found'])));
+        $cnt = fn($f) => count(array_filter($found, $f));
+        $sum = fn($k) => array_sum(array_map(fn($r) => (float)($r[$k] ?? 0), $found));
+
+        /* Sheet 1 — Summary */
+        $s1 = $X->sheet('Summary');
+        $s1->set(1, 1, $title, ['b' => 1, 'sz' => 20, 'color' => $C['white'], 'bg' => $C['teal'], 'indent' => 1]);
+        for ($c = 2; $c <= 8; $c++) $s1->set(1, $c, '', ['bg' => $C['teal']]);
+        $s1->merge(1, 1, 1, 8); $s1->heights[1] = 38;
+        $s1->set(2, 1, 'Analyzed as at ' . date('d M Y', strtotime($asat)) . '  ·  generated ' . date('d M Y H:i') . ' by ' . ca_user() . '  ·  sale = secondary sales value of ' . date('F Y'), ['i' => 1, 'color' => '6B7280', 'indent' => 1]);
+        $s1->merge(2, 1, 2, 8);
+        $K = [['Outlets in file', count($rows), '111827'], ['Found in system', count($found), '15803D'], ['Not in system', count($rows) - count($found), '6B7280'], ['Blacklisted', $cnt(fn($r) => !empty($r['bl'])), 'B91C1C'],
+              ['Cheques will delay', $cnt(fn($r) => !empty($r['cwd'])), 'D97706'], ['With returned cheques', $cnt(fn($r) => ($r['ret_n'] ?? 0) > 0), '7C3AED'], ['Policy violated', $cnt(fn($r) => ($r['viol'] ?? 0) > 0), 'DC2626'],
+              ['High / critical risk', $cnt(fn($r) => in_array($r['band'] ?? '', ['HIGH', 'CRITICAL'], true)), 'BE123C']];
+        foreach ($K as $i => [$l, $v, $col]) { $s1->set(4, $i + 1, (int)$v, ['b' => 1, 'sz' => 22, 'color' => $col, 'bg' => $C['light'], 'h' => 'center']); $s1->set(5, $i + 1, $l, ['b' => 1, 'sz' => 9, 'color' => '6B7280', 'bg' => $C['light'], 'h' => 'center', 'wrap' => 1]); }
+        $s1->heights[4] = 34; $s1->heights[5] = 26;
+        $T = [['Total outstanding (Rs.)', $sum('outstanding')], [date('F') . ' sale — secondary sales value (Rs.)', $sum('sale_m')], ['Returned cheques value (Rs.)', $sum('ret_amt')], ['Returned cheques still open (Rs.)', $sum('ret_open')], ['Policy violations (times)', $sum('viol')]];
+        $s1->set(7, 1, 'Totals', $H); $s1->set(7, 2, '', $H); $s1->set(7, 3, 'Value', $H); $s1->merge(7, 1, 7, 2);
+        foreach ($T as $i => [$l, $v]) { $r = 8 + $i; $s1->set($r, 1, $l, ['border' => 1, 'b' => 1]); $s1->set($r, 2, '', ['border' => 1]); $s1->merge($r, 1, $r, 2); $s1->set($r, 3, round($v, 2), ['border' => 1, 'h' => 'right', 'b' => 1, 'nf' => 4]); }
+        $bands = ['LOW' => '15803D', 'MODERATE' => 'B45309', 'HIGH' => 'B91C1C', 'CRITICAL' => '9F1239']; $r = 14;
+        $s1->set($r, 1, 'Risk band', $H); $s1->set($r, 2, 'Customers', $H); $s1->set($r, 3, 'Outstanding (Rs.)', $H); $r++;
+        foreach ($bands as $bnd => $col) { $g = array_filter($found, fn($x) => ($x['band'] ?? '') === $bnd);
+            $s1->set($r, 1, $bnd, ['border' => 1, 'b' => 1, 'color' => $col]); $s1->set($r, 2, count($g), ['border' => 1, 'h' => 'center']); $s1->set($r, 3, round(array_sum(array_map(fn($x) => (float)$x['outstanding'], $g)), 2), ['border' => 1, 'h' => 'right', 'nf' => 4]); $r++; }
+        foreach ([26, 22, 18, 16, 16, 18, 16, 18] as $i => $w) $s1->widths[$i + 1] = $w;
+
+        /* Sheet 2 — Customer analysis */
+        $s2 = $X->sheet('Customer analysis');
+        $cols = ['#', 'NEW SR', 'Outlet code', 'Outlet name', 'In system', 'Blacklisted', 'Blacklist type', 'Blacklist reason', 'Pay mode', 'Policy days', 'Cheques will delay',
+                 date('M') . ' sale (secondary)', 'Sale bills', 'Total outstanding', 'Unpaid bills', 'Oldest bill (days)', 'Aging ≤0', 'Aging 1-7', 'Aging 8-14', 'Aging 15-21', 'Aging 22-28', 'Aging 29-35', 'Aging 35+',
+                 'Credit limit', 'Limit used %', 'Last payment', 'Avg days to pay', 'Returned cheques', 'Returned amount', 'Returned open', 'Policy', 'Violated (times)', 'Longest over (days)', 'Overdue now', 'Risk score', 'Risk band', 'Why (system data)'];
+        $nc = count($cols);
+        $s2->set(1, 1, $title . ' — customer analysis', ['b' => 1, 'sz' => 15, 'color' => $C['white'], 'bg' => $C['teal'], 'indent' => 1]);
+        for ($c = 2; $c <= $nc; $c++) $s2->set(1, $c, '', ['bg' => $C['teal']]);
+        $s2->merge(1, 1, 1, $nc); $s2->heights[1] = 28;
+        foreach ($cols as $i => $h) $s2->set(3, $i + 1, $h, $H);
+        $s2->heights[3] = 34; $r = 4; $n = 1;
+        $pmc = ['cash' => '15803D', 'credit' => 'B45309', 'cheque' => '6D28D9'];
+        foreach ($rows as $x) {
+            $zebra = ($n % 2 === 0) ? ['bg' => $C['grey']] : [];
+            if (empty($x['found'])) {
+                $st = ['border' => 1, 'color' => '9CA3AF'] + $zebra;
+                foreach ([$n, $x['sr'] ?? '', $x['code'] ?? '', $x['file_name'] ?? '', 'No'] as $i => $v) $s2->set($r, $i + 1, $v, $st + ($i === 0 || $i === 4 ? ['h' => 'center'] : []));
+                for ($c = 6; $c <= $nc; $c++) $s2->set($r, $c, '', $st);
+                $r++; $n++; continue;
+            }
+            $bl = !empty($x['bl']); $bg = $bl ? ['bg' => 'FEF2F2'] : $zebra; $b = ['border' => 1] + $bg; $ag = $x['aging'] ?? [];
+            $vals = [$n, $x['sr'] ?? '', $x['code'] ?? '', $x['name'] ?? '', 'Yes', $bl ? 'YES' : '', $x['bl_type_lbl'] ?? '', $x['bl_reason'] ?? '', ucfirst((string)($x['pm'] ?? '')), in_array($x['pm'] ?? '', ['credit', 'cheque'], true) ? (int)($x['days'] ?? 0) : '',
+                     !empty($x['cwd']) ? 'YES' : '', round((float)($x['sale_m'] ?? 0), 2), (int)($x['sale_n'] ?? 0), round((float)$x['outstanding'], 2), (int)$x['out_n'], $x['oldest_age'] ?: '',
+                     $ag['0']['v'] ?? '', $ag['1-7']['v'] ?? '', $ag['8-14']['v'] ?? '', $ag['15-21']['v'] ?? '', $ag['22-28']['v'] ?? '', $ag['29-35']['v'] ?? '', $ag['35+']['v'] ?? '',
+                     $x['limit'] ?: '', $x['util'] ?? '', $x['last_pay'] ?? '', $x['avg_pay'] ?? '', (int)($x['ret_n'] ?? 0), round((float)($x['ret_amt'] ?? 0), 2), round((float)($x['ret_open'] ?? 0), 2),
+                     ($x['policy'] ?? '') === 'cheque' ? 'Cheque policy' : (($x['policy'] ?? '') === 'credit' ? 'Credit policy' : 'n/a'), ($x['policy'] ?? 'none') === 'none' ? '' : (int)($x['viol'] ?? 0), $x['max_over'] ?: '', $x['cur_over'] ?: '',
+                     $x['risk'] ?? '', $x['band'] ?? '', is_array($x['bl_why'] ?? null) ? implode(' | ', $x['bl_why']) : ''];
+            foreach ($vals as $i => $v) {
+                $st = $b; $ci = $i + 1;
+                if (in_array($ci, [1, 2, 3, 5, 9, 10, 11, 13, 15, 16, 28, 32, 33, 34, 35], true)) $st += ['h' => 'center'];
+                if (in_array($ci, [12, 14, 17, 18, 19, 20, 21, 22, 23, 24, 29, 30], true)) $st += ['h' => 'right', 'nf' => 4];   // money with thousands separators
+                if (in_array($ci, [25, 27], true)) $st += ['h' => 'right'];
+                if ($ci === 4) $st += ['b' => 1];
+                if ($ci === 6 && $bl) $st = ['border' => 1, 'bg' => 'FEE2E2', 'color' => 'B91C1C', 'b' => 1, 'h' => 'center'];
+                if ($ci === 9 && isset($pmc[$x['pm'] ?? ''])) $st += ['b' => 1, 'color' => $pmc[$x['pm']]];
+                if ($ci === 11 && $v === 'YES') $st = ['border' => 1, 'bg' => 'FEF3C7', 'color' => 'B45309', 'b' => 1, 'h' => 'center'];
+                if ($ci === 12) $st += ['b' => 1, 'color' => '0F766E'];
+                if ($ci === 14 && $v > 0) $st += ['b' => 1, 'color' => '1D4ED8'];
+                if ($ci === 32 && (int)$v > 0) $st = ['border' => 1, 'bg' => 'FEE2E2', 'color' => 'B91C1C', 'b' => 1, 'h' => 'center'];
+                if ($ci === 36) { $bc = $bands[$v] ?? '374151'; $st = ['border' => 1, 'b' => 1, 'h' => 'center', 'color' => $C['white'], 'bg' => $bc]; }
+                $s2->set($r, $ci, $v, $st);
+            }
+            $r++; $n++;
+        }
+        foreach ([5, 10, 17, 30, 9, 11, 22, 34, 10, 9, 11, 15, 8, 16, 9, 10, 11, 11, 11, 11, 11, 11, 11, 14, 9, 13, 10, 10, 15, 14, 14, 10, 11, 9, 8, 11, 70] as $i => $w) $s2->widths[$i + 1] = $w;
+        $s2->freeze = [3, 4]; $s2->filter = 'A3:' . MiniXlsx::col($nc) . max(4, $r - 1);
+
+        /* Sheet 3 — Violated bills */
+        $s3 = $X->sheet('Violated bills');
+        foreach (['Outlet code', 'Customer', 'Policy', 'Invoice', 'Delivery date', 'Policy due date', 'Paid on', 'Days over policy', 'Net (Rs.)', 'Balance (Rs.)'] as $i => $h) $s3->set(1, $i + 1, $h, $H);
+        $s3->heights[1] = 26; $r = 2;
+        foreach (is_array($viol) ? $viol : [] as $v) {
+            $zb = ($r % 2) ? ['bg' => $C['grey']] : [];
+            foreach ([$v['code'] ?? '', $v['name'] ?? '', $v['policy'] ?? '', $v['inv'] ?? '', $v['del'] ?? '', $v['due'] ?? '', $v['paid'] ?? 'UNPAID', (int)($v['over'] ?? 0), round((float)($v['net'] ?? 0), 2), round((float)($v['bal'] ?? 0), 2)] as $i => $val)
+                $s3->set($r, $i + 1, $val, ['border' => 1] + $zb + ($i === 7 ? ['b' => 1, 'color' => 'B91C1C', 'h' => 'center'] : ($i >= 8 ? ['h' => 'right', 'nf' => 4] : [])) + ($i === 6 && $val === 'UNPAID' ? ['b' => 1, 'color' => 'B45309'] : []));
+            $r++;
+        }
+        foreach ([16, 32, 14, 16, 14, 15, 14, 12, 14, 14] as $i => $w) $s3->widths[$i + 1] = $w;
+        $s3->freeze = [1, 0]; $s3->filter = 'A1:J' . max(2, $r - 1);
+
+        $tmp = tempnam(sys_get_temp_dir(), 'ca'); $X->save($tmp);
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="customer_analysis_' . date('Ymd_His') . '.xlsx"');
+        header('Content-Length: ' . filesize($tmp));
+        readfile($tmp); @unlink($tmp); exit;
+    }
     /* ---- analyse the uploaded rows ---- */
     if ($ajax === 'analyze') {
         $in = json_decode($_POST['rows'] ?? '', true);
@@ -153,6 +255,12 @@ if ($ajax !== '') {
                 WHERE ch.t_code IN ($tlist) AND ch.status != 'cleared' AND fs.delivery_date IS NOT NULL AND fs.delivery_date != '0000-00-00'
                   AND NOT (ch.status = 'sent_back' AND COALESCE(ch.sb_settled,0) = 1) AND NOT (ch.status = 'returned' AND COALESCE(ch.return_settled,0) = 1)");
         while ($q && ($x = mysqli_fetch_assoc($q))) $chq_age[$x['t_code']][] = $x;
+        /* THIS MONTH'S SALE = secondary sales value (final bill amount of the imported secondary invoices, once per bill) */
+        $sale = []; $m1 = date('Y-m-01');
+        $q = @mysqli_query($conn, "SELECT x.t_code, COUNT(*) AS n, SUM(x.fb) AS v FROM (
+                SELECT t_code, bill_no, MAX(final_bill_amount) AS fb FROM secondary_invoice_import_details
+                WHERE status = 'imported' AND t_code IN ($tlist) AND delivery_date BETWEEN '$m1' AND '$today' GROUP BY t_code, bill_no) x GROUP BY x.t_code");
+        while ($q && ($x = mysqli_fetch_assoc($q))) $sale[$x['t_code']] = $x;
         $BL_LABELS = ['temporary' => 'Temporary block', 'no_cheque_cod' => 'Block cheque on delivery', 'no_cash_cod' => 'Block cash on delivery', 'permanent' => 'Permanent block', 'no_service' => 'Not serviced (no delivery)'];
         $bl_type_of = [];
         if ($hasBl && rx_has_col($conn, 'customers', 'blacklist_type')) {
@@ -247,6 +355,7 @@ if ($ajax !== '') {
                      'last_pay' => $last_pay, 'days_since' => $days_since, 'avg_pay' => $avg_pay, 'paid_n' => $paid_n, 'ontime_pct' => $paid_n ? round($paid_ok / $paid_n * 100) : null,
                      'canc_n' => (int)$cn['n'], 'canc_v' => round((float)$cn['v'], 2), 'ec_n' => $ecn, 'ec_pend' => (int)$ec['pend'], 'ec_amt' => round((float)$ec['amt'], 2),
                      'chq_open' => count($ca), 'chq_max_age' => $max_chq_age, 'chq_pol' => $pol_cnt, 'chq_breach' => $max_breach, 'sb_n' => $sb_t, 'sb_open' => $sb_open, 'rt_n' => $rt, 'rt_open' => $rt_open,
+                     'sale_m' => round((float)($sale[$t]['v'] ?? 0), 2), 'sale_n' => (int)($sale[$t]['n'] ?? 0),
                      'risk' => $risk, 'band' => $band, 'crit' => $crit, 'bl_type' => $btype, 'bl_type_lbl' => $btype ? ($BL_LABELS[$btype] ?? $btype) : null, 'bl_why' => ((int)$c['bl'] ? $why : [])];
             $out[] = $row;
         }
@@ -312,7 +421,7 @@ include 'header.php';
             <div class="tabs" id="caTabs"></div>
             <div class="wrap"><table class="t"><thead><tr>
                 <th>#</th><th>NEW SR</th><th>Outlet code</th><th class="l">Outlet name</th><th>Blacklisted</th><th>Pay mode</th><th>Cheques will delay</th>
-                <th>Total outstanding (Rs.)</th><th>Oldest bill</th><th>Returned cheques</th><th>Policy</th><th>Violated</th><th>Risk</th><th>Analysis</th></tr></thead>
+                <th>This month sale (Rs.)<br><span style="font-weight:500;font-size:10px">secondary sales</span></th><th>Total outstanding (Rs.)</th><th>Oldest bill</th><th>Returned cheques</th><th>Policy</th><th>Violated</th><th>Risk</th><th>Analysis</th></tr></thead>
                 <tbody id="caBody"></tbody></table></div>
             <div class="empty" id="caEmpty" style="display:none">No customers match.</div>
         </div>
@@ -416,7 +525,7 @@ include 'header.php';
     var q=$('caQ').value.trim().toLowerCase(); VIEW=[];
     var h=''; ROWS.forEach(function(r,i){
       if(!test(r,TAB)) return; if(q && (r.code+' '+(r.name||'')+' '+r.file_name+' '+r.sr).toLowerCase().indexOf(q)<0) return; VIEW.push(i);
-      if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="10"><span class="b grey">Not found in the system</span></td></tr>'; return; }
+      if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="11"><span class="b grey">Not found in the system</span></td></tr>'; return; }
       var pm=PM[r.pm]||['grey',r.pm||'—'], pol=r.policy==='cheque'?'Cheque policy':(r.policy==='credit'?'Credit policy':'—');
       var rk=(r.risk==null)?'<span style="color:#d1d5db">—</span>':'<span class="b '+(BAND[r.band]||'grey')+'">'+r.risk+' · '+r.band+'</span>';
       var bl=r.bl?'<span class="b red" title="'+esc(r.bl_reason||'')+'">BLACKLISTED</span>'+(r.bl_type_lbl?'<br><small style="color:#b91c1c;font-weight:700">'+esc(r.bl_type_lbl)+'</small>':'')+(r.bl_reason?'<br><small style="color:#b91c1c">'+esc(String(r.bl_reason).slice(0,60))+(String(r.bl_reason).length>60?'…':'')+'</small>':'<br><small style="color:#b91c1c">no reason recorded</small>'):'<span style="color:#d1d5db">—</span>';
@@ -424,6 +533,7 @@ include 'header.php';
        +'<td>'+bl+'</td>'
        +'<td><span class="b '+pm[0]+'">'+esc(pm[1])+'</span>'+(r.pm==='credit'||r.pm==='cheque'?'<br><small style="color:#6b7280">'+r.days+' days</small>':'')+'</td>'
        +'<td>'+(r.cwd?'<span class="b amber">CHEQUES WILL DELAY</span>':'<span style="color:#d1d5db">—</span>')+'</td>'
+       +'<td class="r" style="'+(r.sale_m>0?'color:#0f766e;font-weight:800':'color:#9ca3af')+'">'+(r.sale_m>0?money(r.sale_m)+'<br><small style="font-weight:600;color:#6b7280">'+r.sale_n+' bill'+(r.sale_n>1?'s':'')+'</small>':'0.00')+'</td>'
        +'<td class="r" style="'+(r.outstanding>0?'color:#1d4ed8;font-weight:800':'color:#9ca3af')+'">'+(r.outstanding>0?money(r.outstanding)+'<br><small style="font-weight:600;color:#6b7280">'+r.out_n+' bill'+(r.out_n>1?'s':'')+(r.util!=null?' · '+r.util+'% of limit':'')+'</small>':'0.00')+'</td>'
        +'<td>'+(r.oldest_age>0?'<b style="color:'+(r.oldest_age>=60?'#b91c1c':(r.oldest_age>=30?'#b45309':'#374151'))+'">'+r.oldest_age+' d</b>':'<span style="color:#d1d5db">—</span>')+'</td>'
        +'<td>'+(r.ret_n>0?'<span class="b red">'+r.ret_n+' returned</span><br><small style="color:#b91c1c;font-weight:700">Rs. '+money(r.ret_amt)+(r.ret_open>0?' · open '+money(r.ret_open):'')+'</small>':'<span style="color:#d1d5db">—</span>')+'</td>'
@@ -456,6 +566,7 @@ include 'header.php';
       +Object.keys(r.aging).map(function(k){ var a=r.aging[k]; return '<tr><td class="l">'+esc(r.aging_lbl[k]||k)+'</td><td>'+a.n+'</td><td class="r">'+money(a.v)+'</td><td>'+bar(a.v/mx*100,k==='35+'||k==='29-35'?'#dc2626':(k==='22-28'||k==='15-21'?'#f59e0b':'#0f766e'))+'</td></tr>'; }).join('')
       +'</tbody></table><div class="kv"><span>Oldest open bill</span><b>'+(r.oldest_age>0?r.oldest_age+' days':'—')+'</b></div></div>'
       +'<div class="pan"><h4>Payment behaviour &amp; exposure</h4>'
+      +'<div class="kv"><span>This month sale (secondary)</span><b>'+(r.sale_m>0?'Rs. '+money(r.sale_m)+' · '+r.sale_n+' bill'+(r.sale_n>1?'s':''):'no sales this month')+'</b></div>'
       +'<div class="kv"><span>Credit limit</span><b>'+(r.limit>0?'Rs. '+money(r.limit)+(r.util!=null?' · using '+r.util+'%':''):'not set')+'</b></div>'
       +'<div class="kv"><span>Last payment</span><b>'+(r.last_pay?fd(r.last_pay)+' ('+r.days_since+' days ago)':'never paid')+'</b></div>'
       +'<div class="kv"><span>Average days to pay</span><b>'+(r.avg_pay!=null?r.avg_pay+' days':'—')+'</b></div>'
@@ -526,14 +637,11 @@ include 'header.php';
   /* ── 5. Excel export of what is analysed ── */
   $('caXls').addEventListener('click',function(){
     if(!ROWS.length) return;
-    var A=[['NEW SR','Outlet code','Outlet name (file)','System name','In system','Blacklisted','Blacklist type','Blacklist reason','Why (system data)','Pay mode','Credit days','Cheques will delay','Total outstanding','Unpaid bills','Oldest open bill (days)','Aging ≤0','Aging 1-7','Aging 8-14','Aging 15-21','Aging 22-28','Aging 29-35','Aging 35+','Credit limit','Limit used %','Last payment','Avg days to pay','Cancelled bills value','Emergency credit requests','Returned cheques','Returned amount','Returned still open','Policy','Policy violated (times)','Longest over policy (days)','Overdue now (bills)','Risk score','Risk band']];
-    var B=[['Outlet code','Customer','Invoice','Delivery date','Policy due date','Paid on','Days over policy','Violated','Net','Balance']];
-    ROWS.forEach(function(r){ if(!r.found){ A.push([r.sr,r.code,r.file_name,'','No']); return; }
-      var ag=r.aging||{}, g=function(k){ return ag[k]?ag[k].v:''; };
-      A.push([r.sr,r.code,r.file_name,r.name,'Yes',r.bl?'YES':'',r.bl_type_lbl||'',r.bl_reason||'',(r.bl_why||[]).join(' | '),r.pm,r.days,r.cwd?'YES':'',r.outstanding,r.out_n,r.oldest_age||'',g('0'),g('1-7'),g('8-14'),g('15-21'),g('22-28'),g('29-35'),g('35+'),r.limit||'',r.util!=null?r.util:'',r.last_pay||'',r.avg_pay!=null?r.avg_pay:'',r.canc_v||'',r.ec_n||'',r.ret_n,r.ret_amt,r.ret_open,r.policy==='cheque'?'Cheque policy':(r.policy==='credit'?'Credit policy':'n/a'),r.policy==='none'?'':r.viol,r.max_over||'',r.cur_over||'',r.risk!=null?r.risk:'',r.band||'']);
-      r.bills.forEach(function(b){ if(b.v) B.push([r.code,r.name,b.inv,b.del,b.due,b.paid||'UNPAID',b.over,'YES',b.net,b.bal]); }); });
-    var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(A),'Customer analysis'); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(B),'Violated bills');
-    XLSX.writeFile(wb,'customer_analysis_'+new Date().toISOString().slice(0,10)+'.xlsx');
+    var slim=ROWS.map(function(r){ if(!r.found) return {sr:r.sr,code:r.code,file_name:r.file_name,found:false}; var o={}; Object.keys(r).forEach(function(k){ if(k!=='bills'&&k!=='cheques'&&k!=='crit'&&k!=='aging_lbl') o[k]=r[k]; }); return o; });
+    var viol=[]; ROWS.forEach(function(r){ if(r.found) (r.bills||[]).forEach(function(b){ if(b.v) viol.push({code:r.code,name:r.name,policy:r.policy==='cheque'?'Cheque':'Credit',inv:b.inv,del:b.del,due:b.due,paid:b.paid||'UNPAID',over:b.over,net:b.net,bal:b.bal}); }); });
+    var f=document.createElement('form'); f.method='POST'; f.action='customer_analysis_report.php'; f.style.display='none';
+    [['action','export_report'],['title',LOADED||($('caName').value||'Analyze the Customers')],['as_at',new Date().toISOString().slice(0,10)],['rows',JSON.stringify(slim)],['viol',JSON.stringify(viol)]].forEach(function(p){ var i=document.createElement('input'); i.type='hidden'; i.name=p[0]; i.value=p[1]; f.appendChild(i); });
+    document.body.appendChild(f); f.submit(); setTimeout(function(){ f.remove(); },2000);
   });
 
   document.body.appendChild($('cam'));      // out of the page wrapper: always above the site header & sidebar
