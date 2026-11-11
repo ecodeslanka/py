@@ -2171,6 +2171,9 @@ if (isset($conn) && $conn) {
                     <a href="ccf_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'ccf_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>CCF Report (DP &amp; SR)</span>
                     </a>
+                    <a href="customer_analysis_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'customer_analysis_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-magnifying-glass-chart"></i><span>Analyze the Customers</span>
+                    </a>
                     
                          <a href="daily_delivery_monitor.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'daily_delivery_monitor.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-fast"></i><span>Daily Delivery Monitoring Report</span>
