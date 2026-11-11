@@ -63,7 +63,26 @@ if ($ajax !== '') {
         $json = @gzuncompress(base64_decode($x['data']));
         $rows = $json !== false ? json_decode($json, true) : null;
         if (!is_array($rows)) { echo json_encode(['success' => false, 'message' => 'Saved data could not be read.']); exit; }
-        echo json_encode(['success' => true, 'name' => $x['report_name'], 'file' => $x['file_name'], 'as_at' => $x['as_at'], 'by' => $x['created_by'], 'at' => $x['created_at'], 'rows' => $rows]); exit;
+        echo json_encode(['success' => true, 'id' => $id, 'name' => $x['report_name'], 'file' => $x['file_name'], 'as_at' => $x['as_at'], 'by' => $x['created_by'], 'at' => $x['created_at'], 'rows' => $rows]); exit;
+    }
+    /* ---- DO-NOT-ISSUE marks + actions done for the customers of a saved report (needs Edit right: "update_") ---- */
+    if ($ajax === 'update_decisions') {
+        $id = intval($_POST['id'] ?? 0); $dec = json_decode($_POST['dec'] ?? '', true);
+        $r = mysqli_query($conn, "SELECT data FROM customer_analysis_reports WHERE id = $id LIMIT 1"); $x = $r ? mysqli_fetch_assoc($r) : null;
+        if (!$x || !is_array($dec)) { echo json_encode(['success' => false, 'message' => 'Report not found.']); exit; }
+        $rows = json_decode((string)@gzuncompress(base64_decode($x['data'])), true);
+        if (!is_array($rows)) { echo json_encode(['success' => false, 'message' => 'Saved data could not be read.']); exit; }
+        $by = ca_user(); $at = date('Y-m-d H:i');
+        foreach ($rows as &$row) {
+            $code = $row['code'] ?? ''; if (!isset($dec[$code]) || !is_array($dec[$code])) continue;
+            $d = $dec[$code]; $done = [];
+            foreach ((array)($d['done'] ?? []) as $k => $v) if ($v && preg_match('/^[a-z_]{1,20}$/', (string)$k)) $done[$k] = 1;
+            $row['dec'] = ['no_issue' => !empty($d['no_issue']) ? 1 : 0, 'done' => $done, 'note' => mb_substr(trim((string)($d['note'] ?? '')), 0, 500), 'by' => $by, 'at' => $at];
+        }
+        unset($row);
+        $blob = base64_encode(gzcompress(json_encode($rows, JSON_UNESCAPED_UNICODE), 6));
+        $ok = mysqli_query($conn, "UPDATE customer_analysis_reports SET data = '" . mysqli_real_escape_string($conn, $blob) . "' WHERE id = $id");
+        echo json_encode(['success' => (bool)$ok, 'message' => $ok ? '' : mysqli_error($conn), 'by' => $by, 'at' => $at]); exit;
     }
     /* ---- save (needs Add right: action name starts with "save_") ---- */
     if ($ajax === 'save_report') {
@@ -123,7 +142,7 @@ if ($ajax !== '') {
         $s2 = $X->sheet('Customer analysis');
         $cols = ['#', 'NEW SR', 'Outlet code', 'Outlet name', 'In system', 'Blacklisted', 'Blacklist type', 'Blacklist reason', 'Pay mode', 'Policy days', 'Cheques will delay',
                  date('M') . ' sale (secondary)', 'Sale bills', 'Total outstanding', 'Unpaid bills', 'Oldest bill (days)', 'Aging ≤0', 'Aging 1-7', 'Aging 8-14', 'Aging 15-21', 'Aging 22-28', 'Aging 29-35', 'Aging 35+',
-                 'Credit limit', 'Limit used %', 'Last payment', 'Avg days to pay', 'Returned cheques', 'Returned amount', 'Returned open', 'Policy', 'Violated (times)', 'Longest over (days)', 'Overdue now', 'Risk score', 'Risk band', 'Why (system data)'];
+                 'Credit limit', 'Limit used %', 'Last payment', 'Avg days to pay', 'Returned cheques', 'Returned amount', 'Returned open', 'Policy', 'Violated (times)', 'Longest over (days)', 'Overdue now', 'Risk score', 'Risk band', 'DO NOT ISSUE (marked)', 'Suggested to stop issue', 'Actions to do', 'Actions done', 'Note', 'Why (system data)'];
         $nc = count($cols);
         $s2->set(1, 1, $title . ' — customer analysis', ['b' => 1, 'sz' => 15, 'color' => $C['white'], 'bg' => $C['teal'], 'indent' => 1]);
         for ($c = 2; $c <= $nc; $c++) $s2->set(1, $c, '', ['bg' => $C['teal']]);
@@ -139,13 +158,14 @@ if ($ajax !== '') {
                 for ($c = 6; $c <= $nc; $c++) $s2->set($r, $c, '', $st);
                 $r++; $n++; continue;
             }
-            $bl = !empty($x['bl']); $bg = $bl ? ['bg' => 'FEF2F2'] : $zebra; $b = ['border' => 1] + $bg; $ag = $x['aging'] ?? [];
+            $bl = !empty($x['bl']); $ni = !empty($x['ni']); $bg = $ni ? ['bg' => 'FECACA'] : ($bl ? ['bg' => 'FEF2F2'] : (!empty($x['sg']) ? ['bg' => 'FFFBEB'] : $zebra)); $b = ['border' => 1] + $bg; $ag = $x['aging'] ?? [];
             $vals = [$n, $x['sr'] ?? '', $x['code'] ?? '', $x['name'] ?? '', 'Yes', $bl ? 'YES' : '', $x['bl_type_lbl'] ?? '', $x['bl_reason'] ?? '', ucfirst((string)($x['pm'] ?? '')), in_array($x['pm'] ?? '', ['credit', 'cheque'], true) ? (int)($x['days'] ?? 0) : '',
                      !empty($x['cwd']) ? 'YES' : '', round((float)($x['sale_m'] ?? 0), 2), (int)($x['sale_n'] ?? 0), round((float)$x['outstanding'], 2), (int)$x['out_n'], $x['oldest_age'] ?: '',
                      $ag['0']['v'] ?? '', $ag['1-7']['v'] ?? '', $ag['8-14']['v'] ?? '', $ag['15-21']['v'] ?? '', $ag['22-28']['v'] ?? '', $ag['29-35']['v'] ?? '', $ag['35+']['v'] ?? '',
                      $x['limit'] ?: '', $x['util'] ?? '', $x['last_pay'] ?? '', $x['avg_pay'] ?? '', (int)($x['ret_n'] ?? 0), round((float)($x['ret_amt'] ?? 0), 2), round((float)($x['ret_open'] ?? 0), 2),
                      ($x['policy'] ?? '') === 'cheque' ? 'Cheque policy' : (($x['policy'] ?? '') === 'credit' ? 'Credit policy' : 'n/a'), ($x['policy'] ?? 'none') === 'none' ? '' : (int)($x['viol'] ?? 0), $x['max_over'] ?: '', $x['cur_over'] ?: '',
-                     $x['risk'] ?? '', $x['band'] ?? '', is_array($x['bl_why'] ?? null) ? implode(' | ', $x['bl_why']) : ''];
+                     $x['risk'] ?? '', $x['band'] ?? '', !empty($x['ni']) ? 'DO NOT ISSUE' : '', !empty($x['sg']) && empty($x['ni']) ? 'Suggested' : '', is_array($x['acts'] ?? null) ? implode(' | ', $x['acts']) : '',
+                     is_array($x['acts_done'] ?? null) ? implode(' | ', $x['acts_done']) : '', $x['note'] ?? '', is_array($x['bl_why'] ?? null) ? implode(' | ', $x['bl_why']) : ''];
             foreach ($vals as $i => $v) {
                 $st = $b; $ci = $i + 1;
                 if (in_array($ci, [1, 2, 3, 5, 9, 10, 11, 13, 15, 16, 28, 32, 33, 34, 35], true)) $st += ['h' => 'center'];
@@ -159,11 +179,14 @@ if ($ajax !== '') {
                 if ($ci === 14 && $v > 0) $st += ['b' => 1, 'color' => '1D4ED8'];
                 if ($ci === 32 && (int)$v > 0) $st = ['border' => 1, 'bg' => 'FEE2E2', 'color' => 'B91C1C', 'b' => 1, 'h' => 'center'];
                 if ($ci === 36) { $bc = $bands[$v] ?? '374151'; $st = ['border' => 1, 'b' => 1, 'h' => 'center', 'color' => $C['white'], 'bg' => $bc]; }
+                if ($ci === 37 && $v !== '') $st = ['border' => 1, 'b' => 1, 'h' => 'center', 'color' => $C['white'], 'bg' => '9F1239'];
+                if ($ci === 38 && $v !== '') $st += ['b' => 1, 'color' => 'B45309', 'h' => 'center'];
+                if (in_array($ci, [39, 40, 41, 42], true)) $st += ['wrap' => 1];
                 $s2->set($r, $ci, $v, $st);
             }
             $r++; $n++;
         }
-        foreach ([5, 10, 17, 30, 9, 11, 22, 34, 10, 9, 11, 15, 8, 16, 9, 10, 11, 11, 11, 11, 11, 11, 11, 14, 9, 13, 10, 10, 15, 14, 14, 10, 11, 9, 8, 11, 70] as $i => $w) $s2->widths[$i + 1] = $w;
+        foreach ([5, 10, 17, 30, 9, 11, 22, 34, 10, 9, 11, 15, 8, 16, 9, 10, 11, 11, 11, 11, 11, 11, 11, 14, 9, 13, 10, 10, 15, 14, 14, 10, 11, 9, 8, 11, 16, 14, 60, 40, 30, 70] as $i => $w) $s2->widths[$i + 1] = $w;
         $s2->freeze = [3, 4]; $s2->filter = 'A3:' . MiniXlsx::col($nc) . max(4, $r - 1);
 
         /* Sheet 3 — Violated bills */
@@ -392,6 +415,9 @@ include 'header.php';
 .ca .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; } .ca .tabs button { padding:6px 14px; border-radius:99px; border:1px solid var(--line); background:#fff; font:inherit; font-weight:700; font-size:12px; cursor:pointer; color:#374151; } .ca .tabs button.on { background:#111827; border-color:#111827; color:#fff; }
 .ca .saved { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:10px; } .ca .sv { border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fafafa; } .ca .sv b { display:block; font-size:13.5px; } .ca .sv small { color:var(--muted); display:block; margin:2px 0 8px; } .ca .sv .a { display:flex; gap:6px; }
 .ca .sv .btn { height:30px; padding:0 12px; font-size:12px; }
+.ca .t tr.noi td { background:#fecaca !important; } .ca .t tr.noi td:first-child { box-shadow:inset 5px 0 0 #9f1239; font-weight:800; }
+.ca .t tr.sug td { background:#fffbeb; } .ca .t tr.sug td:first-child { box-shadow:inset 5px 0 0 #f59e0b; }
+.ca .ni-wrap { display:flex; flex-direction:column; align-items:center; gap:3px; } .ca .ni-wrap input { width:18px; height:18px; accent-color:#9f1239; cursor:pointer; } .ca .ni-wrap small { font-weight:700; font-size:10px; }
 .ca .empty { padding:28px; text-align:center; color:var(--muted); }
 @media (max-width:1100px) { .ca .kpis { grid-template-columns:repeat(4,1fr); } } @media (max-width:560px) { .ca { padding:16px 12px 40px; } .ca .kpis { grid-template-columns:1fr 1fr; } }
 </style>
@@ -419,9 +445,14 @@ include 'header.php';
                 <span id="caTitle" style="margin-left:auto;font-weight:700;color:#134e4a"></span>
             </div>
             <div class="tabs" id="caTabs"></div>
+            <div class="row" id="caBulk" style="margin:0 0 10px;gap:8px">
+                <button class="btn red" id="caMarkSug" type="button"><i class="fa-solid fa-ban"></i> Mark all suggested as DO NOT ISSUE</button>
+                <button class="btn light" id="caClearMarks" type="button"><i class="fa-solid fa-eraser"></i> Clear all marks</button>
+                <span id="caMarkInfo" style="font-size:12.5px;color:#6b7280"></span>
+            </div>
             <div class="wrap"><table class="t"><thead><tr>
                 <th>#</th><th>NEW SR</th><th>Outlet code</th><th class="l">Outlet name</th><th>Blacklisted</th><th>Pay mode</th><th>Cheques will delay</th>
-                <th>This month sale (Rs.)<br><span style="font-weight:500;font-size:10px">secondary sales</span></th><th>Total outstanding (Rs.)</th><th>Oldest bill</th><th>Returned cheques</th><th>Policy</th><th>Violated</th><th>Risk</th><th>Analysis</th></tr></thead>
+                <th>This month sale (Rs.)<br><span style="font-weight:500;font-size:10px">secondary sales</span></th><th>Total outstanding (Rs.)</th><th>Oldest bill</th><th>Returned cheques</th><th>Policy</th><th>Violated</th><th>Risk</th><th>Do not issue</th><th>Analysis</th></tr></thead>
                 <tbody id="caBody"></tbody></table></div>
             <div class="empty" id="caEmpty" style="display:none">No customers match.</div>
         </div>
@@ -440,7 +471,7 @@ include 'header.php';
             <button class="nb" id="hPrev" type="button">◀ Previous</button><button class="nb" id="hNext" type="button">Next ▶</button>
             <button class="x" id="hClose" type="button" aria-label="Close">&times;</button></div>
         <div class="sum" id="hSum"></div>
-        <div class="tabs2"><button type="button" class="on" data-t="ana">Analysis &amp; risk</button><button type="button" data-t="bills">Bills &amp; policy history</button><button type="button" data-t="chq">Returned cheques</button></div>
+        <div class="tabs2"><button type="button" class="on" data-t="ana">Analysis &amp; risk</button><button type="button" data-t="act">Actions to do</button><button type="button" data-t="bills">Bills &amp; policy history</button><button type="button" data-t="chq">Returned cheques</button></div>
         <div class="tw" id="hBody"></div>
     </div>
 </div>
@@ -457,6 +488,11 @@ include 'header.php';
 .cam .tw { flex:1; min-height:0; overflow:auto; } .cam table { width:100%; border-collapse:collapse; } .cam th { position:sticky; top:0; padding:9px 12px; background:#134e4a; color:#fff; font-size:11px; font-weight:700; text-align:center; white-space:nowrap; }
 .cam td { padding:8px 12px; border-bottom:1px solid #eef0f3; text-align:center; white-space:nowrap; font-variant-numeric:tabular-nums; } .cam td.l { text-align:left; font-weight:700; } .cam td.r { text-align:right; font-weight:700; } .cam tr.v td { background:#fff5f5; }
 .cam .b { display:inline-block; padding:2px 9px; border-radius:99px; font-size:11px; font-weight:800; border:1px solid; } .cam .b.red { color:#b91c1c; background:#fef2f2; border-color:#fecaca; } .cam .b.green { color:#15803d; background:#f0fdf4; border-color:#bbf7d0; } .cam .b.amber { color:#b45309; background:#fffbeb; border-color:#fde68a; }
+.cam .act-ban { border-radius:12px; padding:12px 14px; margin-bottom:12px; font-weight:700; } .cam .act-ban.stop { background:#fecaca; border:1px solid #f87171; color:#7f1d1d; } .cam .act-ban.sug { background:#fffbeb; border:1px solid #fcd34d; color:#92400e; } .cam .act-ban.ok { background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; }
+.cam .big-cb { display:flex; align-items:center; gap:10px; font-size:15px; font-weight:800; margin:6px 0 2px; cursor:pointer; } .cam .big-cb input { width:22px; height:22px; accent-color:#9f1239; }
+.cam .act-li { display:flex; gap:10px; align-items:flex-start; padding:9px 12px; border:1px solid #e5e7eb; border-radius:10px; margin-bottom:8px; background:#fff; } .cam .act-li input { width:18px; height:18px; margin-top:2px; accent-color:#0f766e; } .cam .act-li.done { background:#f0fdf4; opacity:.8; text-decoration:line-through; }
+.cam .act-li .lv { font-size:10px; font-weight:800; padding:1px 8px; border-radius:99px; margin-left:6px; text-decoration:none; display:inline-block; } .cam .act-li .lv.h { background:#fee2e2; color:#b91c1c; } .cam .act-li .lv.m { background:#fef3c7; color:#b45309; }
+.cam textarea { width:100%; min-height:70px; border:1px solid #d1d5db; border-radius:8px; padding:8px 10px; font:inherit; } .cam .saved-note { font-size:11.5px; color:#6b7280; margin-top:4px; }
 .cam .none { padding:30px; text-align:center; color:#6b7280; }
 .cam .an { padding:14px 20px 24px; } .cam .grid2 { display:grid; grid-template-columns:1.25fr 1fr; gap:14px; align-items:start; } @media (max-width:980px) { .cam .grid2 { grid-template-columns:1fr; } }
 .cam .pan { border:1px solid #e5e7eb; border-radius:12px; padding:12px 14px; margin-bottom:14px; background:#fff; } .cam .pan h4 { margin:0 0 8px; font-size:13px; font-weight:800; color:#134e4a; }
@@ -468,7 +504,31 @@ include 'header.php';
 
 <script>
 (function(){
-  var ROWS = [], VIEW = [], TAB = 'all', CUR = -1, HT = 'bills', FILE = '', LOADED = '';
+  var ROWS = [], VIEW = [], TAB = 'all', CUR = -1, HT = 'bills', FILE = '', LOADED = '', CUR_ID = 0, PERSIST_T = null;
+  /* ── DO NOT ISSUE marks + recommended actions (kept in each row's .dec; saved with the report) ── */
+  function dec(r){ if(!r.dec) r.dec={no_issue:0,done:{},note:''}; if(!r.dec.done) r.dec.done={}; return r.dec; }
+  function acts(r){
+    if(!r.found) return []; var A=[], band=(r.band==='HIGH'||r.band==='CRITICAL');
+    if(r.bl) A.push({k:'bl',l:'h',t:'Blacklisted'+(r.bl_type_lbl?' ('+r.bl_type_lbl+')':'')+' — keep blocked; do NOT issue items until management clears it'});
+    if(r.ret_open>0) A.push({k:'ret',l:'h',t:'Collect the unsettled returned / sent-back cheques (Rs. '+money(r.ret_open)+') before any new issue'});
+    if(r.outstanding>0&&r.oldest_age>=60) A.push({k:'od',l:'h',t:'Recover the overdue bills — Rs. '+money(r.outstanding)+' outstanding, oldest '+r.oldest_age+' days. No new issue until paid'});
+    if(r.util!=null&&r.util>=100) A.push({k:'lim',l:'h',t:'Credit limit exceeded ('+r.util+'% used) — stop further credit; cash only'});
+    if(r.policy!=='none'&&r.viol>=3) A.push({k:'viol',l:'m',t:(r.policy==='cheque'?'Cheque':'Credit')+' policy violated '+r.viol+' times — move to cash on delivery or shorten the policy days'});
+    if(r.chq_pol>0) A.push({k:'chq',l:'m',t:r.chq_pol+' cheque(s) beyond the policy (worst +'+r.chq_breach+' days) — accept only cash / cleared cheques'});
+    if(r.cwd&&r.outstanding>0) A.push({k:'cwd',l:'m',t:'Cheques-will-delay customer with Rs. '+money(r.outstanding)+' open — follow up the cheque realization'});
+    if(r.days_since!=null&&r.days_since>=30&&r.outstanding>0) A.push({k:'pay',l:'m',t:'No payment for '+r.days_since+' days — visit the outlet and collect'});
+    if(r.canc_v>=20000) A.push({k:'canc',l:'m',t:'High cancelled bills (Rs. '+money(r.canc_v)+') — review with the sales rep'});
+    if(band) A.push({k:'esc',l:'h',t:r.band+' risk ('+r.risk+') — escalate to the credit controller / manager before issuing anything'});
+    return A;
+  }
+  function suggest(r){ return !!(r.found&&(r.bl||r.band==='CRITICAL'||(r.ret_open>0&&r.oldest_age>=30)||(r.util!=null&&r.util>=100&&r.oldest_age>=60))); }
+  function persist(){
+    var info=$('caMarkInfo');
+    if(!CUR_ID){ info.textContent='Marks are kept in this analysis — press “Save report” to keep them.'; return; }
+    info.textContent='Saving marks…'; clearTimeout(PERSIST_T);
+    PERSIST_T=setTimeout(function(){ var m={}; ROWS.forEach(function(r){ if(r.found&&r.dec) m[r.code]=r.dec; });
+      post('update_decisions',{id:CUR_ID,dec:JSON.stringify(m)}).then(function(res){ info.textContent=res.success?'Marks saved ✓':'Could not save marks: '+(res.message||''); }).catch(function(){ info.textContent='Could not save marks (connection).'; }); },500);
+  }
   var $ = function(id){ return document.getElementById(id); };
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function money(v){ return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -498,14 +558,15 @@ include 'header.php';
     post('analyze',{rows:JSON.stringify(parsed)}).then(function(res){
       b.disabled=false;
       if(!res.success){ $('caStatus').textContent=res.message||'Analysis failed.'; return; }
-      ROWS=res.rows; LOADED=''; $('caName').value=(FILE||'Analysis').replace(/\.xlsx?$/i,'')+' — '+new Date().toLocaleDateString('en-GB'); $('caTitle').textContent='Analysis as at '+fd(res.as_at);
+      ROWS=res.rows; LOADED=''; CUR_ID=0; $('caMarkInfo').textContent=''; $('caName').value=(FILE||'Analysis').replace(/\.xlsx?$/i,'')+' — '+new Date().toLocaleDateString('en-GB'); $('caTitle').textContent='Analysis as at '+fd(res.as_at);
       $('caStatus').textContent='Done — '+ROWS.length+' outlets analysed.'; show();
     }).catch(function(){ b.disabled=false; $('caStatus').textContent='Connection problem — try again.'; });
   });
 
   /* ── 2. results ── */
-  var TABS=[['all','All'],['bl','Blacklisted'],['cwd','Cheques will delay'],['ret','Returned cheques'],['viol','Policy violated'],['risk','High / critical risk'],['out','Outstanding'],['nf','Not in system']];
+  var TABS=[['all','All'],['ni','DO NOT ISSUE (marked)'],['sg','Suggested to stop issue'],['bl','Blacklisted'],['cwd','Cheques will delay'],['ret','Returned cheques'],['viol','Policy violated'],['risk','High / critical risk'],['out','Outstanding'],['nf','Not in system']];
   function test(r,t){ if(t==='all') return true; if(t==='nf') return !r.found; if(!r.found) return false;
+    if(t==='ni') return !!dec(r).no_issue; if(t==='sg') return suggest(r)&&!dec(r).no_issue;
     return t==='bl'?r.bl:(t==='cwd'?r.cwd:(t==='ret'?r.ret_n>0:(t==='viol'?r.viol>0:(t==='risk'?(r.band==='HIGH'||r.band==='CRITICAL'):(t==='out'?r.outstanding>0:true))))); }
   function show(){ $('caResult').style.display='block'; kpis(); tabs(); draw(); }
   function kpis(){
@@ -525,11 +586,12 @@ include 'header.php';
     var q=$('caQ').value.trim().toLowerCase(); VIEW=[];
     var h=''; ROWS.forEach(function(r,i){
       if(!test(r,TAB)) return; if(q && (r.code+' '+(r.name||'')+' '+r.file_name+' '+r.sr).toLowerCase().indexOf(q)<0) return; VIEW.push(i);
-      if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="11"><span class="b grey">Not found in the system</span></td></tr>'; return; }
+      if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="12"><span class="b grey">Not found in the system</span></td></tr>'; return; }
       var pm=PM[r.pm]||['grey',r.pm||'—'], pol=r.policy==='cheque'?'Cheque policy':(r.policy==='credit'?'Credit policy':'—');
       var rk=(r.risk==null)?'<span style="color:#d1d5db">—</span>':'<span class="b '+(BAND[r.band]||'grey')+'">'+r.risk+' · '+r.band+'</span>';
       var bl=r.bl?'<span class="b red" title="'+esc(r.bl_reason||'')+'">BLACKLISTED</span>'+(r.bl_type_lbl?'<br><small style="color:#b91c1c;font-weight:700">'+esc(r.bl_type_lbl)+'</small>':'')+(r.bl_reason?'<br><small style="color:#b91c1c">'+esc(String(r.bl_reason).slice(0,60))+(String(r.bl_reason).length>60?'…':'')+'</small>':'<br><small style="color:#b91c1c">no reason recorded</small>'):'<span style="color:#d1d5db">—</span>';
-      h+='<tr class="'+(r.bl?'bl':'')+'" data-i="'+i+'"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l"><b>'+esc(r.name||r.file_name)+'</b>'+(r.name&&r.file_name&&r.name.toLowerCase()!==r.file_name.toLowerCase()?'<br><small style="color:#9ca3af">file: '+esc(r.file_name)+'</small>':'')+'</td>'
+      var D=dec(r), sg=suggest(r)&&!D.no_issue, na=acts(r).length;
+      h+='<tr class="'+(D.no_issue?'noi':(sg?'sug':(r.bl?'bl':'')))+'" data-i="'+i+'"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l"><b>'+esc(r.name||r.file_name)+'</b>'+(r.name&&r.file_name&&r.name.toLowerCase()!==r.file_name.toLowerCase()?'<br><small style="color:#9ca3af">file: '+esc(r.file_name)+'</small>':'')+'</td>'
        +'<td>'+bl+'</td>'
        +'<td><span class="b '+pm[0]+'">'+esc(pm[1])+'</span>'+(r.pm==='credit'||r.pm==='cheque'?'<br><small style="color:#6b7280">'+r.days+' days</small>':'')+'</td>'
        +'<td>'+(r.cwd?'<span class="b amber">CHEQUES WILL DELAY</span>':'<span style="color:#d1d5db">—</span>')+'</td>'
@@ -540,11 +602,15 @@ include 'header.php';
        +'<td>'+pol+'</td>'
        +'<td>'+(r.policy==='none'?'<span style="color:#d1d5db">n/a</span>':(r.viol>0?'<span class="b red">VIOLATED × '+r.viol+'</span><br><small style="color:#b91c1c">max +'+r.max_over+'d'+(r.cur_over?' · '+r.cur_over+' overdue now':'')+'</small>':'<span class="b green">No violation</span>'))+'</td>'
        +'<td>'+rk+'</td>'
+       +'<td><div class="ni-wrap"><input type="checkbox" class="ni" data-n="'+i+'" '+(D.no_issue?'checked':'')+' title="Do not issue items to this customer again">'+(D.no_issue?'<small style="color:#9f1239">DO NOT ISSUE</small>':(sg?'<small style="color:#b45309">⚠ suggested</small>':''))+(na?'<small style="color:#6b7280">'+na+' action'+(na>1?'s':'')+'</small>':'')+'</div></td>'
        +'<td><button class="btn light" style="height:30px;padding:0 12px" data-h="'+i+'"><i class="fa-solid fa-chart-line"></i> Analyze</button></td></tr>';
     });
     $('caBody').innerHTML=h; $('caEmpty').style.display=VIEW.length?'none':'block';
   }
   $('caBody').addEventListener('click',function(e){ var b=e.target.closest('[data-h]'); if(b) openH(parseInt(b.dataset.h,10)); });
+  $('caBody').addEventListener('change',function(e){ var c=e.target.closest('.ni'); if(!c) return; dec(ROWS[parseInt(c.dataset.n,10)]).no_issue=c.checked?1:0; persist(); tabs(); draw(); });
+  $('caMarkSug').addEventListener('click',function(){ var n=0; ROWS.forEach(function(r){ if(suggest(r)&&!dec(r).no_issue){ dec(r).no_issue=1; n++; } }); persist(); tabs(); draw(); if(!n) $('caMarkInfo').textContent='No suggested customers to mark.'; });
+  $('caClearMarks').addEventListener('click',function(){ if(!confirm('Clear every DO NOT ISSUE mark in this report?')) return; ROWS.forEach(function(r){ if(r.dec) r.dec.no_issue=0; }); persist(); tabs(); draw(); });
 
   /* ── 3. history modal ── */
   function foundList(){ return VIEW.filter(function(i){ return ROWS[i].found; }); }
@@ -577,6 +643,17 @@ include 'header.php';
       +'<div class="kv"><span>Returned / sent-back cheques</span><b>'+r.rt_n+' returned ('+r.rt_open+' open) · '+r.sb_n+' sent back ('+r.sb_open+' open)</b></div></div></div></div></div>';
     return h;
   }
+  function actionsHtml(r){
+    var D=dec(r), A=acts(r), sg=suggest(r), h='<div class="an">';
+    h+=D.no_issue?'<div class="act-ban stop">🚫 DO NOT ISSUE items to this customer again'+(D.by?' — marked by '+esc(D.by)+(D.at?' · '+esc(D.at):''):'')+'</div>'
+        :(sg?'<div class="act-ban sug">⚠ The analysis suggests stopping issue to this customer (risk '+r.risk+' · '+r.band+(r.bl?' · blacklisted':'')+').</div>':'<div class="act-ban ok">✔ No stop-issue is suggested for this customer.</div>');
+    h+='<label class="big-cb"><input type="checkbox" id="hNi" '+(D.no_issue?'checked':'')+'> Do not issue items to this customer again</label><div class="saved-note" style="margin-bottom:14px">'+(CUR_ID?'Saved with this report automatically.':'Press “Save report” on the page to keep this decision.')+'</div>';
+    h+='<h4 style="margin:6px 0 8px;font-size:13px;color:#134e4a">Actions to do for this customer</h4>';
+    h+=A.length?A.map(function(a){ var dn=!!D.done[a.k]; return '<label class="act-li'+(dn?' done':'')+'"><input type="checkbox" class="hDone" data-k="'+a.k+'" '+(dn?'checked':'')+'><span>'+esc(a.t)+'<span class="lv '+(a.l==='h'?'h':'m')+'">'+(a.l==='h'?'URGENT':'FOLLOW UP')+'</span></span></label>'; }).join('')
+        :'<div class="none" style="padding:14px">No actions needed — this customer looks fine.</div>';
+    h+='<h4 style="margin:14px 0 6px;font-size:13px;color:#134e4a">Note</h4><textarea id="hNote" placeholder="e.g. spoke to the owner, promised payment on 15th…">'+esc(D.note||'')+'</textarea></div>';
+    return h;
+  }
   function showH(i){
     CUR=i; var r=ROWS[i], list=foundList(), pos=list.indexOf(i);
     $('hName').textContent=(r.name||r.file_name)+' ('+r.t_code+')';
@@ -590,6 +667,7 @@ include 'header.php';
     [].forEach.call(document.querySelectorAll('.cam .tabs2 button'),function(b){ b.classList.toggle('on',b.dataset.t===HT); });
     var h='';
     if(HT==='ana'){ h=analysisHtml(r); }
+    else if(HT==='act'){ h=actionsHtml(r); }
     else if(HT==='bills'){
       h='<table><thead><tr><th>#</th><th class="l">Invoice</th><th>Delivery date</th><th>Policy due date</th><th>Paid on</th><th>Days over policy</th><th>Policy</th><th>Net (Rs.)</th><th>Balance (Rs.)</th></tr></thead><tbody>';
       r.bills.forEach(function(b,k){ var st=r.policy==='none'?'<span class="b green">n/a</span>':(b.v?'<span class="b red">VIOLATED</span>':'<span class="b green">Within policy</span>');
@@ -603,6 +681,10 @@ include 'header.php';
         h+='</tbody></table>'; }
     }
     $('hBody').innerHTML=h;
+    if(HT==='act'){ var D=dec(r);
+      $('hNi').onchange=function(){ D.no_issue=this.checked?1:0; persist(); tabs(); draw(); showH(CUR); };
+      [].forEach.call(document.querySelectorAll('.hDone'),function(c){ c.onchange=function(){ if(c.checked) D.done[c.dataset.k]=1; else delete D.done[c.dataset.k]; persist(); c.closest('.act-li').classList.toggle('done',c.checked); }; });
+      $('hNote').onchange=function(){ D.note=this.value; persist(); }; }
   }
   [].forEach.call(document.querySelectorAll('.cam .tabs2 button'),function(b){ b.onclick=function(){ HT=b.dataset.t; showH(CUR); }; });
   function step(d){ var l=foundList(), p=l.indexOf(CUR)+d; if(p>=0&&p<l.length) showH(l[p]); }
@@ -622,7 +704,7 @@ include 'header.php';
   $('caSaved').addEventListener('click',function(e){
     var o=e.target.closest('[data-open]'), d=e.target.closest('[data-del]');
     if(o){ fetch('customer_analysis_report.php?ajax=load&id='+o.dataset.open,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(res){
-        if(!res.success){ alert(res.message||'Could not open.'); return; } ROWS=res.rows; TAB='all'; LOADED=res.name; FILE=res.file||''; $('caName').value=res.name;
+        if(!res.success){ alert(res.message||'Could not open.'); return; } ROWS=res.rows; TAB='all'; LOADED=res.name; FILE=res.file||''; CUR_ID=res.id||0; $('caMarkInfo').textContent=''; $('caName').value=res.name;
         $('caTitle').textContent='Saved report: '+res.name+' · analysed '+fd(res.as_at)+' · by '+(res.by||''); show(); window.scrollTo({top:0,behavior:'smooth'}); }); }
     if(d){ if(!confirm('Delete the saved report "'+d.dataset.nm+'"? This cannot be undone.')) return;
       post('delete_report',{id:d.dataset.del}).then(function(res){ if(res.success) loadSaved(); else alert(res.message||'Could not delete.'); }); }
@@ -630,14 +712,15 @@ include 'header.php';
   $('caSave').addEventListener('click',function(){
     var n=$('caName').value.trim(); if(!n||!ROWS.length){ alert('Enter a report name first.'); return; }
     var b=this; b.disabled=true;
-    post('save_report',{name:n,file:FILE,rows:JSON.stringify(ROWS)}).then(function(res){ b.disabled=false; if(res.success){ $('caStatus').textContent='Report saved.'; loadSaved(); } else alert(res.message||'Could not save.'); })
+    post('save_report',{name:n,file:FILE,rows:JSON.stringify(ROWS)}).then(function(res){ b.disabled=false; if(res.success){ CUR_ID=res.id||0; LOADED=n; $('caStatus').textContent='Report saved — marks and actions are now saved automatically.'; $('caMarkInfo').textContent=''; loadSaved(); } else alert(res.message||'Could not save.'); })
       .catch(function(){ b.disabled=false; alert('Connection problem — try again.'); });
   });
 
   /* ── 5. Excel export of what is analysed ── */
   $('caXls').addEventListener('click',function(){
     if(!ROWS.length) return;
-    var slim=ROWS.map(function(r){ if(!r.found) return {sr:r.sr,code:r.code,file_name:r.file_name,found:false}; var o={}; Object.keys(r).forEach(function(k){ if(k!=='bills'&&k!=='cheques'&&k!=='crit'&&k!=='aging_lbl') o[k]=r[k]; }); return o; });
+    var slim=ROWS.map(function(r){ if(!r.found) return {sr:r.sr,code:r.code,file_name:r.file_name,found:false}; var o={}; Object.keys(r).forEach(function(k){ if(k!=='bills'&&k!=='cheques'&&k!=='crit'&&k!=='aging_lbl'&&k!=='dec') o[k]=r[k]; }); var D=dec(r), A=acts(r);
+      o.ni=D.no_issue?1:0; o.sg=suggest(r)?1:0; o.acts=A.map(function(a){ return a.t; }); o.acts_done=A.filter(function(a){ return D.done[a.k]; }).map(function(a){ return a.t; }); o.note=D.note||''; return o; });
     var viol=[]; ROWS.forEach(function(r){ if(r.found) (r.bills||[]).forEach(function(b){ if(b.v) viol.push({code:r.code,name:r.name,policy:r.policy==='cheque'?'Cheque':'Credit',inv:b.inv,del:b.del,due:b.due,paid:b.paid||'UNPAID',over:b.over,net:b.net,bal:b.bal}); }); });
     var f=document.createElement('form'); f.method='POST'; f.action='customer_analysis_report.php'; f.style.display='none';
     [['action','export_report'],['title',LOADED||($('caName').value||'Analyze the Customers')],['as_at',new Date().toISOString().slice(0,10)],['rows',JSON.stringify(slim)],['viol',JSON.stringify(viol)]].forEach(function(p){ var i=document.createElement('input'); i.type='hidden'; i.name=p[0]; i.value=p[1]; f.appendChild(i); });
