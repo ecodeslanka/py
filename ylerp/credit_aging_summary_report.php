@@ -36,8 +36,8 @@ $HAS_CWD = rx_has_col($conn, 'customers', 'cheques_will_delay');
 /* ── sets ── */
 $GROUPS = [
     'credit' => ['label' => 'Credit customers',          'exceed' => 'Credit policy exceeded',         'icon' => 'fa-credit-card',     'color' => '#2563eb', 'bg' => '#eff6ff', 'view' => 'pay_mode=credit', 'test' => true],
-    'cheque' => ['label' => 'Cheque customers (only)',   'exceed' => 'Cheque policy exceeded',         'icon' => 'fa-money-check',     'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
-    'cwd'    => ['label' => 'Cheques will delay',        'exceed' => 'Cheques-will-delay exceeded',    'icon' => 'fa-hourglass-half',  'color' => '#d97706', 'bg' => '#fffbeb', 'view' => 'pay_mode=cwd',    'test' => true],
+    'cheque' => ['label' => 'Cheque customers (only)',   'exceed' => 'Cheque policy exceeded',  'unit' => 'cheques',       'icon' => 'fa-money-check',     'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
+    'cwd'    => ['label' => 'Cheques will delay',        'exceed' => 'Cheques-will-delay exceeded',  'unit' => 'cheques',  'icon' => 'fa-hourglass-half',  'color' => '#d97706', 'bg' => '#fffbeb', 'view' => 'pay_mode=cwd',    'test' => true],
     'cash'   => ['label' => 'Cash customers',            'exceed' => 'Cash policy exceeded',           'icon' => 'fa-money-bill-wave', 'color' => '#15803d', 'bg' => '#f0fdf4', 'view' => 'pay_mode=cash',   'test' => true],
 ];
 $S = [];
@@ -71,6 +71,7 @@ if ($res) while ($r = mysqli_fetch_assoc($res)) {
     elseif ($mode === 'cheque')         $k = 'cheque';
     elseif ($mode === 'cash')           $k = 'cash';
     else                                continue;      // pay mode not set → not part of this report
+    if ($k === 'cheque' || $k === 'cwd') continue;     // the CHEQUE side comes from the cheque aging (below), not from the bills
     $del = $r['delivery_date'] ? strtotime($r['delivery_date']) : $as_at_ts;
     $over = (int)floor(($as_at_ts - ($del + (int)$r['credit_days'] * 86400)) / 86400);   // days past the policy due date
     $tc = (string)$r['t_code'];
@@ -86,6 +87,49 @@ if ($res) while ($r = mysqli_fetch_assoc($res)) {
     $cu['bills'][] = ['inv' => (string)$r['invoice_num'], 'del' => $r['delivery_date'], 'due' => date('Y-m-d', $del + (int)$r['credit_days'] * 86400),
                       'bal' => round($bal, 2), 'over' => $over, 'ex' => $exceeded ? 1 : 0,
                       'route' => (string)$r['route'], 'sr' => (string)$r['sr_code'], 'days' => (int)$r['credit_days']];
+    unset($cu);
+}
+
+/* ── CHEQUE side — taken from the Cheque Aging Report ──
+   Unsettled cheques of cheque customers (cleared and fully-settled returned / sent-back cheques are left out).
+   Cheque age = cheque date − delivery date;  CHEQUE POLICY EXCEEDED when the age is more than the customer's policy days
+   (the same rule the Cheque Aging Report paints red).  The credit side above stays bill / credit-policy based. */
+$cw = ["fs.delivery_date IS NOT NULL", "fs.delivery_date != '0000-00-00'", "fs.delivery_date <= '" . mysqli_real_escape_string($conn, $f_as_at) . "'",
+       "ch.status != 'cleared'", "NOT (ch.status = 'sent_back' AND COALESCE(ch.sb_settled,0) = 1)", "NOT (ch.status = 'returned' AND COALESCE(ch.return_settled,0) = 1)",
+       "LOWER(TRIM(COALESCE(c.payment_mode,''))) = 'cheque'"];
+if ($f_route !== '') $cw[] = "fs.route = '" . mysqli_real_escape_string($conn, $f_route) . "'";
+if ($f_sr !== '')    $cw[] = "fs.sr_code = '" . mysqli_real_escape_string($conn, $f_sr) . "'";
+$cres = mysqli_query($conn, "
+SELECT ch.cheque_no, ch.cheque_date, ch.total_amount, ch.status, ch.bank_code, ch.t_code, fs.delivery_date, fs.route, fs.sr_code,
+       COALESCE(NULLIF(fsd.customer_name,''), c.shop_name, ch.t_code) AS customer_name, COALESCE(c.credit_days, 0) AS credit_days,
+       " . ($HAS_CWD ? "COALESCE(c.cheques_will_delay,0)" : "0") . " AS cwd,
+       COALESCE(ch.sb_settlement_amount,0) AS sb_paid, COALESCE(ch.settlement_amount,0) AS ret_paid,
+       DATEDIFF(ch.cheque_date, fs.delivery_date) AS age_days
+FROM cheques ch
+INNER JOIN invoice_payments ip ON ip.id = ch.invoice_payment_id
+INNER JOIN field_summary fs ON fs.id = ip.field_summary_id
+LEFT  JOIN field_summary_details fsd ON fsd.id = ip.field_summary_detail_id
+LEFT  JOIN customers c ON c.t_code = ch.t_code
+WHERE " . implode(' AND ', $cw));
+if ($cres) while ($r = mysqli_fetch_assoc($cres)) {
+    $face = (float)$r['total_amount']; $st = strtolower(trim((string)$r['status']));
+    $amt = ($st === 'sent_back') ? max(0, $face - (float)$r['sb_paid']) : (($st === 'returned') ? max(0, $face - (float)$r['ret_paid']) : $face);
+    if ($amt <= 0.004) continue;
+    $k = ((int)$r['cwd'] === 1) ? 'cwd' : 'cheque';
+    $days = (int)$r['credit_days']; $age = ($r['age_days'] !== null) ? (int)$r['age_days'] : 0;
+    $exceeded = ($days > 0 && $age > $days);
+    $over = $age - $days;                                              // days the cheque date is beyond the policy
+    $del = $r['delivery_date'] ? strtotime($r['delivery_date']) : $as_at_ts;
+    $tc = (string)$r['t_code'];
+    if (!isset($CUST[$tc])) $CUST[$tc] = ['t_code' => $tc, 'name' => $r['customer_name'], 'set' => $k, 'days' => $days, 'route' => $r['route'], 'sr' => $r['sr_code'],
+                                          'n' => 0, 'v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'max_over' => 0, 'oldest' => $r['delivery_date'], 'bills' => []];
+    $cu = &$CUST[$tc];
+    $cu['n']++; $cu['v'] += $amt;
+    if ($r['delivery_date'] && ($cu['oldest'] === null || $r['delivery_date'] < $cu['oldest'])) $cu['oldest'] = $r['delivery_date'];
+    if ($exceeded) { $cu['ex_n']++; $cu['ex_v'] += $amt; if ($over > $cu['max_over']) $cu['max_over'] = $over; }
+    $cu['bills'][] = ['inv' => (string)$r['cheque_no'], 'del' => $r['delivery_date'], 'due' => date('Y-m-d', $del + $days * 86400), 'bal' => round($amt, 2), 'over' => $over, 'ex' => $exceeded ? 1 : 0,
+                      'route' => (string)$r['route'], 'sr' => (string)$r['sr_code'], 'days' => $days,
+                      'chq' => 1, 'cdate' => $r['cheque_date'], 'age' => $age, 'bank' => (string)$r['bank_code'], 'cst' => $st];
     unset($cu);
 }
 
@@ -154,17 +198,18 @@ if (isset($_GET['export'])) {
 
     /* Sheet 2 — invoice wise (every bill, with its set and status) */
     $bs = $X->sheet('Invoices');
-    foreach (['Set', 'T code', 'Customer', 'Invoice', 'Route', 'SR', 'Delivery date', 'Policy days', 'Policy due date', 'Days over policy', 'Status', 'Balance (Rs.)'] as $i => $h) $bs->set(1, $i + 1, $h, $H);
+    foreach (['Set', 'T code', 'Customer', 'Invoice / Cheque no', 'Route', 'SR', 'Delivery date', 'Policy days', 'Policy due date', 'Days over policy', 'Status', 'Balance / Cheque amount (Rs.)', 'Cheque date', 'Cheque age (days)', 'Bank', 'Cheque status'] as $i => $h) $bs->set(1, $i + 1, $h, $H);
     $r = 2;
     foreach ($SETBILLS as $k => $list) foreach ($list as $b) {
         $ex = (bool)$b['ex']; $bg = $ex ? ['bg' => 'FEF2F2'] : [];
         $vals = [$GROUPS[$k]['label'], $b['t'], $b['n'], $b['inv'], $b['route'], $b['sr'], $b['del'] ? date('d M Y', strtotime($b['del'])) : '', $b['days'],
-                 $GROUPS[$k]['test'] ? date('d M Y', strtotime($b['due'])) : '', $GROUPS[$k]['test'] ? $b['over'] : '', !$GROUPS[$k]['test'] ? 'Normal' : ($ex ? 'Exceeded' : 'Within policy'), $b['bal']];
+                 $GROUPS[$k]['test'] ? date('d M Y', strtotime($b['due'])) : '', $GROUPS[$k]['test'] ? $b['over'] : '', !$GROUPS[$k]['test'] ? 'Normal' : ($ex ? 'Exceeded' : 'Within policy'), $b['bal'],
+                 !empty($b['chq']) && $b['cdate'] ? date('d M Y', strtotime($b['cdate'])) : '', !empty($b['chq']) ? $b['age'] : '', !empty($b['chq']) ? $b['bank'] : '', !empty($b['chq']) ? ucwords(str_replace('_', ' ', (string)$b['cst'])) : ''];
         foreach ($vals as $i => $v) $bs->set($r, $i + 1, $v, ['border' => 1] + $bg + ($i === 10 ? ['b' => 1, 'color' => $ex ? 'B91C1C' : '15803D', 'h' => 'center'] : []) + ($i === 11 ? ['h' => 'right'] : []));
         $r++;
     }
-    foreach ([26, 11, 34, 16, 12, 10, 14, 11, 15, 14, 14, 16] as $i => $w) $bs->widths[$i + 1] = $w;
-    $bs->freeze = [1, 0]; $bs->filter = 'A1:L' . max(2, $r - 1);
+    foreach ([26, 11, 34, 18, 12, 10, 14, 11, 15, 14, 14, 20, 14, 12, 10, 16] as $i => $w) $bs->widths[$i + 1] = $w;
+    $bs->freeze = [1, 0]; $bs->filter = 'A1:P' . max(2, $r - 1);
 
     $tmp = tempnam(sys_get_temp_dir(), 'cs'); $X->save($tmp);
     while (ob_get_level()) ob_end_clean();
@@ -186,7 +231,7 @@ $ac = []; foreach ($S as $s) $ac += $s['customers'];
 $ex_c = []; foreach ($S as $s) $ex_c += $s['ex_customers'];
 /* data for the modal: one entry per set */
 $MODAL = [];
-foreach ($GROUPS as $k => $g) $MODAL[] = ['k' => $k, 'g' => ['label' => $g['label'], 'exceed' => $g['exceed'], 'test' => $g['test'], 'color' => $g['color']], 's' => [
+foreach ($GROUPS as $k => $g) $MODAL[] = ['k' => $k, 'g' => ['label' => $g['label'], 'exceed' => $g['exceed'], 'test' => $g['test'], 'color' => $g['color'], 'chq' => !empty($g['unit'])], 's' => [
     'n' => $S[$k]['n'], 'v' => round($S[$k]['v'], 2), 'ex_n' => $S[$k]['ex_n'], 'ex_v' => round($S[$k]['ex_v'], 2), 'cust' => count($S[$k]['customers'])], 'bills' => $SETBILLS[$k] ?? []];
 include 'header.php';
 ?>
@@ -260,13 +305,13 @@ include 'header.php';
                 <th colspan="3" class="ex">Customers exceeded</th><th colspan="3" class="ok">Customers not exceeded</th>
                 <th colspan="2">All credit bills</th><th colspan="2" class="ok">Normal / within policy</th><th colspan="2" class="ex">Policy exceeded</th>
             </tr>
-            <tr><th class="ex2">Customers</th><th class="ex2">Bills</th><th class="ex2">Value (Rs.)</th><th class="ok2">Customers</th><th class="ok2">Bills</th><th class="ok2">Value (Rs.)</th>
-                <th class="sub2">Bills</th><th class="sub2">Value (Rs.)</th><th class="ok2">Bills</th><th class="ok2">Value (Rs.)</th><th class="ex2">Bills</th><th class="ex2">Value (Rs.)</th></tr>
+            <tr><th class="ex2">Customers</th><th class="ex2">Bills / Chq</th><th class="ex2">Value (Rs.)</th><th class="ok2">Customers</th><th class="ok2">Bills / Chq</th><th class="ok2">Value (Rs.)</th>
+                <th class="sub2">Bills / Chq</th><th class="sub2">Value (Rs.)</th><th class="ok2">Bills / Chq</th><th class="ok2">Value (Rs.)</th><th class="ex2">Bills / Chq</th><th class="ex2">Value (Rs.)</th></tr>
         </thead>
         <tbody>
         <?php $mi = 0; foreach ($GROUPS as $k => $g): $s = $S[$k]; ?>
             <tr class="clk" data-i="<?= $mi++ ?>" title="Click to see the invoices">
-                <td class="l"><div class="gname"><i class="fa-solid <?= $g['icon'] ?>" style="background:<?= $g['bg'] ?>;color:<?= $g['color'] ?>"></i><?= cas_h($g['label']) ?></div></td>
+                <td class="l"><div class="gname"><i class="fa-solid <?= $g['icon'] ?>" style="background:<?= $g['bg'] ?>;color:<?= $g['color'] ?>"></i><span><?= cas_h($g['label']) ?><?php if (!empty($g['unit'])): ?><small style="display:block;font-weight:600;color:#7c3aed;font-size:10.5px">by cheque aging · cheques</small><?php else: ?><small style="display:block;font-weight:600;color:#6b7280;font-size:10.5px">by bills · credit policy</small><?php endif; ?></span></div></td>
                 <td class="c"><span class="ptest <?= $g['test'] ? 'ex' : 'normal' ?>"><?= cas_h($g['exceed']) ?></span></td>
                 <td class="c"><?= number_format(count($s['customers'])) ?></td>
                 <td class="c <?= $s['cx_c'] ? 'exv' : 'na' ?>"><?= number_format($s['cx_c']) ?></td><td class="<?= $s['cx_c'] ? 'exv' : 'na' ?>"><?= number_format($s['cx_n']) ?></td><td class="<?= $s['cx_c'] ? 'exv' : 'na' ?>"><?= cas_money($s['cx_v']) ?></td>
@@ -287,7 +332,8 @@ include 'header.php';
         </tr></tfoot>
     </table>
     </div>
-    <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. “Cheques will delay” customers are counted only in their own row. Customers with no pay mode set are not part of this report.</p>
+    <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. “Cheques will delay” customers are counted only in their own row. Customers with no pay mode set are not part of this report.
+    <br><b>Cheque customers and Cheques-will-delay</b> are taken from the <b>Cheque Aging Report</b>: unsettled cheques (cleared and settled returned / sent-back cheques left out); cheque age = cheque date − delivery date; <b>cheque policy exceeded</b> when the age is more than the customer's policy days. Their outstanding bills are not counted here — the Credit and Cash rows use the bills and the credit policy.</p>
 </div>
 
 <!-- invoices viewer: moved to <body> by the script so it always sits above the site header / sidebar -->
@@ -302,10 +348,10 @@ include 'header.php';
         <div class="sum" id="mSum"></div>
         <div class="bar">
             <div class="tabs" id="mTabs"><button type="button" data-f="all" class="on">All</button><button type="button" data-f="ex">Exceeded</button><button type="button" data-f="ok">Within policy</button></div>
-            <input type="search" id="mQ" placeholder="Search customer, T code or invoice">
+            <input type="search" id="mQ" placeholder="Search customer, T code, invoice or cheque no">
             <span class="hint" id="mShown"></span>
         </div>
-        <div class="tw"><table><thead><tr><th>#</th><th class="l">Customer</th><th class="l">Invoice</th><th>Route</th><th>SR</th><th>Delivery date</th><th>Policy days</th><th>Due date</th><th>Days over</th><th>Status</th><th>Balance (Rs.)</th></tr></thead><tbody id="mBills"></tbody></table></div>
+        <div class="tw"><table><thead id="mHead"></thead><tbody id="mBills"></tbody></table></div>
         <div class="foot"><a id="mOpen" class="btn" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square"></i> Open in Credit Aging Report</a><span class="hint">← → previous / next set · Esc closes</span></div>
     </div>
 </div>
@@ -346,29 +392,39 @@ include 'header.php';
     }).sort(function(a,b){ return (b.over||0)-(a.over||0); });
   }
   function draw(){
-    var d=DATA[cur], g=d.g, list=rows(), h='', tot=0;
+    var d=DATA[cur], g=d.g, list=rows(), h='', tot=0, chq=!!g.chq;
+    $('mHead').innerHTML = chq
+      ? '<tr><th>#</th><th class="l">Customer</th><th class="l">Cheque no</th><th>Bank</th><th>Chq status</th><th>Route</th><th>SR</th><th>Delivery date</th><th>Cheque date</th><th>Age (days)</th><th>Policy days</th><th>Days over policy</th><th>Policy</th><th>Amount (Rs.)</th></tr>'
+      : '<tr><th>#</th><th class="l">Customer</th><th class="l">Invoice</th><th>Route</th><th>SR</th><th>Delivery date</th><th>Policy days</th><th>Due date</th><th>Days over</th><th>Status</th><th>Balance (Rs.)</th></tr>';
     list.forEach(function(b,k){ tot+=b.bal;
-      h+='<tr class="'+(b.ex?'ex':'')+'"><td>'+(k+1)+'</td><td class="nm">'+esc(b.n)+'<small>'+esc(b.t)+'</small></td><td class="l"><b>'+esc(b.inv||'—')+'</b></td><td>'+esc(b.route||'')+'</td><td>'+esc(b.sr||'')+'</td>'
-        +'<td>'+fd(b.del)+'</td><td>'+(g.test?b.days+'d':'—')+'</td><td>'+(g.test?fd(b.due):'—')+'</td>'
-        +'<td style="font-weight:800;color:'+(b.ex?'#b91c1c':'#6b7280')+'">'+(g.test?(b.over>0?'+'+b.over+'d':b.over+'d'):'—')+'</td>'
-        +'<td><span class="st '+(b.ex?'bad':'good')+'">'+(!g.test?'Normal':(b.ex?'Exceeded':'Within policy'))+'</span></td><td class="r">'+money(b.bal)+'</td></tr>';
+      var nm='<td class="nm">'+esc(b.n)+'<small>'+esc(b.t)+'</small></td>', stc='<td><span class="st '+(b.ex?'bad':'good')+'">'+(!g.test?'Normal':(b.ex?'Exceeded':'Within policy'))+'</span></td>';
+      if(chq){
+        h+='<tr class="'+(b.ex?'ex':'')+'"><td>'+(k+1)+'</td>'+nm+'<td class="l"><b>'+esc(b.inv||'—')+'</b></td><td>'+esc(b.bank||'')+'</td><td style="text-transform:capitalize">'+esc(String(b.cst||'').replace('_',' '))+'</td><td>'+esc(b.route||'')+'</td><td>'+esc(b.sr||'')+'</td>'
+          +'<td>'+fd(b.del)+'</td><td>'+fd(b.cdate)+'</td><td style="font-weight:700">'+(b.age==null?'—':b.age+'d')+'</td><td>'+(b.days>0?b.days+'d':'—')+'</td>'
+          +'<td style="font-weight:800;color:'+(b.ex?'#b91c1c':'#6b7280')+'">'+(b.days>0?(b.over>0?'+'+b.over+'d':b.over+'d'):'—')+'</td>'+stc.replace('Within policy',b.days>0?'Within policy':'No policy')+'<td class="r">'+money(b.bal)+'</td></tr>';
+      } else {
+        h+='<tr class="'+(b.ex?'ex':'')+'"><td>'+(k+1)+'</td>'+nm+'<td class="l"><b>'+esc(b.inv||'—')+'</b></td><td>'+esc(b.route||'')+'</td><td>'+esc(b.sr||'')+'</td>'
+          +'<td>'+fd(b.del)+'</td><td>'+(g.test?b.days+'d':'—')+'</td><td>'+(g.test?fd(b.due):'—')+'</td>'
+          +'<td style="font-weight:800;color:'+(b.ex?'#b91c1c':'#6b7280')+'">'+(g.test?(b.over>0?'+'+b.over+'d':b.over+'d'):'—')+'</td>'+stc+'<td class="r">'+money(b.bal)+'</td></tr>';
+      }
     });
-    $('mBills').innerHTML=h||'<tr><td colspan="11" style="padding:28px;color:#6b7280">No invoices</td></tr>';
-    $('mShown').textContent=list.length+' invoice'+(list.length===1?'':'s')+' · Rs. '+money(tot);
+    $('mBills').innerHTML=h||'<tr><td colspan="14" style="padding:28px;color:#6b7280">No '+(chq?'cheques':'invoices')+'</td></tr>';
+    $('mShown').textContent=list.length+' '+(chq?'cheque':'invoice')+(list.length===1?'':'s')+' · Rs. '+money(tot);
   }
   function show(i){
     if(i<0||i>=DATA.length) return; cur=i; var d=DATA[i], g=d.g, s=d.s;
-    $('mName').textContent=g.label+' — invoices'; $('mSub').textContent=g.exceed+' · as at '+fd(AS_AT)+(ROUTE?' · route '+ROUTE:'')+(SR?' · SR '+SR:'');
+    $('mName').textContent=g.label+(g.chq?' — cheques (cheque aging)':' — invoices'); $('mSub').textContent=g.exceed+' · as at '+fd(AS_AT)+(ROUTE?' · route '+ROUTE:'')+(SR?' · SR '+SR:'');
     $('mCnt').textContent=(i+1)+' / '+DATA.length; $('mPrev').disabled=(i===0); $('mNext').disabled=(i===DATA.length-1);
-    $('mSum').innerHTML='<div><div class="l">Customers</div><div class="v">'+s.cust+'</div></div><div><div class="l">Credit bills</div><div class="v">'+s.n+'</div></div>'
+    $('mSum').innerHTML='<div><div class="l">Customers</div><div class="v">'+s.cust+'</div></div><div><div class="l">'+(g.chq?'Unsettled cheques':'Credit bills')+'</div><div class="v">'+s.n+'</div></div>'
       +'<div><div class="l">Total value</div><div class="v">Rs. '+money(s.v)+'</div></div>'
-      +'<div><div class="l">'+(g.test?'Exceeded bills':'Status')+'</div><div class="v" style="color:#b91c1c">'+(g.test?s.ex_n:'<span style="color:#15803d">Normal</span>')+'</div></div>'
+      +'<div><div class="l">'+(g.test?(g.chq?'Exceeded cheques':'Exceeded bills'):'Status')+'</div><div class="v" style="color:#b91c1c">'+(g.test?s.ex_n:'<span style="color:#15803d">Normal</span>')+'</div></div>'
       +'<div><div class="l">'+(g.test?'Exceeded value':'Policy test')+'</div><div class="v" style="color:#b91c1c">'+(g.test?'Rs. '+money(s.ex_v):'<span style="color:#15803d;font-size:13px">not tested (cash)</span>')+'</div></div>';
     [].forEach.call($('mTabs').children,function(b){ b.style.display=(!g.test&&b.dataset.f!=='all')?'none':''; });
     filt='all'; [].forEach.call($('mTabs').children,function(b){ b.classList.toggle('on',b.dataset.f==='all'); });
     $('mQ').value='';
     var pm={credit:'credit',cheque:'cheque',cwd:'cwd',cash:'cash'}[d.k]||'';
-    $('mOpen').href='credit_aging_report.php?as_at_date='+encodeURIComponent(AS_AT)+'&pay_mode='+pm+(ROUTE?'&route='+encodeURIComponent(ROUTE):'')+(SR?'&sr_code='+encodeURIComponent(SR):'');
+    if(g.chq){ $('mOpen').href='cheque_aging_report.php?as_at='+encodeURIComponent(AS_AT)+'&pay_mode=cheque'+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Cheque Aging Report'; }
+    else { $('mOpen').href='credit_aging_report.php?as_at_date='+encodeURIComponent(AS_AT)+'&pay_mode='+pm+(ROUTE?'&route='+encodeURIComponent(ROUTE):'')+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Credit Aging Report'; }
     draw();
   }
   function openAt(i){ $('casm').classList.add('open'); document.body.style.overflow='hidden'; show(i); }
