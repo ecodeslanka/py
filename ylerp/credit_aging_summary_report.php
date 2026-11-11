@@ -8,7 +8,7 @@
  *   1. Credit customers            → credit policy EXCEEDED      (customers.payment_mode = credit)
  *   2. Cheque customers (only)     → cheque policy EXCEEDED      (payment_mode = cheque, NOT "cheques will delay")
  *   3. Cheques-will-delay customers→ cheques-will-delay EXCEEDED (customers.cheques_will_delay = 1)
- *   4. Cash customers              → cash policy EXCEEDED        (payment_mode = cash)
+ *   4. Cash customers              → EVERY outstanding bill is a policy exceed (a cash customer should owe nothing)
  *
  * Click a set row → modal with that set's invoices and details.
  * A bill is "exceeded" when  as-at date − (delivery date + the customer's credit policy days) > 0
@@ -75,7 +75,9 @@ if ($res) while ($r = mysqli_fetch_assoc($res)) {
     if (!isset($CUST[$tc])) $CUST[$tc] = ['t_code' => $tc, 'name' => $r['customer_name'], 'set' => $k, 'days' => (int)$r['credit_days'], 'route' => $r['route'], 'sr' => $r['sr_code'],
                                           'n' => 0, 'v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'max_over' => 0, 'oldest' => $r['delivery_date'], 'bills' => []];
     $cu = &$CUST[$tc];
-    $exceeded = ($GROUPS[$k]['test'] && $over > 0);
+    /* Cash customers should not owe anything: EVERY outstanding bill of a cash customer is a policy exceed (whatever its age). */
+    if ($k === 'cash') $over = max($over, (int)floor(($as_at_ts - $del) / 86400));        // days since delivery
+    $exceeded = ($k === 'cash') ? true : ($GROUPS[$k]['test'] && $over > 0);
     $cu['n']++; $cu['v'] += $bal;
     if ($r['delivery_date'] && ($cu['oldest'] === null || $r['delivery_date'] < $cu['oldest'])) $cu['oldest'] = $r['delivery_date'];
     if ($exceeded) { $cu['ex_n']++; $cu['ex_v'] += $bal; if ($over > $cu['max_over']) $cu['max_over'] = $over; }
