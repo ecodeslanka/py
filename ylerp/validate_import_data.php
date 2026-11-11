@@ -103,6 +103,18 @@ if ($route_result) {
     }
 }
 
+// ── An Excel is already imported for this delivery date → block (the old one must be deleted first) ──
+$__dd = mysqli_real_escape_string($conn, $delivery_date);
+$__ex = mysqli_query($conn, "SELECT id, filename, imported_at FROM loading_summary_imports
+                             WHERE delivery_date = '$__dd' AND status IN ('completed','processing') ORDER BY id DESC LIMIT 1");
+if ($__ex && ($__row = mysqli_fetch_assoc($__ex))) {
+    echo json_encode(['success' => false, 'already_imported' => true, 'existing_id' => intval($__row['id']),
+        'message' => 'Permission denied: an Excel file has already been imported for the delivery date ' . date('d M Y', strtotime($delivery_date))
+                   . ' (' . $__row['filename'] . ', ' . date('d M Y H:i', strtotime($__row['imported_at'])) . '). You cannot import this date again. '
+                   . 'Please delete the old import (Create Field Summary → Delete) and import again.']);
+    exit;
+}
+
 // ── Check if a completed secondary import already exists for this date ───────
 $dd_escaped         = mysqli_real_escape_string($conn, $delivery_date);
 $existing_import_id = null;

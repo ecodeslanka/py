@@ -498,7 +498,8 @@ function validateAndPreview(data, deliveryDate) {
             skippedDuplicateCount = result.skipped_duplicates || 0;
             displayPreview(result);
         } else {
-            alert('Validation error: ' + result.message);
+            alert(result.already_imported ? ('\u26D4 ' + result.message) : ('Validation error: ' + result.message));
+            if (result.already_imported) { const f = document.getElementById('excel_file'); if (f) f.value = ''; }
         }
     })
     .catch(err => { hideLoader(); alert('Error: ' + err.message); });
