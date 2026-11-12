@@ -74,7 +74,6 @@ if ($res) while ($r = mysqli_fetch_assoc($res)) {
     if ($k === 'cheque' || $k === 'cwd') continue;     // the CHEQUE side comes from the cheque aging (below), not from the bills
     $del = $r['delivery_date'] ? strtotime($r['delivery_date']) : $as_at_ts;
     $over = (int)floor(($as_at_ts - ($del + (int)$r['credit_days'] * 86400)) / 86400);   // days past the policy due date
-    if ($k !== 'cash' && !($GROUPS[$k]['test'] && $over > 0)) continue;   // 0 / minus days = not exceeding → not in this report
     $tc = (string)$r['t_code'];
     if (!isset($CUST[$tc])) $CUST[$tc] = ['t_code' => $tc, 'name' => $r['customer_name'], 'set' => $k, 'days' => (int)$r['credit_days'], 'route' => $r['route'], 'sr' => $r['sr_code'],
                                           'n' => 0, 'v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'max_over' => 0, 'oldest' => $r['delivery_date'], 'bills' => []];
@@ -120,7 +119,6 @@ if ($cres) while ($r = mysqli_fetch_assoc($cres)) {
     $days = (int)$r['credit_days']; $age = ($r['age_days'] !== null) ? (int)$r['age_days'] : 0;
     $exceeded = ($days > 0 && $age > $days);
     $over = $age - $days;                                              // days the cheque date is beyond the policy
-    if (!$exceeded) continue;                                          // 0 / minus days = not exceeding → not in this report
     $del = $r['delivery_date'] ? strtotime($r['delivery_date']) : $as_at_ts;
     $tc = (string)$r['t_code'];
     if (!isset($CUST[$tc])) $CUST[$tc] = ['t_code' => $tc, 'name' => $r['customer_name'], 'set' => $k, 'days' => $days, 'route' => $r['route'], 'sr' => $r['sr_code'],
