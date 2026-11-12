@@ -505,8 +505,8 @@ include 'header.php';
                 <span id="caMarkInfo" style="font-size:12.5px;color:#6b7280"></span>
             </div>
             <div class="wrap"><table class="t"><thead><tr>
-                <th>#</th><th>NEW SR</th><th>Outlet code</th><th class="l">Outlet name</th><th>Blacklisted</th><th>Pay mode</th><th>Cheques will delay</th>
-                <th>This month sale (Rs.)<br><span style="font-weight:500;font-size:10px">secondary sales</span></th><th>3-month avg sale (Rs.)<br><span style="font-weight:500;font-size:10px">per month · last 3 full months</span></th><th>6-month avg sale (Rs.)<br><span style="font-weight:500;font-size:10px">per month · last 6 full months</span></th><th>BTG amount (Rs.)<br><span style="font-weight:500;font-size:10px">from Excel</span></th><th>Approved BTG (Rs.)<br><span style="font-weight:500;font-size:10px">type &amp; save</span></th><th>Total outstanding (Rs.)</th><th>Oldest bill</th><th>Returned cheques</th><th>Policy</th><th>Violated</th><th>Risk</th><th>Do not issue</th><th>Analysis</th></tr></thead>
+                <th>#</th><th>NEW SR</th><th>Outlet code</th><th class="l">Outlet name</th><th>Blacklisted</th><th>Pay mode</th>
+                <th>This month sale (Rs.)<br><span style="font-weight:500;font-size:10px">secondary sales</span></th><th>6-month avg sale (Rs.)<br><span style="font-weight:500;font-size:10px">per month · last 6 full months</span></th><th>3-month avg sale (Rs.)<br><span style="font-weight:500;font-size:10px">per month · last 3 full months</span></th><th>BTG amount (Rs.)<br><span style="font-weight:500;font-size:10px">from Excel</span></th><th>Approved BTG (Rs.)<br><span style="font-weight:500;font-size:10px">type &amp; save</span></th><th>Total outstanding (Rs.)</th><th>Oldest bill</th><th>Returned cheques</th><th>Policy</th><th>Violated</th><th>Risk</th><th>Do not issue</th><th>Analysis</th></tr></thead>
                 <tbody id="caBody"></tbody></table></div>
             <div class="empty" id="caEmpty" style="display:none">No customers match.</div>
         </div>
@@ -717,18 +717,17 @@ include 'header.php';
     var q=$('caQ').value.trim().toLowerCase(); VIEW=[];
     var h=''; ROWS.forEach(function(r,i){
       if(!test(r,TAB)) return; if(q && (r.code+' '+(r.name||'')+' '+r.file_name+' '+r.sr).toLowerCase().indexOf(q)<0) return; VIEW.push(i);
-      if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="16"><span class="b grey">Not found in the system</span></td></tr>'; return; }
+      if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="15"><span class="b grey">Not found in the system</span></td></tr>'; return; }
       var pm=PM[r.pm]||['grey',r.pm||'—'], pol=r.policy==='cheque'?'Cheque policy':(r.policy==='credit'?'Credit policy':'—');
       var rk=(r.risk==null)?'<span style="color:#d1d5db">—</span>':'<span class="b '+(BAND[r.band]||'grey')+'">'+r.risk+' · '+r.band+'</span>';
       var bl=r.bl?'<span class="b red" title="'+esc(r.bl_reason||'')+'">BLACKLISTED</span>'+(r.bl_type_lbl?'<br><small style="color:#b91c1c;font-weight:700">'+esc(r.bl_type_lbl)+'</small>':'')+(r.bl_reason?'<br><small style="color:#b91c1c">'+esc(String(r.bl_reason).slice(0,60))+(String(r.bl_reason).length>60?'…':'')+'</small>':'<br><small style="color:#b91c1c">no reason recorded</small>'):'<span style="color:#d1d5db">—</span>';
       var D=dec(r), sg=suggest(r)&&!D.no_issue, na=acts(r).length;
       h+='<tr class="'+(D.no_issue?'noi':(sg?'sug':(r.bl?'bl':'')))+'" data-i="'+i+'"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l"><b>'+esc(r.name||r.file_name)+'</b>'+(r.name&&r.file_name&&r.name.toLowerCase()!==r.file_name.toLowerCase()?'<br><small style="color:#9ca3af">file: '+esc(r.file_name)+'</small>':'')+'</td>'
        +'<td>'+bl+'</td>'
-       +'<td><span class="b '+pm[0]+'">'+esc(pm[1])+'</span>'+(r.pm==='credit'||r.pm==='cheque'?'<br><small style="color:#6b7280">'+r.days+' days</small>':'')+'</td>'
-       +'<td>'+(r.cwd?'<span class="b amber">CHEQUES WILL DELAY</span>':'<span style="color:#d1d5db">—</span>')+'</td>'
+       +'<td><span class="b '+pm[0]+'">'+esc(pm[1])+'</span>'+(r.pm==='credit'||r.pm==='cheque'?'<br><small style="color:#6b7280">'+r.days+' days</small>':'')+(r.cwd?'<br><span class="b amber" style="font-size:10px">CHEQUES WILL DELAY</span>':'')+'</td>'
        +'<td class="r" style="'+(r.sale_m>0?'color:#0f766e;font-weight:800':'color:#9ca3af')+'">'+(r.sale_m>0?money(r.sale_m)+'<br><small style="font-weight:600;color:#6b7280">'+r.sale_n+' bill'+(r.sale_n>1?'s':'')+'</small>':'0.00')+'</td>'
-       +'<td class="r" style="'+(r.avg3>0?'color:#0f766e;font-weight:700':'color:#9ca3af')+'">'+money(r.avg3||0)+'</td>'
        +'<td class="r" style="'+(r.avg6>0?'color:#0f766e;font-weight:700':'color:#9ca3af')+'">'+money(r.avg6||0)+'</td>'
+       +'<td class="r" style="'+(r.avg3>0?'color:#0f766e;font-weight:700':'color:#9ca3af')+'">'+money(r.avg3||0)+'</td>'
        +'<td class="r" style="'+(r.btg_x!=null?'color:#2563eb;font-weight:700':'color:#9ca3af')+'">'+(r.btg_x!=null?money(r.btg_x):'—')+'</td>'
        +'<td class="r btgc"><input type="text" inputmode="decimal" class="btg" data-n="'+i+'" value="'+(r.btg!=null?String(r.btg):'')+'" placeholder="Approved BTG" title="Approved BTG — type and press Enter or click away to save">'
          +(r.btg>0&&r.avg6>0?'<br><small style="font-weight:700;color:'+(r.btg>r.avg6*1.2?'#b91c1c':'#6d28d9')+'">'+Math.round(r.btg/r.avg6*100)+'% of 6M avg</small>':'')+(r.channel?'<br><small style="color:#6b7280">'+esc(r.channel)+'</small>':'')+'</td>'
