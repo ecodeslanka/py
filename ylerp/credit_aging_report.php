@@ -203,7 +203,9 @@ if ($result) {
         if (!empty($f_age_ranges) && !in_array($bucket, $f_age_ranges)) continue;
 
         /* policy exceeded = cash customer with an open bill, or a credit / cheque bill older than its credit days */
-        $row['exceeded'] = (($row['payment_mode'] === 'cash') || ($credit_days_val > 0 && $row['policy_aging'] > 0)) ? 1 : 0;
+        /* cheque customers / "cheques will delay" customers are a CHEQUE policy (see the Cheque Aging Report) — never part of this exceeded set */
+        $is_chq_set = ($row['payment_mode'] === 'cheque') || ((int)$row['cheques_will_delay'] === 1);
+        $row['exceeded'] = $is_chq_set ? 0 : ((($row['payment_mode'] === 'cash') || ($credit_days_val > 0 && $row['policy_aging'] > 0)) ? 1 : 0);
         $cand[] = $row;
     }
 }
@@ -597,7 +599,7 @@ if ($f_age_ranges) $fl_chips[] = 'Age: ' . implode(', ', $f_age_ranges);
         <div style="margin-top:12px;">
             <label class="exc-chk" for="excOnly"><input type="checkbox" id="excOnly" name="exceed_only" value="1" <?php echo $f_exceed ? 'checked' : ''; ?>>
                 <span><i class="fa-solid fa-triangle-exclamation"></i> Policy exceeded customers only</span>
-                <small>shows only the bills past the credit policy (no 0 / minus days) · cash customers with an open bill</small></label>
+                <small>shows only the bills past the credit policy (no 0 / minus days) · cash customers with an open bill · cheque customers are not included</small></label>
         </div>
         <style>.exc-chk{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 14px;border:1.5px solid #fecaca;background:#fef2f2;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:#991b1b}.exc-chk input{width:17px;height:17px;accent-color:#dc2626}.exc-chk small{font-weight:500;color:#b45309;font-size:11.5px}</style>
 
