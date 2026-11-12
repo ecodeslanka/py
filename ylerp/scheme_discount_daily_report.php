@@ -18,13 +18,15 @@ if (($_GET['ajax'] ?? '') === 'bws_rows') {
     $code = trim($_GET['code'] ?? ''); $out = ['success' => true, 'rows' => [], 'total' => 0, 'count' => 0, 'free_value' => 0];
     $chk = mysqli_query($conn, "SHOW TABLES LIKE 'bws_items'");
     if ($code === '' || !$chk || !mysqli_num_rows($chk)) { echo json_encode(['success' => false, 'message' => 'No Bill Wise Scheme data.']); exit; }
-    $c = mysqli_real_escape_string($conn, $code);
+    $c = mysqli_real_escape_string($conn, sd_norm($code));
     $q = mysqli_query($conn, "SELECT bill_date, bill_no, COALESCE(NULLIF(hul_code,''), party_code) AS outlet, party_name, beat_name, salesman_code, product_name, sold_qty, free_qty, free_value, sch_disc, gross_sales
-                              FROM bws_items WHERE TRIM(scheme_no) = '$c' ORDER BY bill_date, bill_no LIMIT 5000");
+                              FROM bws_items WHERE UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) = '$c' ORDER BY bill_date, bill_no LIMIT 5000");
     while ($q && ($x = mysqli_fetch_assoc($q))) { $out['rows'][] = $x; $out['total'] += (float)$x['sch_disc']; $out['free_value'] += (float)$x['free_value']; }
     $out['count'] = count($out['rows']); $out['total'] = round($out['total'], 2); $out['free_value'] = round($out['free_value'], 2);
     echo json_encode($out); exit;
 }
+/* scheme code key: same code whether it is typed 41388823, ' 41388823 ' or 41388823.0 (case ignored) */
+function sd_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); }
 function sd_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 function sd_d($v) { return $v ? date('d M Y', strtotime($v)) : '—'; }
 function sd_ok($d) { return (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$d); }
@@ -60,11 +62,11 @@ if ($ready) {
 $bws = [];
 $cb = mysqli_query($conn, "SHOW TABLES LIKE 'bws_items'");
 if ($items && $cb && mysqli_num_rows($cb)) {
-    $codes = array_values(array_unique(array_map(fn($x) => "'" . mysqli_real_escape_string($conn, trim($x['activity_code'])) . "'", $items)));
-    $q = mysqli_query($conn, "SELECT TRIM(scheme_no) AS sn, COUNT(*) AS n, COALESCE(SUM(sch_disc),0) AS sd FROM bws_items WHERE TRIM(scheme_no) IN (" . implode(',', $codes) . ") GROUP BY TRIM(scheme_no)");
+    $codes = array_values(array_unique(array_map(fn($x) => "'" . mysqli_real_escape_string($conn, sd_norm($x['activity_code'])) . "'", $items)));
+    $q = mysqli_query($conn, "SELECT UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) AS sn, COUNT(*) AS n, COALESCE(SUM(sch_disc),0) AS sd FROM bws_items WHERE UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) IN (" . implode(',', $codes) . ") GROUP BY UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no)))");
     while ($q && ($x = mysqli_fetch_assoc($q))) $bws[$x['sn']] = ['n' => (int)$x['n'], 'sd' => (float)$x['sd']];
 }
-foreach ($items as &$__x) { $b = $bws[trim($__x['activity_code'])] ?? null; $__x['bws_n'] = $b ? $b['n'] : 0; $__x['bws_sd'] = $b ? $b['sd'] : null; } unset($__x);
+foreach ($items as &$__x) { $b = $bws[sd_norm($__x['activity_code'])] ?? null; $__x['bws_n'] = $b ? $b['n'] : 0; $__x['bws_sd'] = $b ? $b['sd'] : null; } unset($__x);
 $tot = array_sum(array_map(fn($x) => (float)$x['claim_amount'], $items));
 $tot_bws = array_sum(array_map(fn($x) => (float)$x['bws_sd'], $items));
 
