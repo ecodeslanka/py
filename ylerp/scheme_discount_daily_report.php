@@ -58,7 +58,7 @@ $f_claim = in_array($_GET['claim'] ?? '', ['', 'with', 'without'], true) ? ($_GE
 $items = []; $mocs = $types = $cmocs = [];
 if ($ready) {
     $e = fn($v) => mysqli_real_escape_string($conn, $v);
-    $w = ['1=1'];
+    $w = ['1=1', "UPPER(TRIM(i.activity_type)) <> 'DAMAGE'"];       // DAMAGE rows are not part of this report
     /* "schemes running in the date range": start <= to AND end >= from (a single day = from and to the same) */
     if ($f_to)   $w[] = "(i.start_date IS NULL OR i.start_date <= '{$e($f_to)}')";
     if ($f_from) $w[] = "(i.end_date IS NULL OR i.end_date >= '{$e($f_from)}')";
@@ -70,7 +70,7 @@ if ($ready) {
     if ($f_q !== '') { $q = $e($f_q); $w[] = "(i.activity_code LIKE '%$q%' OR i.activity_desc LIKE '%$q%')"; }
     $r = mysqli_query($conn, "SELECT i.* FROM scheme_status_items i WHERE " . implode(' AND ', $w) . " ORDER BY i.start_date DESC, i.moc_ref DESC, i.activity_type, i.activity_code");
     while ($r && ($x = mysqli_fetch_assoc($r))) $items[] = $x;
-    $dist = function ($col, $ord) use ($conn) { $o = []; $r = mysqli_query($conn, "SELECT DISTINCT $col AS v FROM scheme_status_items WHERE $col IS NOT NULL AND $col <> '' ORDER BY $col $ord"); while ($r && ($x = mysqli_fetch_assoc($r))) $o[] = $x['v']; return $o; };
+    $dist = function ($col, $ord) use ($conn) { $o = []; $r = mysqli_query($conn, "SELECT DISTINCT $col AS v FROM scheme_status_items WHERE $col IS NOT NULL AND $col <> '' AND UPPER(TRIM(activity_type)) <> 'DAMAGE' ORDER BY $col $ord"); while ($r && ($x = mysqli_fetch_assoc($r))) $o[] = $x['v']; return $o; };
     $mocs = $dist('moc_ref', 'DESC'); $types = $dist('activity_type', 'ASC'); $cmocs = $dist('claim_moc_ref', 'DESC');
 }
 /* total scheme discount per scheme code from the Bill Wise Scheme Analysis rows (the same code has many bill rows) */
@@ -98,7 +98,7 @@ foreach ($items as &$__x) {
     $__x['cc_n'] = $c2 ? $c2['n'] : 0; $__x['cc_act'] = $c2 ? $c2['act'] : null;
     $has_claim = $__x['claim_amount'] !== null;
     $__x['diff'] = ($has_claim || $b) ? round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($b ? $b['sd'] : 0), 2) : null;     // Claim Amount − scheme discount as per invoice
-    $__x['balance'] = ($has_claim || $c2) ? round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($c2 ? $c2['act'] : 0), 2) : null;     // Claim Amount − claim certificate actual amount
+    $__x['balance'] = ($has_claim || $c2) ? max(0, round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($c2 ? $c2['act'] : 0), 2)) : null;     // a negative balance (claimed more than the claim amount) is shown as 0     // Claim Amount − claim certificate actual amount
 } unset($__x);
 $tot = array_sum(array_map(fn($x) => (float)$x['claim_amount'], $items));
 $tot_bws = array_sum(array_map(fn($x) => (float)$x['bws_sd'], $items));
