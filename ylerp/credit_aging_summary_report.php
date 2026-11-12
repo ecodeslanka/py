@@ -167,11 +167,18 @@ foreach ($S as $s) foreach (['n', 'v', 'ok_n', 'ok_v', 'ex_n', 'ex_v', 'cx_c', '
 /* 5th row: "Cheques policy exceeded" = the cheque customers + cheques-will-delay customers together, from the Cheque Aging Report data.
    It is a combined view of rows 2 and 3, so it is NOT added into the TOTAL again. */
 $GROUPS['chq'] = ['label' => 'Cheques policy exceeded', 'exceed' => 'Cheques policy exceeded', 'unit' => 'cheques', 'icon' => 'fa-money-check', 'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true];
-$S['chq'] = $S['cheque'];
-foreach ($S['cwd'] as $f => $v) {
-    $S['chq'][$f] = $S['cheque'][$f] + $v;      // customer lists (arrays): union · counts / values: sum
+/* only the cheques that are PAST the policy (+ days): cheques with 0 / minus days left are not part of this row */
+$S['chq'] = ['n' => 0, 'v' => 0.0, 'ok_n' => 0, 'ok_v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'customers' => [], 'ex_customers' => [],
+             'cx_c' => 0, 'cx_n' => 0, 'cx_v' => 0.0, 'nx_c' => 0, 'nx_n' => 0, 'nx_v' => 0.0];
+foreach ($CUST as $tc => $c) {
+    if (!in_array($c['set'], ['cheque', 'cwd'], true) || $c['ex_n'] <= 0) continue;
+    $q = &$S['chq'];
+    $q['customers'][$tc] = 1; $q['ex_customers'][$tc] = 1;
+    $q['n'] += $c['ex_n']; $q['v'] += $c['ex_v']; $q['ex_n'] += $c['ex_n']; $q['ex_v'] += $c['ex_v'];
+    $q['cx_c']++; $q['cx_n'] += $c['ex_n']; $q['cx_v'] += $c['ex_v'];
+    unset($q);
 }
-$SETBILLS['chq'] = array_merge($SETBILLS['cheque'] ?? [], $SETBILLS['cwd'] ?? []);
+$SETBILLS['chq'] = array_values(array_filter(array_merge($SETBILLS['cheque'] ?? [], $SETBILLS['cwd'] ?? []), fn($b) => !empty($b['ex'])));
 
 /* ═════════════ Excel export ═════════════ */
 if (isset($_GET['export'])) {
