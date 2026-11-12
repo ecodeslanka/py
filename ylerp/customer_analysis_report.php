@@ -549,7 +549,7 @@ include 'header.php';
 <script>
 (function(){
   /* each tab is the real page (same figures as the menu), filtered to this customer; its menu / header is hidden inside the window */
-  var URLS={ risk:function(tc){ return 'customer_credit_risk_report.php?search='+encodeURIComponent(tc); }, inv:function(tc){ return 'invoices.php?customer='+encodeURIComponent(tc); },
+  var URLS={ risk:function(tc){ return 'customer_credit_risk_report.php?detail='+encodeURIComponent(tc); }, inv:function(tc){ return 'invoices.php?customer='+encodeURIComponent(tc); },
              ledger:function(tc){ return 'customer_ledger.php?t_code='+encodeURIComponent(tc); }, mc:function(tc){ return 'market_credit_report.php?t_code='+encodeURIComponent(tc)+'&hide_zero=0&tc_exact=1&expand=1'; } };
   var EMBED='header.header,.header,aside.sidebar,#sidebar,.sidebar-overlay,.ms-edge-toggle,footer.footer{display:none!important;}body{padding-top:0!important;margin-top:0!important;}.main-content{margin-left:0!important;margin-top:0!important;padding-top:12px!important;width:100%!important;max-width:100%!important;}';
   var cur={tc:'',tab:'risk'}, bg=document.getElementById('c360Modal'); document.body.appendChild(bg);     // always above the site header
