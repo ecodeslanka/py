@@ -25,6 +25,21 @@ if (($_GET['ajax'] ?? '') === 'bws_rows') {
     $out['count'] = count($out['rows']); $out['total'] = round($out['total'], 2); $out['free_value'] = round($out['free_value'], 2);
     echo json_encode($out); exit;
 }
+/* claim certificate rows (customer_claim.php import = claim_cert_items) whose description starts with this scheme no, e.g. "41440127-B418050926-Ponds FW 100g ETE 20" */
+if (($_GET['ajax'] ?? '') === 'claim_rows') {
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/json; charset=utf-8');
+    $code = trim($_GET['code'] ?? ''); $out = ['success' => true, 'rows' => [], 'actual' => 0, 'vat' => 0, 'count' => 0];
+    $chk = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
+    if ($code === '' || !$chk || !mysqli_num_rows($chk)) { echo json_encode(['success' => false, 'message' => 'No Customer Claim Certificate data.']); exit; }
+    $c = mysqli_real_escape_string($conn, strtoupper(preg_replace('/\.0+$/', '', $code)));
+    $q = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, customer_code, customer_name, claim_type, entity, claim_description, actual_amount, vat_amount, total_amount
+                              FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND claim_description NOT LIKE '-%'
+                                AND UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) = '$c' ORDER BY invoice_date, tax_invoice_no LIMIT 5000");
+    while ($q && ($x = mysqli_fetch_assoc($q))) { $out['rows'][] = $x; $out['actual'] += (float)$x['actual_amount']; $out['vat'] += (float)$x['vat_amount']; }
+    $out['count'] = count($out['rows']); $out['actual'] = round($out['actual'], 2); $out['vat'] = round($out['vat'], 2);
+    echo json_encode($out); exit;
+}
 /* scheme code key: same code whether it is typed 41388823, ' 41388823 ' or 41388823.0 (case ignored) */
 function sd_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); }
 function sd_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
@@ -66,9 +81,27 @@ if ($items && $cb && mysqli_num_rows($cb)) {
     $q = mysqli_query($conn, "SELECT UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) AS sn, COUNT(*) AS n, COALESCE(SUM(sch_disc),0) AS sd FROM bws_items WHERE UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) IN (" . implode(',', $codes) . ") GROUP BY UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no)))");
     while ($q && ($x = mysqli_fetch_assoc($q))) $bws[$x['sn']] = ['n' => (int)$x['n'], 'sd' => (float)$x['sd']];
 }
-foreach ($items as &$__x) { $b = $bws[sd_norm($__x['activity_code'])] ?? null; $__x['bws_n'] = $b ? $b['n'] : 0; $__x['bws_sd'] = $b ? $b['sd'] : null; } unset($__x);
+/* claim certificates (Customer Claim Certificate Import): the scheme no is the part of the claim description before the first "-" */
+$cc = [];
+$cq = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
+if ($items && $cq && mysqli_num_rows($cq)) {
+    $codes2 = array_values(array_unique(array_map(fn($x) => "'" . mysqli_real_escape_string($conn, sd_norm($x['activity_code'])) . "'", $items)));
+    $q = mysqli_query($conn, "SELECT UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) AS sn, COUNT(*) AS n, COALESCE(SUM(actual_amount),0) AS act
+                              FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND claim_description NOT LIKE '-%'
+                                AND UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) IN (" . implode(',', $codes2) . ")
+                              GROUP BY UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1))))");
+    while ($q && ($x = mysqli_fetch_assoc($q))) $cc[$x['sn']] = ['n' => (int)$x['n'], 'act' => (float)$x['act']];
+}
+foreach ($items as &$__x) {
+    $k = sd_norm($__x['activity_code']); $b = $bws[$k] ?? null; $c2 = $cc[$k] ?? null;
+    $__x['bws_n'] = $b ? $b['n'] : 0; $__x['bws_sd'] = $b ? $b['sd'] : null;
+    $__x['cc_n'] = $c2 ? $c2['n'] : 0; $__x['cc_act'] = $c2 ? $c2['act'] : null;
+    $__x['balance'] = ($b || $c2) ? round(($b ? $b['sd'] : 0) - ($c2 ? $c2['act'] : 0), 2) : null;     // scheme discount as per invoice − claim certificate actual amount
+} unset($__x);
 $tot = array_sum(array_map(fn($x) => (float)$x['claim_amount'], $items));
 $tot_bws = array_sum(array_map(fn($x) => (float)$x['bws_sd'], $items));
+$tot_cc  = array_sum(array_map(fn($x) => (float)$x['cc_act'], $items));
+$tot_bal = array_sum(array_map(fn($x) => (float)$x['balance'], $items));
 
 /* Excel */
 if (isset($_GET['export']) && class_exists('ZipArchive')) {
@@ -77,14 +110,14 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     $X = new MiniXlsx(); $sh = $X->sheet('Scheme Discount Daily');
     $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '1E3A8A', 'h' => 'center', 'border' => 1, 'wrap' => 1];
     $sh->set(1, 1, 'Scheme Discount Daily Report' . ($f_from || $f_to ? ' — ' . ($f_from ?: '…') . ' to ' . ($f_to ?: '…') : ''), ['b' => 1, 'sz' => 15]);
-    foreach (['#', 'Activity Type', 'Scheme Activity Code', 'Scheme Activity Description', 'MOC Ref', 'Start Date', 'End Date', 'Claim MOC Ref', 'Claim Amount', 'Total Scheme Discount (Bill Wise)', 'Bill Wise Rows'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
+    foreach (['#', 'Activity Type', 'Scheme Activity Code', 'Scheme Activity Description', 'MOC Ref', 'Start Date', 'End Date', 'Claim MOC Ref', 'Claim Amount', 'Scheme Discount as per Invoice', 'Invoice Rows', 'Claim Certificate Actual Amount', 'Claim Rows', 'Balance'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
     $r = 4; foreach ($items as $n => $x) {
-        foreach ([$n + 1, $x['activity_type'], $x['activity_code'], $x['activity_desc'], $x['moc_ref'], sd_d($x['start_date']) === '—' ? '' : sd_d($x['start_date']), sd_d($x['end_date']) === '—' ? '' : sd_d($x['end_date']), $x['claim_moc_ref'], $x['claim_amount'] === null ? '' : (float)$x['claim_amount'], $x['bws_sd'] === null ? '' : round((float)$x['bws_sd'], 2), $x['bws_n'] ?: ''] as $i => $v)
-            $sh->set($r, $i + 1, $v, ['border' => 1] + (in_array($i, [8, 9], true) ? ['h' => 'right', 'nf' => 4] : []));
+        foreach ([$n + 1, $x['activity_type'], $x['activity_code'], $x['activity_desc'], $x['moc_ref'], sd_d($x['start_date']) === '—' ? '' : sd_d($x['start_date']), sd_d($x['end_date']) === '—' ? '' : sd_d($x['end_date']), $x['claim_moc_ref'], $x['claim_amount'] === null ? '' : (float)$x['claim_amount'], $x['bws_sd'] === null ? '' : round((float)$x['bws_sd'], 2), $x['bws_n'] ?: '', $x['cc_act'] === null ? '' : round((float)$x['cc_act'], 2), $x['cc_n'] ?: '', $x['balance'] === null ? '' : $x['balance']] as $i => $v)
+            $sh->set($r, $i + 1, $v, ['border' => 1] + (in_array($i, [8, 9, 11, 13], true) ? ['h' => 'right', 'nf' => 4] : []));
         $r++;
     }
-    $sh->set($r, 8, 'TOTAL', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 9, round($tot, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 10, round($tot_bws, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]);
-    foreach ([5, 14, 18, 40, 10, 13, 13, 13, 16, 20, 12] as $i => $wd) $sh->widths[$i + 1] = $wd;
+    $sh->set($r, 8, 'TOTAL', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 9, round($tot, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 10, round($tot_bws, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 12, round($tot_cc, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 14, round($tot_bal, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]);
+    foreach ([5, 14, 18, 40, 10, 13, 13, 13, 16, 20, 12, 20, 11, 16] as $i => $wd) $sh->widths[$i + 1] = $wd;
     $sh->freeze = [3, 0]; $tmp = tempnam(sys_get_temp_dir(), 'sd'); $X->save($tmp);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="scheme_discount_daily_' . date('Ymd_His') . '.xlsx"');
     header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
@@ -101,6 +134,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
 .sdr .kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}.sdr .k{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px}.sdr .k span{font-size:11px;color:#6b7280;text-transform:uppercase;font-weight:700}.sdr .k b{display:block;font-size:19px;margin-top:2px;font-variant-numeric:tabular-nums}
 .sdr .tw{overflow:auto;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-height:72vh}.sdr table{width:100%;border-collapse:collapse;font-size:13px}.sdr th{background:#1e3a8a;color:#fff;padding:9px 10px;text-align:left;position:sticky;top:0;white-space:nowrap}.sdr td{padding:8px 10px;border-bottom:1px solid #f1f5f9}.sdr .r{text-align:right;font-variant-numeric:tabular-nums}.sdr tr:hover td{background:#f8fafc}
 .sdr tfoot td{background:#fde68a;font-weight:800;position:sticky;bottom:0}.sdr .ty{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#ede9fe;color:#6d28d9}.sdr .ty.dmg{background:#fee2e2;color:#b91c1c}
+.sdr .bal{display:inline-block;min-width:92px;text-align:right;padding:3px 10px;border-radius:8px;font-weight:800}.sdr .bal.pos{background:#fee2e2;color:#b91c1c}.sdr .bal.neg{background:#dcfce7;color:#15803d}.sdr .bal.zero{background:#f1f5f9;color:#64748b}.sdr a.bwsl,.sdr a.ccl{color:#1d4ed8;text-decoration:none}.sdr a.ccl{color:#15803d}.sdr a:hover b{text-decoration:underline}.sdr small{color:#6b7280;font-weight:500}
 .sdr .fbody.collapsed{display:none}.sdr .ftog{cursor:pointer;display:flex;align-items:center;gap:10px;user-select:none}
 </style>
 <div class="sdr">
@@ -123,13 +157,15 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
   </form>
 
   <div class="kp"><div class="k"><span>Schemes</span><b><?= number_format(count($items)) ?></b></div><div class="k"><span>Total claim amount</span><b style="color:#7c3aed">Rs. <?= number_format($tot, 2) ?></b></div>
-    <div class="k"><span>Total scheme discount (bill wise)</span><b style="color:#1d4ed8">Rs. <?= number_format($tot_bws, 2) ?></b></div><div class="k"><span>With claim</span><b><?= number_format(count(array_filter($items, fn($x) => (float)$x['claim_amount'] > 0))) ?></b></div></div>
+    <div class="k"><span>Scheme discount as per invoice</span><b style="color:#1d4ed8">Rs. <?= number_format($tot_bws, 2) ?></b></div><div class="k"><span>Claim certificate (actual)</span><b style="color:#15803d">Rs. <?= number_format($tot_cc, 2) ?></b></div><div class="k"><span>Balance</span><b style="color:<?= $tot_bal > 0.5 ? '#b91c1c' : ($tot_bal < -0.5 ? '#15803d' : '#6b7280') ?>">Rs. <?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></b></div><div class="k"><span>With claim</span><b><?= number_format(count(array_filter($items, fn($x) => (float)$x['claim_amount'] > 0))) ?></b></div></div>
 
-  <div class="tw"><table><thead><tr><th>#</th><th>Type</th><th>Scheme Activity Code</th><th>Scheme Activity Description</th><th>MOC Ref</th><th>Start Date</th><th>End Date</th><th class="r">Claim Amount</th><th class="r" title="Sum of the scheme discount of every Bill Wise Scheme Analysis row with this scheme code — click to see the rows">Total Scheme Discount<br><span style="font-weight:500;font-size:10px">bill wise · click to open rows</span></th></tr></thead><tbody>
+  <div class="tw"><table><thead><tr><th>#</th><th>Type</th><th>Scheme Activity Code</th><th>Scheme Activity Description</th><th>MOC Ref</th><th>Start Date</th><th>End Date</th><th class="r">Claim Amount</th><th class="r" title="Sum of the scheme discount of every Bill Wise Scheme Analysis row with this scheme code — click to see the rows">Scheme Discount<br>as per Invoice<br><span style="font-weight:500;font-size:10px">click to open invoice rows</span></th><th class="r" title="Actual amount (without VAT) of the Customer Claim Certificate rows whose claim description starts with this scheme no — click to see them">Claim Certificate<br>Actual Amount<br><span style="font-weight:500;font-size:10px">click to open claim rows</span></th><th class="r">Balance<br><span style="font-weight:500;font-size:10px">invoice − claim</span></th></tr></thead><tbody>
   <?php foreach ($items as $n => $x): ?><tr><td><?= $n + 1 ?></td><td><span class="ty <?= $x['activity_type'] === 'DAMAGE' ? 'dmg' : '' ?>"><?= sd_h($x['activity_type']) ?></span></td><td><b><?= sd_h($x['activity_code']) ?></b></td><td><?= sd_h($x['activity_desc']) ?></td><td><?= sd_h($x['moc_ref']) ?></td><td><?= sd_d($x['start_date']) ?></td><td><?= sd_d($x['end_date']) ?></td><td class="r"><b><?= $x['claim_amount'] === null ? '—' : number_format((float)$x['claim_amount'], 2) ?></b></td>
-    <td class="r"><?php if ($x['bws_sd'] !== null): ?><a href="#" class="bwsl" data-code="<?= sd_h(trim($x['activity_code'])) ?>" data-desc="<?= sd_h($x['activity_desc']) ?>" title="Show the <?= (int)$x['bws_n'] ?> bill wise rows"><b><?= number_format($x['bws_sd'], 2) ?></b><small> · <?= (int)$x['bws_n'] ?> rows</small></a><?php else: ?><span style="color:#cbd5e1" title="No Bill Wise Scheme Analysis rows for this code">—</span><?php endif; ?></td></tr>
-  <?php endforeach; if (!$items): ?><tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:28px">No schemes for these filters.</td></tr><?php endif; ?></tbody>
-  <?php if ($items): ?><tfoot><tr><td colspan="7">TOTAL (<?= number_format(count($items)) ?> schemes)</td><td class="r"><?= number_format($tot, 2) ?></td><td class="r"><?= number_format($tot_bws, 2) ?></td></tr></tfoot><?php endif; ?></table></div>
+    <td class="r"><?php if ($x['bws_sd'] !== null): ?><a href="#" class="bwsl" data-code="<?= sd_h(trim($x['activity_code'])) ?>" data-desc="<?= sd_h($x['activity_desc']) ?>" title="Show the <?= (int)$x['bws_n'] ?> bill wise rows"><b><?= number_format($x['bws_sd'], 2) ?></b><small> · <?= (int)$x['bws_n'] ?> rows</small></a><?php else: ?><span style="color:#cbd5e1" title="No Bill Wise Scheme Analysis rows for this code">—</span><?php endif; ?></td>
+    <td class="r"><?php if ($x['cc_act'] !== null): ?><a href="#" class="ccl" data-code="<?= sd_h(trim($x['activity_code'])) ?>" data-desc="<?= sd_h($x['activity_desc']) ?>" title="Show the <?= (int)$x['cc_n'] ?> claim certificate rows"><b><?= number_format($x['cc_act'], 2) ?></b><small> · <?= (int)$x['cc_n'] ?> rows</small></a><?php else: ?><span style="color:#cbd5e1" title="No claim certificate rows with this scheme no in the description">—</span><?php endif; ?></td>
+    <td class="r"><?php if ($x['balance'] !== null): $bc = $x['balance'] > 0.5 ? 'pos' : ($x['balance'] < -0.5 ? 'neg' : 'zero'); ?><span class="bal <?= $bc ?>"><?= $x['balance'] < 0 ? '(' . number_format(abs($x['balance']), 2) . ')' : number_format($x['balance'], 2) ?></span><?php else: ?><span style="color:#cbd5e1">—</span><?php endif; ?></td></tr>
+  <?php endforeach; if (!$items): ?><tr><td colspan="11" style="text-align:center;color:#9ca3af;padding:28px">No schemes for these filters.</td></tr><?php endif; ?></tbody>
+  <?php if ($items): ?><tfoot><tr><td colspan="7">TOTAL (<?= number_format(count($items)) ?> schemes)</td><td class="r"><?= number_format($tot, 2) ?></td><td class="r"><?= number_format($tot_bws, 2) ?></td><td class="r"><?= number_format($tot_cc, 2) ?></td><td class="r"><?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></td></tr></tfoot><?php endif; ?></table></div>
 </div>
 <div id="bwsM" style="position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px;font-family:'Inter',system-ui,sans-serif">
   <div style="background:#fff;border-radius:14px;width:100%;max-width:1400px;height:92vh;display:flex;flex-direction:column;overflow:hidden">
@@ -146,16 +182,24 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
   function close(){ m.style.display='none'; document.body.style.overflow=''; }
   document.getElementById('bwsX').addEventListener('click',close); m.addEventListener('click',function(e){ if(e.target===m) close(); });
   document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&m.style.display==='flex') close(); });
-  document.addEventListener('click',function(e){ var a=e.target.closest('.bwsl'); if(!a) return; e.preventDefault();
-    document.getElementById('bwsT').textContent='Scheme '+a.dataset.code+' — bill wise rows'; document.getElementById('bwsS').textContent=a.dataset.desc||''; document.getElementById('bwsK').innerHTML='Loading…'; document.getElementById('bwsB').innerHTML=''; document.getElementById('bwsH').innerHTML='';
+  var $=function(i){ return document.getElementById(i); };
+  function table(heads,rows,numFrom,cells){ $('bwsH').innerHTML=heads.map(function(h,i){ return '<th style="'+TH+(i>=numFrom?';text-align:right':'')+'">'+h+'</th>'; }).join('');
+    $('bwsB').innerHTML=rows.map(function(r,i){ return '<tr><td style="'+TD+'">'+(i+1)+'</td>'+cells(r)+'</tr>'; }).join('')||'<tr><td colspan="'+heads.length+'" style="padding:24px;text-align:center;color:#9ca3af">No rows</td></tr>'; }
+  var tdt=function(v){ return '<td style="'+TD+'">'+esc(v)+'</td>'; }, tdn=function(v,b){ return '<td style="'+TD+';text-align:right;font-variant-numeric:tabular-nums'+(b?';font-weight:700':'')+'">'+money(v)+'</td>'; };
+  document.addEventListener('click',function(e){ var a=e.target.closest('.bwsl,.ccl'); if(!a) return; e.preventDefault(); var claim=a.classList.contains('ccl');
+    $('bwsT').textContent='Scheme '+a.dataset.code+(claim?' — claim certificate rows (Customer Claim Certificate Import)':' — scheme discount as per invoice (bill wise rows)'); $('bwsS').textContent=a.dataset.desc||''; $('bwsK').innerHTML='Loading…'; $('bwsB').innerHTML=''; $('bwsH').innerHTML='';
     m.style.display='flex'; document.body.style.overflow='hidden';
-    fetch('scheme_discount_daily_report.php?ajax=bws_rows&code='+encodeURIComponent(a.dataset.code),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-      if(!d.success){ document.getElementById('bwsK').innerHTML='<span style="color:#b91c1c">'+esc(d.message||'Could not load')+'</span>'; return; }
-      document.getElementById('bwsK').innerHTML='<span><b>'+d.count+'</b> rows</span><span>Total scheme discount <b style="color:#1d4ed8">Rs. '+money(d.total)+'</b></span><span>Free value <b>Rs. '+money(d.free_value)+'</b></span>'+(d.count>=5000?'<span style="color:#b45309">first 5,000 rows shown</span>':'');
-      document.getElementById('bwsH').innerHTML=['#','Bill date','Bill no','Outlet code','Outlet name','Beat','Salesman','Product','Sold qty','Free qty','Free value','Scheme discount','Gross sales'].map(function(h,i){ return '<th style="'+TH+(i>7?';text-align:right':'')+'">'+h+'</th>'; }).join('');
-      document.getElementById('bwsB').innerHTML=d.rows.map(function(r,i){ return '<tr><td style="'+TD+'">'+(i+1)+'</td><td style="'+TD+'">'+esc(r.bill_date)+'</td><td style="'+TD+'">'+esc(r.bill_no)+'</td><td style="'+TD+'">'+esc(r.outlet)+'</td><td style="'+TD+'">'+esc(r.party_name)+'</td><td style="'+TD+'">'+esc(r.beat_name)+'</td><td style="'+TD+'">'+esc(r.salesman_code)+'</td><td style="'+TD+'">'+esc(r.product_name)+'</td>'
-        +['sold_qty','free_qty','free_value','sch_disc','gross_sales'].map(function(k){ return '<td style="'+TD+';text-align:right;font-variant-numeric:tabular-nums'+(k==='sch_disc'?';font-weight:700':'')+'">'+money(r[k])+'</td>'; }).join('')+'</tr>'; }).join('')||'<tr><td colspan="13" style="padding:24px;text-align:center;color:#9ca3af">No rows</td></tr>';
-    }).catch(function(){ document.getElementById('bwsK').innerHTML='<span style="color:#b91c1c">Connection problem.</span>'; }); });
+    fetch('scheme_discount_daily_report.php?ajax='+(claim?'claim_rows':'bws_rows')+'&code='+encodeURIComponent(a.dataset.code),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+      if(!d.success){ $('bwsK').innerHTML='<span style="color:#b91c1c">'+esc(d.message||'Could not load')+'</span>'; return; }
+      var cap=d.count>=5000?'<span style="color:#b45309">first 5,000 rows shown</span>':'';
+      if(claim){
+        $('bwsK').innerHTML='<span><b>'+d.count+'</b> rows</span><span>Actual amount <b style="color:#15803d">Rs. '+money(d.actual)+'</b></span><span>VAT <b>Rs. '+money(d.vat)+'</b></span>'+cap;
+        table(['#','Tax invoice no','Invoice date','Banking date','Customer','Claim type','Entity','Claim description','Actual amount','VAT','Total'],d.rows,8,function(r){ return tdt(r.tax_invoice_no)+tdt(r.invoice_date)+tdt(r.banking_date)+tdt((r.customer_code||'')+' '+(r.customer_name||''))+tdt(r.claim_type)+tdt(r.entity)+tdt(r.claim_description)+tdn(r.actual_amount,true)+tdn(r.vat_amount)+tdn(r.total_amount); });
+      } else {
+        $('bwsK').innerHTML='<span><b>'+d.count+'</b> rows</span><span>Scheme discount <b style="color:#1d4ed8">Rs. '+money(d.total)+'</b></span><span>Free value <b>Rs. '+money(d.free_value)+'</b></span>'+cap;
+        table(['#','Bill date','Bill no','Outlet code','Outlet name','Beat','Salesman','Product','Sold qty','Free qty','Free value','Scheme discount','Gross sales'],d.rows,8,function(r){ return tdt(r.bill_date)+tdt(r.bill_no)+tdt(r.outlet)+tdt(r.party_name)+tdt(r.beat_name)+tdt(r.salesman_code)+tdt(r.product_name)+tdn(r.sold_qty)+tdn(r.free_qty)+tdn(r.free_value)+tdn(r.sch_disc,true)+tdn(r.gross_sales); });
+      }
+    }).catch(function(){ $('bwsK').innerHTML='<span style="color:#b91c1c">Connection problem.</span>'; }); });
 })();
 </script>
 <script>document.getElementById('sdTog').addEventListener('click',function(){ document.getElementById('sdBody').classList.toggle('collapsed'); });</script>
