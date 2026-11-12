@@ -412,7 +412,7 @@ function rbac_menu_tree() {
 /** Delete the cached sidebar / page lists so they are rebuilt from header.php on the next request */
 function rbac_cache_clear() {
     $dir = rtrim(sys_get_temp_dir(), '/\\');
-    foreach (['yms_rbac_side_', 'yms_rbac_extra_'] as $pre) @unlink($dir . '/' . $pre . md5(__DIR__) . '.json');
+    foreach (['yms_rbac_side_', 'yms_rbac_extra_', 'yms_rbac_btn_'] as $pre) @unlink($dir . '/' . $pre . md5(__DIR__) . '.json');
 }
 
 /* ---------- pages that are not in the sidebar ---------- */
@@ -698,6 +698,8 @@ function rbac_guard() {
 
     if (!rbac_can('view', $page)) rbac_deny(rbac_resolve($page)[1] ?: 'view', $page);
 
+    rbac_guard_buttons($page);
+
     $act = rbac_detect_action();
     if ($act === 'create_or_edit') {
         if (!rbac_can('create', $page) && !rbac_can('edit', $page)) rbac_deny('create', $page);
@@ -803,6 +805,7 @@ function rbac_js() {
         'role' => $ctx['role_name'],
         'full' => (bool)$ctx['full'],
         'can'  => ['view'=>rbac_can('view'),'create'=>rbac_can('create'),'edit'=>rbac_can('edit'),'delete'=>rbac_can('delete')],
+        'deny_btn' => rbac_btn_denied(),
     ]);
 }
 
@@ -827,14 +830,26 @@ function rbac_client_script() {
     create: '[data-perm="create"]'
   };
   var MSG = {delete:'delete records here', edit:'edit records here', create:'add records here'};
+  var DENY = R.deny_btn || [];
+  function slug(t){ return String(t||'').toLowerCase().replace(/\s+/g,' ').trim().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').substring(0,40); }
+  function btnKey(el){ var t=(el.getAttribute('data-perm-btn')||el.textContent||'').trim(); if(!t) t=el.getAttribute('title')||el.getAttribute('aria-label')||''; if(!t && el.value) t=el.value; return slug(t); }
   function toast(a){
     var t = document.getElementById('rbacToast');
     if(!t){ t = document.createElement('div'); t.id='rbacToast'; document.body.appendChild(t); }
-    t.textContent = '⛔ Permission blocked: you are not allowed to ' + MSG[a] + '.';
+    t.textContent = a==='btn' ? '⛔ Permission blocked: you are not allowed to use this button.' : '⛔ Permission blocked: you are not allowed to ' + MSG[a] + '.';
     t.style.display='block'; clearTimeout(t._h); t._h = setTimeout(function(){ t.style.display='none'; }, 3500);
   }
   function target(el){ return el.closest('a,button,[onclick],.btn') || el; }
+  function markBtns(root){
+    if(!DENY.length) return;
+    root.querySelectorAll('button,a.btn,a[class*="btn"],a[class*="button"],input[type=submit],input[type=button],[role=button],[data-perm-btn]').forEach(function(el){
+      if (el.closest('#sidebar,.sidebar,nav,[data-perm-skip]') || el.dataset.rbacBlock) return;
+      if (DENY.indexOf(btnKey(el))<0) return;
+      el.dataset.rbacBlock='btn'; el.classList.add('rbac-blocked'); if(el.tagName==='BUTTON'||el.tagName==='INPUT') el.setAttribute('aria-disabled','true');
+    });
+  }
   function mark(root){
+    markBtns(root);
     ['delete','edit','create'].forEach(function(a){
       if (can[a] !== false) return;
       root.querySelectorAll(SEL[a]).forEach(function(el){
@@ -861,6 +876,127 @@ function rbac_client_script() {
 })();
 </script>
 JS;
+}
+
+
+/* ================================================================
+ *  BUTTON PERMISSIONS  (per page: Export, Print, Download, Approve ... each one can be given or taken away)
+ *  Buttons are discovered from the page's own file, so a new button shows up in the role form by itself.
+ *  Stored in role_page_buttons (role_id, page, btn_key, allowed). No row = allowed (old roles keep working).
+ * ================================================================ */
+
+/** key used for a button: lower-case words joined with _ (same rule as the browser script) */
+function rbac_btn_slug($t) {
+    $t = strtolower(trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string)$t), ENT_QUOTES, 'UTF-8'))));
+    $t = trim(preg_replace('/[^a-z0-9]+/', '_', $t), '_');
+    return substr($t, 0, 40);
+}
+
+/** ['export_excel' => 'Export Excel', ...] for one menu page, read from its file */
+function rbac_page_buttons($page) {
+    static $memo = [];
+    $page = strtolower($page);
+    if (isset($memo[$page])) return $memo[$page];
+    $file = __DIR__ . '/' . $page . '.php';
+    if (!preg_match('/^[a-z0-9_\-]+$/', $page) || !is_file($file)) return $memo[$page] = [];
+    $cache = rtrim(sys_get_temp_dir(), '/\\') . '/yms_rbac_btn_' . md5(__DIR__ . $page) . '.json';
+    $mt = @filemtime($file);
+    if (is_file($cache) && ($c = json_decode((string)@file_get_contents($cache), true)) && ($c['m'] ?? 0) === $mt) return $memo[$page] = $c['b'];
+
+    $src = (string)@file_get_contents($file);
+    $src = preg_replace('~<script\b.*?</script>~is', '', $src);                      // only markup, not JS strings
+    $src = preg_replace('~<\?(?:php|=).*?\?>~is', ' ', $src);                         // PHP output is not a fixed label
+    $src = preg_replace('~<!--.*?-->~s', '', $src);
+    $found = [];
+    $add = function ($label) use (&$found) {
+        $label = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($label), ENT_QUOTES, 'UTF-8')));
+        $label = trim($label, " \t\n\r\0\x0B:·•-–—|");
+        if ($label === '' || mb_strlen($label) < 3 || mb_strlen($label) > 40 || !preg_match('/[A-Za-z]{3}/', $label)) return;
+        if (preg_match('/^(close|cancel|back|no|yes|ok|okay|search|reset|clear|filter|apply|go|next|prev|previous|submit|login|logout|menu|toggle|home|dashboard|select|all|none|today)$/i', $label)) return;
+        $k = rbac_btn_slug($label);
+        if ($k !== '' && !isset($found[$k])) $found[$k] = $label;
+    };
+    if (preg_match_all('~<button\b[^>]*>(.*?)</button>~is', $src, $m)) foreach ($m[1] as $i => $inner) {
+        $t = trim(strip_tags($inner));
+        if ($t === '' && preg_match('~\b(?:title|aria-label)\s*=\s*"([^"]+)"~i', $m[0][$i], $tt)) $t = $tt[1];
+        $add($t);
+    }
+    if (preg_match_all('~<a\b([^>]*)>(.*?)</a>~is', $src, $m)) foreach ($m[2] as $i => $inner) {
+        if (!preg_match('~class\s*=\s*"[^"]*(?:btn|button)[^"]*"~i', $m[1][$i])) continue;
+        $t = trim(strip_tags($inner));
+        if ($t === '' && preg_match('~\b(?:title|aria-label)\s*=\s*"([^"]+)"~i', $m[1][$i], $tt)) $t = $tt[1];
+        $add($t);
+    }
+    if (preg_match_all('~<input\b[^>]*type\s*=\s*"(?:submit|button)"[^>]*value\s*=\s*"([^"]+)"~i', $src, $m)) foreach ($m[1] as $v) $add($v);
+    ksort($found);
+    @file_put_contents($cache, json_encode(['m' => $mt, 'b' => $found]));
+    return $memo[$page] = $found;
+}
+
+/** [page => [key => label]] for every menu page that has buttons */
+function rbac_all_buttons() {
+    $out = [];
+    foreach (rbac_menu_pages() as $page => $info) {
+        $b = rbac_page_buttons($page);
+        if ($b) $out[strtolower($page)] = $b;
+    }
+    return $out;
+}
+
+/** page => [key => 0/1] explicitly saved for one role */
+function rbac_role_buttons($role_id) {
+    $out = [];
+    $res = @rbac_q("SELECT page, btn_key, allowed FROM role_page_buttons WHERE role_id = " . intval($role_id));
+    while ($res && ($r = mysqli_fetch_assoc($res))) $out[strtolower($r['page'])][$r['btn_key']] = (int)$r['allowed'];
+    return $out;
+}
+
+/** can the signed-in user use this button on this page?  (full access / no row = yes) */
+function rbac_btn_can($key, $page = null) {
+    $ctx = rbac_context();
+    if ($ctx['full'] || !$ctx['enforced'] || !$ctx['role_id']) return true;
+    static $mine = null;
+    if ($mine === null) $mine = rbac_role_buttons($ctx['role_id']);
+    $target = rbac_resolve($page ?: rbac_current_page())[0] ?? null;
+    if ($target === null) return true;
+    return !isset($mine[strtolower($target)][$key]) || $mine[strtolower($target)][$key] === 1;
+}
+
+/** keys the signed-in user may NOT use on the current page (sent to the browser script) */
+function rbac_btn_denied() {
+    $ctx = rbac_context();
+    if ($ctx['full'] || !$ctx['enforced'] || !$ctx['role_id']) return [];
+    $target = rbac_resolve(rbac_current_page())[0] ?? null;
+    if ($target === null) return [];
+    $mine = rbac_role_buttons($ctx['role_id']);
+    $d = [];
+    foreach ($mine[strtolower($target)] ?? [] as $k => $a) if (!$a) $d[] = $k;
+    return $d;
+}
+
+/** server side: a denied Export / Print / Download button also stops the request itself, not just the button */
+function rbac_guard_buttons($page) {
+    $denied = rbac_btn_denied();
+    if (!$denied) return;
+    $req = $_GET + $_POST;
+    $kind = '';
+    foreach ($req as $k => $v) {
+        if (!is_string($k)) continue;
+        $val = is_string($v) ? strtolower($v) : '';
+        if (preg_match('/^(export|download|excel|csv|pdf|print)(_|$)/i', $k) && $v !== '' && $v !== '0') { $kind = strtolower($k); break; }
+        if (in_array($k, ['action', 'act', 'do', 'op', 'mode', 'task'], true) && preg_match('/^(export|download|excel|csv|pdf|print)/', $val)) { $kind = $val; break; }
+    }
+    if ($kind === '') return;
+    $group = preg_match('/print/', $kind) ? 'print' : (preg_match('/pdf/', $kind) ? 'pdf' : (preg_match('/csv/', $kind) ? 'csv' : (preg_match('/excel|xls/', $kind) ? 'excel' : 'export')));
+    foreach ($denied as $key) {
+        if (strpos($key, $group) !== false || ($group !== 'print' && strpos($key, 'export') !== false) || ($group !== 'export' && strpos($key, 'download') !== false)) {
+            $pages = rbac_menu_pages(); $target = rbac_resolve($page)[0] ?? $page;
+            $pname = $pages[$target]['label'] ?? ucwords(str_replace('_', ' ', $page));
+            $msg = 'Permission blocked: you are not allowed to use "' . ($group === 'print' ? 'Print' : 'Export / Download') . '" on ' . $pname . '.';
+            if (rbac_is_ajax()) { http_response_code(403); header('Content-Type: application/json'); echo json_encode(['success' => false, 'error' => $msg, 'message' => $msg]); exit; }
+            http_response_code(403); echo '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:40px;color:#991b1b"><h3>⛔ ' . htmlspecialchars($msg) . '</h3><p><a href="javascript:history.back()">Go back</a></p>'; exit;
+        }
+    }
 }
 
 /* ================================================================
