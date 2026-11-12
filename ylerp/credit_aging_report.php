@@ -210,7 +210,7 @@ if ($result) {
 $exc_cust = [];
 foreach ($cand as $__r) if ($__r['exceeded']) $exc_cust[$__r['t_code']] = 1;
 foreach ($cand as $row) {
-    if ($f_exceed && !isset($exc_cust[$row['t_code']])) continue;     /* "exceeded customers only" keeps all open bills of those customers */
+    if ($f_exceed && !$row['exceeded']) continue;     /* "policy exceeded only": only the bills that are past the policy (no 0 / minus days left) */
     $bucket = $row['bucket'];
         $rows[]    = $row;
         $t_net     += floatval($row['net_value']);
@@ -504,7 +504,7 @@ if ($f_as_at !== date('Y-m-d')) $fl_chips[] = 'As at: ' . date('d M Y', strtotim
 if ($f_type)  $fl_chips[] = ucfirst($f_type) . ' credit';
 if ($f_pmodes) $fl_chips[] = 'Pay mode: ' . implode(' + ', array_map(fn($m) => $m === 'none' ? 'Not set' : ($m === 'cwd' ? 'Cheques will delay' : ucfirst($m)), $f_pmodes));
 if ($f_cwd === '0') $fl_chips[] = 'Without cheques will delay';
-if ($f_exceed) $fl_chips[] = 'Policy exceeded customers only (' . count($exc_cust) . ')';
+if ($f_exceed) $fl_chips[] = 'Policy exceeded bills only (' . count($exc_cust) . ' customers)';
 if ($f_age_ranges) $fl_chips[] = 'Age: ' . implode(', ', $f_age_ranges);
 ?>
 <div class="filter-card no-print collapsed" id="filterCard">
@@ -597,7 +597,7 @@ if ($f_age_ranges) $fl_chips[] = 'Age: ' . implode(', ', $f_age_ranges);
         <div style="margin-top:12px;">
             <label class="exc-chk" for="excOnly"><input type="checkbox" id="excOnly" name="exceed_only" value="1" <?php echo $f_exceed ? 'checked' : ''; ?>>
                 <span><i class="fa-solid fa-triangle-exclamation"></i> Policy exceeded customers only</span>
-                <small>credit / cheque bills older than the customer's credit days · cash customers with an open bill</small></label>
+                <small>shows only the bills past the credit policy (no 0 / minus days) · cash customers with an open bill</small></label>
         </div>
         <style>.exc-chk{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 14px;border:1.5px solid #fecaca;background:#fef2f2;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:#991b1b}.exc-chk input{width:17px;height:17px;accent-color:#dc2626}.exc-chk small{font-weight:500;color:#b45309;font-size:11.5px}</style>
 
