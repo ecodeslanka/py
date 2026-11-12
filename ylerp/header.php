@@ -2264,6 +2264,8 @@ if (isset($conn) && $conn) {
                     if (e.ctrlKey || e.metaKey || e.shiftKey) return;
                     const href = this.getAttribute('href');
                     if (!href || href === '#' || href.startsWith('javascript:')) return;
+                    // file downloads (Excel / CSV / PDF export, print) do not leave the page, so the loader would never go away
+                    if (this.hasAttribute('download') || this.hasAttribute('data-no-loader') || /[?&](export|export_xlsx|export_excel|download|excel|csv|pdf|print)(=|&|$)/i.test(href)) return;
                     showLoader();
                 });
             });
@@ -2272,6 +2274,8 @@ if (isset($conn) && $conn) {
             const loader = document.getElementById('yms-loader');
             if (loader && !loader.classList.contains('loaded')) hideLoader();
         }, 10000);
+        // never leave the loader up when the page is shown again (back button) or a download finished
+        window.addEventListener('pageshow', function() { hideLoader(); });
 
         // ── Sidebar ──
         function toggleSidebar() {

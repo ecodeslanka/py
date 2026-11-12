@@ -141,6 +141,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     $mr = 4; foreach ($monthly as $mk => $m) { foreach ([$mk, $m['n'], round($m['claim'], 2), round($m['bws'], 2), round($m['diff'], 2), round($m['cc'], 2), round($m['bal'], 2)] as $i => $v) $ms->set($mr, $i + 1, $v, ['border' => 1] + ($i >= 2 ? ['h' => 'right', 'nf' => 4] : [])); $mr++; }
     foreach ([['TOTAL', 'b'], [array_sum(array_column($monthly, 'n')), 'b'], [round($tot, 2), 'n'], [round($tot_bws, 2), 'n'], [round($tot_diff, 2), 'n'], [round($tot_cc, 2), 'n'], [round($tot_bal, 2), 'n']] as $i => [$v, $t]) $ms->set($mr, $i + 1, $v, ['b' => 1, 'border' => 1, 'bg' => 'FDE68A'] + ($i >= 2 ? ['h' => 'right', 'nf' => 4] : []));
     foreach ([14, 10, 16, 22, 22, 24, 16] as $i => $wd) $ms->widths[$i + 1] = $wd;
+    if (($_GET['sheet'] ?? '') === 'summary') array_shift($X->sheets);      // only the Monthly summary sheet
     $tmp = tempnam(sys_get_temp_dir(), 'sd'); $X->save($tmp);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="scheme_discount_daily_' . date('Ymd_His') . '.xlsx"');
     header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
@@ -177,13 +178,14 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
       <div class="fld"><label>Claim</label><select name="claim"><option value="">All</option><option value="with" <?= $f_claim === 'with' ? 'selected' : '' ?>>With claim amount</option><option value="without" <?= $f_claim === 'without' ? 'selected' : '' ?>>Without claim</option></select></div>
       <div class="fld"><label>Search</label><input type="search" name="q" value="<?= sd_h($f_q) ?>" placeholder="activity code or description"></div>
       <button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Show</button><a class="btn o" href="scheme_discount_daily_report.php">Reset</a>
-      <a class="btn o" href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></div>
+      <a class="btn o" data-no-loader href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></div>
   </form>
 
   <div class="kp"><div class="k"><span>Schemes</span><b><?= number_format(count($items)) ?></b></div><div class="k"><span>Total claim amount</span><b style="color:#7c3aed">Rs. <?= number_format($tot, 2) ?></b></div>
     <div class="k"><span>Scheme discount as per invoice</span><b style="color:#1d4ed8">Rs. <?= number_format($tot_bws, 2) ?></b></div><div class="k"><span>Claim certificate (actual)</span><b style="color:#15803d">Rs. <?= number_format($tot_cc, 2) ?></b></div><div class="k"><span>Balance</span><b style="color:<?= $tot_bal > 0.5 ? '#b91c1c' : ($tot_bal < -0.5 ? '#15803d' : '#6b7280') ?>">Rs. <?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></b></div><div class="k"><span>With claim</span><b><?= number_format(count(array_filter($items, fn($x) => (float)$x['claim_amount'] > 0))) ?></b></div></div>
 
   <div class="sdtabs"><button type="button" data-v="det" class="on"><i class="fa-solid fa-table-list"></i> Detailed</button><button type="button" data-v="sum"><i class="fa-solid fa-calendar-days"></i> Monthly summary (by MOC Ref)</button>
+    <a class="btn o" id="sdSumXls" data-no-loader href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1, 'sheet' => 'summary']))) ?>" style="display:none;padding:7px 14px;border:1.5px solid #c7d2fe;border-radius:9px;color:#1e3a8a;text-decoration:none;font:600 13px inherit;background:#fff"><i class="fa-solid fa-file-excel"></i> Export monthly summary</a>
     <span id="sdMocBar" style="display:none;margin-left:auto;font-size:12.5px"><span class="chip" style="margin:0">MOC <b id="sdMocTxt"></b></span> <a href="#" id="sdMocClr" style="color:#1e3a8a;font-weight:700">show all MOC refs ✕</a></span></div>
 
   <div id="sdSum" style="display:none"><div class="tw"><table><thead><tr><th>MOC Ref</th><th class="r">Schemes</th><th class="r">Claim Amount</th><th class="r">Scheme Discount<br>as per Invoice</th><th class="r">Difference<br><span style="font-weight:500;font-size:10px">Claim Amount − invoice</span></th><th class="r">Claim Certificate<br>Actual Amount</th><th class="r">Balance</th></tr></thead><tbody>
@@ -241,7 +243,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
 (function(){
   var $=function(i){ return document.getElementById(i); }, KEY='sd_view_v1', moc=null;
   var money=function(v){ return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }, neg=function(v){ return v<0?'('+money(Math.abs(v))+')':money(v); };
-  function view(v){ $('sdSum').style.display=v==='sum'?'block':'none'; $('sdDetail').style.display=v==='det'?'block':'none'; [].forEach.call(document.querySelectorAll('.sdtabs button'),function(b){ b.classList.toggle('on',b.dataset.v===v); }); try{ localStorage.setItem(KEY,v); }catch(e){} }
+  function view(v){ $('sdSumXls').style.display=v==='sum'?'inline-flex':'none'; $('sdSum').style.display=v==='sum'?'block':'none'; $('sdDetail').style.display=v==='det'?'block':'none'; [].forEach.call(document.querySelectorAll('.sdtabs button'),function(b){ b.classList.toggle('on',b.dataset.v===v); }); try{ localStorage.setItem(KEY,v); }catch(e){} }
   function filt(m){ moc=m; var rows=document.querySelectorAll('#sdDetail tbody tr[data-moc]'), t={c:0,b:0,d:0,a:0,l:0}, n=0;
     [].forEach.call(rows,function(r){ var show=m===null||r.dataset.moc===m; r.style.display=show?'':'none'; if(show){ n++; r.querySelector('.sdn').textContent=n; t.c+=+r.dataset.claim; t.b+=+r.dataset.bws; t.d+=+r.dataset.diff; t.a+=+r.dataset.cc; t.l+=+r.dataset.bal; } });
     if($('sdFN')){ $('sdFN').textContent='TOTAL ('+n+' scheme'+(n===1?'':'s')+(m!==null?' · MOC '+(m||'—'):'')+')'; $('sdFC').textContent=money(t.c); $('sdFB').textContent=money(t.b); $('sdFD').textContent=neg(t.d); $('sdFA').textContent=money(t.a); $('sdFL').textContent=neg(t.l); }
