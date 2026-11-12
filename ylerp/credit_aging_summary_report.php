@@ -156,8 +156,11 @@ foreach ($CUST as $tc => $c) {
     $s = &$S[$c['set']];
     $s['n'] += $c['n']; $s['v'] += $c['v']; $s['customers'][$tc] = 1;
     $s['ex_n'] += $c['ex_n']; $s['ex_v'] += $c['ex_v']; $s['ok_n'] += $c['n'] - $c['ex_n']; $s['ok_v'] += $c['v'] - $c['ex_v'];
-    if ($c['ex_n'] > 0) { $s['ex_customers'][$tc] = 1; $s['cx_c']++; $s['cx_n'] += $c['n']; $s['cx_v'] += $c['v']; }
-    else                { $s['nx_c']++; $s['nx_n'] += $c['n']; $s['nx_v'] += $c['v']; }
+    /* customers: with at least one exceeded bill / cheque  vs  with none.  Bills / cheques and value follow the BILL itself
+       (exceeded = past the policy, not exceeded = within policy) so they match the lists in the pop-up window exactly. */
+    if ($c['ex_n'] > 0) { $s['ex_customers'][$tc] = 1; $s['cx_c']++; } else { $s['nx_c']++; }
+    $s['cx_n'] += $c['ex_n'];            $s['cx_v'] += $c['ex_v'];
+    $s['nx_n'] += $c['n'] - $c['ex_n'];  $s['nx_v'] += $c['v'] - $c['ex_v'];
     unset($s);
 }
 /* invoice rows per set (for the modal and the Excel "Invoices" sheet) */
@@ -302,9 +305,9 @@ include 'header.php';
         <thead>
             <tr>
                 <th class="l" rowspan="2">Set</th><th rowspan="2">Policy test</th><th rowspan="2">Customers</th>
-                <th colspan="3" class="ex">Customers exceeded</th><th colspan="3" class="ok">Customers not exceeded</th>
+                <th colspan="3" class="ex">Exceeded (past policy)</th><th colspan="3" class="ok">Not exceeded (within policy)</th>
             </tr>
-            <tr><th class="ex2">Customers</th><th class="ex2">Bills / Chq</th><th class="ex2">Value (Rs.)</th><th class="ok2">Customers</th><th class="ok2">Bills / Chq</th><th class="ok2">Value (Rs.)</th></tr>
+            <tr><th class="ex2" title="customers with at least one exceeded bill / cheque">Customers</th><th class="ex2">Bills / Chq</th><th class="ex2">Value (Rs.)</th><th class="ok2" title="customers with no exceeded bill / cheque">Customers</th><th class="ok2">Bills / Chq</th><th class="ok2">Value (Rs.)</th></tr>
         </thead>
         <tbody>
         <?php $mi = 0; foreach ($GROUPS as $k => $g): $s = $S[$k]; ?>
