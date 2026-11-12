@@ -39,6 +39,30 @@ $createUserBranchesTable = "CREATE TABLE IF NOT EXISTS user_branches (
 )";
 mysqli_query($conn, $createUserBranchesTable);
 
+require_once __DIR__ . '/activity_lib.php';
+al_ensure();   // adds users.email / failed_attempts / locked_until / lock_reason when missing
+
+// Lock / unlock a user (administrator lock stays until someone unlocks it)
+if (isset($_GET['action']) && in_array($_GET['action'], ['lock_user', 'unlock_user'], true) && isset($_GET['uid'])) {
+    $lid = intval($_GET['uid']);
+    $lr  = mysqli_fetch_assoc(mysqli_query($conn, "SELECT username FROM users WHERE id = $lid"));
+    if (!$lr) { $error_message = 'User not found.'; }
+    elseif ($_GET['action'] === 'lock_user') {
+        if ($lid === intval($_SESSION['user_id'] ?? 0)) { $error_message = 'You cannot lock your own account.'; }
+        else {
+            $why = mysqli_real_escape_string($conn, 'Locked by ' . ($_SESSION['username'] ?? 'admin') . ' on ' . date('Y-m-d H:i'));
+            mysqli_query($conn, "UPDATE users SET locked_until = '" . AL_ADMIN_LOCK . "', lock_reason = '$why' WHERE id = $lid");
+            @mysqli_query($conn, "DELETE FROM remember_tokens WHERE user_id = $lid");
+            al_event('user_locked', 'locked ' . $lr['username']);
+            $success_message = 'User "' . htmlspecialchars($lr['username']) . '" is locked. They are signed out and cannot log in until unlocked.';
+        }
+    } else {
+        mysqli_query($conn, "UPDATE users SET locked_until = NULL, failed_attempts = 0, lock_reason = NULL WHERE id = $lid");
+        al_event('user_unlocked', 'unlocked ' . $lr['username']);
+        $success_message = 'User "' . htmlspecialchars($lr['username']) . '" is unlocked.';
+    }
+}
+
 // Handle Delete User
 if (isset($_GET['delete'])) {
     $id = intval($_GET['delete']);
@@ -54,6 +78,9 @@ if (isset($_GET['delete'])) {
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $username = mysqli_real_escape_string($conn, $_POST['username']);
     $description = mysqli_real_escape_string($conn, $_POST['description']);
+    $email_raw = trim($_POST['email'] ?? '');
+    $email_ok  = ($email_raw === '' || filter_var($email_raw, FILTER_VALIDATE_EMAIL));
+    $email_sql = $email_raw === '' ? 'NULL' : "'" . mysqli_real_escape_string($conn, $email_raw) . "'";
     $role_id = !empty($_POST['role_id']) ? intval($_POST['role_id']) : null;
     $active = isset($_POST['active']) ? 1 : 0;
     
@@ -67,6 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $sql = "UPDATE users SET 
                     username = '$username', 
                     password = '$password',
+                    email = $email_sql,
                     description = '$description',
                     role_id = " . ($role_id ? "'$role_id'" : "NULL") . ",
                     active = '$active' 
@@ -74,13 +102,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } else {
             $sql = "UPDATE users SET 
                     username = '$username', 
+                    email = $email_sql,
                     description = '$description',
                     role_id = " . ($role_id ? "'$role_id'" : "NULL") . ",
                     active = '$active' 
                     WHERE id = $id";
         }
-        
-        if (mysqli_query($conn, $sql)) {
+        if (!$email_ok) {
+            $error_message = 'Invalid e-mail address.';
+        } elseif (mysqli_query($conn, $sql)) {
             // Delete existing company assignments
             mysqli_query($conn, "DELETE FROM user_companies WHERE user_id = $id");
             
@@ -109,7 +139,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     } else {
         // Validate password
-        if (empty($_POST['password']) || empty($_POST['retype_password'])) {
+        if (!$email_ok) {
+            $error_message = "Invalid e-mail address.";
+        } elseif (empty($_POST['password']) || empty($_POST['retype_password'])) {
             $error_message = "Password and Retype Password are required!";
         } elseif ($_POST['password'] !== $_POST['retype_password']) {
             $error_message = "Passwords do not match!";
@@ -124,8 +156,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $error_message = "Username already exists!";
             } else {
                 // Insert new user
-                $sql = "INSERT INTO users (username, password, description, role_id, active) 
-                        VALUES ('$username', '$password', '$description', " . 
+                $sql = "INSERT INTO users (username, password, email, description, role_id, active) 
+                        VALUES ('$username', '$password', $email_sql, '$description', " . 
                         ($role_id ? "'$role_id'" : "NULL") . ", '$active')";
                 
                 if (mysqli_query($conn, $sql)) {
@@ -252,6 +284,11 @@ include 'header.php';
                         <?php if ($user['description']): ?>
                             <br><small style="color: #666;"><?php echo htmlspecialchars($user['description']); ?></small>
                         <?php endif; ?>
+                        <?php if (!empty($user['email'])): ?>
+                            <br><small style="color:#4f46e5;"><i class="fa-regular fa-envelope"></i> <?php echo htmlspecialchars($user['email']); ?></small>
+                        <?php else: ?>
+                            <br><small style="color:#b45309;"><i class="fa-regular fa-envelope"></i> no e-mail (cannot reset password by mail)</small>
+                        <?php endif; ?>
                     </td>
                     <td>
                         <?php if (count($company_names) > 0): ?>
@@ -278,6 +315,12 @@ include 'header.php';
                         <?php endif; ?>
                     </td>
                     <td>
+                        <?php $isLocked = !empty($user['locked_until']) && strtotime($user['locked_until']) > time(); $adminLock = $isLocked && al_is_admin_lock($user['locked_until']); ?>
+                        <?php if ($isLocked): ?>
+                            <span class="badge badge-inactive" style="background:#fee2e2;color:#991b1b" title="<?php echo htmlspecialchars($adminLock ? ($user['lock_reason'] ?? 'Locked by administrator') : 'Locked until ' . $user['locked_until'] . ' after too many wrong passwords'); ?>">
+                                <i class="fa-solid fa-lock"></i> <?php echo $adminLock ? 'Locked (admin)' : 'Locked (auto)'; ?>
+                            </span><br>
+                        <?php endif; ?>
                         <?php if ($user['active']): ?>
                             <span class="badge badge-success">
                                 <i class="fa-solid fa-circle-check"></i> Active
@@ -296,6 +339,13 @@ include 'header.php';
                                title="Edit">
                                 <i class="fa-solid fa-pen"></i>
                             </a>
+                            <?php if ($isLocked): ?>
+                            <a href="?action=unlock_user&uid=<?php echo $user['id']; ?>" class="btn-action" style="background:#dcfce7;color:#166534" title="Unlock this user"
+                               onclick="return confirm('Unlock this user?')"><i class="fa-solid fa-lock-open"></i></a>
+                            <?php elseif ((int)$user['id'] !== (int)($_SESSION['user_id'] ?? 0)): ?>
+                            <a href="?action=lock_user&uid=<?php echo $user['id']; ?>" class="btn-action" style="background:#fef3c7;color:#92400e" title="Lock this user (sign out + block login)"
+                               onclick="return confirm('Lock this user? They will be signed out and cannot log in until unlocked.')"><i class="fa-solid fa-lock"></i></a>
+                            <?php endif; ?>
                             <a href="?delete=<?php echo $user['id']; ?>" 
                                class="btn-action btn-delete" 
                                title="Delete"
@@ -343,6 +393,11 @@ include 'header.php';
                             placeholder="Enter username"
                             required
                         >
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email" class="form-label">E-mail <span class="optional">(for forgot password)</span></label>
+                        <input type="email" id="email" name="email" class="form-input" placeholder="name@company.com" autocomplete="off">
                     </div>
 
                     <div class="form-group">
@@ -1021,6 +1076,7 @@ function editUser(userId) {
             document.getElementById('user_id').value = data.user.id;
             document.getElementById('username').value = data.user.username;
             document.getElementById('description').value = data.user.description || '';
+            document.getElementById('email').value = data.user.email || '';
             document.getElementById('role_id').value = data.user.role_id || '';
             document.getElementById('active').checked = data.user.active == 1;
             document.getElementById('password').value = '';

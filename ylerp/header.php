@@ -1018,6 +1018,9 @@ if (isset($conn) && $conn) {
                     <a href="backup_settings.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'backup_settings.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-database"></i><span>DB Backup</span>
                     </a>
+                    <a href="email_settings.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'email_settings.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-envelope-circle-check"></i><span>E-mail Setup</span>
+                    </a>
                     
                         <a href="bank_holidays.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bank_holidays.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Bank Holidays</span>
@@ -1041,6 +1044,9 @@ if (isset($conn) && $conn) {
                     </a>
                     <a href="user_role_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'user_role_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-clipboard-list"></i><span>User Role Report</span>
+                    </a>
+                    <a href="activity_log.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'activity_log.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-clock-rotate-left"></i><span>Activity Log</span>
                     </a>
                 </div>
 

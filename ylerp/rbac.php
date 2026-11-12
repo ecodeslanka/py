@@ -29,7 +29,7 @@ define('RBAC_LOADED', true);
 
 // Pages every logged-in user may open, whatever the role.
 $GLOBALS['RBAC_ALWAYS_ALLOWED'] = ['index', 'login', 'logout', 'login_process', 'profile', 'help',
-                                    'session_extend', 'access_denied'];
+                                    'session_extend', 'access_denied', 'forgot_password', 'reset_password'];
 
 // Users with NO role assigned: true = full access (old behaviour), false = dashboard only.
 if (!defined('RBAC_NO_ROLE_FULL_ACCESS')) define('RBAC_NO_ROLE_FULL_ACCESS', false);
@@ -687,6 +687,17 @@ function rbac_detect_action() {
 function rbac_guard() {
     if (PHP_SAPI === 'cli') return;
     $page = rbac_current_page();
+    // activity log + instant sign-out of locked / deactivated users (never lets a logging problem break a page)
+    if (!in_array($page, ['login', 'login_process', 'logout', 'forgot_password', 'reset_password'], true)) {
+        try {
+            if (session_status() === PHP_SESSION_NONE) @session_start();
+            if (!empty($_SESSION['user_id'])) {
+                require_once __DIR__ . '/activity_lib.php';
+                al_enforce_account();
+                al_request();
+            }
+        } catch (Throwable $e) { /* ignore */ }
+    }
     if (in_array($page, $GLOBALS['RBAC_ALWAYS_ALLOWED'], true)) return;
     [$target] = rbac_resolve($page);
     if ($target === null) return;                         // not a menu / related page
@@ -716,6 +727,7 @@ function rbac_is_ajax() {
 }
 
 function rbac_deny($action, $page) {
+    try { if (!empty($_SESSION['user_id'])) { require_once __DIR__ . '/activity_lib.php'; al_write((int)$_SESSION['user_id'], $_SESSION['username'] ?? '', $_SESSION['role_name'] ?? '', $page, 'blocked', 'tried to ' . $action . ' — permission blocked'); } } catch (Throwable $e) {}
     $labels = ['view'=>'view', 'create'=>'add records on', 'edit'=>'edit records on', 'delete'=>'delete records on'];
     $pages  = rbac_menu_pages();
     [$target] = rbac_resolve($page);
