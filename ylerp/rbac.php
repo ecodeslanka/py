@@ -28,6 +28,8 @@ define('RBAC_LOADED', true);
  * ================================================================ */
 
 // Pages every logged-in user may open, whatever the role.
+require_once __DIR__ . '/session_boot.php';   // long sliding session (must run before any session_start)
+
 $GLOBALS['RBAC_ALWAYS_ALLOWED'] = ['index', 'login', 'logout', 'login_process', 'profile', 'help',
                                     'session_extend', 'access_denied', 'forgot_password', 'reset_password'];
 

@@ -98,7 +98,7 @@ function getRealIp() {
 // ============================================================
 $username   = trim($_POST['username'] ?? '');
 $password   = $_POST['password']   ?? '';
-$remember   = isset($_POST['remember']);
+$remember   = true;   // always keep the user signed in until they press Logout
 $email_hint = trim($_POST['email'] ?? '');   // optional mail field in form
 $ip_address = getRealIp();
 $ua         = $_SERVER['HTTP_USER_AGENT'] ?? '';
@@ -242,7 +242,7 @@ if (empty($username) || empty($password)) {
 
                 setcookie('remember_token', $token,
                           time() + (REMEMBER_DAYS * 24 * 3600),
-                          '/', '', true, true);   // Secure + HttpOnly
+                          '/', '', !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off', true);   // HttpOnly (+Secure on https)
             }
 
             // ----------------------------------------------------------
