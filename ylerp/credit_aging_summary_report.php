@@ -164,6 +164,15 @@ $SETBILLS = [];
 foreach ($CUST as $tc => $c) foreach ($c['bills'] as $b) $SETBILLS[$c['set']][] = ['t' => $tc, 'n' => $c['name']] + $b;
 $T = ['n' => 0, 'v' => 0.0, 'ok_n' => 0, 'ok_v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'cx_c' => 0, 'cx_n' => 0, 'cx_v' => 0.0, 'nx_c' => 0, 'nx_n' => 0, 'nx_v' => 0.0];
 foreach ($S as $s) foreach (['n', 'v', 'ok_n', 'ok_v', 'ex_n', 'ex_v', 'cx_c', 'cx_n', 'cx_v', 'nx_c', 'nx_n', 'nx_v'] as $f) $T[$f] += $s[$f];
+/* 5th row: "Cheques policy exceeded" = the cheque customers + cheques-will-delay customers together, from the Cheque Aging Report data.
+   It is a combined view of rows 2 and 3, so it is NOT added into the TOTAL again. */
+$GROUPS['chq'] = ['label' => 'Cheques policy exceeded', 'exceed' => 'Cheques policy exceeded', 'unit' => 'cheques', 'icon' => 'fa-money-check', 'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true];
+$S['chq'] = $S['cheque'];
+foreach ($S['cwd'] as $f => $v) {
+    $S['chq'][$f] = $S['cheque'][$f] + $v;      // customer lists (arrays): union · counts / values: sum
+}
+$SETBILLS['chq'] = array_merge($SETBILLS['cheque'] ?? [], $SETBILLS['cwd'] ?? []);
+
 /* ═════════════ Excel export ═════════════ */
 if (isset($_GET['export'])) {
     require_once __DIR__ . '/rbac_xlsx.php';
@@ -410,7 +419,7 @@ include 'header.php';
     [].forEach.call($('mTabs').children,function(b){ b.style.display=(!g.test&&b.dataset.f!=='all')?'none':''; });
     filt='all'; [].forEach.call($('mTabs').children,function(b){ b.classList.toggle('on',b.dataset.f==='all'); });
     $('mQ').value='';
-    var pm={credit:'credit',cheque:'cheque',cwd:'cwd',cash:'cash'}[d.k]||'';
+    var pm={credit:'credit',cheque:'cheque',cwd:'cwd',cash:'cash',chq:'cheque'}[d.k]||'';
     if(g.chq){ $('mOpen').href='cheque_aging_report.php?as_at='+encodeURIComponent(AS_AT)+'&pay_mode=cheque'+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Cheque Aging Report'; }
     else { $('mOpen').href='credit_aging_report.php?as_at_date='+encodeURIComponent(AS_AT)+'&pay_mode='+pm+(ROUTE?'&route='+encodeURIComponent(ROUTE):'')+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Credit Aging Report'; }
     draw();
