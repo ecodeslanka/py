@@ -42,6 +42,8 @@ if (($_GET['ajax'] ?? '') === 'claim_rows') {
 }
 /* scheme code key: same code whether it is typed 41388823, ' 41388823 ' or 41388823.0 (case ignored) */
 function sd_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); }
+/** amounts under Rs. 1 (rounding crumbs such as 0.01) count as 0 */
+function sd_zero($v) { return abs((float)$v) < 1 ? 0.0 : (float)$v; }
 function sd_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 function sd_d($v) { return $v ? date('d M Y', strtotime($v)) : '—'; }
 function sd_ok($d) { return (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$d); }
@@ -97,8 +99,8 @@ foreach ($items as &$__x) {
     $__x['bws_n'] = $b ? $b['n'] : 0; $__x['bws_sd'] = $b ? $b['sd'] : null;
     $__x['cc_n'] = $c2 ? $c2['n'] : 0; $__x['cc_act'] = $c2 ? $c2['act'] : null;
     $has_claim = $__x['claim_amount'] !== null;
-    $__x['diff'] = ($has_claim || $b) ? round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($b ? $b['sd'] : 0), 2) : null;     // Claim Amount − scheme discount as per invoice
-    $__x['balance'] = ($has_claim || $c2) ? max(0, round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($c2 ? $c2['act'] : 0), 2)) : null;     // a negative balance (claimed more than the claim amount) is shown as 0     // Claim Amount − claim certificate actual amount
+    $__x['diff'] = ($has_claim || $b) ? sd_zero(round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($b ? $b['sd'] : 0), 2)) : null;     // Claim Amount − scheme discount as per invoice
+    $__x['balance'] = ($has_claim || $c2) ? sd_zero(max(0, round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($c2 ? $c2['act'] : 0), 2))) : null;     // negative balance → 0; rounding crumbs (under Rs. 1, e.g. 0.01) → 0     // Claim Amount − claim certificate actual amount
 } unset($__x);
 $tot = array_sum(array_map(fn($x) => (float)$x['claim_amount'], $items));
 $tot_bws = array_sum(array_map(fn($x) => (float)$x['bws_sd'], $items));
