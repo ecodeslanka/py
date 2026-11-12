@@ -77,6 +77,69 @@ function al_request() {
     al_write((int)$_SESSION['user_id'], $_SESSION['username'] ?? '', $_SESSION['role_name'] ?? '', $page, $act, al_detail());
 }
 
+/* ───────── meaningful description of a log row ("Deleted record #12 on Users", "Opened Credit Aging Report — from 01 Nov 2026, route R1") ───────── */
+function al_page_label($page) {
+    static $labels = null;
+    if ($labels === null) {
+        $labels = [];
+        if (function_exists('rbac_menu_pages')) foreach (rbac_menu_pages() as $k => $info) $labels[strtolower($k)] = $info['label'] ?? '';
+    }
+    $p = strtolower((string)$page);
+    if ($p === 'index') return 'Dashboard';
+    if (!empty($labels[$p])) return $labels[$p];
+    return ucwords(trim(str_replace(['_', '-'], ' ', $p)));
+}
+function al_nice_date($v) { $t = strtotime($v); return $t ? date('d M Y', $t) : $v; }
+/** "date_from=2026-11-01 & route=R1" → parts */
+function al_params($detail) {
+    $o = [];
+    foreach (explode(' & ', (string)$detail) as $kv) { if ($kv === '' || strpos($kv, '=') === false) continue; [$k, $v] = explode('=', $kv, 2); if ($v !== '') $o[trim($k)] = $v; }
+    return $o;
+}
+function al_filters_text($pm) {
+    $skip = '/^(id|ids|action|act|op|do|mode|task|ajax|page|pg|per_page|sort|dir|_|t|nocache|csrf|t_code|tc|code|customer|scheme_no|delete|del|remove)$|^(export|print)(_.*)?$/i';
+    $names = ['date_from' => 'from', 'from' => 'from', 'date_to' => 'to', 'to' => 'to', 'as_at_date' => 'as at', 'as_at' => 'as at', 'delivery_date' => 'delivery date', 'search' => 'search', 'q' => 'search', 'route' => 'route', 'sr_code' => 'SR', 'sr' => 'SR', 'pay_mode' => 'pay mode', 'moc' => 'MOC', 'type' => 'type'];
+    $o = [];
+    foreach ($pm as $k => $v) {
+        if (preg_match($skip, $k) || preg_match('/(^|_)id$/i', $k)) continue;
+        $lbl = $names[strtolower($k)] ?? strtolower(str_replace('_', ' ', $k));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) $v = al_nice_date($v);
+        $o[] = ($lbl === 'search' ? 'search “' . $v . '”' : $lbl . ' ' . $v);
+        if (count($o) >= 6) break;
+    }
+    return implode(', ', $o);
+}
+function al_describe($r) {
+    $a = (string)($r['action'] ?? 'view'); $page = al_page_label($r['page'] ?? ''); $d = (string)($r['detail'] ?? ''); $pm = al_params($d);
+    $id = ''; foreach ($pm as $k => $v) if ((preg_match('/(^|_)id$/i', $k) && !preg_match('/^(upload|import)_id$/i', $k)) || preg_match('/^(delete|del|remove)(_.*)?$/i', $k) && ctype_digit($v)) { $id = $v; break; }
+    $subj = ''; foreach (['t_code', 'tc', 'code', 'customer', 'scheme_no'] as $k) if (isset($pm[$k])) { $subj = $pm[$k]; break; }
+    $act = ''; foreach (['action', 'ajax', 'act', 'do', 'op', 'mode', 'task'] as $k) if (isset($pm[$k])) { $act = trim(str_replace('_', ' ', $pm[$k])); break; }
+    $fil = al_filters_text($pm); $rec = $id !== '' ? ' (record #' . $id . ')' : '';
+    if ($subj !== '') $act = trim($act . ' for ' . $subj);
+    switch ($a) {
+        case 'view':    return 'Opened ' . $page . ($act !== '' ? ' — ' . $act : '') . ($fil !== '' ? ' — ' . $fil : '');
+        case 'create':  return 'Added a new record on ' . $page . ($act !== '' ? ' — ' . $act : '') . $rec;
+        case 'save':    return 'Saved ' . ($id !== '' ? 'record #' . $id : 'a record') . ' on ' . $page . ($act !== '' ? ' — ' . $act : '');
+        case 'edit':    return 'Edited ' . ($id !== '' ? 'record #' . $id : 'a record') . ' on ' . $page . ($act !== '' ? ' — ' . $act : '');
+        case 'delete':  return 'Deleted ' . ($id !== '' ? 'record #' . $id : 'a record') . ' on ' . $page . ($act !== '' ? ' — ' . $act : '');
+        case 'export':  return 'Exported ' . $page . ' to Excel' . ($fil !== '' ? ' — ' . $fil : '');
+        case 'print':   return 'Printed ' . $page . ($fil !== '' ? ' — ' . $fil : '');
+        case 'blocked': return 'Blocked — no permission to ' . (preg_match('/tried to (\w+)/', $d, $m) ? $m[1] : 'use') . ' on ' . $page;
+        case 'login':   return 'Signed in' . ($d !== '' ? ' (' . $d . ')' : '');
+        case 'logout':  return 'Signed out';
+        case 'login_failed':  return 'Failed sign-in — ' . ($d !== '' ? $d : 'wrong password');
+        case 'login_blocked': return 'Sign-in refused — the account is locked';
+        case 'user_locked':   return 'Locked a user account' . (preg_match('/locked (.+)$/', $d, $m) ? ': ' . $m[1] : '');
+        case 'user_unlocked': return 'Unlocked a user account' . (preg_match('/unlocked (.+)$/', $d, $m) ? ': ' . $m[1] : '');
+        case 'user_auto_locked': return 'Account locked automatically — ' . $d;
+        case 'password_reset_sent':   return 'Password reset e-mail sent';
+        case 'password_reset_failed': return 'Password reset e-mail could not be sent — ' . $d;
+        case 'password_reset_done':   return 'Password changed with the e-mailed link';
+        case 'email_settings_saved':  return 'Saved the e-mail (SMTP) settings — ' . $d;
+    }
+    return ucfirst(str_replace('_', ' ', $a)) . ' on ' . $page . ($d !== '' ? ' — ' . $d : '');
+}
+
 /** Locked by an administrator (no automatic expiry) */
 function al_is_admin_lock($locked_until) { return $locked_until && strtotime($locked_until) >= strtotime('2090-01-01'); }
 define('AL_ADMIN_LOCK', '2099-12-31 23:59:59');

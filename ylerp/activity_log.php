@@ -32,10 +32,10 @@ if (!empty($_GET['export']) && class_exists('ZipArchive')) {
     $X = new MiniXlsx(); $sh = $X->sheet('Activity log');
     $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '1E293B', 'h' => 'center', 'border' => 1];
     $sh->set(1, 1, 'Activity Log  ·  ' . $from . ' to ' . $to, ['b' => 1, 'sz' => 14]);
-    foreach (['Time', 'User', 'Role', 'Page', 'Action', 'Detail', 'IP', 'Device'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
+    foreach (['Time', 'User', 'Role', 'Page', 'Action', 'What happened', 'Detail', 'IP', 'Device'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
     $r = 4; $res = mysqli_query($conn, "SELECT * FROM activity_log WHERE $where ORDER BY id DESC LIMIT 20000");
-    while ($res && ($x = mysqli_fetch_assoc($res))) { foreach ([$x['created_at'], $x['username'], $x['role_name'], $x['page'], $x['action'], $x['detail'], $x['ip'], $x['device']] as $i => $v) $sh->set($r, $i + 1, (string)$v, ['border' => 1]); $r++; }
-    foreach ([19, 16, 16, 24, 16, 60, 15, 24] as $i => $wd) $sh->widths[$i + 1] = $wd;
+    while ($res && ($x = mysqli_fetch_assoc($res))) { foreach ([$x['created_at'], $x['username'], $x['role_name'], al_page_label($x['page']), $x['action'], al_describe($x), $x['detail'], $x['ip'], $x['device']] as $i => $v) $sh->set($r, $i + 1, (string)$v, ['border' => 1]); $r++; }
+    foreach ([19, 16, 16, 26, 16, 60, 44, 15, 24] as $i => $wd) $sh->widths[$i + 1] = $wd;
     $tmp = tempnam(sys_get_temp_dir(), 'al'); $X->save($tmp);
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -136,9 +136,9 @@ include 'header.php';
       <td class="num" style="color:#dc2626"><?php echo $x['d']; ?></td><td class="num"><?php echo $x['ex']; ?></td><td class="num" style="color:#991b1b"><?php echo $x['b']; ?></td><td><?php echo $x['last_at']; ?></td></tr>
     <?php endforeach; if (!$usersum) echo '<tr><td colspan="12" style="text-align:center;color:#9ca3af;padding:30px">No activity in this period.</td></tr>'; ?></tbody></table>
   <?php else: ?>
-    <table><thead><tr><th>Time</th><th>User</th><th>Page</th><th>Action</th><th>Detail</th><th>IP</th><th>Device</th></tr></thead><tbody>
+    <table><thead><tr><th>Time</th><th>User</th><th>Page</th><th>Action</th><th>What happened</th><th>IP</th><th>Device</th></tr></thead><tbody>
     <?php foreach ($rows as $x): ?><tr><td style="white-space:nowrap"><?php echo $x['created_at']; ?></td><td><b><?php echo htmlspecialchars($x['username'] ?: '—'); ?></b><br><small style="color:#9ca3af"><?php echo htmlspecialchars($x['role_name']); ?></small></td>
-      <td><?php echo htmlspecialchars($x['page']); ?></td><td><?php echo $badge($x['action']); ?></td><td class="det"><?php echo htmlspecialchars($x['detail']); ?></td><td><?php echo htmlspecialchars($x['ip']); ?></td><td><small><?php echo htmlspecialchars($x['device']); ?></small></td></tr>
+      <td><?php echo htmlspecialchars(al_page_label($x['page'])); ?><br><small style="color:#9ca3af"><?php echo htmlspecialchars($x['page']); ?>.php</small></td><td><?php echo $badge($x['action']); ?></td><td style="max-width:560px;white-space:normal"><b style="color:#111827"><?php echo htmlspecialchars(al_describe($x)); ?></b><?php if ($x['detail'] !== '' && $x['detail'] !== null): ?><br><span class="det" title="<?php echo htmlspecialchars($x['detail']); ?>"><?php echo htmlspecialchars(mb_strimwidth($x['detail'], 0, 110, '…')); ?></span><?php endif; ?></td><td><?php echo htmlspecialchars($x['ip']); ?></td><td><small><?php echo htmlspecialchars($x['device']); ?></small></td></tr>
     <?php endforeach; if (!$rows) echo '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:30px">No activity found for these filters.</td></tr>'; ?></tbody></table>
   <?php endif; ?>
   </div>
