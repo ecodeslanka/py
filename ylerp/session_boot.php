@@ -21,13 +21,8 @@ function yms_session_boot() {
         @ini_set('session.gc_probability', '1');
         @ini_set('session.gc_divisor', '100');
         @ini_set('session.use_strict_mode', '1');
-        // own session folder: the shared system temp folder is cleaned by the server after ~24 minutes
-        $dir = __DIR__ . '/sessions';
-        if (!is_dir($dir)) @mkdir($dir, 0700, true);
-        if (is_dir($dir) && is_writable($dir)) {
-            if (!is_file($dir . '/.htaccess')) @file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
-            @session_save_path($dir);
-        }
+        // NOTE: the session save folder is deliberately left at the server default. Some pages call session_start()
+        // BEFORE they include config.php; a custom folder would make them read a different (empty) session = not logged in.
         @session_set_cookie_params(['lifetime' => $life, 'path' => '/', 'secure' => $https, 'httponly' => true, 'samesite' => 'Lax']);
         @session_start();
     }
