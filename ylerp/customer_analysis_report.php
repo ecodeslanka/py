@@ -50,6 +50,13 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS customer_btg (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+/* BTG amount (from the Excel) is kept apart from the Approved BTG (typed in by hand) */
+$cb = @mysqli_query($conn, "SHOW COLUMNS FROM customer_btg LIKE 'btg_excel'");
+if ($cb && !mysqli_num_rows($cb)) {
+    mysqli_query($conn, "ALTER TABLE customer_btg ADD COLUMN btg_excel DECIMAL(15,2) NULL AFTER btg");
+    mysqli_query($conn, "UPDATE customer_btg SET btg_excel = btg, btg = 0 WHERE source = 'excel'");   // earlier imports were stored as 'approved'
+}
+
 /* ═══════════════════════════ AJAX ═══════════════════════════ */
 $ajax = $_POST['action'] ?? ($_GET['ajax'] ?? '');
 if ($ajax !== '') {
@@ -153,8 +160,8 @@ if ($ajax !== '') {
         $cols = ['#', 'NEW SR', 'Outlet code', 'Outlet name', 'In system', 'Blacklisted', 'Blacklist type', 'Blacklist reason', 'Pay mode', 'Policy days', 'Cheques will delay',
                  date('M') . ' sale (secondary)', 'Sale bills', 'Total outstanding', 'Unpaid bills', 'Oldest bill (days)', 'Aging ≤0', 'Aging 1-7', 'Aging 8-14', 'Aging 15-21', 'Aging 22-28', 'Aging 29-35', 'Aging 35+',
                  'Credit limit', 'Limit used %', 'Last payment', 'Avg days to pay', 'Returned cheques', 'Returned amount', 'Returned open', 'Policy', 'Violated (times)', 'Longest over (days)', 'Overdue now', 'Risk score', 'Risk band', 'DO NOT ISSUE (marked)', 'Suggested to stop issue', 'Actions to do', 'Actions done', 'Note', 'Why (system data)'];
-        array_splice($cols, 13, 0, ['Channel', '3-month avg sale', '6-month avg sale', 'Approved BTG', 'BTG vs 6M avg %']);
-        $nc = count($cols); $sh = fn($c) => $c > 13 ? $c + 5 : $c;     // later columns move right by the 5 new ones
+        array_splice($cols, 13, 0, ['Channel', '3-month avg sale', '6-month avg sale', 'BTG amount (Excel)', 'Approved BTG', 'Approved BTG vs 6M avg %']);
+        $nc = count($cols); $sh = fn($c) => $c > 13 ? $c + 6 : $c;     // later columns move right by the 6 new ones
         $s2->set(1, 1, $title . ' — customer analysis', ['b' => 1, 'sz' => 15, 'color' => $C['white'], 'bg' => $C['teal'], 'indent' => 1]);
         for ($c = 2; $c <= $nc; $c++) $s2->set(1, $c, '', ['bg' => $C['teal']]);
         $s2->merge(1, 1, 1, $nc); $s2->heights[1] = 28;
@@ -178,14 +185,16 @@ if ($ajax !== '') {
                      $x['risk'] ?? '', $x['band'] ?? '', !empty($x['ni']) ? 'DO NOT ISSUE' : '', !empty($x['sg']) && empty($x['ni']) ? 'Suggested' : '', is_array($x['acts'] ?? null) ? implode(' | ', $x['acts']) : '',
                      is_array($x['acts_done'] ?? null) ? implode(' | ', $x['acts_done']) : '', $x['note'] ?? '', is_array($x['bl_why'] ?? null) ? implode(' | ', $x['bl_why']) : ''];
             $btgv = ($x['btg'] ?? null) === null || $x['btg'] === '' ? '' : round((float)$x['btg'], 2);
-            array_splice($vals, 13, 0, [$x['channel'] ?? '', round((float)($x['avg3'] ?? 0), 2), round((float)($x['avg6'] ?? 0), 2), $btgv,
+            $btgx = ($x['btg_x'] ?? null) === null || $x['btg_x'] === '' ? '' : round((float)$x['btg_x'], 2);
+            array_splice($vals, 13, 0, [$x['channel'] ?? '', round((float)($x['avg3'] ?? 0), 2), round((float)($x['avg6'] ?? 0), 2), $btgx, $btgv,
                                         ($btgv !== '' && (float)($x['avg6'] ?? 0) > 0) ? round($btgv / (float)$x['avg6'] * 100) : '']);
             foreach ($vals as $i => $v) {
                 $st = $b; $ci = $i + 1;
-                if (in_array($ci, array_map($sh, [1, 2, 3, 5, 9, 10, 11, 13, 15, 16, 28, 32, 33, 34, 35]), true) || $ci === 14 || $ci === 18) $st += ['h' => 'center'];
-                if (in_array($ci, array_merge(array_map($sh, [12, 14, 17, 18, 19, 20, 21, 22, 23, 24, 29, 30]), [15, 16, 17]), true)) $st += ['h' => 'right', 'nf' => 4];   // money with thousands separators
+                if (in_array($ci, array_map($sh, [1, 2, 3, 5, 9, 10, 11, 13, 15, 16, 28, 32, 33, 34, 35]), true) || $ci === 14 || $ci === 19) $st += ['h' => 'center'];
+                if (in_array($ci, array_merge(array_map($sh, [12, 14, 17, 18, 19, 20, 21, 22, 23, 24, 29, 30]), [15, 16, 17, 18]), true)) $st += ['h' => 'right', 'nf' => 4];   // money with thousands separators
                 if (in_array($ci, array_map($sh, [25, 27]), true)) $st += ['h' => 'right'];
-                if ($ci === 17 && $v !== '') $st += ['b' => 1, 'color' => '7C3AED'];
+                if ($ci === 17 && $v !== '') $st += ['color' => '2563EB'];
+                if ($ci === 18 && $v !== '') $st += ['b' => 1, 'color' => '7C3AED'];
                 if ($ci === 15 || $ci === 16) $st += ['color' => '0F766E'];
                 if ($ci === 4) $st += ['b' => 1];
                 if ($ci === 6 && $bl) $st = ['border' => 1, 'bg' => 'FEE2E2', 'color' => 'B91C1C', 'b' => 1, 'h' => 'center'];
@@ -202,7 +211,7 @@ if ($ajax !== '') {
             }
             $r++; $n++;
         }
-        foreach ([5, 10, 17, 30, 9, 11, 22, 34, 10, 9, 11, 15, 8, 12, 15, 15, 15, 12, 16, 9, 10, 11, 11, 11, 11, 11, 11, 11, 14, 9, 13, 10, 10, 15, 14, 14, 10, 11, 9, 8, 11, 16, 14, 60, 40, 30, 70] as $i => $w) $s2->widths[$i + 1] = $w;
+        foreach ([5, 10, 17, 30, 9, 11, 22, 34, 10, 9, 11, 15, 8, 12, 15, 15, 16, 15, 14, 16, 9, 10, 11, 11, 11, 11, 11, 11, 11, 14, 9, 13, 10, 10, 15, 14, 14, 10, 11, 9, 8, 11, 16, 14, 60, 40, 30, 70] as $i => $w) $s2->widths[$i + 1] = $w;
         $s2->freeze = [3, 4]; $s2->filter = 'A3:' . MiniXlsx::col($nc) . max(4, $r - 1);
 
         /* Sheet 3 — Violated bills */
@@ -231,7 +240,7 @@ if ($ajax !== '') {
         $v = (float)str_replace(',', '', $raw);
         if ($tc === '' || $v < 0 || ($raw !== '' && !is_numeric(str_replace(',', '', $raw)))) { echo json_encode(['success' => false, 'message' => 'Enter a valid BTG amount.']); exit; }
         $e = mysqli_real_escape_string($conn, $tc); $u = mysqli_real_escape_string($conn, ca_user());
-        $ok = mysqli_query($conn, "INSERT INTO customer_btg (t_code, btg, source, updated_by) VALUES ('$e', $v, 'manual', '$u') ON DUPLICATE KEY UPDATE btg = VALUES(btg), source = 'manual', updated_by = VALUES(updated_by)");
+        $ok = mysqli_query($conn, "INSERT INTO customer_btg (t_code, btg, source, updated_by) VALUES ('$e', $v, 'manual', '$u') ON DUPLICATE KEY UPDATE btg = VALUES(btg), updated_by = VALUES(updated_by)");
         echo json_encode(['success' => (bool)$ok, 'btg' => round($v, 2), 'message' => $ok ? '' : 'Could not save.']); exit;
     }
     if ($ajax === 'analyze') {
@@ -316,15 +325,15 @@ if ($ajax !== '') {
                 SELECT t_code, bill_no, MAX(final_bill_amount) AS fb, MIN(delivery_date) AS d FROM secondary_invoice_import_details
                 WHERE status = 'imported' AND t_code IN ($tlist) AND delivery_date BETWEEN '$a6s' AND '$aend' GROUP BY t_code, bill_no) x GROUP BY x.t_code");
         while ($q && ($x = mysqli_fetch_assoc($q))) $avg[$x['t_code']] = $x;
-        /* approved BTG: an amount in the Excel replaces the saved one; otherwise the saved / typed one is used */
+        /* BTG amount: an amount in the Excel replaces the saved one. Approved BTG: only what is typed in by hand */
         $uname = mysqli_real_escape_string($conn, ca_user());
         foreach ($rows as $rw) if ($rw['btg_in'] !== null) {
             $tc_e = mysqli_real_escape_string($conn, $rw['code']); $ch_e = mysqli_real_escape_string($conn, $rw['channel']);
-            mysqli_query($conn, "INSERT INTO customer_btg (t_code, btg, channel, source, updated_by) VALUES ('$tc_e', " . (float)$rw['btg_in'] . ", '$ch_e', 'excel', '$uname')
-                                 ON DUPLICATE KEY UPDATE btg = VALUES(btg), channel = VALUES(channel), source = 'excel', updated_by = VALUES(updated_by)");
+            mysqli_query($conn, "INSERT INTO customer_btg (t_code, btg, btg_excel, channel, source, updated_by) VALUES ('$tc_e', 0, " . (float)$rw['btg_in'] . ", '$ch_e', 'excel', '$uname')
+                                 ON DUPLICATE KEY UPDATE btg_excel = VALUES(btg_excel), channel = VALUES(channel), updated_by = VALUES(updated_by)");
         }
         $btgm = [];
-        $q = mysqli_query($conn, "SELECT t_code, btg, channel, source FROM customer_btg WHERE t_code IN ($tlist)");
+        $q = mysqli_query($conn, "SELECT t_code, btg, btg_excel, channel, source FROM customer_btg WHERE t_code IN ($tlist)");
         while ($q && ($x = mysqli_fetch_assoc($q))) $btgm[$x['t_code']] = $x;
         $BL_LABELS = ['temporary' => 'Temporary block', 'no_cheque_cod' => 'Block cheque on delivery', 'no_cash_cod' => 'Block cash on delivery', 'permanent' => 'Permanent block', 'no_service' => 'Not serviced (no delivery)'];
         $bl_type_of = [];
@@ -422,7 +431,8 @@ if ($ajax !== '') {
                      'chq_open' => count($ca), 'chq_max_age' => $max_chq_age, 'chq_pol' => $pol_cnt, 'chq_breach' => $max_breach, 'sb_n' => $sb_t, 'sb_open' => $sb_open, 'rt_n' => $rt, 'rt_open' => $rt_open,
                      'sale_m' => round((float)($sale[$t]['v'] ?? 0), 2), 'sale_n' => (int)($sale[$t]['n'] ?? 0),
                      'avg3' => round((float)($avg[$t]['v3'] ?? 0) / 3, 2), 'avg6' => round((float)($avg[$t]['v6'] ?? 0) / 6, 2),
-                     'btg' => isset($btgm[$t]) ? round((float)$btgm[$t]['btg'], 2) : null, 'btg_src' => $btgm[$t]['source'] ?? null, 'channel' => ($btgm[$t]['channel'] ?? '') !== '' ? $btgm[$t]['channel'] : ($r['channel'] ?? ''),
+                     'btg_x' => isset($btgm[$t]) && $btgm[$t]['btg_excel'] !== null ? round((float)$btgm[$t]['btg_excel'], 2) : null,
+                     'btg' => isset($btgm[$t]) && (float)$btgm[$t]['btg'] > 0 ? round((float)$btgm[$t]['btg'], 2) : null, 'channel' => ($btgm[$t]['channel'] ?? '') !== '' ? $btgm[$t]['channel'] : ($r['channel'] ?? ''),
                      'risk' => $risk, 'band' => $band, 'crit' => $crit, 'bl_type' => $btype, 'bl_type_lbl' => $btype ? ($BL_LABELS[$btype] ?? $btype) : null, 'bl_why' => ((int)$c['bl'] ? $why : [])];
             $out[] = $row;
         }
@@ -496,7 +506,7 @@ include 'header.php';
             </div>
             <div class="wrap"><table class="t"><thead><tr>
                 <th>#</th><th>NEW SR</th><th>Outlet code</th><th class="l">Outlet name</th><th>Blacklisted</th><th>Pay mode</th><th>Cheques will delay</th>
-                <th>This month sale (Rs.)<br><span style="font-weight:500;font-size:10px">secondary sales</span></th><th>3-month avg sale (Rs.)<br><span style="font-weight:500;font-size:10px">per month · last 3 full months</span></th><th>6-month avg sale (Rs.)<br><span style="font-weight:500;font-size:10px">per month · last 6 full months</span></th><th>Approved BTG (Rs.)<br><span style="font-weight:500;font-size:10px">from Excel · or type &amp; save</span></th><th>Total outstanding (Rs.)</th><th>Oldest bill</th><th>Returned cheques</th><th>Policy</th><th>Violated</th><th>Risk</th><th>Do not issue</th><th>Analysis</th></tr></thead>
+                <th>This month sale (Rs.)<br><span style="font-weight:500;font-size:10px">secondary sales</span></th><th>3-month avg sale (Rs.)<br><span style="font-weight:500;font-size:10px">per month · last 3 full months</span></th><th>6-month avg sale (Rs.)<br><span style="font-weight:500;font-size:10px">per month · last 6 full months</span></th><th>BTG amount (Rs.)<br><span style="font-weight:500;font-size:10px">from Excel</span></th><th>Approved BTG (Rs.)<br><span style="font-weight:500;font-size:10px">type &amp; save</span></th><th>Total outstanding (Rs.)</th><th>Oldest bill</th><th>Returned cheques</th><th>Policy</th><th>Violated</th><th>Risk</th><th>Do not issue</th><th>Analysis</th></tr></thead>
                 <tbody id="caBody"></tbody></table></div>
             <div class="empty" id="caEmpty" style="display:none">No customers match.</div>
         </div>
@@ -663,7 +673,7 @@ include 'header.php';
             iCh=low.findIndex(function(x){ return x==='channel'||x.indexOf('channel')>-1; }); iBtg=low.findIndex(function(x){ return x==='btg'||x.indexOf('btg')>-1; }); break; } }
         for(var j=hi+1;j<a.length;j++){ var code=String(a[j][iCode]||'').trim(); if(code){ var bv=iBtg>-1?String(a[j][iBtg]).replace(/,/g,'').trim():''; parsed.push({sr:String(a[j][iSr]||'').trim(),code:code,name:String(a[j][iName]||'').trim(),channel:iCh>-1?String(a[j][iCh]||'').trim():'',btg:(bv!==''&&!isNaN(bv))?parseFloat(bv):''}); } }
         var nb=parsed.filter(function(x){ return x.btg!==''; }).length;
-        $('caStatus').textContent=parsed.length+' outlets found in "'+f.name+'"'+(iBtg>-1?' · '+nb+' BTG amount(s) will be imported':' · no BTG column found (you can type the BTG after analysing)')+'.'; $('caRun').disabled=!parsed.length;
+        $('caStatus').textContent=parsed.length+' outlets found in "'+f.name+'"'+(iBtg>-1?' · '+nb+' BTG amount(s) will be imported (Approved BTG is typed in the table)':' · no BTG column found (you can type the BTG after analysing)')+'.'; $('caRun').disabled=!parsed.length;
       }catch(err){ $('caStatus').textContent='Could not read the file: '+err.message; }
     };
     rd.readAsArrayBuffer(f);
@@ -707,7 +717,7 @@ include 'header.php';
     var q=$('caQ').value.trim().toLowerCase(); VIEW=[];
     var h=''; ROWS.forEach(function(r,i){
       if(!test(r,TAB)) return; if(q && (r.code+' '+(r.name||'')+' '+r.file_name+' '+r.sr).toLowerCase().indexOf(q)<0) return; VIEW.push(i);
-      if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="15"><span class="b grey">Not found in the system</span></td></tr>'; return; }
+      if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="16"><span class="b grey">Not found in the system</span></td></tr>'; return; }
       var pm=PM[r.pm]||['grey',r.pm||'—'], pol=r.policy==='cheque'?'Cheque policy':(r.policy==='credit'?'Credit policy':'—');
       var rk=(r.risk==null)?'<span style="color:#d1d5db">—</span>':'<span class="b '+(BAND[r.band]||'grey')+'">'+r.risk+' · '+r.band+'</span>';
       var bl=r.bl?'<span class="b red" title="'+esc(r.bl_reason||'')+'">BLACKLISTED</span>'+(r.bl_type_lbl?'<br><small style="color:#b91c1c;font-weight:700">'+esc(r.bl_type_lbl)+'</small>':'')+(r.bl_reason?'<br><small style="color:#b91c1c">'+esc(String(r.bl_reason).slice(0,60))+(String(r.bl_reason).length>60?'…':'')+'</small>':'<br><small style="color:#b91c1c">no reason recorded</small>'):'<span style="color:#d1d5db">—</span>';
@@ -719,8 +729,9 @@ include 'header.php';
        +'<td class="r" style="'+(r.sale_m>0?'color:#0f766e;font-weight:800':'color:#9ca3af')+'">'+(r.sale_m>0?money(r.sale_m)+'<br><small style="font-weight:600;color:#6b7280">'+r.sale_n+' bill'+(r.sale_n>1?'s':'')+'</small>':'0.00')+'</td>'
        +'<td class="r" style="'+(r.avg3>0?'color:#0f766e;font-weight:700':'color:#9ca3af')+'">'+money(r.avg3||0)+'</td>'
        +'<td class="r" style="'+(r.avg6>0?'color:#0f766e;font-weight:700':'color:#9ca3af')+'">'+money(r.avg6||0)+'</td>'
-       +'<td class="r btgc"><input type="text" inputmode="decimal" class="btg" data-n="'+i+'" value="'+(r.btg!=null?String(r.btg):'')+'" placeholder="BTG" title="Approved BTG — type and press Enter or click away to save">'
-         +(r.btg>0&&r.avg6>0?'<br><small style="font-weight:700;color:'+(r.btg>r.avg6*1.2?'#b91c1c':'#6d28d9')+'">'+Math.round(r.btg/r.avg6*100)+'% of 6M avg</small>':'')+(r.channel?'<br><small style="color:#6b7280">'+esc(r.channel)+(r.btg_src==='excel'?' · Excel':'')+'</small>':'')+'</td>'
+       +'<td class="r" style="'+(r.btg_x!=null?'color:#2563eb;font-weight:700':'color:#9ca3af')+'">'+(r.btg_x!=null?money(r.btg_x):'—')+'</td>'
+       +'<td class="r btgc"><input type="text" inputmode="decimal" class="btg" data-n="'+i+'" value="'+(r.btg!=null?String(r.btg):'')+'" placeholder="Approved BTG" title="Approved BTG — type and press Enter or click away to save">'
+         +(r.btg>0&&r.avg6>0?'<br><small style="font-weight:700;color:'+(r.btg>r.avg6*1.2?'#b91c1c':'#6d28d9')+'">'+Math.round(r.btg/r.avg6*100)+'% of 6M avg</small>':'')+(r.channel?'<br><small style="color:#6b7280">'+esc(r.channel)+'</small>':'')+'</td>'
        +'<td class="r" style="'+(r.outstanding>0?'color:#1d4ed8;font-weight:800':'color:#9ca3af')+'">'+(r.outstanding>0?money(r.outstanding)+'<br><small style="font-weight:600;color:#6b7280">'+r.out_n+' bill'+(r.out_n>1?'s':'')+(r.util!=null?' · '+r.util+'% of limit':'')+'</small>':'0.00')+'</td>'
        +'<td>'+(r.oldest_age>0?'<b style="color:'+(r.oldest_age>=60?'#b91c1c':(r.oldest_age>=30?'#b45309':'#374151'))+'">'+r.oldest_age+' d</b>':'<span style="color:#d1d5db">—</span>')+'</td>'
        +'<td>'+(r.ret_n>0?'<span class="b red">'+r.ret_n+' returned</span><br><small style="color:#b91c1c;font-weight:700">Rs. '+money(r.ret_amt)+(r.ret_open>0?' · open '+money(r.ret_open):'')+'</small>':'<span style="color:#d1d5db">—</span>')+'</td>'
@@ -737,7 +748,7 @@ include 'header.php';
   $('caBody').addEventListener('change',function(e){ var g=e.target.closest('.btg');
     if(g){ var r=ROWS[parseInt(g.dataset.n,10)], raw=g.value.replace(/,/g,'').trim(); if(raw!==''&&(isNaN(raw)||parseFloat(raw)<0)){ alert('Enter a valid BTG amount.'); g.value=r.btg!=null?r.btg:''; return; }
       g.classList.add('sv'); post('save_btg',{t_code:r.t_code,btg:raw===''?'0':raw}).then(function(res){ g.classList.remove('sv');
-        if(res.success){ r.btg=raw===''?null:res.btg; r.btg_src='manual'; if(CUR_ID) persist(); g.value=r.btg!=null?r.btg:''; g.classList.add('ok'); setTimeout(function(){ g.classList.remove('ok'); draw(); },500); } else alert(res.message||'Could not save the BTG.'); }); return; }
+        if(res.success){ r.btg=(raw===''||res.btg<=0)?null:res.btg; if(CUR_ID) persist(); g.value=r.btg!=null?r.btg:''; g.classList.add('ok'); setTimeout(function(){ g.classList.remove('ok'); draw(); },500); } else alert(res.message||'Could not save the BTG.'); }); return; }
     var c=e.target.closest('.ni'); if(!c) return; dec(ROWS[parseInt(c.dataset.n,10)]).no_issue=c.checked?1:0; persist(); tabs(); draw(); });
   $('caMarkSug').addEventListener('click',function(){ var n=0; ROWS.forEach(function(r){ if(suggest(r)&&!dec(r).no_issue){ dec(r).no_issue=1; n++; } }); persist(); tabs(); draw(); if(!n) $('caMarkInfo').textContent='No suggested customers to mark.'; });
   $('caClearMarks').addEventListener('click',function(){ if(!confirm('Clear every DO NOT ISSUE mark in this report?')) return; ROWS.forEach(function(r){ if(r.dec) r.dec.no_issue=0; }); persist(); tabs(); draw(); });
@@ -762,7 +773,7 @@ include 'header.php';
       +Object.keys(r.aging).map(function(k){ var a=r.aging[k]; return '<tr><td class="l">'+esc(r.aging_lbl[k]||k)+'</td><td>'+a.n+'</td><td class="r">'+money(a.v)+'</td><td>'+bar(a.v/mx*100,k==='35+'||k==='29-35'?'#dc2626':(k==='22-28'||k==='15-21'?'#f59e0b':'#0f766e'))+'</td></tr>'; }).join('')
       +'</tbody></table><div class="kv"><span>Oldest open bill</span><b>'+(r.oldest_age>0?r.oldest_age+' days':'—')+'</b></div></div>'
       +'<div class="pan"><h4>Payment behaviour &amp; exposure</h4>'
-      +'<div class="kv"><span>3-month / 6-month average sale (per month)</span><b>Rs. '+money(r.avg3||0)+' / Rs. '+money(r.avg6||0)+'</b></div><div class="kv"><span>Approved BTG</span><b>'+(r.btg!=null?'Rs. '+money(r.btg)+(r.avg6>0?' · '+Math.round(r.btg/r.avg6*100)+'% of 6-month avg':''):'not set')+'</b></div>'
+      +'<div class="kv"><span>3-month / 6-month average sale (per month)</span><b>Rs. '+money(r.avg3||0)+' / Rs. '+money(r.avg6||0)+'</b></div><div class="kv"><span>BTG amount (Excel)</span><b>'+(r.btg_x!=null?'Rs. '+money(r.btg_x):'not imported')+'</b></div><div class="kv"><span>Approved BTG</span><b>'+(r.btg!=null?'Rs. '+money(r.btg)+(r.avg6>0?' · '+Math.round(r.btg/r.avg6*100)+'% of 6-month avg':''):'not set')+'</b></div>'
       +'<div class="kv"><span>This month sale (secondary)</span><b>'+(r.sale_m>0?'Rs. '+money(r.sale_m)+' · '+r.sale_n+' bill'+(r.sale_n>1?'s':''):'no sales this month')+'</b></div>'
       +'<div class="kv"><span>Credit limit</span><b>'+(r.limit>0?'Rs. '+money(r.limit)+(r.util!=null?' · using '+r.util+'%':''):'not set')+'</b></div>'
       +'<div class="kv"><span>Last payment</span><b>'+(r.last_pay?fd(r.last_pay)+' ('+r.days_since+' days ago)':'never paid')+'</b></div>'
