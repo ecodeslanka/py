@@ -509,6 +509,15 @@ include 'header.php';
         <div class="card">
             <div class="row" style="margin-bottom:10px">
                 <div class="fld"><label for="caQ">Search</label><input type="search" id="caQ" placeholder="outlet code, name or SR"></div>
+                <div class="fld"><label>Pay mode</label>
+                    <div class="pmx" id="caPm"><button type="button" class="pmx-b" id="caPmBtn"><span id="caPmTxt">All pay modes</span> <i class="fa-solid fa-chevron-down"></i></button>
+                        <div class="pmx-m" id="caPmMenu">
+                            <label><input type="checkbox" value="cash"> Cash</label><label><input type="checkbox" value="credit"> Credit</label><label><input type="checkbox" value="cheque"> Cheque</label>
+                            <label><input type="checkbox" value="cwd"> Cheques will delay</label><label><input type="checkbox" value="none"> Not set</label>
+                            <div class="pmx-a"><a href="#" id="caPmAll">Select all</a> · <a href="#" id="caPmClear">Clear</a></div></div></div></div>
+                <style>.pmx{position:relative}.pmx-b{min-width:190px;text-align:left;padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;background:#fff;font:inherit;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;height:38px}
+                .pmx-m{display:none;position:absolute;z-index:60;top:100%;left:0;min-width:100%;margin-top:4px;background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:8px;white-space:nowrap}.pmx.open .pmx-m{display:block}
+                .pmx-m label{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px}.pmx-m label:hover{background:#f3f4f6}.pmx-a{border-top:1px solid #eef0f3;margin-top:4px;padding:6px 8px 2px;font-size:12px;color:#6b7280}.pmx-a a{color:#0f766e;text-decoration:none;font-weight:600}</style>
                 <div class="fld"><label for="caName">Report name</label><input type="text" id="caName" placeholder="e.g. SMN outlets — Nov 2026"></div>
                 <button class="btn teal" id="caSave" type="button"><i class="fa-solid fa-floppy-disk"></i> Save report</button>
 
@@ -727,14 +736,25 @@ include 'header.php';
     $('caKpis').innerHTML=K.map(function(k){ return '<div class="kpi '+(TAB===k[0]&&'on'===(TAB===k[0]?'on':'')?'on':'')+'" style="--c:'+k[4]+'" data-t="'+k[0]+'"><div class="l">'+k[1]+'</div><div class="n" style="color:'+k[4]+'">'+k[2]+'</div><div class="v">'+k[3]+'&nbsp;</div></div>'; }).join('');
   }
   $('caKpis').addEventListener('click',function(e){ var k=e.target.closest('.kpi'); if(k){ TAB=k.dataset.t; tabs(); kpis(); draw(); } });
-  function tabs(){ $('caTabs').innerHTML=TABS.map(function(t){ var n=ROWS.filter(function(r){return test(r,t[0]);}).length; return '<button type="button" data-t="'+t[0]+'" class="'+(TAB===t[0]?'on':'')+'">'+t[1]+' <span style="opacity:.7">'+n+'</span></button>'; }).join(''); }
+  function tabs(){ $('caTabs').innerHTML=TABS.map(function(t){ var n=ROWS.filter(function(r){return test(r,t[0])&&(!PMF.length||pmMatch(r));}).length; return '<button type="button" data-t="'+t[0]+'" class="'+(TAB===t[0]?'on':'')+'">'+t[1]+' <span style="opacity:.7">'+n+'</span></button>'; }).join(''); }
   $('caTabs').addEventListener('click',function(e){ var b=e.target.closest('button'); if(b){ TAB=b.dataset.t; tabs(); kpis(); draw(); } });
   $('caQ').addEventListener('input',draw);
   var PM={cash:['green','Cash'],credit:['amber','Credit'],cheque:['purple','Cheque']}, BAND={LOW:'green',MODERATE:'amber',HIGH:'red',CRITICAL:'red'};
+  /* Pay mode filter (several can be ticked; a customer shows when it matches ANY of them) */
+  var PMF=[];
+  function pmMatch(r){ if(!r.found) return false; return PMF.some(function(m){ return m==='cwd'?!!r.cwd:(m==='none'?!r.pm:(m==='cheque'?(r.pm==='cheque'&&!r.cwd):r.pm===m)); }); }
+  (function(){ var w=$('caPm'), t=$('caPmTxt'), boxes=function(){ return w.querySelectorAll('input[type=checkbox]'); };
+    function sync(){ PMF=[].filter.call(boxes(),function(c){ return c.checked; }).map(function(c){ return c.value; }); t.textContent=PMF.length?[].filter.call(boxes(),function(c){return c.checked;}).map(function(c){ return c.parentNode.textContent.trim(); }).join(' + '):'All pay modes'; tabs(); draw(); }
+    $('caPmBtn').addEventListener('click',function(e){ e.stopPropagation(); w.classList.toggle('open'); });
+    document.addEventListener('click',function(e){ if(!w.contains(e.target)) w.classList.remove('open'); });
+    w.addEventListener('change',sync);
+    $('caPmAll').addEventListener('click',function(e){ e.preventDefault(); boxes().forEach(function(c){ c.checked=true; }); sync(); });
+    $('caPmClear').addEventListener('click',function(e){ e.preventDefault(); boxes().forEach(function(c){ c.checked=false; }); sync(); });
+  })();
   function draw(){
     var q=$('caQ').value.trim().toLowerCase(); VIEW=[];
     var h=''; ROWS.forEach(function(r,i){
-      if(!test(r,TAB)) return; if(q && (r.code+' '+(r.name||'')+' '+r.file_name+' '+r.sr).toLowerCase().indexOf(q)<0) return; VIEW.push(i);
+      if(!test(r,TAB)) return; if(PMF.length && !pmMatch(r)) return; if(q && (r.code+' '+(r.name||'')+' '+r.file_name+' '+r.sr).toLowerCase().indexOf(q)<0) return; VIEW.push(i);
       if(!r.found){ h+='<tr class="nf"><td>'+VIEW.length+'</td><td>'+esc(r.sr)+'</td><td>'+esc(r.code)+'</td><td class="l">'+esc(r.file_name)+'</td><td colspan="15"><span class="b grey">Not found in the system</span></td></tr>'; return; }
       var pm=PM[r.pm]||['grey',r.pm||'—'], pol=r.policy==='cheque'?'Cheque policy':(r.policy==='credit'?'Credit policy':'—');
       var rk=(r.risk==null)?'<span style="color:#d1d5db">—</span>':'<span class="b '+(BAND[r.band]||'grey')+'">'+r.risk+' · '+r.band+'</span>';
