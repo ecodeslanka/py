@@ -181,7 +181,7 @@ include 'header.php';
 .ss tr.dupr td{background:#fffbeb;color:#92400e}.ss tr.badr td{background:#fef2f2}
 .ss .ic{border:none;background:#eef2ff;color:#1e3a8a;width:28px;height:28px;border-radius:7px;cursor:pointer}.ss .ic.d{background:#fee2e2;color:#b91c1c}
 .ss .al{padding:10px 14px;border-radius:9px;margin:10px 0;font-size:13px}.ss .al.ok{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0}.ss .al.er{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}.ss .al.in{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe}
-.ssm{position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px}.ssm.open{display:flex}
+.ssm.ss{max-width:none;margin:0;padding:14px}.ssm{position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px}.ssm.open{display:flex}
 .ssm .bx{background:#fff;border-radius:14px;width:100%;max-width:860px;max-height:92vh;overflow:auto;padding:18px}.ssm .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 </style>
 <div class="ss">
@@ -191,13 +191,8 @@ include 'header.php';
   <?php if ($can_add): ?>
   <div class="card" id="upCard">
     <h3><i class="fa-solid fa-file-arrow-up"></i> Upload Excel</h3>
-    <div class="row"><div class="fld"><label>Excel file (.xlsx)</label><input type="file" id="ssFile" accept=".xlsx,.xls"></div>
-      <button class="btn g" id="ssImport" type="button" disabled><i class="fa-solid fa-check"></i> Import new rows</button>
-      <button class="btn o" id="ssCancel" type="button" style="display:none">Cancel</button></div>
+    <div class="row"><div class="fld"><label>Excel file (.xlsx)</label><input type="file" id="ssFile" accept=".xlsx,.xls"></div></div>
     <div id="ssMsg"></div>
-    <div id="ssPrev" style="display:none;margin-top:10px">
-      <div class="tw" style="max-height:48vh"><table><thead><tr><th>#</th><th>Status</th><th>Type</th><th>Activity code</th><th>Description</th><th>MOC Ref</th><th>Start</th><th>End</th><th class="r">Total budget</th><th class="r">RS budget</th><th class="r">RS approval</th><th>TSI date</th><th class="r">TSI amount</th><th class="r">Payout</th><th>Payout close</th><th class="r">Close amt</th><th class="r">Pending</th><th>Claim MOC</th><th>Claim date</th><th class="r">Claim amt</th></tr></thead><tbody id="ssPrevBody"></tbody></table></div>
-    </div>
   </div>
   <?php endif; ?>
 
@@ -229,12 +224,21 @@ include 'header.php';
   <?php endforeach; if (!$items) echo '<tr><td colspan="20" style="text-align:center;color:#9ca3af;padding:26px">No rows. Upload the Current Scheme Status Report Excel above.</td></tr>'; ?></tbody></table></div>
 </div>
 
-<div class="ssm" id="ssEdit"><div class="bx"><h3 style="margin:0 0 12px">Edit scheme row</h3><input type="hidden" id="e_id"><div class="g" id="e_g"></div>
+<?php if ($can_add): ?>
+<div class="ssm ss" id="ssPrevModal"><div class="bx" style="max-width:96vw;height:94vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+  <div style="padding:14px 18px;background:linear-gradient(120deg,#0f172a,#1e3a8a);color:#fff;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <div style="font-weight:800;font-size:16px"><i class="fa-solid fa-table-list"></i> Preview — Current Scheme Status</div><div id="ssPrevFile" style="opacity:.8;font-size:12.5px"></div>
+    <div style="margin-left:auto;display:flex;gap:8px"><button class="btn g" id="ssImport" type="button" disabled><i class="fa-solid fa-check"></i> Import new rows</button><button class="btn o" id="ssCancel" type="button">Cancel</button></div></div>
+  <div id="ssSum" style="padding:10px 18px 0"></div>
+  <div style="padding:8px 18px 14px;flex:1;min-height:0"><div class="tw" style="max-height:none;height:100%"><table><thead><tr><th>#</th><th>Status</th><th>Type</th><th>Activity code</th><th>Description</th><th>MOC Ref</th><th>Start</th><th>End</th><th class="r">Total budget</th><th class="r">RS budget</th><th class="r">RS approval</th><th>TSI date</th><th class="r">TSI amount</th><th class="r">Payout</th><th>Payout close</th><th class="r">Close amt</th><th class="r">Pending</th><th>Claim MOC</th><th>Claim date</th><th class="r">Claim amt</th></tr></thead><tbody id="ssPrevBody"></tbody></table></div></div>
+</div></div>
+<?php endif; ?>
+<div class="ssm ss" id="ssEdit"><div class="bx"><h3 style="margin:0 0 12px">Edit scheme row</h3><input type="hidden" id="e_id"><div class="g" id="e_g"></div>
   <div id="e_msg"></div><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn o" type="button" id="e_x">Cancel</button><button class="btn g" type="button" id="e_s"><i class="fa-solid fa-floppy-disk"></i> Save</button></div></div></div>
 <script>
 (function(){
   var $=function(i){ return document.getElementById(i); }, esc=function(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
-  document.body.appendChild($('ssEdit'));
+  document.body.appendChild($('ssEdit')); if($('ssPrevModal')) document.body.appendChild($('ssPrevModal'));   // above the site header
   function post(action,data){ var fd=new FormData(); fd.append('action',action); Object.keys(data||{}).forEach(function(k){ fd.append(k,data[k]); });
     return fetch('scheme_status_report.php',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){ return r.json().catch(function(){ return {success:false,message:'Server error (blocked or invalid response).'}; }); }); }
   var FIELDS=[['activity_type','Activity type'],['activity_code','Activity code'],['activity_desc','Description'],['moc_ref','MOC Ref'],['start_date','Start date','date'],['end_date','End date','date'],['total_budget','Total budget','num'],['rs_budget_amount','RS budget amount','num'],['rs_approval_amount','RS approval amount','num'],
@@ -245,7 +249,7 @@ include 'header.php';
   function iso(v){ if(v instanceof Date && !isNaN(v)){ var z=new Date(v.getTime()-v.getTimezoneOffset()*60000); return z.toISOString().slice(0,10); } var s=String(v==null?'':v).trim(); if(!s||s==='-') return ''; var m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/); if(m) return m[3]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):''; }
   function txt(v){ if(v instanceof Date) return iso(v); var s=String(v==null?'':v).trim(); return s==='-'?'':s; }
   var fileEl=$('ssFile'); if(fileEl) fileEl.addEventListener('change',function(){
-    var f=this.files[0]; ROWS=[]; $('ssImport').disabled=true; $('ssPrev').style.display='none'; $('ssMsg').innerHTML=''; if(!f) return; FILEN=f.name; var rd=new FileReader();
+    var f=this.files[0]; ROWS=[]; $('ssMsg').innerHTML=''; if(!f) return; FILEN=f.name; var rd=new FileReader();
     rd.onload=function(e){ try{
       var wb=XLSX.read(e.target.result,{type:'array',cellDates:true}), ws=wb.Sheets[wb.SheetNames[0]], a=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true}), hi=-1, map={};
       MOC=''; RDATE=''; for(var i=0;i<Math.min(a.length,12);i++){ a[i].forEach(function(c,j){ var t=String(c).toLowerCase(); if(t.indexOf('date:')===0&&a[i][j+1]!=='') RDATE=iso(a[i][j+1])||(String(a[i][j+1]).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)?String(a[i][j+1]).replace(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,'$3-$2-$1'):''); if(t.indexOf('moc refr no')===0||t.indexOf('moc ref no')===0) MOC=String(a[i][j+1]||'').trim(); }); }
@@ -266,14 +270,16 @@ include 'header.php';
   function preview(st){ var cnt={new:0,dup_file:0,dup_db:0,invalid:0}, h='';
     ROWS.forEach(function(r,i){ var s=st[i]?st[i].status:'new'; cnt[s]++; var b=s==='new'?'<span class="b new">NEW</span>':(s==='invalid'?'<span class="b bad">INVALID</span>':'<span class="b dup">'+(s==='dup_file'?'DUPLICATE IN FILE':'ALREADY IMPORTED')+'</span>');
       h+='<tr class="'+(s==='new'?'':(s==='invalid'?'badr':'dupr'))+'"><td>'+(i+1)+'</td><td>'+b+'</td><td>'+esc(r.activity_type)+'</td><td>'+esc(r.activity_code)+'</td><td style="white-space:normal;min-width:200px">'+esc(r.activity_desc)+'</td><td>'+esc(r.moc_ref)+'</td><td>'+esc(r.start_date)+'</td><td>'+esc(r.end_date)+'</td><td class="r">'+money(r.total_budget)+'</td><td class="r">'+money(r.rs_budget_amount)+'</td><td class="r">'+money(r.rs_approval_amount)+'</td><td>'+esc(r.tsi_approval_date)+'</td><td class="r">'+money(r.tsi_approval_amount)+'</td><td class="r">'+money(r.payout_amount)+'</td><td>'+esc(r.payout_close_date)+'</td><td class="r">'+money(r.payout_close_amount)+'</td><td class="r">'+money(r.pending_payout_amount)+'</td><td>'+esc(r.claim_moc_ref)+'</td><td>'+esc(r.claim_date)+'</td><td class="r">'+money(r.claim_amount)+'</td></tr>'; });
-    $('ssPrevBody').innerHTML=h; $('ssPrev').style.display='block'; $('ssCancel').style.display='';
-    $('ssMsg').innerHTML='<div class="al '+(cnt.new?'ok':'er')+'"><b>'+ROWS.length+'</b> rows read (Sr No skipped) · <b>'+cnt.new+'</b> new · <b>'+(cnt.dup_file+cnt.dup_db)+'</b> duplicates (will be skipped'+(cnt.dup_db?' — '+cnt.dup_db+' already imported':'')+')'+(cnt.invalid?' · <b>'+cnt.invalid+'</b> invalid':'')+'.</div>';
+    $('ssPrevBody').innerHTML=h; $('ssPrevFile').textContent=FILEN+(MOC?' · MOC '+MOC:''); $('ssMsg').innerHTML=''; $('ssPrevModal').classList.add('open'); document.body.style.overflow='hidden';
+    $('ssSum').innerHTML='<div class="al '+(cnt.new?'ok':'er')+'"><b>'+ROWS.length+'</b> rows read (Sr No skipped) · <b>'+cnt.new+'</b> new · <b>'+(cnt.dup_file+cnt.dup_db)+'</b> duplicates (will be skipped'+(cnt.dup_db?' — '+cnt.dup_db+' already imported':'')+')'+(cnt.invalid?' · <b>'+cnt.invalid+'</b> invalid':'')+'.</div>';
     $('ssImport').disabled=!cnt.new; $('ssImport').innerHTML='<i class="fa-solid fa-check"></i> Import '+cnt.new+' new rows'; }
-  $('ssCancel')&&$('ssCancel').addEventListener('click',function(){ ROWS=[]; fileEl.value=''; $('ssPrev').style.display='none'; $('ssMsg').innerHTML=''; $('ssImport').disabled=true; this.style.display='none'; });
+  function closePrev(){ $('ssPrevModal').classList.remove('open'); document.body.style.overflow=''; }
+  $('ssCancel')&&$('ssCancel').addEventListener('click',function(){ ROWS=[]; fileEl.value=''; closePrev(); $('ssImport').disabled=true; });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&$('ssPrevModal')&&$('ssPrevModal').classList.contains('open')) closePrev(); });
   $('ssImport')&&$('ssImport').addEventListener('click',function(){ var b=this; b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Importing…';
     post('import_rows',{rows:JSON.stringify(ROWS),file_name:FILEN,moc_ref:MOC,report_date:RDATE}).then(function(res){
-      if(!res.success){ $('ssMsg').innerHTML='<div class="al er">'+esc(res.message||'Import failed')+'</div>'; b.disabled=false; return; }
-      $('ssMsg').innerHTML='<div class="al ok">Imported <b>'+res.imported+'</b> rows · '+res.duplicates+' duplicates skipped'+(res.invalid?' · '+res.invalid+' invalid':'')+'. Reloading…</div>'; setTimeout(function(){ location.href='scheme_status_report.php?upload='+res.upload_id; },1200); }); });
+      if(!res.success){ $('ssSum').innerHTML='<div class="al er">'+esc(res.message||'Import failed')+'</div>'; b.disabled=false; b.innerHTML='<i class="fa-solid fa-check"></i> Import new rows'; return; }
+      $('ssSum').innerHTML='<div class="al ok">Imported <b>'+res.imported+'</b> rows · '+res.duplicates+' duplicates skipped'+(res.invalid?' · '+res.invalid+' invalid':'')+'. Reloading…</div>'; setTimeout(function(){ location.href='scheme_status_report.php?upload='+res.upload_id; },1200); }); });
 
   /* ── edit / delete ── */
   document.addEventListener('click',function(e){

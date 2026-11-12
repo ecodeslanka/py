@@ -1839,9 +1839,6 @@ if (isset($conn) && $conn) {
                     <a href="scheme_discount_receivable.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_discount_receivable.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-plus"></i><span>Scheme Discount</span>
                     </a>
-                    <a href="scheme_status_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_status_report.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-clipboard-check"></i><span>Current Scheme Status</span>
-                    </a>
                     <a href="free_issue_cc_receivable.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'free_issue_cc_receivable.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-plus"></i><span>Free Issues</span>
                     </a>
@@ -1892,6 +1889,9 @@ if (isset($conn) && $conn) {
                     </a>
                     <a href="billwise_scheme.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'billwise_scheme.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-file-import"></i><span>Bill Wise Scheme Analysis Import</span>
+                    </a>
+                    <a href="scheme_status_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_status_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-file-import"></i><span>Current Scheme Status Import</span>
                     </a>
                 
                     </div>
