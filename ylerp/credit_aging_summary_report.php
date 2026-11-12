@@ -174,19 +174,18 @@ if (isset($_GET['export'])) {
     /* Sheet 1 — summary by set */
     $sh = $X->sheet('Summary');
     $sh->set(1, 1, 'Credit Aging Summary Report — as at ' . date('d M Y', $as_at_ts), ['b' => 1, 'sz' => 16, 'color' => 'FFFFFF', 'bg' => 'B91C1C', 'indent' => 1]);
-    for ($c = 2; $c <= 14; $c++) $sh->set(1, $c, '', ['bg' => 'B91C1C']);
-    $sh->merge(1, 1, 1, 14); $sh->heights[1] = 30;
+    for ($c = 2; $c <= 9; $c++) $sh->set(1, $c, '', ['bg' => 'B91C1C']);
+    $sh->merge(1, 1, 1, 9); $sh->heights[1] = 30;
     $sh->set(2, 1, 'Outstanding credit bills · exceeded = past (delivery date + customer credit policy days) '
         . ($f_route !== '' ? ' · Route ' . $f_route : '') . ($f_sr !== '' ? ' · SR ' . $f_sr : ''), ['i' => 1, 'color' => '6B7280']);
-    $sh->merge(2, 1, 2, 14);
-    foreach (['Set', 'Policy test', 'Customers', 'Exceeded customers', 'Exceeded customers: bills', 'Exceeded customers: value (Rs.)', 'Non-exceeded customers', 'Non-exceeded customers: bills', 'Non-exceeded customers: value (Rs.)', 'Credit bills', 'Value (Rs.)', 'Normal bills', 'Normal value (Rs.)', 'Exceeded bills', 'Exceeded value (Rs.)'] as $i => $h) $sh->set(4, $i + 1, $h, $H);
+    $sh->merge(2, 1, 2, 9);
+    foreach (['Set', 'Policy test', 'Customers', 'Exceeded customers', 'Exceeded customers: bills', 'Exceeded customers: value (Rs.)', 'Non-exceeded customers', 'Non-exceeded customers: bills', 'Non-exceeded customers: value (Rs.)'] as $i => $h) $sh->set(4, $i + 1, $h, $H);
     $r = 5;
     $line = function ($label, $test, $cn, $cex, $s, $bold = false, $bg = null, $na = false) use ($sh, &$r) {
         $st = ['border' => 1] + ($bold ? ['b' => 1] : []) + ($bg ? ['bg' => $bg] : []);
         $sh->set($r, 1, $label, $st + ['b' => 1]); $sh->set($r, 2, $test, $st);
         $sh->set($r, 3, $cn, $st + ['h' => 'center']);
-        $vals = [$s['cx_c'], $s['cx_n'], round($s['cx_v'], 2), $s['nx_c'], $s['nx_n'], round($s['nx_v'], 2),
-                 $s['n'], round($s['v'], 2), $s['ok_n'], round($s['ok_v'], 2), $s['ex_n'], round($s['ex_v'], 2)];
+        $vals = [$s['cx_c'], $s['cx_n'], round($s['cx_v'], 2), $s['nx_c'], $s['nx_n'], round($s['nx_v'], 2)];
         foreach ($vals as $i => $v) $sh->set($r, 4 + $i, $v, $st + ['h' => 'right']);
         $r++;
     };
@@ -289,9 +288,6 @@ include 'header.php';
     </form>
 
     <section class="kpis">
-        <div class="kpi" style="--c:#111827"><div class="l">All credit bills</div><div class="n"><?= number_format($T['n']) ?></div><div class="v">Rs. <?= cas_money($T['v']) ?></div></div>
-        <div class="kpi" style="--c:#15803d"><div class="l">Normal / within policy</div><div class="n" style="color:#15803d"><?= number_format($T['ok_n']) ?></div><div class="v">Rs. <?= cas_money($T['ok_v']) ?></div><div class="p"><?= $pct($T['ok_v'], $T['v']) ?>% of value</div></div>
-        <div class="kpi" style="--c:#b91c1c"><div class="l">Policy exceeded</div><div class="n" style="color:#b91c1c"><?= number_format($T['ex_n']) ?></div><div class="v">Rs. <?= cas_money($T['ex_v']) ?></div><div class="p"><?= $pct($T['ex_v'], $T['v']) ?>% of value</div></div>
         <div class="kpi" style="--c:#2563eb"><div class="l">Customers with bills</div><div class="n"><?= number_format(count($ac)) ?></div><div class="v">as at <?= cas_h(date('d M Y', $as_at_ts)) ?></div></div>
         <div class="kpi" style="--c:#dc2626"><div class="l">Customers exceeded</div><div class="n" style="color:#dc2626"><?= number_format(count($ex_c)) ?></div><div class="v">of <?= number_format(count($ac)) ?> customers</div></div>
     </section>
@@ -303,10 +299,8 @@ include 'header.php';
             <tr>
                 <th class="l" rowspan="2">Set</th><th rowspan="2">Policy test</th><th rowspan="2">Customers</th>
                 <th colspan="3" class="ex">Customers exceeded</th><th colspan="3" class="ok">Customers not exceeded</th>
-                <th colspan="2">All credit bills</th><th colspan="2" class="ok">Normal / within policy</th><th colspan="2" class="ex">Policy exceeded</th>
             </tr>
-            <tr><th class="ex2">Customers</th><th class="ex2">Bills / Chq</th><th class="ex2">Value (Rs.)</th><th class="ok2">Customers</th><th class="ok2">Bills / Chq</th><th class="ok2">Value (Rs.)</th>
-                <th class="sub2">Bills / Chq</th><th class="sub2">Value (Rs.)</th><th class="ok2">Bills / Chq</th><th class="ok2">Value (Rs.)</th><th class="ex2">Bills / Chq</th><th class="ex2">Value (Rs.)</th></tr>
+            <tr><th class="ex2">Customers</th><th class="ex2">Bills / Chq</th><th class="ex2">Value (Rs.)</th><th class="ok2">Customers</th><th class="ok2">Bills / Chq</th><th class="ok2">Value (Rs.)</th></tr>
         </thead>
         <tbody>
         <?php $mi = 0; foreach ($GROUPS as $k => $g): $s = $S[$k]; ?>
@@ -316,10 +310,6 @@ include 'header.php';
                 <td class="c"><?= number_format(count($s['customers'])) ?></td>
                 <td class="c <?= $s['cx_c'] ? 'exv' : 'na' ?>"><?= number_format($s['cx_c']) ?></td><td class="<?= $s['cx_c'] ? 'exv' : 'na' ?>"><?= number_format($s['cx_n']) ?></td><td class="<?= $s['cx_c'] ? 'exv' : 'na' ?>"><?= cas_money($s['cx_v']) ?></td>
                 <td class="c <?= $s['nx_c'] ? 'okv' : 'na' ?>"><?= number_format($s['nx_c']) ?></td><td class="<?= $s['nx_c'] ? 'okv' : 'na' ?>"><?= number_format($s['nx_n']) ?></td><td class="<?= $s['nx_c'] ? 'okv' : 'na' ?>"><?= cas_money($s['nx_v']) ?></td>
-                <td><?= number_format($s['n']) ?></td><td><?= cas_money($s['v']) ?></td>
-                <td class="okv"><?= number_format($s['ok_n']) ?></td><td class="okv"><?= cas_money($s['ok_v']) ?></td>
-                <?php if ($g['test']): ?><td class="exv"><?= number_format($s['ex_n']) ?></td><td class="exv"><?= cas_money($s['ex_v']) ?></td>
-                <?php else: ?><td class="na" colspan="2">Normal</td><?php endif; ?>
             </tr>
         <?php endforeach; ?>
         </tbody>
@@ -327,8 +317,6 @@ include 'header.php';
             <td class="l">TOTAL</td><td></td><td class="c"><?= number_format(count($ac)) ?></td>
             <td class="c"><?= number_format($T['cx_c']) ?></td><td><?= number_format($T['cx_n']) ?></td><td><?= cas_money($T['cx_v']) ?></td>
             <td class="c"><?= number_format($T['nx_c']) ?></td><td><?= number_format($T['nx_n']) ?></td><td><?= cas_money($T['nx_v']) ?></td>
-            <td><?= number_format($T['n']) ?></td><td><?= cas_money($T['v']) ?></td><td><?= number_format($T['ok_n']) ?></td><td><?= cas_money($T['ok_v']) ?></td>
-            <td><?= number_format($T['ex_n']) ?></td><td><?= cas_money($T['ex_v']) ?></td>
         </tr></tfoot>
     </table>
     </div>
