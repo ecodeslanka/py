@@ -36,6 +36,7 @@ $f_sr         = trim($_GET['sr_code']       ?? '');
 $f_date       = trim($_GET['delivery_date'] ?? '');
 $f_as_at      = trim($_GET['as_at_date']    ?? date('Y-m-d'));
 $f_type       = trim($_GET['credit_type']   ?? '');
+$f_exceed     = !empty($_GET['exceed_only']);   /* only customers that EXCEEDED their policy */
 $f_cwd        = trim($_GET['chq_delay']     ?? '');   /* '' all | '1' only "Cheques will delay" | '0' without them */
 if (!in_array($f_cwd, ['', '0', '1'], true)) $f_cwd = '';
 /* Pay Mode = several can be ticked: credit | cheque | cash | none (not set) | cwd (cheques will delay). pay_mode=cash, pay_mode=cash,cheque and pay_mode[]=cash all work. */
@@ -62,7 +63,7 @@ if (!empty($_GET['age_range'])) {
 
 $as_at_ts = strtotime($f_as_at);
 
-$rows = [];
+$rows = []; $cand = [];
 $t_net = $t_cash = $t_cheque = $t_cn = $t_paid = $t_balance = 0;
 $t_special = $t_normal = $total_count = 0;
 $t_cwd = 0; $t_cwd_bal = 0; $cwd_cust = [];   /* "Cheques will delay" customers */
@@ -201,6 +202,16 @@ if ($result) {
         /* Multi-select age range filter — skip if none of the selected buckets match */
         if (!empty($f_age_ranges) && !in_array($bucket, $f_age_ranges)) continue;
 
+        /* policy exceeded = cash customer with an open bill, or a credit / cheque bill older than its credit days */
+        $row['exceeded'] = (($row['payment_mode'] === 'cash') || ($credit_days_val > 0 && $row['policy_aging'] > 0)) ? 1 : 0;
+        $cand[] = $row;
+    }
+}
+$exc_cust = [];
+foreach ($cand as $__r) if ($__r['exceeded']) $exc_cust[$__r['t_code']] = 1;
+foreach ($cand as $row) {
+    if ($f_exceed && !isset($exc_cust[$row['t_code']])) continue;     /* "exceeded customers only" keeps all open bills of those customers */
+    $bucket = $row['bucket'];
         $rows[]    = $row;
         $t_net     += floatval($row['net_value']);
         $t_cash    += floatval($row['cash_paid']);
@@ -213,7 +224,6 @@ if ($result) {
 
         $buckets[$bucket]['count']++;
         $buckets[$bucket]['balance'] += floatval($row['balance']);
-    }
 }
 $total_count = count($rows);
 $as_at_display = date('d M Y', $as_at_ts);
@@ -494,6 +504,7 @@ if ($f_as_at !== date('Y-m-d')) $fl_chips[] = 'As at: ' . date('d M Y', strtotim
 if ($f_type)  $fl_chips[] = ucfirst($f_type) . ' credit';
 if ($f_pmodes) $fl_chips[] = 'Pay mode: ' . implode(' + ', array_map(fn($m) => $m === 'none' ? 'Not set' : ($m === 'cwd' ? 'Cheques will delay' : ucfirst($m)), $f_pmodes));
 if ($f_cwd === '0') $fl_chips[] = 'Without cheques will delay';
+if ($f_exceed) $fl_chips[] = 'Policy exceeded customers only (' . count($exc_cust) . ')';
 if ($f_age_ranges) $fl_chips[] = 'Age: ' . implode(', ', $f_age_ranges);
 ?>
 <div class="filter-card no-print collapsed" id="filterCard">
@@ -581,6 +592,14 @@ if ($f_age_ranges) $fl_chips[] = 'Age: ' . implode(', ', $f_age_ranges);
                 </script>
             </div>
         </div>
+
+        <!-- Policy exceeded -->
+        <div style="margin-top:12px;">
+            <label class="exc-chk" for="excOnly"><input type="checkbox" id="excOnly" name="exceed_only" value="1" <?php echo $f_exceed ? 'checked' : ''; ?>>
+                <span><i class="fa-solid fa-triangle-exclamation"></i> Policy exceeded customers only</span>
+                <small>credit / cheque bills older than the customer's credit days · cash customers with an open bill</small></label>
+        </div>
+        <style>.exc-chk{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 14px;border:1.5px solid #fecaca;background:#fef2f2;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:#991b1b}.exc-chk input{width:17px;height:17px;accent-color:#dc2626}.exc-chk small{font-weight:500;color:#b45309;font-size:11.5px}</style>
 
         <!-- Age Range — full-width multi-checkbox row below main grid -->
         <div style="margin-top:12px;">
