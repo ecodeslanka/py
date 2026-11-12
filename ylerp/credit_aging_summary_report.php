@@ -36,6 +36,8 @@ $HAS_CWD = rx_has_col($conn, 'customers', 'cheques_will_delay');
 /* ── sets ── */
 $GROUPS = [
     'credit' => ['label' => 'Credit customers',          'exceed' => 'Credit policy exceeded',         'icon' => 'fa-credit-card',     'color' => '#2563eb', 'bg' => '#eff6ff', 'view' => 'pay_mode=credit', 'test' => true],
+    'cheque' => ['label' => 'Cheque customers (only)',   'exceed' => 'Cheque policy exceeded',  'unit' => 'cheques',       'icon' => 'fa-money-check',     'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
+    'cwd'    => ['label' => 'Cheques will delay',        'exceed' => 'Cheques-will-delay exceeded',  'unit' => 'cheques',  'icon' => 'fa-hourglass-half',  'color' => '#d97706', 'bg' => '#fffbeb', 'view' => 'pay_mode=cwd',    'test' => true],
     'cash'   => ['label' => 'Cash customers',            'exceed' => 'Cash policy exceeded',           'icon' => 'fa-money-bill-wave', 'color' => '#15803d', 'bg' => '#f0fdf4', 'view' => 'pay_mode=cash',   'test' => true],
 ];
 $S = [];
@@ -114,7 +116,6 @@ if ($cres) while ($r = mysqli_fetch_assoc($cres)) {
     $amt = ($st === 'sent_back') ? max(0, $face - (float)$r['sb_paid']) : (($st === 'returned') ? max(0, $face - (float)$r['ret_paid']) : $face);
     if ($amt <= 0.004) continue;
     $k = ((int)$r['cwd'] === 1) ? 'cwd' : 'cheque';
-    if (!isset($GROUPS[$k])) continue;      // the cheque / cheques-will-delay sets are not shown in this report
     $days = (int)$r['credit_days']; $age = ($r['age_days'] !== null) ? (int)$r['age_days'] : 0;
     $exceeded = ($days > 0 && $age > $days);
     $over = $age - $days;                                              // days the cheque date is beyond the policy
@@ -331,7 +332,8 @@ include 'header.php';
         </tr></tfoot>
     </table>
     </div>
-    <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. Cash customers: every outstanding bill is a policy exceed. Cheque and “Cheques will delay” customers are not part of this report (see the Cheque Aging Report). Customers with no pay mode set are not part of this report.</p>
+    <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. “Cheques will delay” customers are counted only in their own row. Customers with no pay mode set are not part of this report.
+    <br><b>Cheque customers and Cheques-will-delay</b> are taken from the <b>Cheque Aging Report</b>: unsettled cheques (cleared and settled returned / sent-back cheques left out); cheque age = cheque date − delivery date; <b>cheque policy exceeded</b> when the age is more than the customer's policy days. Their outstanding bills are not counted here — the Credit and Cash rows use the bills and the credit policy.</p>
 </div>
 
 <!-- invoices viewer: moved to <body> by the script so it always sits above the site header / sidebar -->
