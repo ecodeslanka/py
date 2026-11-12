@@ -36,9 +36,9 @@ $HAS_CWD = rx_has_col($conn, 'customers', 'cheques_will_delay');
 /* ── sets ── */
 $GROUPS = [
     'credit' => ['label' => 'Credit customers',          'exceed' => 'Credit policy exceeded',         'icon' => 'fa-credit-card',     'color' => '#2563eb', 'bg' => '#eff6ff', 'view' => 'pay_mode=credit', 'test' => true],
+    'cheque' => ['label' => 'Cheque customers (only)',   'exceed' => 'Cheque policy exceeded',  'unit' => 'cheques',       'icon' => 'fa-money-check',     'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
+    'cwd'    => ['label' => 'Cheques will delay',        'exceed' => 'Cheques-will-delay exceeded',  'unit' => 'cheques',  'icon' => 'fa-hourglass-half',  'color' => '#d97706', 'bg' => '#fffbeb', 'view' => 'pay_mode=cwd',    'test' => true],
     'cash'   => ['label' => 'Cash customers',            'exceed' => 'Cash policy exceeded',           'icon' => 'fa-money-bill-wave', 'color' => '#15803d', 'bg' => '#f0fdf4', 'view' => 'pay_mode=cash',   'test' => true],
-    /* after Cash: ONE row for cheque customers + "cheques will delay" customers, built from the Cheque Aging Report (cheque age vs policy) */
-    'chq'    => ['label' => 'Cheques policy exceeded',   'exceed' => 'Cheques policy exceeded',  'unit' => 'cheques',  'icon' => 'fa-money-check',     'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
 ];
 $S = [];
 foreach ($GROUPS as $k => $g) $S[$k] = ['n' => 0, 'v' => 0.0, 'ok_n' => 0, 'ok_v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'customers' => [], 'ex_customers' => [],
@@ -115,7 +115,7 @@ if ($cres) while ($r = mysqli_fetch_assoc($cres)) {
     $face = (float)$r['total_amount']; $st = strtolower(trim((string)$r['status']));
     $amt = ($st === 'sent_back') ? max(0, $face - (float)$r['sb_paid']) : (($st === 'returned') ? max(0, $face - (float)$r['ret_paid']) : $face);
     if ($amt <= 0.004) continue;
-    $k = 'chq';                                  // cheque + cheques-will-delay customers: one set
+    $k = ((int)$r['cwd'] === 1) ? 'cwd' : 'cheque';
     $days = (int)$r['credit_days']; $age = ($r['age_days'] !== null) ? (int)$r['age_days'] : 0;
     $exceeded = ($days > 0 && $age > $days);
     $over = $age - $days;                                              // days the cheque date is beyond the policy
@@ -271,7 +271,7 @@ include 'header.php';
 <div class="cas">
     <h1><span class="ic"><i class="fa-solid fa-chart-pie"></i></span> Credit Aging Summary Report <span class="asat"><i class="fa-regular fa-calendar"></i> As at <?= cas_h(date('d M Y', $as_at_ts)) ?></span></h1>
     <p class="sub">Outstanding <b>credit bills</b> (count and value) as at the chosen date, by the way each customer pays. A bill is <b style="color:#b91c1c">exceeded</b> when it is past its delivery date + the customer's credit policy days.
-        <b>Credit</b>, <b>Cash</b> and <b>Cheques policy exceeded</b> (cheque + cheques-will-delay customers) each show how much exceeded their policy.</p>
+        <b>Credit</b>, <b>Cheque (only)</b>, <b>Cheques will delay</b> and <b>Cash</b> customers each show how much exceeded their policy.</p>
 
     <form class="card flt" method="get" action="credit_aging_summary_report.php">
         <div class="fld"><label for="asAt">As at date</label><input type="date" id="asAt" name="as_at_date" value="<?= cas_h($f_as_at) ?>" required></div>
@@ -320,7 +320,7 @@ include 'header.php';
         </tr></tfoot>
     </table>
     </div>
-    <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. Customers with no pay mode set are not part of this report.
+    <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. “Cheques will delay” customers are counted only in their own row. Customers with no pay mode set are not part of this report.
     <br><b>Cheque customers and Cheques-will-delay</b> are taken from the <b>Cheque Aging Report</b>: unsettled cheques (cleared and settled returned / sent-back cheques left out); cheque age = cheque date − delivery date; <b>cheque policy exceeded</b> when the age is more than the customer's policy days. Their outstanding bills are not counted here — the Credit and Cash rows use the bills and the credit policy.</p>
 </div>
 
@@ -410,7 +410,7 @@ include 'header.php';
     [].forEach.call($('mTabs').children,function(b){ b.style.display=(!g.test&&b.dataset.f!=='all')?'none':''; });
     filt='all'; [].forEach.call($('mTabs').children,function(b){ b.classList.toggle('on',b.dataset.f==='all'); });
     $('mQ').value='';
-    var pm={credit:'credit',chq:'cheque',cash:'cash'}[d.k]||'';
+    var pm={credit:'credit',cheque:'cheque',cwd:'cwd',cash:'cash'}[d.k]||'';
     if(g.chq){ $('mOpen').href='cheque_aging_report.php?as_at='+encodeURIComponent(AS_AT)+'&pay_mode=cheque'+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Cheque Aging Report'; }
     else { $('mOpen').href='credit_aging_report.php?as_at_date='+encodeURIComponent(AS_AT)+'&pay_mode='+pm+(ROUTE?'&route='+encodeURIComponent(ROUTE):'')+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Credit Aging Report'; }
     draw();
