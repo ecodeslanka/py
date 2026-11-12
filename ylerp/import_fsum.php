@@ -487,6 +487,7 @@ function validateAndPreview(data, deliveryDate) {
     const formData = new FormData();
     formData.append('data', JSON.stringify(data));
     formData.append('delivery_date', deliveryDate);
+    formData.append('import_type', 'fsum');   // Create Field Summary import (loading summary), not a secondary invoice import
 
     fetch('validate_import_data.php', { method: 'POST', body: formData })
     .then(r => r.json())

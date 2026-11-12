@@ -105,8 +105,19 @@ if ($route_result) {
 
 // ── An Excel is already imported for this delivery date → block (the old one must be deleted first) ──
 $__dd = mysqli_real_escape_string($conn, $delivery_date);
-$__ex = mysqli_query($conn, "SELECT id, filename, imported_at FROM loading_summary_imports
-                             WHERE delivery_date = '$__dd' AND status IN ('completed','processing') ORDER BY id DESC LIMIT 1");
+if (($_POST['import_type'] ?? '') !== 'fsum') {
+    // Secondary invoice import: the same delivery date cannot be imported twice (no more replace) — delete the old import first
+    $__sx = mysqli_query($conn, "SELECT id, filename, imported_at FROM secondary_invoice_imports WHERE delivery_date = '$__dd' AND status = 'completed' ORDER BY id DESC LIMIT 1");
+    if ($__sx && ($__srow = mysqli_fetch_assoc($__sx))) {
+        echo json_encode(['success' => false, 'already_imported' => true, 'existing_id' => intval($__srow['id']),
+            'message' => 'Permission denied: a secondary invoice import already exists for the delivery date ' . date('d M Y', strtotime($delivery_date))
+                       . ' (' . $__srow['filename'] . ', imported ' . date('d M Y H:i', strtotime($__srow['imported_at'])) . '). You cannot import this date again. '
+                       . 'Please delete the old import (Secondary Import History → Delete) and then import again.']);
+        exit;
+    }
+}
+$__ex = (($_POST['import_type'] ?? '') === 'fsum') ? mysqli_query($conn, "SELECT id, filename, imported_at FROM loading_summary_imports
+                             WHERE delivery_date = '$__dd' AND status IN ('completed','processing') ORDER BY id DESC LIMIT 1") : false;
 if ($__ex && ($__row = mysqli_fetch_assoc($__ex))) {
     echo json_encode(['success' => false, 'already_imported' => true, 'existing_id' => intval($__row['id']),
         'message' => 'Permission denied: an Excel file has already been imported for the delivery date ' . date('d M Y', strtotime($delivery_date))

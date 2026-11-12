@@ -131,6 +131,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         echo json_encode(['ok'=>false,'msg'=>'Please select a valid Delivery Date.']);
         exit;
     }
+    // the same delivery date cannot be uploaded twice — the old upload has to be deleted first
+    $__dd = mysqli_real_escape_string($conn, date('Y-m-d', strtotime($delivery_date)));
+    $__ex = mysqli_query($conn, "SELECT id, filename, uploaded_at FROM primary_invoice_wise_sales_uploads WHERE delivery_date = '$__dd' ORDER BY id DESC LIMIT 1");
+    if ($__ex && ($__r = mysqli_fetch_assoc($__ex))) {
+        echo json_encode(['ok'=>false,'msg'=>'Permission denied: a Pre-Secondary file is already imported for '.date('d M Y', strtotime($delivery_date)).' ('.$__r['filename'].', '.date('d M Y H:i', strtotime($__r['uploaded_at'])).'). You cannot import this date again. Please delete the old upload (Pre-Secondary history → Delete) and import again.']);
+        exit;
+    }
     if (!isset($_FILES['xlsx_file']) || $_FILES['xlsx_file']['error'] !== UPLOAD_ERR_OK) {
         echo json_encode(['ok'=>false,'msg'=>'File upload failed. Please try again.']);
         exit;
