@@ -201,6 +201,7 @@ if (isset($_GET['export'])) {
     foreach (['Set', 'T code', 'Customer', 'Invoice / Cheque no', 'Route', 'SR', 'Delivery date', 'Policy days', 'Policy due date', 'Days over policy', 'Status', 'Balance / Cheque amount (Rs.)', 'Cheque date', 'Cheque age (days)', 'Bank', 'Cheque status'] as $i => $h) $bs->set(1, $i + 1, $h, $H);
     $r = 2;
     foreach ($SETBILLS as $k => $list) foreach ($list as $b) {
+        if (empty($b['ex'])) continue;          // only bills past the policy (no 0 / minus days)
         $ex = (bool)$b['ex']; $bg = $ex ? ['bg' => 'FEF2F2'] : [];
         $vals = [$GROUPS[$k]['label'], $b['t'], $b['n'], $b['inv'], $b['route'], $b['sr'], $b['del'] ? date('d M Y', strtotime($b['del'])) : '', $b['days'],
                  $GROUPS[$k]['test'] ? date('d M Y', strtotime($b['due'])) : '', $GROUPS[$k]['test'] ? $b['over'] : '', !$GROUPS[$k]['test'] ? 'Normal' : ($ex ? 'Exceeded' : 'Within policy'), $b['bal'],
@@ -347,7 +348,7 @@ include 'header.php';
         </div>
         <div class="sum" id="mSum"></div>
         <div class="bar">
-            <div class="tabs" id="mTabs"><button type="button" data-f="all" class="on">All</button><button type="button" data-f="ex">Exceeded</button><button type="button" data-f="ok">Within policy</button></div>
+            <div class="tabs" id="mTabs"><button type="button" data-f="ex" class="on" style="cursor:default">Policy exceeded only (+ days)</button></div>
             <input type="search" id="mQ" placeholder="Search customer, T code, invoice or cheque no">
             <span class="hint" id="mShown"></span>
         </div>
@@ -379,7 +380,7 @@ include 'header.php';
 <script>
 (function(){
   var DATA = <?= json_encode($MODAL, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-  var AS_AT = <?= json_encode($f_as_at) ?>, ROUTE = <?= json_encode($f_route) ?>, SR = <?= json_encode($f_sr) ?>, cur = -1, filt = 'all';
+  var AS_AT = <?= json_encode($f_as_at) ?>, ROUTE = <?= json_encode($f_route) ?>, SR = <?= json_encode($f_sr) ?>, cur = -1, filt = 'ex';
   var $ = function(id){ return document.getElementById(id); };
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function money(v){ return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -387,7 +388,7 @@ include 'header.php';
   function rows(){
     var d=DATA[cur], q=$('mQ').value.trim().toLowerCase();
     return d.bills.filter(function(b){
-      if(filt==='ex' && !b.ex) return false; if(filt==='ok' && b.ex) return false;
+      if(!b.ex) return false;      /* only bills past the policy: no 0 / minus days */
       return !q || (b.n+' '+b.t+' '+b.inv).toLowerCase().indexOf(q)>-1;
     }).sort(function(a,b){ return (b.over||0)-(a.over||0); });
   }
@@ -420,7 +421,7 @@ include 'header.php';
       +'<div><div class="l">'+(g.test?(g.chq?'Exceeded cheques':'Exceeded bills'):'Status')+'</div><div class="v" style="color:#b91c1c">'+(g.test?s.ex_n:'<span style="color:#15803d">Normal</span>')+'</div></div>'
       +'<div><div class="l">'+(g.test?'Exceeded value':'Policy test')+'</div><div class="v" style="color:#b91c1c">'+(g.test?'Rs. '+money(s.ex_v):'<span style="color:#15803d;font-size:13px">not tested (cash)</span>')+'</div></div>';
     [].forEach.call($('mTabs').children,function(b){ b.style.display=(!g.test&&b.dataset.f!=='all')?'none':''; });
-    filt='all'; [].forEach.call($('mTabs').children,function(b){ b.classList.toggle('on',b.dataset.f==='all'); });
+    filt='ex';
     $('mQ').value='';
     var pm={credit:'credit',cheque:'cheque',cwd:'cwd',cash:'cash'}[d.k]||'';
     if(g.chq){ $('mOpen').href='cheque_aging_report.php?as_at='+encodeURIComponent(AS_AT)+'&pay_mode=cheque'+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Cheque Aging Report'; }
@@ -430,7 +431,7 @@ include 'header.php';
   function openAt(i){ $('casm').classList.add('open'); document.body.style.overflow='hidden'; show(i); }
   function closeM(){ $('casm').classList.remove('open'); document.body.style.overflow=''; }
   $('mClose').onclick=closeM; $('mPrev').onclick=function(){ show(cur-1); }; $('mNext').onclick=function(){ show(cur+1); };
-  $('mTabs').addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; filt=b.dataset.f; [].forEach.call($('mTabs').children,function(x){ x.classList.toggle('on',x===b); }); draw(); });
+  
   $('mQ').addEventListener('input',draw);
   $('casm').addEventListener('mousedown',function(e){ if(e.target===$('casm')) closeM(); });
   document.addEventListener('keydown',function(e){ if(!$('casm').classList.contains('open')) return;
