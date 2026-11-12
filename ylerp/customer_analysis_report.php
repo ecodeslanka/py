@@ -467,7 +467,7 @@ include 'header.php';
 <!-- history viewer: moved to <body> by the script so it always sits above the site header / sidebar -->
 <div class="cam" id="cam" role="dialog" aria-modal="true" aria-label="Customer history">
     <div class="box">
-        <div class="top"><div><div class="ttl" id="hName">Customer</div><div class="sb" id="hSub"></div></div><span class="sp"></span>
+        <div class="top"><div><div class="ttl" id="hName">Customer</div><div class="sb" id="hSub"></div></div><span class="sp"></span><span id="hLinks" style="display:flex;gap:6px;margin-right:6px"></span>
             <button class="nb" id="hPrev" type="button">◀ Previous</button><button class="nb" id="hNext" type="button">Next ▶</button>
             <button class="x" id="hClose" type="button" aria-label="Close">&times;</button></div>
         <div class="sum" id="hSum"></div>
@@ -502,6 +502,74 @@ include 'header.php';
 @media (max-width:760px) { .cam { padding:0; } .cam .box { border-radius:0; } .cam .sum { grid-template-columns:1fr 1fr; } }
 </style>
 
+<!-- CUSTOMER 360 — same 4 buttons as the Customer Credit Risk report: Customer Risk · Invoices · Customer Ledger · Market Credit -->
+<div id="c360Modal" class="c360-bg" aria-hidden="true">
+  <div class="c360-box" role="dialog" aria-modal="true" aria-labelledby="c360Title">
+    <div class="c360-head">
+      <div class="c360-title"><i class="fa-solid fa-layer-group"></i> <span id="c360Title">Customer</span> <span id="c360Sub" class="c360-sub"></span></div>
+      <div class="c360-tabs" role="tablist">
+        <button type="button" class="c360-tab on" data-tab="risk"><i class="fa-solid fa-chart-pie"></i> Customer Risk</button>
+        <button type="button" class="c360-tab" data-tab="inv"><i class="fa-solid fa-file-invoice"></i> Invoices</button>
+        <button type="button" class="c360-tab" data-tab="ledger"><i class="fa-solid fa-book"></i> Customer Ledger</button>
+        <button type="button" class="c360-tab" data-tab="mc"><i class="fa-solid fa-store"></i> Market Credit</button>
+      </div>
+      <div class="c360-tools">
+        <button type="button" class="c360-btn" id="c360Reload" title="Reload this tab"><i class="fa-solid fa-rotate"></i></button>
+        <a class="c360-btn" id="c360Open" target="_blank" rel="noopener" title="Open this tab in a new browser tab"><i class="fa-solid fa-up-right-from-square"></i></a>
+        <button type="button" class="c360-btn c360-x" id="c360Close" title="Close (Esc)"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>
+    <div class="c360-body">
+      <div class="c360-pane on" data-pane="risk"><div class="c360-load">Loading customer risk…</div><iframe title="Customer Risk"></iframe></div>
+      <div class="c360-pane" data-pane="inv"><div class="c360-load">Loading invoices…</div><iframe title="Invoices"></iframe></div>
+      <div class="c360-pane" data-pane="ledger"><div class="c360-load">Loading customer ledger…</div><iframe title="Customer Ledger"></iframe></div>
+      <div class="c360-pane" data-pane="mc"><div class="c360-load">Loading market credit…</div><iframe title="Market Credit"></iframe></div>
+    </div>
+  </div>
+</div>
+<style>
+.c360-icons { display:inline-flex; gap:3px; }
+.tb-icon { width:26px; height:26px; padding:0; display:inline-flex; align-items:center; justify-content:center; font-size:12px; border:1px solid; border-radius:6px; cursor:pointer; background:#fff; }
+.tbi-risk { background:#fef2f2; color:#dc2626; border-color:#fecaca; } .tbi-risk:hover { background:#dc2626; color:#fff; }
+.tbi-inv { background:#eff6ff; color:#2563eb; border-color:#bfdbfe; } .tbi-inv:hover { background:#2563eb; color:#fff; }
+.tbi-ledger { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; } .tbi-ledger:hover { background:#16a34a; color:#fff; }
+.tbi-mc { background:#f5f3ff; color:#7c3aed; border-color:#ddd6fe; } .tbi-mc:hover { background:#7c3aed; color:#fff; }
+.c360-bg { position:fixed; inset:0; z-index:2147483100; background:rgba(15,23,42,.6); display:none; align-items:center; justify-content:center; padding:14px; font-family:'Inter',system-ui,sans-serif; }
+.c360-bg.open { display:flex; } .c360-bg *, .c360-bg *::before, .c360-bg *::after { box-sizing:border-box; }
+.c360-box { background:#fff; border-radius:12px; width:100%; max-width:1680px; height:96vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 30px 90px rgba(0,0,0,.35); }
+.c360-head { display:flex; align-items:center; gap:14px; padding:10px 14px; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; }
+.c360-title { font-weight:800; font-size:15px; color:#111827; display:flex; align-items:center; gap:8px; min-width:0; } .c360-title i { color:#7c3aed; } .c360-sub { font-weight:500; font-size:12px; color:#6b7280; }
+.c360-tabs { display:flex; gap:4px; background:#f3f4f6; border-radius:8px; padding:3px; margin-left:auto; }
+.c360-tab { border:none; background:transparent; padding:7px 14px; border-radius:6px; font:inherit; font-size:13px; font-weight:600; color:#4b5563; cursor:pointer; white-space:nowrap; } .c360-tab.on { background:#fff; color:#111827; box-shadow:0 1px 3px rgba(0,0,0,.12); }
+.c360-tools { display:flex; gap:6px; } .c360-btn { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border:1px solid #d1d5db; border-radius:7px; background:#fff; color:#374151; cursor:pointer; text-decoration:none; } .c360-btn:hover { background:#f9fafb; } .c360-x:hover { background:#fef2f2; color:#b91c1c; border-color:#fecaca; }
+.c360-body { position:relative; flex:1; min-height:0; background:#f9fafb; } .c360-pane { position:absolute; inset:0; display:none; } .c360-pane.on { display:block; } .c360-pane iframe { width:100%; height:100%; border:0; background:#fff; }
+.c360-load { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#6b7280; font-size:13px; background:#f9fafb; } .c360-pane.ready .c360-load { display:none; }
+@media (max-width:760px) { .c360-bg { padding:0; } .c360-box { height:100vh; border-radius:0; } .c360-tabs { margin-left:0; order:3; width:100%; } .c360-tab { flex:1; padding:7px 6px; font-size:12px; } }
+</style>
+<script>
+(function(){
+  /* each tab is the real page (same figures as the menu), filtered to this customer; its menu / header is hidden inside the window */
+  var URLS={ risk:function(tc){ return 'customer_credit_risk_report.php?search='+encodeURIComponent(tc); }, inv:function(tc){ return 'invoices.php?customer='+encodeURIComponent(tc); },
+             ledger:function(tc){ return 'customer_ledger.php?t_code='+encodeURIComponent(tc); }, mc:function(tc){ return 'market_credit_report.php?t_code='+encodeURIComponent(tc)+'&hide_zero=0&tc_exact=1&expand=1'; } };
+  var EMBED='header.header,.header,aside.sidebar,#sidebar,.sidebar-overlay,.ms-edge-toggle,footer.footer{display:none!important;}body{padding-top:0!important;margin-top:0!important;}.main-content{margin-left:0!important;margin-top:0!important;padding-top:12px!important;width:100%!important;max-width:100%!important;}';
+  var cur={tc:'',tab:'risk'}, bg=document.getElementById('c360Modal'); document.body.appendChild(bg);     // always above the site header
+  function pane(t){ return bg.querySelector('.c360-pane[data-pane="'+t+'"]'); }
+  function load(t,force){ var p=pane(t), f=p.querySelector('iframe'); if(!force&&f.dataset.tc===cur.tc) return; p.classList.remove('ready'); f.dataset.tc=cur.tc;
+    f.onload=function(){ try{ var d=f.contentDocument; if(d&&d.head&&!d.getElementById('c360css')){ var st=d.createElement('style'); st.id='c360css'; st.textContent=EMBED; d.head.appendChild(st); } }catch(e){} p.classList.add('ready'); }; f.src=URLS[t](cur.tc); }
+  function show(t){ cur.tab=t; bg.querySelectorAll('.c360-tab').forEach(function(b){ b.classList.toggle('on',b.dataset.tab===t); }); bg.querySelectorAll('.c360-pane').forEach(function(p){ p.classList.toggle('on',p.dataset.pane===t); });
+    document.getElementById('c360Open').href=URLS[t](cur.tc); load(t,false); }
+  window.openC360=function(tc,tab){
+    if(cur.tc!==tc) bg.querySelectorAll('.c360-pane iframe').forEach(function(f){ f.removeAttribute('src'); f.dataset.tc=''; f.parentNode.classList.remove('ready'); });
+    cur.tc=tc; var r=(window.__rowsOf&&window.__rowsOf(tc))||{};
+    document.getElementById('c360Title').textContent='['+tc+'] '+(r.name||''); document.getElementById('c360Sub').textContent=r.risk!=null?(r.band+' · '+r.risk+'/100'+(r.outstanding?'  ·  Outstanding Rs. '+Number(r.outstanding).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'')):'';
+    bg.classList.add('open'); bg.setAttribute('aria-hidden','false'); document.body.style.overflow='hidden'; show(tab||'risk'); };
+  window.closeC360=function(){ bg.classList.remove('open'); bg.setAttribute('aria-hidden','true'); if(!document.getElementById('cam').classList.contains('open')) document.body.style.overflow=''; };
+  bg.querySelectorAll('.c360-tab').forEach(function(b){ b.addEventListener('click',function(){ show(b.dataset.tab); }); });
+  document.getElementById('c360Reload').addEventListener('click',function(){ load(cur.tab,true); }); document.getElementById('c360Close').addEventListener('click',window.closeC360);
+  bg.addEventListener('click',function(e){ if(e.target===bg) window.closeC360(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&bg.classList.contains('open')){ e.stopImmediatePropagation(); window.closeC360(); } },true);
+})();
+</script>
 <script>
 (function(){
   var ROWS = [], VIEW = [], TAB = 'all', CUR = -1, HT = 'bills', FILE = '', LOADED = '', CUR_ID = 0, PERSIST_T = null;
@@ -568,6 +636,12 @@ include 'header.php';
   function test(r,t){ if(t==='all') return true; if(t==='nf') return !r.found; if(!r.found) return false;
     if(t==='ni') return !!dec(r).no_issue; if(t==='sg') return suggest(r)&&!dec(r).no_issue;
     return t==='bl'?r.bl:(t==='cwd'?r.cwd:(t==='ret'?r.ret_n>0:(t==='viol'?r.viol>0:(t==='risk'?(r.band==='HIGH'||r.band==='CRITICAL'):(t==='out'?r.outstanding>0:true))))); }
+  function iconBtns(tc){ var e=esc(tc);
+    return '<span class="c360-icons">'
+      +'<button type="button" class="tb-icon tbi-risk" data-c360="risk" data-tc="'+e+'" title="Customer Risk" aria-label="Customer Risk of '+e+'"><i class="fa-solid fa-chart-pie"></i></button>'
+      +'<button type="button" class="tb-icon tbi-inv" data-c360="inv" data-tc="'+e+'" title="Invoices" aria-label="Invoices of '+e+'"><i class="fa-solid fa-file-invoice"></i></button>'
+      +'<button type="button" class="tb-icon tbi-ledger" data-c360="ledger" data-tc="'+e+'" title="Customer Ledger" aria-label="Customer Ledger of '+e+'"><i class="fa-solid fa-book"></i></button>'
+      +'<button type="button" class="tb-icon tbi-mc" data-c360="mc" data-tc="'+e+'" title="Market Credit (with cheques)" aria-label="Market Credit of '+e+'"><i class="fa-solid fa-store"></i></button></span>'; }
   function show(){ $('caResult').style.display='block'; kpis(); tabs(); draw(); }
   function kpis(){
     var f=ROWS.filter(function(r){return r.found;}), sum=function(k){ return f.reduce(function(a,r){ return a+(r[k]||0); },0); };
@@ -603,11 +677,11 @@ include 'header.php';
        +'<td>'+(r.policy==='none'?'<span style="color:#d1d5db">n/a</span>':(r.viol>0?'<span class="b red">VIOLATED × '+r.viol+'</span><br><small style="color:#b91c1c">max +'+r.max_over+'d'+(r.cur_over?' · '+r.cur_over+' overdue now':'')+'</small>':'<span class="b green">No violation</span>'))+'</td>'
        +'<td>'+rk+'</td>'
        +'<td><div class="ni-wrap"><input type="checkbox" class="ni" data-n="'+i+'" '+(D.no_issue?'checked':'')+' title="Do not issue items to this customer again">'+(D.no_issue?'<small style="color:#9f1239">DO NOT ISSUE</small>':(sg?'<small style="color:#b45309">⚠ suggested</small>':''))+(na?'<small style="color:#6b7280">'+na+' action'+(na>1?'s':'')+'</small>':'')+'</div></td>'
-       +'<td><button class="btn light" style="height:30px;padding:0 12px" data-h="'+i+'"><i class="fa-solid fa-chart-line"></i> Analyze</button></td></tr>';
+       +'<td><div style="display:flex;gap:5px;align-items:center;justify-content:center">'+iconBtns(r.t_code)+'<button class="btn light" style="height:30px;padding:0 12px" data-h="'+i+'"><i class="fa-solid fa-chart-line"></i> Analyze</button></div></td></tr>';
     });
     $('caBody').innerHTML=h; $('caEmpty').style.display=VIEW.length?'none':'block';
   }
-  $('caBody').addEventListener('click',function(e){ var b=e.target.closest('[data-h]'); if(b) openH(parseInt(b.dataset.h,10)); });
+  $('caBody').addEventListener('click',function(e){ var c=e.target.closest('[data-c360]'); if(c){ openC360(c.dataset.tc,c.dataset.c360); return; } var b=e.target.closest('[data-h]'); if(b) openH(parseInt(b.dataset.h,10)); });
   $('caBody').addEventListener('change',function(e){ var c=e.target.closest('.ni'); if(!c) return; dec(ROWS[parseInt(c.dataset.n,10)]).no_issue=c.checked?1:0; persist(); tabs(); draw(); });
   $('caMarkSug').addEventListener('click',function(){ var n=0; ROWS.forEach(function(r){ if(suggest(r)&&!dec(r).no_issue){ dec(r).no_issue=1; n++; } }); persist(); tabs(); draw(); if(!n) $('caMarkInfo').textContent='No suggested customers to mark.'; });
   $('caClearMarks').addEventListener('click',function(){ if(!confirm('Clear every DO NOT ISSUE mark in this report?')) return; ROWS.forEach(function(r){ if(r.dec) r.dec.no_issue=0; }); persist(); tabs(); draw(); });
@@ -658,6 +732,7 @@ include 'header.php';
     CUR=i; var r=ROWS[i], list=foundList(), pos=list.indexOf(i);
     $('hName').textContent=(r.name||r.file_name)+' ('+r.t_code+')';
     $('hSub').textContent='SR '+(r.sr||'—')+' · '+(PM[r.pm]?PM[r.pm][1]:'—')+(r.pm==='credit'||r.pm==='cheque'?' · policy '+r.days+' days':'')+(r.special?' · special: '+r.special:'')+(r.bl?' · BLACKLISTED'+(r.bl_reason?': '+r.bl_reason:''):'')+(r.cwd?' · cheques will delay':'');
+    $('hLinks').innerHTML=iconBtns(r.t_code); $('hLinks').onclick=function(e){ var c=e.target.closest('[data-c360]'); if(c) openC360(c.dataset.tc,c.dataset.c360); };
     $('hPrev').disabled=pos<=0; $('hNext').disabled=pos>=list.length-1;
     $('hSum').innerHTML='<div><div class="l">Total outstanding</div><div class="v" style="color:#1d4ed8">Rs. '+money(r.outstanding)+'</div></div><div><div class="l">Unpaid bills</div><div class="v">'+r.out_n+'</div></div>'
       +'<div><div class="l">Policy violated</div><div class="v" style="color:'+(r.viol?'#b91c1c':'#15803d')+'">'+(r.policy==='none'?'n/a':(r.viol?r.viol+' time'+(r.viol>1?'s':''):'Never'))+'</div></div>'
@@ -727,6 +802,7 @@ include 'header.php';
     document.body.appendChild(f); f.submit(); setTimeout(function(){ f.remove(); },2000);
   });
 
+  window.__rowsOf=function(tc){ return ROWS.find(function(r){ return r.found&&r.t_code===tc; }); };
   document.body.appendChild($('cam'));      // out of the page wrapper: always above the site header & sidebar
   loadSaved();
 })();
