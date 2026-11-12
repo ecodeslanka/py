@@ -511,6 +511,8 @@ include 'header.php';
                 <div class="fld"><label for="caQ">Search</label><input type="search" id="caQ" placeholder="outlet code, name or SR"></div>
                 <div class="fld"><label for="caName">Report name</label><input type="text" id="caName" placeholder="e.g. SMN outlets — Nov 2026"></div>
                 <button class="btn teal" id="caSave" type="button"><i class="fa-solid fa-floppy-disk"></i> Save report</button>
+
+                <button class="btn light" id="caLive" type="button" title="Re-read every customer from the live system data (keeps your marks, actions and BTG)"><i class="fa-solid fa-arrows-rotate"></i> Refresh live data</button>
                 <button class="btn xl" id="caXls" type="button"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
                 <span id="caTitle" style="margin-left:auto;font-weight:700;color:#134e4a"></span>
             </div>
@@ -700,7 +702,7 @@ include 'header.php';
       b.disabled=false;
       if(!res.success){ $('caStatus').textContent=res.message||'Analysis failed.'; return; }
       ROWS=res.rows; LOADED=''; CUR_ID=0; $('caMarkInfo').textContent=''; $('caName').value=(FILE||'Analysis').replace(/\.xlsx?$/i,'')+' — '+new Date().toLocaleDateString('en-GB'); $('caTitle').textContent='Analysis as at '+fd(res.as_at);
-      $('caStatus').textContent='Done — '+ROWS.length+' outlets analysed.'; show();
+      $('caStatus').textContent='Done — '+ROWS.length+' outlets analysed.'; remember({mode:'draft',file:FILE,rows:parsed.map(function(x){ return {sr:x.sr,code:x.code,name:x.name}; })}); show();
     }).catch(function(){ b.disabled=false; $('caStatus').textContent='Connection problem — try again.'; });
   });
 
@@ -859,18 +861,38 @@ include 'header.php';
         +'<div class="a"><button class="btn teal" data-open="'+s.id+'"><i class="fa-solid fa-folder-open"></i> Open</button><button class="btn red" data-del="'+s.id+'" data-nm="'+esc(s.report_name)+'"><i class="fa-solid fa-trash"></i> Delete</button></div></div>'; }).join('');
     }).catch(function(){ $('caSaved').innerHTML='<div class="muted">Could not load saved reports.</div>'; });
   }
+  /* ── remember what is open so a browser refresh brings it back with LIVE data (BTG typed, marks, everything) ── */
+  var KEY='ca_state_v1';
+  function remember(o){ try{ localStorage.setItem(KEY,JSON.stringify(o)); }catch(e){} }
+  function recall(){ try{ return JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){ return null; } }
+  function openSaved(id,live){
+    return fetch('customer_analysis_report.php?ajax=load&id='+id,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(res){
+      if(!res.success){ if(!live) alert(res.message||'Could not open.'); return; } ROWS=res.rows; TAB='all'; LOADED=res.name; FILE=res.file||''; CUR_ID=res.id||0; $('caMarkInfo').textContent=''; $('caName').value=res.name;
+      $('caTitle').textContent='Saved report: '+res.name+' · analysed '+fd(res.as_at)+' · by '+(res.by||''); remember({mode:'saved',id:CUR_ID}); show(); if(!live) window.scrollTo({top:0,behavior:'smooth'});
+      if(live) return liveRefresh(true); });
+  }
+  /* re-read every customer from the system now; the marks / actions / notes of each row are kept */
+  function liveRefresh(quiet){
+    var src=ROWS.map(function(r){ return {sr:r.sr||'',code:r.code,name:r.file_name||r.name||''}; }); if(!src.length) return Promise.resolve();
+    var b=$('caLive'); if(b) b.disabled=true; $('caStatus').textContent='Updating with live data…';
+    return post('analyze',{rows:JSON.stringify(src)}).then(function(res){ if(b) b.disabled=false;
+      if(!res.success){ $('caStatus').textContent=res.message||'Live update failed.'; return; }
+      var old={}; ROWS.forEach(function(r){ old[r.code]=r; });
+      ROWS=res.rows.map(function(n){ var o=old[n.code]; if(o&&o.dec) n.dec=o.dec; return n; });
+      $('caStatus').textContent='Live data updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' — '+ROWS.length+' outlets.'; $('caTitle').textContent=($('caTitle').textContent.replace(/ · live.*$/,''))+' · live '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); show(); })
+     .catch(function(){ if(b) b.disabled=false; $('caStatus').textContent='Connection problem — live update failed.'; });
+  }
+  $('caLive').addEventListener('click',function(){ liveRefresh(false); });
   $('caSaved').addEventListener('click',function(e){
     var o=e.target.closest('[data-open]'), d=e.target.closest('[data-del]');
-    if(o){ fetch('customer_analysis_report.php?ajax=load&id='+o.dataset.open,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(res){
-        if(!res.success){ alert(res.message||'Could not open.'); return; } ROWS=res.rows; TAB='all'; LOADED=res.name; FILE=res.file||''; CUR_ID=res.id||0; $('caMarkInfo').textContent=''; $('caName').value=res.name;
-        $('caTitle').textContent='Saved report: '+res.name+' · analysed '+fd(res.as_at)+' · by '+(res.by||''); show(); window.scrollTo({top:0,behavior:'smooth'}); }); }
+    if(o){ openSaved(o.dataset.open,false); }
     if(d){ if(!confirm('Delete the saved report "'+d.dataset.nm+'"? This cannot be undone.')) return;
       post('delete_report',{id:d.dataset.del}).then(function(res){ if(res.success) loadSaved(); else alert(res.message||'Could not delete.'); }); }
   });
   $('caSave').addEventListener('click',function(){
     var n=$('caName').value.trim(); if(!n||!ROWS.length){ alert('Enter a report name first.'); return; }
     var b=this; b.disabled=true;
-    post('save_report',{name:n,file:FILE,rows:JSON.stringify(ROWS)}).then(function(res){ b.disabled=false; if(res.success){ CUR_ID=res.id||0; LOADED=n; $('caStatus').textContent='Report saved — marks and actions are now saved automatically.'; $('caMarkInfo').textContent=''; loadSaved(); } else alert(res.message||'Could not save.'); })
+    post('save_report',{name:n,file:FILE,rows:JSON.stringify(ROWS)}).then(function(res){ b.disabled=false; if(res.success){ CUR_ID=res.id||0; LOADED=n; remember({mode:'saved',id:CUR_ID}); $('caStatus').textContent='Report saved — marks and actions are now saved automatically.'; $('caMarkInfo').textContent=''; loadSaved(); } else alert(res.message||'Could not save.'); })
       .catch(function(){ b.disabled=false; alert('Connection problem — try again.'); });
   });
 
@@ -888,6 +910,11 @@ include 'header.php';
   window.__rowsOf=function(tc){ return ROWS.find(function(r){ return r.found&&r.t_code===tc; }); };
   document.body.appendChild($('cam'));      // out of the page wrapper: always above the site header & sidebar
   loadSaved();
+  /* after a browser refresh: bring back the report that was open, updated with the live data */
+  (function(){ var st=recall(); if(!st) return;
+    if(st.mode==='saved'&&st.id){ openSaved(st.id,true); }
+    else if(st.mode==='draft'&&st.rows&&st.rows.length){ FILE=st.file||''; ROWS=st.rows.map(function(x){ return {sr:x.sr,code:x.code,file_name:x.name,found:false}; });
+      $('caName').value=(FILE||'Analysis').replace(/\.xlsx?$/i,'')+' — '+new Date().toLocaleDateString('en-GB'); $('caTitle').textContent='Analysis (restored)'; liveRefresh(true); } })();
 })();
 </script>
 <?php include 'footer.php'; ?>
