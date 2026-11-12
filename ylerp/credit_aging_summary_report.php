@@ -294,6 +294,7 @@ include 'header.php';
         <a class="btn light" href="credit_aging_summary_report.php">Reset</a>
         <a class="btn xl" href="<?= cas_h($exp_url) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a>
         <button class="btn pr noprint" type="button" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+        <button class="btn pr noprint" type="button" id="casShot" title="Save the summary table as a picture (PNG)"><i class="fa-solid fa-camera"></i> Save screenshot</button>
     </form>
 
     <section class="kpis">
@@ -302,7 +303,7 @@ include 'header.php';
     </section>
 
     <div class="hintrow noprint"><i class="fa-solid fa-hand-pointer"></i> Click a row to see its invoices and details.</div>
-    <div class="card wrap">
+    <div class="card wrap" id="casShotArea">
     <table class="sumt">
         <thead>
             <tr>
@@ -373,6 +374,26 @@ include 'header.php';
 .casm .hint { margin-left:auto; color:#6b7280; font-size:11.5px; }
 @media (max-width:760px) { .casm { padding:0; } .casm .box { border-radius:0; } .casm .sum { grid-template-columns:1fr 1fr; } .casm .hint { display:none; } .casm .bar input { min-width:0; flex:1; } }
 </style>
+<script>
+/* Save screenshot: the summary table (with its heading and date) as a PNG picture */
+(function(){
+  var btn=document.getElementById('casShot'); if(!btn) return;
+  function load(cb){ if(window.html2canvas) return cb(); var sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'; sc.onload=cb; sc.onerror=function(){ alert('Could not load the screenshot tool (needs internet). Please try again.'); btn.disabled=false; }; document.head.appendChild(sc); }
+  btn.addEventListener('click',function(){
+    var area=document.getElementById('casShotArea'); if(!area) return; btn.disabled=true; var old=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
+    load(function(){
+      var wrap=document.createElement('div'); wrap.style.cssText='position:fixed;left:-99999px;top:0;background:#fff;padding:18px 20px;font-family:Inter,system-ui,sans-serif;width:'+Math.max(area.scrollWidth,1000)+'px';
+      var h=document.createElement('div'); h.style.cssText='font-weight:800;font-size:17px;color:#111827;margin-bottom:2px'; h.textContent='Credit Aging Summary Report';
+      var d=document.createElement('div'); d.style.cssText='font-size:12px;color:#6b7280;margin-bottom:10px'; d.textContent='As at <?= cas_h(date('d M Y', $as_at_ts)) ?>'+<?= json_encode(($f_route !== '' ? ' · Route ' . $f_route : '') . ($f_sr !== '' ? ' · SR ' . $f_sr : '')) ?>+' · saved '+new Date().toLocaleString('en-GB');
+      var clone=area.cloneNode(true); clone.removeAttribute('id'); clone.style.overflow='visible'; clone.style.boxShadow='none';
+      wrap.appendChild(h); wrap.appendChild(d); wrap.appendChild(clone); document.body.appendChild(wrap);
+      html2canvas(wrap,{scale:2,backgroundColor:'#ffffff',useCORS:true}).then(function(c){
+        var a=document.createElement('a'); a.download='credit_aging_summary_<?= cas_h($f_as_at) ?>.png'; a.href=c.toDataURL('image/png'); document.body.appendChild(a); a.click(); a.remove();
+      }).catch(function(e){ alert('Could not save the screenshot: '+e.message); }).then(function(){ wrap.remove(); btn.disabled=false; btn.innerHTML=old; });
+    });
+  });
+})();
+</script>
 <script>
 (function(){
   var DATA = <?= json_encode($MODAL, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
