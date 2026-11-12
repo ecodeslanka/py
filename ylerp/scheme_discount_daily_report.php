@@ -108,6 +108,16 @@ $tot_bws = array_sum(array_map(fn($x) => (float)$x['bws_sd'], $items));
 $tot_cc  = array_sum(array_map(fn($x) => (float)$x['cc_act'], $items));
 $tot_bal = array_sum(array_map(fn($x) => (float)$x['balance'], $items));
 $tot_diff = array_sum(array_map(fn($x) => (float)$x['diff'], $items));
+/* monthly summary: the same figures, grouped by MOC Ref (newest month first) */
+function sd_moc_key($m) { return preg_match('~^(\d{1,2})/(\d{4})$~', trim((string)$m), $mm) ? (int)($mm[2] . str_pad($mm[1], 2, '0', STR_PAD_LEFT)) : 0; }
+$monthly = [];
+foreach ($items as $x) {
+    $m = trim((string)$x['moc_ref']) !== '' ? trim((string)$x['moc_ref']) : '—';
+    if (!isset($monthly[$m])) $monthly[$m] = ['n' => 0, 'claim' => 0.0, 'bws' => 0.0, 'diff' => 0.0, 'cc' => 0.0, 'bal' => 0.0];
+    $monthly[$m]['n']++; $monthly[$m]['claim'] += (float)$x['claim_amount']; $monthly[$m]['bws'] += (float)$x['bws_sd'];
+    $monthly[$m]['diff'] += (float)$x['diff']; $monthly[$m]['cc'] += (float)$x['cc_act']; $monthly[$m]['bal'] += (float)$x['balance'];
+}
+uksort($monthly, fn($a, $b) => sd_moc_key($b) <=> sd_moc_key($a) ?: strcmp($b, $a));
 
 /* Excel */
 if (isset($_GET['export']) && class_exists('ZipArchive')) {
@@ -124,7 +134,14 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     }
     $sh->set($r, 8, 'TOTAL', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 9, round($tot, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 10, round($tot_bws, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 11, round($tot_diff, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 12, round($tot_cc, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 13, round($tot_bal, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]);
     foreach ([5, 14, 18, 40, 10, 13, 13, 13, 16, 20, 18, 20, 16] as $i => $wd) $sh->widths[$i + 1] = $wd;
-    $sh->freeze = [3, 0]; $tmp = tempnam(sys_get_temp_dir(), 'sd'); $X->save($tmp);
+    $sh->freeze = [3, 0];
+    $ms = $X->sheet('Monthly summary');
+    $ms->set(1, 1, 'Scheme Discount — monthly summary by MOC Ref', ['b' => 1, 'sz' => 15]);
+    foreach (['MOC Ref', 'Schemes', 'Claim Amount', 'Scheme Discount as per Invoice', 'Difference (Claim - Invoice)', 'Claim Certificate Actual Amount', 'Balance'] as $i => $h) $ms->set(3, $i + 1, $h, $H);
+    $mr = 4; foreach ($monthly as $mk => $m) { foreach ([$mk, $m['n'], round($m['claim'], 2), round($m['bws'], 2), round($m['diff'], 2), round($m['cc'], 2), round($m['bal'], 2)] as $i => $v) $ms->set($mr, $i + 1, $v, ['border' => 1] + ($i >= 2 ? ['h' => 'right', 'nf' => 4] : [])); $mr++; }
+    foreach ([['TOTAL', 'b'], [array_sum(array_column($monthly, 'n')), 'b'], [round($tot, 2), 'n'], [round($tot_bws, 2), 'n'], [round($tot_diff, 2), 'n'], [round($tot_cc, 2), 'n'], [round($tot_bal, 2), 'n']] as $i => [$v, $t]) $ms->set($mr, $i + 1, $v, ['b' => 1, 'border' => 1, 'bg' => 'FDE68A'] + ($i >= 2 ? ['h' => 'right', 'nf' => 4] : []));
+    foreach ([14, 10, 16, 22, 22, 24, 16] as $i => $wd) $ms->widths[$i + 1] = $wd;
+    $tmp = tempnam(sys_get_temp_dir(), 'sd'); $X->save($tmp);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="scheme_discount_daily_' . date('Ymd_His') . '.xlsx"');
     header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
 }
@@ -141,6 +158,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
 .sdr .tw{overflow:auto;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-height:72vh}.sdr table{width:100%;border-collapse:collapse;font-size:13px}.sdr th{background:#1e3a8a;color:#fff;padding:9px 10px;text-align:left;position:sticky;top:0;white-space:nowrap}.sdr td{padding:8px 10px;border-bottom:1px solid #f1f5f9}.sdr .r{text-align:right;font-variant-numeric:tabular-nums}.sdr tr:hover td{background:#f8fafc}
 .sdr tfoot td{background:#fde68a;font-weight:800;position:sticky;bottom:0}.sdr .ty{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#ede9fe;color:#6d28d9}.sdr .ty.dmg{background:#fee2e2;color:#b91c1c}
 .sdr .bal{display:inline-block;min-width:92px;text-align:right;padding:3px 10px;border-radius:8px;font-weight:800}.sdr .bal.pos{background:#fee2e2;color:#b91c1c}.sdr .bal.neg{background:#dcfce7;color:#15803d}.sdr .bal.zero{background:#f1f5f9;color:#64748b}.sdr a.bwsl,.sdr a.ccl{color:#1d4ed8;text-decoration:none}.sdr a.ccl{color:#15803d}.sdr a:hover b{text-decoration:underline}.sdr small{color:#6b7280;font-weight:500}
+.sdr .sdtabs{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.sdr .sdtabs button{padding:8px 16px;border:1.5px solid #c7d2fe;background:#fff;color:#1e3a8a;border-radius:9px;font:600 13px inherit;cursor:pointer}.sdr .sdtabs button.on{background:#1e3a8a;color:#fff;border-color:#1e3a8a}.sdr tr.mocr{cursor:pointer}.sdr tr.mocr:hover td{background:#eef2ff}
 .sdr .fbody.collapsed{display:none}.sdr .ftog{cursor:pointer;display:flex;align-items:center;gap:10px;user-select:none}
 </style>
 <div class="sdr">
@@ -165,14 +183,24 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
   <div class="kp"><div class="k"><span>Schemes</span><b><?= number_format(count($items)) ?></b></div><div class="k"><span>Total claim amount</span><b style="color:#7c3aed">Rs. <?= number_format($tot, 2) ?></b></div>
     <div class="k"><span>Scheme discount as per invoice</span><b style="color:#1d4ed8">Rs. <?= number_format($tot_bws, 2) ?></b></div><div class="k"><span>Claim certificate (actual)</span><b style="color:#15803d">Rs. <?= number_format($tot_cc, 2) ?></b></div><div class="k"><span>Balance</span><b style="color:<?= $tot_bal > 0.5 ? '#b91c1c' : ($tot_bal < -0.5 ? '#15803d' : '#6b7280') ?>">Rs. <?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></b></div><div class="k"><span>With claim</span><b><?= number_format(count(array_filter($items, fn($x) => (float)$x['claim_amount'] > 0))) ?></b></div></div>
 
-  <div class="tw"><table><thead><tr><th>#</th><th>Type</th><th>Scheme Activity Code</th><th>Scheme Activity Description</th><th>MOC Ref</th><th>Start Date</th><th>End Date</th><th class="r">Claim Amount</th><th class="r" title="Sum of the scheme discount of every Bill Wise Scheme Analysis row with this scheme code — click to see the rows">Scheme Discount<br>as per Invoice<br><span style="font-weight:500;font-size:10px">click to open invoice rows</span></th><th class="r" title="Claim Amount minus Scheme Discount as per Invoice">Difference<br><span style="font-weight:500;font-size:10px">Claim Amount − invoice</span></th><th class="r" title="Actual amount (without VAT) of the Customer Claim Certificate rows whose claim description starts with this scheme no — click to see them">Claim Certificate<br>Actual Amount<br><span style="font-weight:500;font-size:10px">click to open claim rows</span></th><th class="r">Balance<br><span style="font-weight:500;font-size:10px">Claim Amount − actual amount</span></th></tr></thead><tbody>
-  <?php foreach ($items as $n => $x): ?><tr><td><?= $n + 1 ?></td><td><span class="ty <?= $x['activity_type'] === 'DAMAGE' ? 'dmg' : '' ?>"><?= sd_h($x['activity_type']) ?></span></td><td><b><?= sd_h($x['activity_code']) ?></b></td><td><?= sd_h($x['activity_desc']) ?></td><td><?= sd_h($x['moc_ref']) ?></td><td><?= sd_d($x['start_date']) ?></td><td><?= sd_d($x['end_date']) ?></td><td class="r"><b><?= $x['claim_amount'] === null ? '—' : number_format((float)$x['claim_amount'], 2) ?></b></td>
+  <div class="sdtabs"><button type="button" data-v="det" class="on"><i class="fa-solid fa-table-list"></i> Detailed</button><button type="button" data-v="sum"><i class="fa-solid fa-calendar-days"></i> Monthly summary (by MOC Ref)</button>
+    <span id="sdMocBar" style="display:none;margin-left:auto;font-size:12.5px"><span class="chip" style="margin:0">MOC <b id="sdMocTxt"></b></span> <a href="#" id="sdMocClr" style="color:#1e3a8a;font-weight:700">show all MOC refs ✕</a></span></div>
+
+  <div id="sdSum" style="display:none"><div class="tw"><table><thead><tr><th>MOC Ref</th><th class="r">Schemes</th><th class="r">Claim Amount</th><th class="r">Scheme Discount<br>as per Invoice</th><th class="r">Difference<br><span style="font-weight:500;font-size:10px">Claim Amount − invoice</span></th><th class="r">Claim Certificate<br>Actual Amount</th><th class="r">Balance</th></tr></thead><tbody>
+  <?php foreach ($monthly as $mk => $m): $dc = $m['diff'] > 0.5 ? 'pos' : ($m['diff'] < -0.5 ? 'neg' : 'zero'); $bc = $m['bal'] > 0.5 ? 'pos' : ($m['bal'] < -0.5 ? 'neg' : 'zero'); ?>
+    <tr class="mocr" data-moc="<?= sd_h($mk === '—' ? '' : $mk) ?>" title="Click to see the detailed rows of this MOC Ref"><td><b><?= sd_h($mk) ?></b> <i class="fa-solid fa-chevron-right" style="font-size:10px;color:#9ca3af"></i></td><td class="r"><?= number_format($m['n']) ?></td><td class="r"><b><?= number_format($m['claim'], 2) ?></b></td><td class="r"><?= number_format($m['bws'], 2) ?></td>
+      <td class="r"><span class="bal <?= $dc ?>"><?= $m['diff'] < 0 ? '(' . number_format(abs($m['diff']), 2) . ')' : number_format($m['diff'], 2) ?></span></td><td class="r"><?= number_format($m['cc'], 2) ?></td><td class="r"><span class="bal <?= $bc ?>"><?= $m['bal'] < 0 ? '(' . number_format(abs($m['bal']), 2) . ')' : number_format($m['bal'], 2) ?></span></td></tr>
+  <?php endforeach; if (!$monthly): ?><tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:28px">No schemes for these filters.</td></tr><?php endif; ?></tbody>
+  <?php if ($monthly): ?><tfoot><tr><td>TOTAL</td><td class="r"><?= number_format(array_sum(array_column($monthly, 'n'))) ?></td><td class="r"><?= number_format($tot, 2) ?></td><td class="r"><?= number_format($tot_bws, 2) ?></td><td class="r"><?= $tot_diff < 0 ? '(' . number_format(abs($tot_diff), 2) . ')' : number_format($tot_diff, 2) ?></td><td class="r"><?= number_format($tot_cc, 2) ?></td><td class="r"><?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></td></tr></tfoot><?php endif; ?></table></div></div>
+
+  <div id="sdDetail"><div class="tw"><table><thead><tr><th>#</th><th>Type</th><th>Scheme Activity Code</th><th>Scheme Activity Description</th><th>MOC Ref</th><th>Start Date</th><th>End Date</th><th class="r">Claim Amount</th><th class="r" title="Sum of the scheme discount of every Bill Wise Scheme Analysis row with this scheme code — click to see the rows">Scheme Discount<br>as per Invoice<br><span style="font-weight:500;font-size:10px">click to open invoice rows</span></th><th class="r" title="Claim Amount minus Scheme Discount as per Invoice">Difference<br><span style="font-weight:500;font-size:10px">Claim Amount − invoice</span></th><th class="r" title="Actual amount (without VAT) of the Customer Claim Certificate rows whose claim description starts with this scheme no — click to see them">Claim Certificate<br>Actual Amount<br><span style="font-weight:500;font-size:10px">click to open claim rows</span></th><th class="r">Balance<br><span style="font-weight:500;font-size:10px">Claim Amount − actual amount</span></th></tr></thead><tbody>
+  <?php foreach ($items as $n => $x): ?><tr data-moc="<?= sd_h(trim((string)$x['moc_ref'])) ?>" data-claim="<?= (float)$x['claim_amount'] ?>" data-bws="<?= (float)$x['bws_sd'] ?>" data-diff="<?= (float)$x['diff'] ?>" data-cc="<?= (float)$x['cc_act'] ?>" data-bal="<?= (float)$x['balance'] ?>"><td class="sdn"><?= $n + 1 ?></td><td><span class="ty <?= $x['activity_type'] === 'DAMAGE' ? 'dmg' : '' ?>"><?= sd_h($x['activity_type']) ?></span></td><td><b><?= sd_h($x['activity_code']) ?></b></td><td><?= sd_h($x['activity_desc']) ?></td><td><?= sd_h($x['moc_ref']) ?></td><td><?= sd_d($x['start_date']) ?></td><td><?= sd_d($x['end_date']) ?></td><td class="r"><b><?= $x['claim_amount'] === null ? '—' : number_format((float)$x['claim_amount'], 2) ?></b></td>
     <td class="r"><?php if ($x['bws_sd'] !== null): ?><a href="#" class="bwsl" data-code="<?= sd_h(trim($x['activity_code'])) ?>" data-desc="<?= sd_h($x['activity_desc']) ?>" title="Show the <?= (int)$x['bws_n'] ?> bill wise rows"><b><?= number_format($x['bws_sd'], 2) ?></b></a><?php else: ?><span style="color:#cbd5e1" title="No Bill Wise Scheme Analysis rows for this code">—</span><?php endif; ?></td>
     <td class="r"><?php if ($x['diff'] !== null): $dc = $x['diff'] > 0.5 ? 'pos' : ($x['diff'] < -0.5 ? 'neg' : 'zero'); ?><span class="bal <?= $dc ?>"><?= $x['diff'] < 0 ? '(' . number_format(abs($x['diff']), 2) . ')' : number_format($x['diff'], 2) ?></span><?php else: ?><span style="color:#cbd5e1">—</span><?php endif; ?></td>
     <td class="r"><?php if ($x['cc_act'] !== null): ?><a href="#" class="ccl" data-code="<?= sd_h(trim($x['activity_code'])) ?>" data-desc="<?= sd_h($x['activity_desc']) ?>" title="Show the <?= (int)$x['cc_n'] ?> claim certificate rows"><b><?= number_format($x['cc_act'], 2) ?></b></a><?php else: ?><span style="color:#cbd5e1" title="No claim certificate rows with this scheme no in the description">—</span><?php endif; ?></td>
     <td class="r"><?php if ($x['balance'] !== null): $bc = $x['balance'] > 0.5 ? 'pos' : ($x['balance'] < -0.5 ? 'neg' : 'zero'); ?><span class="bal <?= $bc ?>"><?= $x['balance'] < 0 ? '(' . number_format(abs($x['balance']), 2) . ')' : number_format($x['balance'], 2) ?></span><?php else: ?><span style="color:#cbd5e1">—</span><?php endif; ?></td></tr>
   <?php endforeach; if (!$items): ?><tr><td colspan="12" style="text-align:center;color:#9ca3af;padding:28px">No schemes for these filters.</td></tr><?php endif; ?></tbody>
-  <?php if ($items): ?><tfoot><tr><td colspan="7">TOTAL (<?= number_format(count($items)) ?> schemes)</td><td class="r"><?= number_format($tot, 2) ?></td><td class="r"><?= number_format($tot_bws, 2) ?></td><td class="r"><?= $tot_diff < 0 ? '(' . number_format(abs($tot_diff), 2) . ')' : number_format($tot_diff, 2) ?></td><td class="r"><?= number_format($tot_cc, 2) ?></td><td class="r"><?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></td></tr></tfoot><?php endif; ?></table></div>
+  <?php if ($items): ?><tfoot><tr><td colspan="7" id="sdFN">TOTAL (<?= number_format(count($items)) ?> schemes)</td><td class="r" id="sdFC"><?= number_format($tot, 2) ?></td><td class="r" id="sdFB"><?= number_format($tot_bws, 2) ?></td><td class="r" id="sdFD"><?= $tot_diff < 0 ? '(' . number_format(abs($tot_diff), 2) . ')' : number_format($tot_diff, 2) ?></td><td class="r" id="sdFA"><?= number_format($tot_cc, 2) ?></td><td class="r" id="sdFL"><?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></td></tr></tfoot><?php endif; ?></table></div></div>
 </div>
 <div id="bwsM" style="position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px;font-family:'Inter',system-ui,sans-serif">
   <div style="background:#fff;border-radius:14px;width:100%;max-width:1400px;height:92vh;display:flex;flex-direction:column;overflow:hidden">
@@ -209,5 +237,19 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
     }).catch(function(){ $('bwsK').innerHTML='<span style="color:#b91c1c">Connection problem.</span>'; }); });
 })();
 </script>
-<script>document.getElementById('sdTog').addEventListener('click',function(){ document.getElementById('sdBody').classList.toggle('collapsed'); });</script>
+<script>
+(function(){
+  var $=function(i){ return document.getElementById(i); }, KEY='sd_view_v1', moc=null;
+  var money=function(v){ return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }, neg=function(v){ return v<0?'('+money(Math.abs(v))+')':money(v); };
+  function view(v){ $('sdSum').style.display=v==='sum'?'block':'none'; $('sdDetail').style.display=v==='det'?'block':'none'; [].forEach.call(document.querySelectorAll('.sdtabs button'),function(b){ b.classList.toggle('on',b.dataset.v===v); }); try{ localStorage.setItem(KEY,v); }catch(e){} }
+  function filt(m){ moc=m; var rows=document.querySelectorAll('#sdDetail tbody tr[data-moc]'), t={c:0,b:0,d:0,a:0,l:0}, n=0;
+    [].forEach.call(rows,function(r){ var show=m===null||r.dataset.moc===m; r.style.display=show?'':'none'; if(show){ n++; r.querySelector('.sdn').textContent=n; t.c+=+r.dataset.claim; t.b+=+r.dataset.bws; t.d+=+r.dataset.diff; t.a+=+r.dataset.cc; t.l+=+r.dataset.bal; } });
+    if($('sdFN')){ $('sdFN').textContent='TOTAL ('+n+' scheme'+(n===1?'':'s')+(m!==null?' · MOC '+(m||'—'):'')+')'; $('sdFC').textContent=money(t.c); $('sdFB').textContent=money(t.b); $('sdFD').textContent=neg(t.d); $('sdFA').textContent=money(t.a); $('sdFL').textContent=neg(t.l); }
+    $('sdMocBar').style.display=m===null?'none':'inline'; if(m!==null) $('sdMocTxt').textContent=m||'—'; }
+  [].forEach.call(document.querySelectorAll('.sdtabs button'),function(b){ b.addEventListener('click',function(){ view(b.dataset.v); }); });
+  document.querySelectorAll('tr.mocr').forEach(function(r){ r.addEventListener('click',function(){ filt(r.dataset.moc); view('det'); window.scrollTo({top:0,behavior:'smooth'}); }); });
+  $('sdMocClr').addEventListener('click',function(e){ e.preventDefault(); filt(null); });
+  var v0='det'; try{ v0=localStorage.getItem(KEY)||'det'; }catch(e){} view(v0==='sum'?'sum':'det');
+})();
+document.getElementById('sdTog').addEventListener('click',function(){ document.getElementById('sdBody').classList.toggle('collapsed'); });</script>
 <?php include 'footer.php'; ?>
