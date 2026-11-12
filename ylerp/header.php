@@ -1836,6 +1836,9 @@ if (isset($conn) && $conn) {
                     <a href="daily_scheme_discounts.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'daily_scheme_discounts.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-plus"></i><span>Daily Scheme Discounts</span>
                     </a>
+                    <a href="scheme_discount_daily_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_discount_daily_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-calendar-day"></i><span>Scheme Discount Daily Report</span>
+                    </a>
                     <a href="scheme_discount_receivable.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_discount_receivable.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-plus"></i><span>Scheme Discount</span>
                     </a>
