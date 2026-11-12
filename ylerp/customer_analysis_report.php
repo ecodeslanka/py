@@ -80,6 +80,20 @@ if ($ajax !== '') {
         $json = @gzuncompress(base64_decode($x['data']));
         $rows = $json !== false ? json_decode($json, true) : null;
         if (!is_array($rows)) { echo json_encode(['success' => false, 'message' => 'Saved data could not be read.']); exit; }
+        /* BTG amounts always come from the database (what was typed / imported since the report was saved) */
+        $tcs = [];
+        foreach ($rows as $__r) if (!empty($__r['found']) && !empty($__r['t_code'])) $tcs[] = "'" . mysqli_real_escape_string($conn, $__r['t_code']) . "'";
+        if ($tcs) {
+            $bm = [];
+            $bq = mysqli_query($conn, "SELECT t_code, btg, btg_excel, channel FROM customer_btg WHERE t_code IN (" . implode(',', array_unique($tcs)) . ")");
+            while ($bq && ($bx = mysqli_fetch_assoc($bq))) $bm[$bx['t_code']] = $bx;
+            foreach ($rows as &$__r) if (!empty($__r['found']) && isset($bm[$__r['t_code']])) {
+                $bx = $bm[$__r['t_code']];
+                $__r['btg'] = (float)$bx['btg'] > 0 ? round((float)$bx['btg'], 2) : null;
+                $__r['btg_x'] = $bx['btg_excel'] !== null ? round((float)$bx['btg_excel'], 2) : null;
+                if (($bx['channel'] ?? '') !== '') $__r['channel'] = $bx['channel'];
+            } unset($__r);
+        }
         echo json_encode(['success' => true, 'id' => $id, 'name' => $x['report_name'], 'file' => $x['file_name'], 'as_at' => $x['as_at'], 'by' => $x['created_by'], 'at' => $x['created_at'], 'rows' => $rows]); exit;
     }
     /* ---- DO-NOT-ISSUE marks + actions done for the customers of a saved report (needs Edit right: "update_") ---- */
@@ -241,7 +255,9 @@ if ($ajax !== '') {
         if ($tc === '' || $v < 0 || ($raw !== '' && !is_numeric(str_replace(',', '', $raw)))) { echo json_encode(['success' => false, 'message' => 'Enter a valid BTG amount.']); exit; }
         $e = mysqli_real_escape_string($conn, $tc); $u = mysqli_real_escape_string($conn, ca_user());
         $ok = mysqli_query($conn, "INSERT INTO customer_btg (t_code, btg, source, updated_by) VALUES ('$e', $v, 'manual', '$u') ON DUPLICATE KEY UPDATE btg = VALUES(btg), updated_by = VALUES(updated_by)");
-        echo json_encode(['success' => (bool)$ok, 'btg' => round($v, 2), 'message' => $ok ? '' : 'Could not save.']); exit;
+        $err = $ok ? '' : mysqli_error($conn);
+        $back = $ok ? mysqli_fetch_assoc(mysqli_query($conn, "SELECT btg FROM customer_btg WHERE t_code = '$e'")) : null;   // read it back: what the database really holds
+        echo json_encode(['success' => (bool)$ok && $back !== null, 'btg' => $back ? round((float)$back['btg'], 2) : 0, 'message' => $ok ? '' : 'Could not save: ' . $err]); exit;
     }
     if ($ajax === 'analyze') {
         $in = json_decode($_POST['rows'] ?? '', true);
@@ -747,7 +763,7 @@ include 'header.php';
   $('caBody').addEventListener('change',function(e){ var g=e.target.closest('.btg');
     if(g){ var r=ROWS[parseInt(g.dataset.n,10)], raw=g.value.replace(/,/g,'').trim(); if(raw!==''&&(isNaN(raw)||parseFloat(raw)<0)){ alert('Enter a valid BTG amount.'); g.value=r.btg!=null?r.btg:''; return; }
       g.classList.add('sv'); post('save_btg',{t_code:r.t_code,btg:raw===''?'0':raw}).then(function(res){ g.classList.remove('sv');
-        if(res.success){ r.btg=(raw===''||res.btg<=0)?null:res.btg; if(CUR_ID) persist(); g.value=r.btg!=null?r.btg:''; g.classList.add('ok'); setTimeout(function(){ g.classList.remove('ok'); draw(); },500); } else alert(res.message||'Could not save the BTG.'); }); return; }
+        if(res.success){ r.btg=(raw===''||res.btg<=0)?null:res.btg; $('caMarkInfo').textContent='Approved BTG saved for '+r.code+(r.btg!=null?': Rs. '+money(r.btg):' (cleared)')+' ✓'; g.value=r.btg!=null?r.btg:''; g.classList.add('ok'); setTimeout(function(){ g.classList.remove('ok'); draw(); },500); } else alert(res.message||'Could not save the BTG.'); }); return; }
     var c=e.target.closest('.ni'); if(!c) return; dec(ROWS[parseInt(c.dataset.n,10)]).no_issue=c.checked?1:0; persist(); tabs(); draw(); });
   $('caMarkSug').addEventListener('click',function(){ var n=0; ROWS.forEach(function(r){ if(suggest(r)&&!dec(r).no_issue){ dec(r).no_issue=1; n++; } }); persist(); tabs(); draw(); if(!n) $('caMarkInfo').textContent='No suggested customers to mark.'; });
   $('caClearMarks').addEventListener('click',function(){ if(!confirm('Clear every DO NOT ISSUE mark in this report?')) return; ROWS.forEach(function(r){ if(r.dec) r.dec.no_issue=0; }); persist(); tabs(); draw(); });
