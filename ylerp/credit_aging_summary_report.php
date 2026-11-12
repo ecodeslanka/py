@@ -36,9 +36,11 @@ $HAS_CWD = rx_has_col($conn, 'customers', 'cheques_will_delay');
 /* ── sets ── */
 $GROUPS = [
     'credit' => ['label' => 'Credit customers',          'exceed' => 'Credit policy exceeded',         'icon' => 'fa-credit-card',     'color' => '#2563eb', 'bg' => '#eff6ff', 'view' => 'pay_mode=credit', 'test' => true],
-    'cheque' => ['label' => 'Cheque customers (only)',   'exceed' => 'Cheque policy exceeded',  'unit' => 'cheques',       'icon' => 'fa-money-check',     'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
-    'cwd'    => ['label' => 'Cheques will delay',        'exceed' => 'Cheques-will-delay exceeded',  'unit' => 'cheques',  'icon' => 'fa-hourglass-half',  'color' => '#d97706', 'bg' => '#fffbeb', 'view' => 'pay_mode=cwd',    'test' => true],
+    'cheque' => ['label' => 'Cheque customers (only)',   'exceed' => 'Cheque policy exceeded',       'icon' => 'fa-money-check',     'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
+    'cwd'    => ['label' => 'Cheques will delay',        'exceed' => 'Cheques-will-delay exceeded', 'icon' => 'fa-hourglass-half',  'color' => '#d97706', 'bg' => '#fffbeb', 'view' => 'pay_mode=cwd',    'test' => true],
     'cash'   => ['label' => 'Cash customers',            'exceed' => 'Cash policy exceeded',           'icon' => 'fa-money-bill-wave', 'color' => '#15803d', 'bg' => '#f0fdf4', 'view' => 'pay_mode=cash',   'test' => true],
+    /* 5th row: built from the CHEQUE AGING REPORT (cheque age vs policy days) — rows 1-4 come from the credit aging (bills) */
+    'chq'    => ['label' => 'Cheques policy exceeded',   'exceed' => 'Cheques policy exceeded', 'unit' => 'cheques', 'icon' => 'fa-money-check', 'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true],
 ];
 $S = [];
 foreach ($GROUPS as $k => $g) $S[$k] = ['n' => 0, 'v' => 0.0, 'ok_n' => 0, 'ok_v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'customers' => [], 'ex_customers' => [],
@@ -71,7 +73,6 @@ if ($res) while ($r = mysqli_fetch_assoc($res)) {
     elseif ($mode === 'cheque')         $k = 'cheque';
     elseif ($mode === 'cash')           $k = 'cash';
     else                                continue;      // pay mode not set → not part of this report
-    if ($k === 'cheque' || $k === 'cwd') continue;     // the CHEQUE side comes from the cheque aging (below), not from the bills
     $del = $r['delivery_date'] ? strtotime($r['delivery_date']) : $as_at_ts;
     $over = (int)floor(($as_at_ts - ($del + (int)$r['credit_days'] * 86400)) / 86400);   // days past the policy due date
     $tc = (string)$r['t_code'];
@@ -115,15 +116,15 @@ if ($cres) while ($r = mysqli_fetch_assoc($cres)) {
     $face = (float)$r['total_amount']; $st = strtolower(trim((string)$r['status']));
     $amt = ($st === 'sent_back') ? max(0, $face - (float)$r['sb_paid']) : (($st === 'returned') ? max(0, $face - (float)$r['ret_paid']) : $face);
     if ($amt <= 0.004) continue;
-    $k = ((int)$r['cwd'] === 1) ? 'cwd' : 'cheque';
+    $k = 'chq';
     $days = (int)$r['credit_days']; $age = ($r['age_days'] !== null) ? (int)$r['age_days'] : 0;
     $exceeded = ($days > 0 && $age > $days);
     $over = $age - $days;                                              // days the cheque date is beyond the policy
     $del = $r['delivery_date'] ? strtotime($r['delivery_date']) : $as_at_ts;
-    $tc = (string)$r['t_code'];
-    if (!isset($CUST[$tc])) $CUST[$tc] = ['t_code' => $tc, 'name' => $r['customer_name'], 'set' => $k, 'days' => $days, 'route' => $r['route'], 'sr' => $r['sr_code'],
+    $tc = (string)$r['t_code']; $ck = 'q:' . $tc;               // own entry: the same customer can also be in a bill-based row
+    if (!isset($CUST[$ck])) $CUST[$ck] = ['t_code' => $tc, 'name' => $r['customer_name'], 'set' => $k, 'days' => $days, 'route' => $r['route'], 'sr' => $r['sr_code'],
                                           'n' => 0, 'v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'max_over' => 0, 'oldest' => $r['delivery_date'], 'bills' => []];
-    $cu = &$CUST[$tc];
+    $cu = &$CUST[$ck];
     $cu['n']++; $cu['v'] += $amt;
     if ($r['delivery_date'] && ($cu['oldest'] === null || $r['delivery_date'] < $cu['oldest'])) $cu['oldest'] = $r['delivery_date'];
     if ($exceeded) { $cu['ex_n']++; $cu['ex_v'] += $amt; if ($over > $cu['max_over']) $cu['max_over'] = $over; }
@@ -161,14 +162,10 @@ foreach ($CUST as $tc => $c) {
 }
 /* invoice rows per set (for the modal and the Excel "Invoices" sheet) */
 $SETBILLS = [];
-foreach ($CUST as $tc => $c) foreach ($c['bills'] as $b) $SETBILLS[$c['set']][] = ['t' => $tc, 'n' => $c['name']] + $b;
+foreach ($CUST as $tc => $c) foreach ($c['bills'] as $b) $SETBILLS[$c['set']][] = ['t' => $c['t_code'], 'n' => $c['name']] + $b;
 $T = ['n' => 0, 'v' => 0.0, 'ok_n' => 0, 'ok_v' => 0.0, 'ex_n' => 0, 'ex_v' => 0.0, 'cx_c' => 0, 'cx_n' => 0, 'cx_v' => 0.0, 'nx_c' => 0, 'nx_n' => 0, 'nx_v' => 0.0];
-foreach ($S as $s) foreach (['n', 'v', 'ok_n', 'ok_v', 'ex_n', 'ex_v', 'cx_c', 'cx_n', 'cx_v', 'nx_c', 'nx_n', 'nx_v'] as $f) $T[$f] += $s[$f];
-/* 5th row: "Cheques policy exceeded" = the cheque-base customers, from the Cheque Aging Report data (exceeded and not exceeded).
-   It repeats row 2, so it is NOT added into the TOTAL again. */
-$GROUPS['chq'] = ['label' => 'Cheques policy exceeded', 'exceed' => 'Cheques policy exceeded', 'unit' => 'cheques', 'icon' => 'fa-money-check', 'color' => '#7c3aed', 'bg' => '#f5f3ff', 'view' => 'pay_mode=cheque', 'test' => true];
-$S['chq'] = $S['cheque'];                       // cheque-base customers only (payment mode = cheque): exceeded and not exceeded, from the cheque aging
-$SETBILLS['chq'] = $SETBILLS['cheque'] ?? [];
+foreach ($S as $sk => $s) { if ($sk === 'chq') continue;          // the 5th row is a cheque-aging view: not added into the TOTAL
+    foreach (['n', 'v', 'ok_n', 'ok_v', 'ex_n', 'ex_v', 'cx_c', 'cx_n', 'cx_v', 'nx_c', 'nx_n', 'nx_v'] as $f) $T[$f] += $s[$f]; }
 
 /* ═════════════ Excel export ═════════════ */
 if (isset($_GET['export'])) {
@@ -196,7 +193,7 @@ if (isset($_GET['export'])) {
         $r++;
     };
     $allc = []; $allex = [];
-    foreach ($GROUPS as $k => $g) { $line($g['label'], $g['exceed'], count($S[$k]['customers']), count($S[$k]['ex_customers']), $S[$k], false, null, !$g['test']); $allc += $S[$k]['customers']; $allex += $S[$k]['ex_customers']; }
+    foreach ($GROUPS as $k => $g) { $line($g['label'], $g['exceed'], count($S[$k]['customers']), count($S[$k]['ex_customers']), $S[$k], false, null, !$g['test']); if ($k !== 'chq') { $allc += $S[$k]['customers']; $allex += $S[$k]['ex_customers']; } }
     $line('TOTAL', '', count($allc), count($allex), $T, true, 'FDE68A');
     foreach ([30, 30, 11, 13, 13, 20, 14, 14, 20, 11, 18, 11, 18, 11, 18] as $i => $w) $sh->widths[$i + 1] = $w;
     $sh->freeze = [4, 0];
@@ -232,8 +229,8 @@ while ($sq && ($x = mysqli_fetch_row($sq))) $all_sr[] = $x[0];
 $qs = $_GET; unset($qs['export']);
 $exp_url = 'credit_aging_summary_report.php?' . http_build_query($qs + ['as_at_date' => $f_as_at]) . '&export=1';
 $pct = fn($a, $b) => $b > 0 ? round($a / $b * 100, 1) : 0;
-$ac = []; foreach ($S as $s) $ac += $s['customers'];
-$ex_c = []; foreach ($S as $s) $ex_c += $s['ex_customers'];
+$ac = []; foreach ($S as $sk => $s) if ($sk !== 'chq') $ac += $s['customers'];
+$ex_c = []; foreach ($S as $sk => $s) if ($sk !== 'chq') $ex_c += $s['ex_customers'];
 /* data for the modal: one entry per set */
 $MODAL = [];
 foreach ($GROUPS as $k => $g) $MODAL[] = ['k' => $k, 'g' => ['label' => $g['label'], 'exceed' => $g['exceed'], 'test' => $g['test'], 'color' => $g['color'], 'chq' => !empty($g['unit'])], 's' => [
@@ -327,8 +324,8 @@ include 'header.php';
         </tr></tfoot>
     </table>
     </div>
-    <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. “Cheques will delay” customers are counted only in their own row. Customers with no pay mode set are not part of this report.
-    <br><b>Cheque customers and Cheques-will-delay</b> are taken from the <b>Cheque Aging Report</b>: unsettled cheques (cleared and settled returned / sent-back cheques left out); cheque age = cheque date − delivery date; <b>cheque policy exceeded</b> when the age is more than the customer's policy days. Their outstanding bills are not counted here — the Credit and Cash rows use the bills and the credit policy.</p>
+    <p class="note">Exceeded = as-at date − (delivery date + customer credit policy days) &gt; 0, the same “Policy Aging” as the Credit Aging Report. Rows 1-4 (Credit, Cheque customers, Cheques will delay, Cash) are taken from the outstanding bills of this report; cash customers: every outstanding bill is a policy exceed.
+    <br><b>Cheques policy exceeded</b> (5th row) is taken from the <b>Cheque Aging Report</b>: unsettled cheques of cheque customers (cleared and settled returned / sent-back cheques left out); cheque age = cheque date − delivery date; exceeded when the age is more than the customer's policy days. It is shown separately and is not added into the TOTAL. Customers with no pay mode set are not part of this report.</p>
 </div>
 
 <!-- invoices viewer: moved to <body> by the script so it always sits above the site header / sidebar -->
