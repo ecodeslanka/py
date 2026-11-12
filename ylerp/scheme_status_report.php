@@ -28,10 +28,10 @@ if ($ajax !== '') {
     header('Content-Type: application/json; charset=utf-8');
     $existing = function ($rows) use ($conn) {      // keys already in the database
         $ex = [];
-        $codes = array_values(array_unique(array_map(fn($r) => "'" . mysqli_real_escape_string($conn, $r['activity_code']) . "'", $rows)));
-        if (!$codes) return $ex;
-        $q = mysqli_query($conn, "SELECT id, activity_type, activity_code, moc_ref FROM scheme_status_items WHERE activity_code IN (" . implode(',', $codes) . ")");
-        while ($q && ($x = mysqli_fetch_assoc($q))) $ex[ss_key($x)] = (int)$x['id'];
+        $hs = array_values(array_unique(array_map(fn($r) => "'" . ss_key($r) . "'", $rows)));
+        if (!$hs) return $ex;
+        $q = mysqli_query($conn, "SELECT id, row_hash FROM scheme_status_items WHERE row_hash IN (" . implode(',', $hs) . ")");
+        while ($q && ($x = mysqli_fetch_assoc($q))) $ex[$x['row_hash']] = (int)$x['id'];
         return $ex;
     };
     /* preview / duplicate check (read only) */
@@ -66,8 +66,8 @@ if ($ajax !== '') {
         $uid = (int)mysqli_insert_id($conn); $ok = $uid > 0; $n = 0;
         if ($ok) foreach (array_chunk($new, 100) as $chunk) {
             $vals = [];
-            foreach ($chunk as $r) { $v = ["$uid"]; foreach ($GLOBALS['COLS'] as $c) $v[] = ss_sql_val($conn, $c, $r[$c]); $vals[] = '(' . implode(',', $v) . ')'; }
-            if (!mysqli_query($conn, "INSERT IGNORE INTO scheme_status_items (upload_id, " . implode(',', $GLOBALS['COLS']) . ") VALUES " . implode(',', $vals))) { $ok = false; break; }
+            foreach ($chunk as $r) { $v = ["$uid"]; foreach ($GLOBALS['COLS'] as $c) $v[] = ss_sql_val($conn, $c, $r[$c]); $v[] = "'" . ss_key($r) . "'"; $vals[] = '(' . implode(',', $v) . ')'; }
+            if (!mysqli_query($conn, "INSERT IGNORE INTO scheme_status_items (upload_id, " . implode(',', $GLOBALS['COLS']) . ", row_hash) VALUES " . implode(',', $vals))) { $ok = false; break; }
             $n += mysqli_affected_rows($conn);
         }
         if (!$ok) { mysqli_rollback($conn); echo json_encode(['success' => false, 'message' => 'Import failed: ' . mysqli_error($conn)]); exit; }
@@ -114,7 +114,7 @@ include 'header.php';
 </style>
 <div class="ss">
   <h2><i class="fa-solid fa-clipboard-check" style="color:#1e3a8a"></i> Current Scheme Status Import</h2>
-  <p class="sub">Pick one or several Excel files, check the preview, import. The <b>Sr No</b> column is skipped. A row is a <b>duplicate</b> when the same Activity Type + Activity Code + MOC Ref is already imported (or repeated in the files) — duplicates are skipped. To filter, edit or export the data open <a href="scheme_status_list.php">Current Scheme Status Report</a>.</p>
+  <p class="sub">Pick one or several Excel files, check the preview, import. The <b>Sr No</b> column is skipped. A row is a <b>duplicate</b> when the every column is the same (Sr No ignored) as a row already imported or repeated in the files — duplicates are skipped. To filter, edit or export the data open <a href="scheme_status_list.php">Current Scheme Status Report</a>.</p>
 
   <?php if ($can_add): ?>
   <div class="card" id="upCard">

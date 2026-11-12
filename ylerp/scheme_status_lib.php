@@ -15,7 +15,7 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS scheme_status_items (
     payout_amount DECIMAL(15,2) NULL, payout_close_date DATE NULL, payout_close_amount DECIMAL(15,2) NULL, pending_payout_amount DECIMAL(15,2) NULL,
     claim_moc_ref VARCHAR(30) NULL, claim_date DATE NULL, claim_amount DECIMAL(15,2) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_scheme (activity_type, activity_code, moc_ref), INDEX idx_upload (upload_id), INDEX idx_moc (moc_ref)
+    row_hash CHAR(32) NULL, UNIQUE KEY uq_row_hash (row_hash), INDEX idx_upload (upload_id), INDEX idx_moc (moc_ref), INDEX idx_code (activity_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
 function ss_user() { if (session_status() === PHP_SESSION_NONE) @session_start(); return $_SESSION['username'] ?? 'user'; }
@@ -35,7 +35,30 @@ function ss_sql_val($conn, $k, $v) {
     if ($v === null || $v === '') return in_array($k, ['activity_type', 'activity_code', 'moc_ref'], true) ? "''" : 'NULL';
     return is_float($v) || is_int($v) ? (string)$v : "'" . mysqli_real_escape_string($conn, $v) . "'";
 }
-function ss_key($r) { return strtoupper($r['activity_type']) . '|' . strtoupper($r['activity_code']) . '|' . strtoupper($r['moc_ref']); }
+/** duplicate key = EVERY column of the row (the Excel's Sr No is not one of them): same type, code, description, MOC, dates, all amounts, claim ... = duplicate */
+function ss_key($r) {
+    $p = [];
+    foreach (['activity_type', 'activity_code', 'activity_desc', 'moc_ref', 'start_date', 'end_date', 'total_budget', 'rs_budget_amount', 'rs_approval_amount', 'tsi_approval_date', 'tsi_approval_amount',
+              'payout_amount', 'payout_close_date', 'payout_close_amount', 'pending_payout_amount', 'claim_moc_ref', 'claim_date', 'claim_amount'] as $c) {
+        $v = $r[$c] ?? null;
+        if ($v === null || $v === '') { $p[] = ''; continue; }
+        $p[] = is_numeric($v) && !preg_match('/^\d{4}-\d{2}-\d{2}/', (string)$v) && in_array($c, ['total_budget', 'rs_budget_amount', 'rs_approval_amount', 'tsi_approval_amount', 'payout_amount', 'payout_close_amount', 'pending_payout_amount', 'claim_amount'], true)
+             ? number_format((float)$v, 2, '.', '') : strtoupper(trim((string)$v));
+    }
+    return md5(implode('|', $p));
+}
+/* one-time upgrade: the old unique key (type + code + MOC) is replaced by a unique key on the whole row */
+$__rh = @mysqli_query($conn, "SHOW COLUMNS FROM scheme_status_items LIKE 'row_hash'");
+if ($__rh && !mysqli_num_rows($__rh)) {
+    @mysqli_query($conn, "ALTER TABLE scheme_status_items ADD COLUMN row_hash CHAR(32) NULL");
+    @mysqli_query($conn, "ALTER TABLE scheme_status_items DROP INDEX uq_scheme");
+    $__q = mysqli_query($conn, "SELECT * FROM scheme_status_items");
+    while ($__q && ($__x = mysqli_fetch_assoc($__q))) {
+        $__h = ss_key($__x); $__id = (int)$__x['id'];
+        if (!@mysqli_query($conn, "UPDATE scheme_status_items SET row_hash = '$__h' WHERE id = $__id")) @mysqli_query($conn, "UPDATE scheme_status_items SET row_hash = '" . md5($__h . $__id) . "' WHERE id = $__id");
+    }
+    @mysqli_query($conn, "ALTER TABLE scheme_status_items ADD UNIQUE KEY uq_row_hash (row_hash)");
+}
 $COLS = ['activity_type', 'activity_code', 'activity_desc', 'moc_ref', 'start_date', 'end_date', 'total_budget', 'rs_budget_amount', 'rs_approval_amount', 'tsi_approval_date', 'tsi_approval_amount',
          'payout_amount', 'payout_close_date', 'payout_close_amount', 'pending_payout_amount', 'claim_moc_ref', 'claim_date', 'claim_amount'];
 function ss_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }

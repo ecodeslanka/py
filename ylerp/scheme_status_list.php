@@ -17,10 +17,11 @@ if ($ajax !== '') {
     if ($ajax === 'update_item') {
         $id = (int)($_POST['id'] ?? 0); $r = ss_clean($_POST);
         if ($id <= 0 || $r['activity_code'] === '' || $r['activity_type'] === '') { echo json_encode(['success' => false, 'message' => 'Activity type and code are required.']); exit; }
-        $k = mysqli_real_escape_string($conn, $r['activity_code']); $t = mysqli_real_escape_string($conn, $r['activity_type']); $m = mysqli_real_escape_string($conn, $r['moc_ref']);
-        $d = mysqli_query($conn, "SELECT id FROM scheme_status_items WHERE activity_type = '$t' AND activity_code = '$k' AND moc_ref = '$m' AND id <> $id LIMIT 1");
-        if ($d && mysqli_num_rows($d)) { echo json_encode(['success' => false, 'message' => 'Another row already has this Activity Type + Code + MOC Ref (duplicate).']); exit; }
+        $h = ss_key($r);
+        $d = mysqli_query($conn, "SELECT id FROM scheme_status_items WHERE row_hash = '$h' AND id <> $id LIMIT 1");
+        if ($d && mysqli_num_rows($d)) { echo json_encode(['success' => false, 'message' => 'Another row is exactly the same in every column (duplicate).']); exit; }
         $set = []; foreach ($COLS as $c) $set[] = "$c = " . ss_sql_val($conn, $c, $r[$c]);
+        $set[] = "row_hash = '$h'";
         $ok = mysqli_query($conn, "UPDATE scheme_status_items SET " . implode(', ', $set) . " WHERE id = $id");
         echo json_encode(['success' => (bool)$ok, 'message' => $ok ? '' : 'Could not save: ' . mysqli_error($conn)]); exit;
     }
