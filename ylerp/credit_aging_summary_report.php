@@ -439,7 +439,7 @@ include 'header.php';
     $('mQ').value='';
     var pm={credit:'credit',cheque:'cheque',cwd:'cwd',cash:'cash',chq:'cheque'}[d.k]||'';
     if(g.chq){ $('mOpen').href='cheque_aging_report.php?as_at='+encodeURIComponent(AS_AT)+'&pay_mode=cheque'+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Cheque Aging Report'; }
-    else { $('mOpen').href='credit_aging_report.php?as_at_date='+encodeURIComponent(AS_AT)+'&pay_mode='+pm+(ROUTE?'&route='+encodeURIComponent(ROUTE):'')+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Credit Aging Report'; }
+    else { $('mOpen').href='credit_aging_report.php?as_at_date='+encodeURIComponent(AS_AT)+'&pay_mode='+pm+(g.test?'&exceed_only=1':'')+(ROUTE?'&route='+encodeURIComponent(ROUTE):'')+(SR?'&sr_code='+encodeURIComponent(SR):''); $('mOpen').innerHTML='<i class="fa-solid fa-up-right-from-square"></i> Open in Credit Aging Report (policy exceeded customers)'; }
     draw();
   }
   function openAt(i){ $('casm').classList.add('open'); document.body.style.overflow='hidden'; show(i); }
