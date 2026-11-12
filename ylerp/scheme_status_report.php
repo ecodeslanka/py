@@ -1,52 +1,14 @@
 <?php
 /**
- * scheme_status_report.php — Current Scheme Status Report (Vendor Ledger)
- * Upload the "Current Scheme Status Report" Excel, preview it (new / duplicate rows are marked), import only the new rows,
- * then edit / delete rows or a whole upload. The Excel's "Sr No" column is NOT imported (skipped).
- * A row is a duplicate when the same Scheme Activity Type + Activity Code + MOC Ref already exists (in the file or in the database).
+ * scheme_status_report.php — Current Scheme Status IMPORT (Vendor Ledger → Import)
+ * Upload one or several "Current Scheme Status Report" Excel files, preview them (new / duplicate rows are marked), import the new rows.
+ * Every file is saved as its own upload. The Excel's "Sr No" column is NOT imported. View an upload in a large pop-up, delete one upload or all uploads.
+ * The filterable report (edit / delete rows, export) is on scheme_status_list.php.
  */
 date_default_timezone_set('Asia/Colombo');
 ob_start();
 include 'config.php';
-
-mysqli_query($conn, "CREATE TABLE IF NOT EXISTS scheme_status_uploads (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    file_name VARCHAR(255) NULL, moc_ref VARCHAR(30) NULL, report_date DATE NULL,
-    total_rows INT NOT NULL DEFAULT 0, imported_rows INT NOT NULL DEFAULT 0, duplicate_rows INT NOT NULL DEFAULT 0,
-    imported_by VARCHAR(100) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-mysqli_query($conn, "CREATE TABLE IF NOT EXISTS scheme_status_items (
-    id INT AUTO_INCREMENT PRIMARY KEY, upload_id INT NOT NULL,
-    activity_type VARCHAR(50) NOT NULL, activity_code VARCHAR(100) NOT NULL, activity_desc VARCHAR(255) NULL, moc_ref VARCHAR(30) NOT NULL DEFAULT '',
-    start_date DATE NULL, end_date DATE NULL,
-    total_budget DECIMAL(15,2) NULL, rs_budget_amount DECIMAL(15,2) NULL, rs_approval_amount DECIMAL(15,2) NULL,
-    tsi_approval_date VARCHAR(30) NULL, tsi_approval_amount DECIMAL(15,2) NULL,
-    payout_amount DECIMAL(15,2) NULL, payout_close_date DATE NULL, payout_close_amount DECIMAL(15,2) NULL, pending_payout_amount DECIMAL(15,2) NULL,
-    claim_moc_ref VARCHAR(30) NULL, claim_date DATE NULL, claim_amount DECIMAL(15,2) NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_scheme (activity_type, activity_code, moc_ref), INDEX idx_upload (upload_id), INDEX idx_moc (moc_ref)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-function ss_user() { if (session_status() === PHP_SESSION_NONE) @session_start(); return $_SESSION['username'] ?? 'user'; }
-function ss_num($v) { if ($v === null) return null; $v = trim((string)$v); if ($v === '' || $v === '-' ) return null; $v = str_replace(',', '', $v); return is_numeric($v) ? round((float)$v, 2) : null; }
-function ss_date($v) { $v = trim((string)$v); if ($v === '' || $v === '-') return null; return preg_match('/^\d{4}-\d{2}-\d{2}/', $v) ? substr($v, 0, 10) : null; }
-function ss_txt($v, $n = 255) { $v = trim((string)$v); return ($v === '' || $v === '-') ? '' : mb_substr($v, 0, $n); }
-/** one posted row → clean row (the Sr No is never read) */
-function ss_clean($r) {
-    return ['activity_type' => ss_txt($r['activity_type'] ?? '', 50), 'activity_code' => ss_txt($r['activity_code'] ?? '', 100), 'activity_desc' => ss_txt($r['activity_desc'] ?? ''),
-            'moc_ref' => ss_txt($r['moc_ref'] ?? '', 30), 'start_date' => ss_date($r['start_date'] ?? ''), 'end_date' => ss_date($r['end_date'] ?? ''),
-            'total_budget' => ss_num($r['total_budget'] ?? null), 'rs_budget_amount' => ss_num($r['rs_budget_amount'] ?? null), 'rs_approval_amount' => ss_num($r['rs_approval_amount'] ?? null),
-            'tsi_approval_date' => ss_txt($r['tsi_approval_date'] ?? '', 30), 'tsi_approval_amount' => ss_num($r['tsi_approval_amount'] ?? null),
-            'payout_amount' => ss_num($r['payout_amount'] ?? null), 'payout_close_date' => ss_date($r['payout_close_date'] ?? ''), 'payout_close_amount' => ss_num($r['payout_close_amount'] ?? null),
-            'pending_payout_amount' => ss_num($r['pending_payout_amount'] ?? null), 'claim_moc_ref' => ss_txt($r['claim_moc_ref'] ?? '', 30), 'claim_date' => ss_date($r['claim_date'] ?? ''), 'claim_amount' => ss_num($r['claim_amount'] ?? null)];
-}
-function ss_sql_val($conn, $k, $v) {
-    if ($v === null || $v === '') return in_array($k, ['activity_type', 'activity_code', 'moc_ref'], true) ? "''" : 'NULL';
-    return is_float($v) || is_int($v) ? (string)$v : "'" . mysqli_real_escape_string($conn, $v) . "'";
-}
-function ss_key($r) { return strtoupper($r['activity_type']) . '|' . strtoupper($r['activity_code']) . '|' . strtoupper($r['moc_ref']); }
-$COLS = ['activity_type', 'activity_code', 'activity_desc', 'moc_ref', 'start_date', 'end_date', 'total_budget', 'rs_budget_amount', 'rs_approval_amount', 'tsi_approval_date', 'tsi_approval_amount',
-         'payout_amount', 'payout_close_date', 'payout_close_amount', 'pending_payout_amount', 'claim_moc_ref', 'claim_date', 'claim_amount'];
+require_once __DIR__ . '/scheme_status_lib.php';
 
 /* ═════════ view one upload (large pop-up) ═════════ */
 if (($_GET['ajax'] ?? '') === 'upload_rows') {
@@ -113,68 +75,23 @@ if ($ajax !== '') {
         mysqli_commit($conn);
         echo json_encode(['success' => true, 'imported' => $n, 'duplicates' => $dup + (count($new) - $n), 'invalid' => $bad, 'upload_id' => $uid]); exit;
     }
-    if ($ajax === 'update_item') {
-        $id = (int)($_POST['id'] ?? 0); $r = ss_clean($_POST);
-        if ($id <= 0 || $r['activity_code'] === '' || $r['activity_type'] === '') { echo json_encode(['success' => false, 'message' => 'Activity type and code are required.']); exit; }
-        $k = mysqli_real_escape_string($conn, $r['activity_code']); $t = mysqli_real_escape_string($conn, $r['activity_type']); $m = mysqli_real_escape_string($conn, $r['moc_ref']);
-        $d = mysqli_query($conn, "SELECT id FROM scheme_status_items WHERE activity_type = '$t' AND activity_code = '$k' AND moc_ref = '$m' AND id <> $id LIMIT 1");
-        if ($d && mysqli_num_rows($d)) { echo json_encode(['success' => false, 'message' => 'Another row already has this Activity Type + Code + MOC Ref (duplicate).']); exit; }
-        $set = []; foreach ($COLS as $c) $set[] = "$c = " . ss_sql_val($conn, $c, $r[$c]);
-        $ok = mysqli_query($conn, "UPDATE scheme_status_items SET " . implode(', ', $set) . " WHERE id = $id");
-        echo json_encode(['success' => (bool)$ok, 'message' => $ok ? '' : 'Could not save: ' . mysqli_error($conn)]); exit;
-    }
-    if ($ajax === 'delete_item') {
-        $id = (int)($_POST['id'] ?? 0); $ok = $id > 0 && mysqli_query($conn, "DELETE FROM scheme_status_items WHERE id = $id");
-        echo json_encode(['success' => (bool)$ok, 'message' => $ok ? '' : 'Could not delete.']); exit;
-    }
     if ($ajax === 'delete_upload') {
         $id = (int)($_POST['id'] ?? 0); $ok = $id > 0;
         if ($ok) { mysqli_query($conn, "DELETE FROM scheme_status_items WHERE upload_id = $id"); $ok = mysqli_query($conn, "DELETE FROM scheme_status_uploads WHERE id = $id"); }
         echo json_encode(['success' => (bool)$ok, 'message' => $ok ? '' : 'Could not delete.']); exit;
     }
+    if ($ajax === 'delete_all_uploads') {
+        $n = (int)(mysqli_fetch_row(mysqli_query($conn, "SELECT COUNT(*) FROM scheme_status_uploads"))[0] ?? 0);
+        $r = mysqli_query($conn, "DELETE FROM scheme_status_items"); $ok = $r && mysqli_query($conn, "DELETE FROM scheme_status_uploads");
+        echo json_encode(['success' => (bool)$ok, 'deleted_uploads' => $n, 'message' => $ok ? '' : 'Could not delete.']); exit;
+    }
     echo json_encode(['success' => false, 'message' => 'Unknown action.']); exit;
 }
 
 /* ═════════ page data ═════════ */
-$f_up   = (int)($_GET['upload'] ?? 0);
-$f_moc  = trim($_GET['moc'] ?? '');
-$f_type = trim($_GET['type'] ?? '');
-$f_q    = trim($_GET['q'] ?? '');
-$w = ['1=1'];
-if ($f_up)   $w[] = "i.upload_id = $f_up";
-if ($f_moc !== '')  $w[] = "i.moc_ref = '" . mysqli_real_escape_string($conn, $f_moc) . "'";
-if ($f_type !== '') $w[] = "i.activity_type = '" . mysqli_real_escape_string($conn, $f_type) . "'";
-if ($f_q !== '') { $q = mysqli_real_escape_string($conn, $f_q); $w[] = "(i.activity_code LIKE '%$q%' OR i.activity_desc LIKE '%$q%')"; }
-$where = implode(' AND ', $w);
-$items = []; $res = mysqli_query($conn, "SELECT i.* FROM scheme_status_items i WHERE $where ORDER BY i.moc_ref DESC, i.activity_type, i.activity_code");
-while ($res && ($x = mysqli_fetch_assoc($res))) $items[] = $x;
-$tot = ['payout_amount' => 0, 'payout_close_amount' => 0, 'pending_payout_amount' => 0, 'claim_amount' => 0, 'tsi_approval_amount' => 0, 'rs_budget_amount' => 0];
-foreach ($items as $x) foreach ($tot as $k => $_) $tot[$k] += (float)$x[$k];
-$uploads = []; $res = mysqli_query($conn, "SELECT u.*, (SELECT COUNT(*) FROM scheme_status_items i WHERE i.upload_id = u.id) AS live_rows FROM scheme_status_uploads u ORDER BY u.id DESC LIMIT 60");
+$uploads = [];  $res = mysqli_query($conn, "SELECT u.*, (SELECT COUNT(*) FROM scheme_status_items i WHERE i.upload_id = u.id) AS live_rows FROM scheme_status_uploads u ORDER BY u.id DESC LIMIT 60");
 while ($res && ($x = mysqli_fetch_assoc($res))) $uploads[] = $x;
-$mocs = []; $res = mysqli_query($conn, "SELECT DISTINCT moc_ref FROM scheme_status_items ORDER BY moc_ref DESC"); while ($res && ($x = mysqli_fetch_assoc($res))) $mocs[] = $x['moc_ref'];
-$types = []; $res = mysqli_query($conn, "SELECT DISTINCT activity_type FROM scheme_status_items ORDER BY activity_type"); while ($res && ($x = mysqli_fetch_assoc($res))) $types[] = $x['activity_type'];
-$can_add = rbac_can('create'); $can_edit = rbac_can('edit'); $can_del = rbac_can('delete');
-function ss_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
-function ss_m($v) { return $v === null || $v === '' ? '<span class="dash">-</span>' : number_format((float)$v, 2); }
-function ss_d($v) { return $v ? date('d M Y', strtotime($v)) : '<span class="dash">-</span>'; }
-
-/* ═════════ Excel export ═════════ */
-if (isset($_GET['export']) && class_exists('ZipArchive')) {
-    require_once __DIR__ . '/rbac_xlsx.php';
-    while (ob_get_level()) ob_end_clean();
-    $X = new MiniXlsx(); $sh = $X->sheet('Scheme Status');
-    $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '1E3A8A', 'h' => 'center', 'border' => 1, 'wrap' => 1];
-    $sh->set(1, 1, 'Current Scheme Status Report', ['b' => 1, 'sz' => 15]);
-    $heads = ['Scheme Activity Type', 'Scheme Activity Code', 'Scheme Activity Description', 'MOC Ref', 'Start Date', 'End Date', 'Total Budget', 'RS Budget Amount', 'RS Approval Amount', 'TSI Approval Date', 'TSI Approval Amount', 'Payout Amount', 'Payout Close Date', 'Payout Close Amount', 'Pending Payout Amount', 'Claim MOC Ref', 'Claim Date', 'Claim Amount'];
-    foreach ($heads as $i => $h) $sh->set(3, $i + 1, $h, $H);
-    $r = 4; $money = [7, 8, 9, 11, 12, 14, 15, 18];
-    foreach ($items as $x) { foreach ($COLS as $i => $c) { $v = $x[$c]; $st = ['border' => 1]; if (in_array($i + 1, $money, true)) { $st += ['h' => 'right', 'nf' => 4]; $v = $v === null ? '' : (float)$v; } $sh->set($r, $i + 1, $v === null ? '' : $v, $st); } $r++; }
-    foreach ([14, 16, 34, 10, 12, 12, 14, 14, 14, 13, 14, 14, 13, 14, 14, 11, 12, 14] as $i => $wd) $sh->widths[$i + 1] = $wd;
-    $sh->freeze = [3, 2]; $tmp = tempnam(sys_get_temp_dir(), 'ss'); $X->save($tmp);
-    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="current_scheme_status_' . date('Ymd_His') . '.xlsx"');
-    header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
-}
+$can_add = rbac_can('create'); $can_del = rbac_can('delete');
 ob_end_flush();
 include 'header.php';
 ?>
@@ -196,8 +113,8 @@ include 'header.php';
 .ssm .bx{background:#fff;border-radius:14px;width:100%;max-width:860px;max-height:92vh;overflow:auto;padding:18px}.ssm .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 </style>
 <div class="ss">
-  <h2><i class="fa-solid fa-clipboard-check" style="color:#1e3a8a"></i> Current Scheme Status Report</h2>
-  <p class="sub">Upload the Excel, check the preview, import. The <b>Sr No</b> column is skipped. A row is a <b>duplicate</b> when the same Activity Type + Activity Code + MOC Ref is already in the file or already imported — duplicates are skipped.</p>
+  <h2><i class="fa-solid fa-clipboard-check" style="color:#1e3a8a"></i> Current Scheme Status Import</h2>
+  <p class="sub">Pick one or several Excel files, check the preview, import. The <b>Sr No</b> column is skipped. A row is a <b>duplicate</b> when the same Activity Type + Activity Code + MOC Ref is already imported (or repeated in the files) — duplicates are skipped. To filter, edit or export the data open <a href="scheme_status_list.php">Current Scheme Status Report</a>.</p>
 
   <?php if ($can_add): ?>
   <div class="card" id="upCard">
@@ -207,33 +124,14 @@ include 'header.php';
   </div>
   <?php endif; ?>
 
-  <div class="card"><h3><i class="fa-solid fa-clock-rotate-left"></i> Uploads</h3>
+  <div class="card"><h3><i class="fa-solid fa-clock-rotate-left"></i> Uploads <?php if ($can_del && $uploads): ?><button class="btn r" type="button" id="ssDelAll" style="margin-left:auto;padding:5px 12px" title="Delete every upload and all their rows"><i class="fa-solid fa-trash-can"></i> Delete all uploads</button><?php endif; ?></h3>
     <div class="tw" style="max-height:220px"><table><thead><tr><th>#</th><th>File</th><th>MOC Ref</th><th>Report date</th><th class="r">Rows in file</th><th class="r">Imported</th><th class="r">Duplicates skipped</th><th class="r">Rows now</th><th>By</th><th>When</th><th></th></tr></thead><tbody>
     <?php foreach ($uploads as $u): ?><tr><td><?= (int)$u['id'] ?></td><td><?= ss_h($u['file_name']) ?></td><td><?= ss_h($u['moc_ref']) ?></td><td><?= ss_d($u['report_date']) ?></td><td class="r"><?= (int)$u['total_rows'] ?></td><td class="r"><?= (int)$u['imported_rows'] ?></td><td class="r"><?= (int)$u['duplicate_rows'] ?></td><td class="r"><?= (int)$u['live_rows'] ?></td><td><?= ss_h($u['imported_by']) ?></td><td><?= ss_h($u['created_at']) ?></td>
-      <td><button class="btn" type="button" style="padding:3px 12px" data-view="<?= (int)$u['id'] ?>"><i class="fa-solid fa-eye"></i> View</button> <a class="btn o" style="padding:3px 10px" href="?upload=<?= (int)$u['id'] ?>" title="Show only this upload in the table below"><i class="fa-solid fa-filter"></i></a> <?php if ($can_del): ?><button class="ic d" type="button" title="Delete this whole upload" data-delup="<?= (int)$u['id'] ?>" data-nm="<?= ss_h($u['file_name']) ?>"><i class="fa-solid fa-trash"></i></button><?php endif; ?></td></tr>
+      <td><button class="btn" type="button" style="padding:3px 12px" data-view="<?= (int)$u['id'] ?>"><i class="fa-solid fa-eye"></i> View</button> <a class="btn o" style="padding:3px 10px" href="scheme_status_list.php?upload=<?= (int)$u['id'] ?>" title="Open this upload in the Current Scheme Status Report (filter / edit / export)"><i class="fa-solid fa-filter"></i></a> <?php if ($can_del): ?><button class="ic d" type="button" title="Delete this whole upload" data-delup="<?= (int)$u['id'] ?>" data-nm="<?= ss_h($u['file_name']) ?>"><i class="fa-solid fa-trash"></i></button><?php endif; ?></td></tr>
     <?php endforeach; if (!$uploads) echo '<tr><td colspan="11" style="text-align:center;color:#9ca3af;padding:18px">Nothing uploaded yet.</td></tr>'; ?></tbody></table></div></div>
 
-  <form class="card" method="get"><div class="row">
-    <div class="fld"><label>MOC Ref</label><select name="moc"><option value="">All</option><?php foreach ($mocs as $m): ?><option <?= $f_moc === $m ? 'selected' : '' ?>><?= ss_h($m) ?></option><?php endforeach; ?></select></div>
-    <div class="fld"><label>Activity type</label><select name="type"><option value="">All</option><?php foreach ($types as $t): ?><option <?= $f_type === $t ? 'selected' : '' ?>><?= ss_h($t) ?></option><?php endforeach; ?></select></div>
-    <div class="fld"><label>Search</label><input type="search" name="q" value="<?= ss_h($f_q) ?>" placeholder="code or description"></div>
-    <?php if ($f_up): ?><input type="hidden" name="upload" value="<?= $f_up ?>"><?php endif; ?>
-    <button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Show</button><a class="btn o" href="scheme_status_report.php">Reset</a>
-    <a class="btn o" href="?<?= ss_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></form>
-
-  <div class="kp">
-    <div class="k"><span>Rows</span><b><?= number_format(count($items)) ?></b></div><div class="k"><span>RS budget</span><b><?= number_format($tot['rs_budget_amount'], 2) ?></b></div>
-    <div class="k"><span>TSI approval</span><b><?= number_format($tot['tsi_approval_amount'], 2) ?></b></div><div class="k"><span>Payout</span><b style="color:#1d4ed8"><?= number_format($tot['payout_amount'], 2) ?></b></div>
-    <div class="k"><span>Payout closed</span><b style="color:#15803d"><?= number_format($tot['payout_close_amount'], 2) ?></b></div><div class="k"><span>Pending payout</span><b style="color:#b91c1c"><?= number_format($tot['pending_payout_amount'], 2) ?></b></div>
-    <div class="k"><span>Claim</span><b style="color:#7c3aed"><?= number_format($tot['claim_amount'], 2) ?></b></div></div>
-
-  <div class="tw"><table><thead><tr><th>#</th><th>Type</th><th>Activity code</th><th>Description</th><th>MOC Ref</th><th>Start</th><th>End</th><th class="r">Total budget</th><th class="r">RS budget</th><th class="r">RS approval</th><th>TSI date</th><th class="r">TSI amount</th><th class="r">Payout</th><th>Payout close</th><th class="r">Close amt</th><th class="r">Pending</th><th>Claim MOC</th><th>Claim date</th><th class="r">Claim amt</th><th></th></tr></thead><tbody>
-  <?php foreach ($items as $n => $x): ?><tr><td><?= $n + 1 ?></td><td><b><?= ss_h($x['activity_type']) ?></b></td><td><?= ss_h($x['activity_code']) ?></td><td style="white-space:normal;min-width:220px"><?= ss_h($x['activity_desc']) ?></td><td><?= ss_h($x['moc_ref']) ?></td><td><?= ss_d($x['start_date']) ?></td><td><?= ss_d($x['end_date']) ?></td>
-    <td class="r"><?= ss_m($x['total_budget']) ?></td><td class="r"><?= ss_m($x['rs_budget_amount']) ?></td><td class="r"><?= ss_m($x['rs_approval_amount']) ?></td><td><?= $x['tsi_approval_date'] !== '' && $x['tsi_approval_date'] !== null ? ss_h($x['tsi_approval_date']) : '<span class="dash">-</span>' ?></td><td class="r"><?= ss_m($x['tsi_approval_amount']) ?></td>
-    <td class="r"><b><?= ss_m($x['payout_amount']) ?></b></td><td><?= ss_d($x['payout_close_date']) ?></td><td class="r"><?= ss_m($x['payout_close_amount']) ?></td><td class="r"><?= ss_m($x['pending_payout_amount']) ?></td><td><?= $x['claim_moc_ref'] ? ss_h($x['claim_moc_ref']) : '<span class="dash">-</span>' ?></td><td><?= ss_d($x['claim_date']) ?></td><td class="r"><?= ss_m($x['claim_amount']) ?></td>
-    <td><?php if ($can_edit): ?><button class="ic" type="button" title="Edit" data-edit='<?= ss_h(json_encode($x)) ?>'><i class="fa-solid fa-pen"></i></button> <?php endif; ?><?php if ($can_del): ?><button class="ic d" type="button" title="Delete" data-del="<?= (int)$x['id'] ?>" data-nm="<?= ss_h($x['activity_code']) ?>"><i class="fa-solid fa-trash"></i></button><?php endif; ?></td></tr>
-  <?php endforeach; if (!$items) echo '<tr><td colspan="20" style="text-align:center;color:#9ca3af;padding:26px">No rows. Upload the Current Scheme Status Report Excel above.</td></tr>'; ?></tbody></table></div>
 </div>
+
 
 <?php if ($can_add): ?>
 <div class="ssm ss" id="ssPrevModal"><div class="bx" style="max-width:96vw;height:94vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
@@ -250,17 +148,12 @@ include 'header.php';
   <div id="vSum" style="padding:10px 18px 0"></div>
   <div style="padding:8px 18px 14px;flex:1;min-height:0"><div class="tw" style="max-height:none;height:100%"><table><thead><tr><th>#</th><th>Type</th><th>Activity code</th><th>Description</th><th>MOC Ref</th><th>Start</th><th>End</th><th class="r">Total budget</th><th class="r">RS budget</th><th class="r">RS approval</th><th>TSI date</th><th class="r">TSI amount</th><th class="r">Payout</th><th>Payout close</th><th class="r">Close amt</th><th class="r">Pending</th><th>Claim MOC</th><th>Claim date</th><th class="r">Claim amt</th></tr></thead><tbody id="vBody"></tbody></table></div></div>
 </div></div>
-<div class="ssm ss" id="ssEdit"><div class="bx"><h3 style="margin:0 0 12px">Edit scheme row</h3><input type="hidden" id="e_id"><div class="g" id="e_g"></div>
-  <div id="e_msg"></div><div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn o" type="button" id="e_x">Cancel</button><button class="btn g" type="button" id="e_s"><i class="fa-solid fa-floppy-disk"></i> Save</button></div></div></div>
 <script>
 (function(){
   var $=function(i){ return document.getElementById(i); }, esc=function(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
-  document.body.appendChild($('ssEdit')); document.body.appendChild($('ssViewModal')); if($('ssPrevModal')) document.body.appendChild($('ssPrevModal'));   // above the site header
+  document.body.appendChild($('ssViewModal')); if($('ssPrevModal')) document.body.appendChild($('ssPrevModal'));   // above the site header
   function post(action,data){ var fd=new FormData(); fd.append('action',action); Object.keys(data||{}).forEach(function(k){ fd.append(k,data[k]); });
     return fetch('scheme_status_report.php',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){ return r.json().catch(function(){ return {success:false,message:'Server error (blocked or invalid response).'}; }); }); }
-  var FIELDS=[['activity_type','Activity type'],['activity_code','Activity code'],['activity_desc','Description'],['moc_ref','MOC Ref'],['start_date','Start date','date'],['end_date','End date','date'],['total_budget','Total budget','num'],['rs_budget_amount','RS budget amount','num'],['rs_approval_amount','RS approval amount','num'],
-    ['tsi_approval_date','TSI approval date'],['tsi_approval_amount','TSI approval amount','num'],['payout_amount','Payout amount','num'],['payout_close_date','Payout close date','date'],['payout_close_amount','Payout close amount','num'],['pending_payout_amount','Pending payout amount','num'],['claim_moc_ref','Claim MOC Ref'],['claim_date','Claim date','date'],['claim_amount','Claim amount','num']];
-
   /* ── read the Excel files (the Sr No column is never used) ── */
   var FILES=[], ROWS=[];      // FILES: [{name,moc,rdate,rows}] · ROWS: every row of every file, each tagged with its file index (__f)
   function iso(v){ if(v instanceof Date && !isNaN(v)){ var z=new Date(v.getTime()-v.getTimezoneOffset()*60000); return z.toISOString().slice(0,10); } var s=String(v==null?'':v).trim(); if(!s||s==='-') return ''; var m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/); if(m) return m[3]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2); return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):''; }
@@ -327,17 +220,13 @@ include 'header.php';
       $('vSum').innerHTML='<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px"><span><b>'+d.rows.length+'</b> rows</span><span>Payout <b style="color:#1d4ed8">'+money(sum('payout_amount'))+'</b></span><span>Pending payout <b style="color:#b91c1c">'+money(sum('pending_payout_amount'))+'</b></span><span>Claim <b style="color:#7c3aed">'+money(sum('claim_amount'))+'</b></span></div>';
       $('vBody').innerHTML=d.rows.map(function(r,i){ return '<tr><td>'+(i+1)+'</td><td><b>'+esc(r.activity_type)+'</b></td><td>'+esc(r.activity_code)+'</td><td style="white-space:normal;min-width:200px">'+esc(r.activity_desc)+'</td><td>'+esc(r.moc_ref)+'</td><td>'+esc(r.start_date||'')+'</td><td>'+esc(r.end_date||'')+'</td><td class="r">'+money(r.total_budget)+'</td><td class="r">'+money(r.rs_budget_amount)+'</td><td class="r">'+money(r.rs_approval_amount)+'</td><td>'+esc(r.tsi_approval_date||'')+'</td><td class="r">'+money(r.tsi_approval_amount)+'</td><td class="r"><b>'+money(r.payout_amount)+'</b></td><td>'+esc(r.payout_close_date||'')+'</td><td class="r">'+money(r.payout_close_amount)+'</td><td class="r">'+money(r.pending_payout_amount)+'</td><td>'+esc(r.claim_moc_ref||'')+'</td><td>'+esc(r.claim_date||'')+'</td><td class="r">'+money(r.claim_amount)+'</td></tr>'; }).join('')||'<tr><td colspan="19" style="padding:24px;text-align:center;color:#9ca3af">No rows left in this upload.</td></tr>'; }); });
 
-  /* ── edit / delete ── */
+  /* ── delete one upload / all uploads ── */
   document.addEventListener('click',function(e){
-    var ed=e.target.closest('[data-edit]'), dl=e.target.closest('[data-del]'), du=e.target.closest('[data-delup]');
-    if(ed){ var d=JSON.parse(ed.dataset.edit); $('e_id').value=d.id; $('e_msg').innerHTML='';
-      $('e_g').innerHTML=FIELDS.map(function(f){ var v=d[f[0]]==null?'':d[f[0]]; return '<div class="fld"><label>'+f[1]+'</label><input id="f_'+f[0]+'" type="'+(f[2]==='date'?'date':'text')+'" '+(f[2]==='num'?'inputmode="decimal"':'')+' value="'+esc(v)+'"></div>'; }).join(''); $('ssEdit').classList.add('open'); }
-    if(dl){ if(!confirm('Delete scheme row "'+dl.dataset.nm+'"?')) return; post('delete_item',{id:dl.dataset.del}).then(function(r){ if(r.success) location.reload(); else alert(r.message||'Could not delete.'); }); }
+    var du=e.target.closest('[data-delup]'), da=e.target.closest('#ssDelAll');
     if(du){ if(!confirm('Delete the WHOLE upload "'+du.dataset.nm+'" with all its rows? This cannot be undone.')) return; post('delete_upload',{id:du.dataset.delup}).then(function(r){ if(r.success) location.href='scheme_status_report.php'; else alert(r.message||'Could not delete.'); }); }
+    if(da){ if(!confirm('Delete ALL uploads and ALL their imported rows in one go?\nThis cannot be undone.')) return; if(prompt('Type DELETE to confirm deleting everything:')!=='DELETE') return;
+      da.disabled=true; post('delete_all_uploads',{}).then(function(r){ if(r.success) location.href='scheme_status_report.php'; else { da.disabled=false; alert(r.message||'Could not delete.'); } }); }
   });
-  $('e_x').addEventListener('click',function(){ $('ssEdit').classList.remove('open'); });
-  $('e_s').addEventListener('click',function(){ var d={id:$('e_id').value}; FIELDS.forEach(function(f){ d[f[0]]=$('f_'+f[0]).value; });
-    post('update_item',d).then(function(r){ if(r.success) location.reload(); else $('e_msg').innerHTML='<div class="al er">'+esc(r.message||'Could not save.')+'</div>'; }); });
 })();
 </script>
 <?php include 'footer.php'; ?>
