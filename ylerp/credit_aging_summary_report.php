@@ -382,14 +382,14 @@ include 'header.php';
   btn.addEventListener('click',function(){
     var area=document.getElementById('casShotArea'); if(!area) return; btn.disabled=true; var old=btn.innerHTML; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
     load(function(){
-      var wrap=document.createElement('div'); wrap.style.cssText='position:fixed;left:-99999px;top:0;background:#fff;padding:18px 20px;font-family:Inter,system-ui,sans-serif;width:'+Math.max(area.scrollWidth,1000)+'px';
-      var h=document.createElement('div'); h.style.cssText='font-weight:800;font-size:17px;color:#111827;margin-bottom:2px'; h.textContent='Credit Aging Summary Report';
-      var d=document.createElement('div'); d.style.cssText='font-size:12px;color:#6b7280;margin-bottom:10px'; d.textContent='As at <?= cas_h(date('d M Y', $as_at_ts)) ?>'+<?= json_encode(($f_route !== '' ? ' · Route ' . $f_route : '') . ($f_sr !== '' ? ' · SR ' . $f_sr : '')) ?>+' · saved '+new Date().toLocaleString('en-GB');
-      var clone=area.cloneNode(true); clone.removeAttribute('id'); clone.style.overflow='visible'; clone.style.boxShadow='none';
-      wrap.appendChild(h); wrap.appendChild(d); wrap.appendChild(clone); document.body.appendChild(wrap);
-      html2canvas(wrap,{scale:2,backgroundColor:'#ffffff',useCORS:true}).then(function(c){
+      var title='Credit Aging Summary Report', sub='As at <?= cas_h(date('d M Y', $as_at_ts)) ?>'+<?= json_encode(($f_route !== '' ? ' · Route ' . $f_route : '') . ($f_sr !== '' ? ' · SR ' . $f_sr : '')) ?>+' · saved '+new Date().toLocaleString('en-GB');
+      /* the REAL table is captured (not a copy) so it keeps exactly the colours / fonts / layout you see on the page */
+      html2canvas(area,{scale:2,backgroundColor:'#ffffff',useCORS:true,width:area.scrollWidth,windowWidth:Math.max(area.scrollWidth+60,document.documentElement.clientWidth),
+        onclone:function(doc){ var el=doc.getElementById('casShotArea'); if(!el) return; el.style.overflow='visible'; el.style.maxWidth='none'; el.style.width=area.scrollWidth+'px';
+          var h=doc.createElement('div'); h.style.cssText='padding:12px 14px 4px;font-family:Inter,system-ui,sans-serif'; h.innerHTML='<div style="font-weight:800;font-size:17px;color:#111827">'+title+'</div><div style="font-size:12px;color:#6b7280;margin-top:2px">'+sub.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</div>'; el.insertBefore(h,el.firstChild); }
+      }).then(function(c){
         var a=document.createElement('a'); a.download='credit_aging_summary_<?= cas_h($f_as_at) ?>.png'; a.href=c.toDataURL('image/png'); document.body.appendChild(a); a.click(); a.remove();
-      }).catch(function(e){ alert('Could not save the screenshot: '+e.message); }).then(function(){ wrap.remove(); btn.disabled=false; btn.innerHTML=old; });
+      }).catch(function(e){ alert('Could not save the screenshot: '+e.message); }).then(function(){ btn.disabled=false; btn.innerHTML=old; });
     });
   });
 })();
