@@ -23,7 +23,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
     $tot = ['receivable' => 0, 'received' => 0, 'paid' => 0, 'balance' => 0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
     $__out(['success' => true, 'rows' => $rows, 'total' => array_map(fn($v) => round($v, 2), $tot), 'debit_notes' => $d['debit_notes'] ?? 0, 'debit_notes_ok' => !empty($allowed['debit_note']),
-            'allowed_any' => in_array(true, $allowed, true), 'as_at' => $F['as_at'], 'filters' => $F]);
+            'allowed_any' => in_array(true, $allowed, true), 'warn' => $d['warn'] ?? [], 'as_at' => $F['as_at'], 'filters' => $F]);
     } catch (Throwable $ex) { $__out(['success' => false, 'message' => $ex->getMessage() . ' (' . basename($ex->getFile()) . ':' . $ex->getLine() . ')']); }
 }
 ?>
@@ -147,6 +147,7 @@ body.ms-dark .ur,body.ms-dark .ur-t tbody tr{background:#1f2937;border-color:#37
           +'<td class="r">'+(r.receivable?fmt(r.receivable):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.paid!=null&&r.paid>0?fmt(r.paid):'<span class="ur-dash">—</span>')+'</td>'
           +'<td class="r"><span class="ur-bal '+bc+'">'+neg(r.balance)+'</span></td>'
           +'<td class="ur-rcv"><div class="ur-bar"><i class="'+cls+'" style="width:'+pc+'%"></i></div><div class="ur-pc">'+pc+'% recovered</div></td></tr>'; }).join('');
+      if(d.warn&&d.warn.length) $('urAsAt').textContent+=' · ⚠ '+d.warn.join(' ');
       $('urBody').style.opacity='1'; $('urFoot').innerHTML='<tr><td colspan="2">Total</td><td class="r">'+fmt(t.receivable)+'</td><td class="r">'+fmt(t.received)+'</td><td class="r">'+fmt(t.paid)+'</td><td class="r">'+neg(t.balance)+'</td><td></td></tr>';
     }).catch(function(err){ box.style.display='block'; $('urBody').style.opacity='1'; $('urAsAt').textContent='could not load'; $('urBody').innerHTML='<tr><td colspan="7" style="padding:26px;text-align:center;cursor:default;color:#b91c1c;font-weight:600">The summary could not be loaded (the server did not answer correctly). <button type="button" class="ur-go" onclick="document.getElementById(\'urReload\').click()" style="margin-left:10px">Try again</button></td></tr>'; });
   }

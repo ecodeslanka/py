@@ -7,7 +7,8 @@
  * Filters ($F): as_at (date), from / to (date range), years[], months[]  — applied to the date of each record
  * (invoice / proposal / paid / entry date, or the month of the entry); settlements count up to the as-at date.
  */
-require_once __DIR__ . '/scheme_ledger_lib.php';
+/* the Scheme Ledger calculation lives in its own file; if that file was not uploaded the summary still works without the Scheme line */
+if (is_file(__DIR__ . '/scheme_ledger_lib.php')) require_once __DIR__ . '/scheme_ledger_lib.php';
 function ur_has_table($conn, $t) { $r = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $t) . "'"); return $r && mysqli_num_rows($r) > 0; }
 function ur_has_col($conn, $t, $c) { $r = @mysqli_query($conn, "SHOW COLUMNS FROM `$t` LIKE '" . mysqli_real_escape_string($conn, $c) . "'"); return $r && mysqli_num_rows($r) > 0; }
 function ur_val($conn, $sql) { $r = @mysqli_query($conn, $sql); if (!$r) return 0.0; $x = mysqli_fetch_row($r); return (float)($x[0] ?? 0); }
@@ -57,7 +58,9 @@ function ur_summary($conn, $F = null) {
         $add('Customer Ledger', 'Damaged Claim', 'damaged_claim', 'fa-box-open', $rec, $recd);
     }
     /* ── Scheme Discount & Free Issues = the SCHEME LEDGER: debit = receivable, credit = received, balance = closing balance */
-    if (ur_has_table($conn, 'scheme_status_items')) {
+    $warn = [];
+    if (!function_exists('sl_compute')) $warn[] = 'scheme_ledger_lib.php is not uploaded on the server — the Scheme Discount & Free Issues line is left out until it is.';
+    elseif (ur_has_table($conn, 'scheme_status_items')) {
         $to = $F['as_at']; if ($F['to'] && $F['to'] < $to) $to = $F['to'];
         $L = sl_compute($conn, ['from' => $F['from'], 'to' => $to, 'years' => $F['years'], 'months' => $F['months']]);
         $lp = ['date_to' => $to]; if ($F['from']) $lp['date_from'] = $F['from']; if ($F['years']) $lp['years'] = implode(',', $F['years']); if ($F['months']) $lp['months'] = implode(',', $F['months']);
@@ -111,5 +114,5 @@ function ur_summary($conn, $F = null) {
     $tot = ['receivable' => 0.0, 'received' => 0.0, 'paid' => 0.0, 'balance' => 0.0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
     foreach ($tot as $k => $v) $tot[$k] = round($v, 2);
-    return ['rows' => $rows, 'total' => $tot, 'debit_notes' => round($debit_notes, 2), 'as_at' => $F['as_at']];
+    return ['rows' => $rows, 'total' => $tot, 'debit_notes' => round($debit_notes, 2), 'as_at' => $F['as_at'], 'warn' => $warn];
 }
