@@ -10,7 +10,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
     $F = ur_filters($_GET);
     $d = ur_summary($conn, $F);
     $rows = array_values(array_filter($d['rows'], fn($r) => rbac_can('view', $r['page'])));   // only what this role may open
-    $tot = ['receivable' => 0, 'received' => 0, 'balance' => 0];
+    $tot = ['receivable' => 0, 'received' => 0, 'paid' => 0, 'balance' => 0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
     echo json_encode(['success' => true, 'rows' => $rows, 'total' => array_map(fn($v) => round($v, 2), $tot), 'debit_notes' => $d['debit_notes'], 'debit_notes_ok' => rbac_can('view', 'debit_note'),
                       'as_at' => $F['as_at'], 'filters' => $F]);
@@ -45,7 +45,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
   <div class="ur-kpis" id="urKpis"></div>
   <div class="ur-scroll">
     <table class="ur-t">
-      <thead><tr><th>Source</th><th>Description</th><th class="r">Receivable</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
+      <thead><tr><th>Source</th><th>Description</th><th class="r">Receivable</th><th class="r">Received</th><th class="r">Paid</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
       <tbody id="urBody"></tbody>
       <tfoot id="urFoot"></tfoot>
     </table>
@@ -125,18 +125,17 @@ body.ms-dark .ur,body.ms-dark .ur-t tbody tr{background:#1f2937;border-color:#37
       box.style.display='block';
       var info=[]; if(f.years) info.push('year '+f.years.split(',').join(', ')); if(f.months) info.push(f.months.split(',').map(function(v){ return MON[v-1]; }).join(', ')); if(f.from||f.to) info.push((f.from||'…')+' → '+(f.to||'…'));
       $('urAsAt').textContent='as at '+d.as_at+(info.length?' · '+info.join(' · '):'')+' · live from Customer Ledger & Vendor Ledger';
-      var t=d.total, K=[['Receivable',fmt(t.receivable),'#2563eb','#eff6ff','#bfdbfe',''],['Received',fmt(t.received),'#16a34a','#f0fdf4','#bbf7d0','']];
-      if(d.debit_notes_ok) K.push(['Debit notes',fmt(d.debit_notes),'#d97706','#fffbeb','#fde68a','debit_note.php']);
+      var t=d.total, K=[['Receivable',fmt(t.receivable),'#2563eb','#eff6ff','#bfdbfe',''],['Received',fmt(t.received),'#16a34a','#f0fdf4','#bbf7d0',''],['Paid out',fmt(t.paid),'#d97706','#fffbeb','#fde68a','']];
       K.push(['Net balance',neg(t.balance),t.balance>0?'#dc2626':'#16a34a',t.balance>0?'#fef2f2':'#f0fdf4',t.balance>0?'#fecaca':'#bbf7d0','']);
       $('urKpis').innerHTML=K.map(function(k){ return '<div class="ur-k'+(k[5]?' lnk':'')+'" style="--c:'+k[2]+';--c-bg:'+k[3]+';--c-b:'+k[4]+'"'+(k[5]?' data-go="'+k[5]+'" title="Open the Debit Notes page"':'')+'><span>'+k[0]+(k[5]?' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px"></i>':'')+'</span><b>Rs. '+k[1]+'</b></div>'; }).join('');
       $('urBody').innerHTML=d.rows.map(function(r){
-        var base=r.receivable||0, pc=base>0?Math.max(0,Math.min(100,Math.round((r.received||0)/base*100))):0, cls=pc>=95?'':(pc>=60?'warn':'low'), bc=r.balance>0.5?'pos':(r.balance<-0.5?'neg':'zero');
+        var base=(r.paid!=null&&r.paid>0)?r.paid:(r.receivable||0), pc=base>0?Math.max(0,Math.min(100,Math.round((r.received||0)/base*100))):0, cls=pc>=95?'':(pc>=60?'warn':'low'), bc=r.balance>0.5?'pos':(r.balance<-0.5?'neg':'zero');
         return '<tr '+(r.ledger?'data-ledger="'+r.ledger+'"':'data-p="'+r.page+'.php"')+'><td><span class="ur-src '+(r.source==='Customer Ledger'?'cl':'cc')+'">'+r.source+'</span></td>'
           +'<td><div class="ur-desc"><i class="fa-solid '+r.icon+'"></i>'+r.label.replace(/&/g,'&amp;')+(r.ledger?' <span class="lk">ledger</span>':'')+'</div></td>'
-          +'<td class="r">'+(r.receivable?fmt(r.receivable):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td>'
+          +'<td class="r">'+(r.receivable?fmt(r.receivable):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.paid!=null&&r.paid>0?fmt(r.paid):'<span class="ur-dash">—</span>')+'</td>'
           +'<td class="r"><span class="ur-bal '+bc+'">'+neg(r.balance)+'</span></td>'
           +'<td class="ur-rcv"><div class="ur-bar"><i class="'+cls+'" style="width:'+pc+'%"></i></div><div class="ur-pc">'+pc+'% recovered</div></td></tr>'; }).join('');
-      $('urFoot').innerHTML='<tr><td colspan="2">Total</td><td class="r">'+fmt(t.receivable)+'</td><td class="r">'+fmt(t.received)+'</td><td class="r">'+neg(t.balance)+'</td><td></td></tr>';
+      $('urFoot').innerHTML='<tr><td colspan="2">Total</td><td class="r">'+fmt(t.receivable)+'</td><td class="r">'+fmt(t.received)+'</td><td class="r">'+fmt(t.paid)+'</td><td class="r">'+neg(t.balance)+'</td><td></td></tr>';
     }).catch(function(){ box.style.display='none'; });
   }
   /* Scheme Ledger window */

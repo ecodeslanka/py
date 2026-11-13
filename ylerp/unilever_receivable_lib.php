@@ -2,7 +2,7 @@
 /**
  * unilever_receivable_lib.php — "Unilever Receivable Summary" (dashboard).
  * One line per Customer Ledger / Vendor Ledger source page, using the SAME figures those pages show.
- *   Receivable = what Unilever has to give us (for Drives & Loyalty, Promoters Salary and SR Incentive: what we paid out and claim back)
+ *   Receivable = what Unilever has to give us · Paid = what we paid out first and claim back (Drives & Loyalty, Promoters Salary, SR Incentive, Others)
  *   Received   = what Unilever has already given / settled          Balance = Receivable − Received  (Scheme line: the Scheme Ledger closing balance)
  * Filters ($F): as_at (date), from / to (date range), years[], months[]  — applied to the date of each record
  * (invoice / proposal / paid / entry date, or the month of the entry); settlements count up to the as-at date.
@@ -34,9 +34,11 @@ function ur_summary($conn, $F = null) {
     $F = $F ?: ur_filters([]);
     $as = mysqli_real_escape_string($conn, $F['as_at']);
     $rows = []; $debit_notes = 0.0;
-    $add = function ($source, $label, $page, $icon, $rec, $recd, $balance = null, $extra = []) use (&$rows) {
+    $add = function ($source, $label, $page, $icon, $rec, $recd, $balance = null, $extra = [], $paid = null) use (&$rows) {
         $rec = (float)$rec; $recd = (float)$recd;
-        $rows[] = ['source' => $source, 'label' => $label, 'page' => $page, 'icon' => $icon, 'receivable' => round($rec, 2), 'received' => round($recd, 2), 'balance' => round($balance === null ? $rec - $recd : $balance, 2)] + $extra;
+        $base = $paid !== null ? (float)$paid : $rec;          // paid-out lines claim back what we paid
+        $rows[] = ['source' => $source, 'label' => $label, 'page' => $page, 'icon' => $icon, 'receivable' => round($rec, 2), 'received' => round($recd, 2), 'paid' => $paid === null ? null : round((float)$paid, 2),
+                   'balance' => round($balance === null ? $base - $recd : $balance, 2)] + $extra;
     };
     $mdate = fn($y, $m) => "STR_TO_DATE(CONCAT($y,'-',LPAD($m,2,'0'),'-01'),'%Y-%m-%d')";
 
@@ -67,7 +69,7 @@ function ur_summary($conn, $F = null) {
         $rec  = ur_val($conn, "SELECT COALESCE(SUM(p.total_amount),0) FROM debit_note p WHERE $dp");
         $recd = ur_has_table($conn, 'dn_settlements') ? ur_val($conn, "SELECT COALESCE(SUM(s.total_amount),0) FROM dn_settlements s INNER JOIN debit_note p ON s.dn_id = p.id WHERE $dp AND (s.banking_date IS NULL OR s.banking_date <= '$as')") : 0;
         $debit_notes = $rec;
-        $add('Customer Certificate', 'Debit Note (BP Claims)', 'debit_note', 'fa-file-circle-minus', $rec, $recd);
+        $add('Customer Certificate', 'Muthupalasa BP Claims', 'debit_note', 'fa-file-circle-minus', $rec, $recd);
     }
     /* ── Drives & Loyalty Programs (what we paid, claimed back) */
     if (ur_has_table($conn, 'sscl_vat_email_entries')) {
@@ -75,21 +77,21 @@ function ur_summary($conn, $F = null) {
         $paid = ur_val($conn, "SELECT COALESCE(SUM(e.total_amount),0) FROM sscl_vat_email_entries e WHERE $dp");
         $recd = (ur_has_table($conn, 'sscl_vat_settlements') && ur_has_col($conn, 'sscl_vat_settlements', 'entry_id'))
               ? ur_val($conn, "SELECT COALESCE(SUM(s.amount),0) FROM sscl_vat_settlements s INNER JOIN sscl_vat_email_entries e ON s.entry_id = e.id WHERE $dp AND (s.settled_at IS NULL OR DATE(s.settled_at) <= '$as')") : 0;
-        $add('Customer Certificate', 'Drives & Loyalty Programs', 'dal', 'fa-trophy', $paid, $recd);
+        $add('Customer Certificate', 'Drives & Loyalty Programs', 'dal', 'fa-trophy', 0, $recd, null, [], $paid);
     }
     /* ── Promoters Salary */
     if (ur_has_table($conn, 'promoters_salary_cl')) {
         $dp = ur_dp($conn, $mdate('p.year', 'p.month'), $F);
         $paid = ur_val($conn, "SELECT COALESCE(SUM(p.amount_with_vat),0) FROM promoters_salary_cl p WHERE $dp");
         $recd = ur_has_table($conn, 'pscl_settlements') ? ur_val($conn, "SELECT COALESCE(SUM(s.total_amount),0) FROM pscl_settlements s INNER JOIN promoters_salary_cl p ON s.pscl_id = p.id WHERE $dp AND (s.banking_date IS NULL OR s.banking_date <= '$as')") : 0;
-        $add('Customer Certificate', 'Promoters Salary', 'promoters_salary_cl', 'fa-user-tie', $paid, $recd);
+        $add('Customer Certificate', 'Promoters Salary', 'promoters_salary_cl', 'fa-user-tie', 0, $recd, null, [], $paid);
     }
     /* ── SR Incentive */
     if (ur_has_table($conn, 'sr_incentive_cc')) {
         $dp = ur_dp($conn, $mdate('p.year', 'p.month'), $F);
         $paid = ur_val($conn, "SELECT COALESCE(SUM(p.amount_with_vat),0) FROM sr_incentive_cc p WHERE $dp");
         $recd = ur_has_table($conn, 'sricc_settlements') ? ur_val($conn, "SELECT COALESCE(SUM(s.total_amount),0) FROM sricc_settlements s INNER JOIN sr_incentive_cc p ON s.sricc_id = p.id WHERE $dp AND (s.banking_date IS NULL OR s.banking_date <= '$as')") : 0;
-        $add('Customer Certificate', 'SR Incentive', 'sr_incentive_cc', 'fa-medal', $paid, $recd);
+        $add('Customer Certificate', 'SR Incentive', 'sr_incentive_cc', 'fa-medal', 0, $recd, null, [], $paid);
     }
     /* ── SSCL & VAT */
     if (ur_has_table($conn, 'sscl_vat')) {
@@ -104,10 +106,10 @@ function ur_summary($conn, $F = null) {
         $dp = ur_dp($conn, 'l.line_date', $F);
         $pos = ur_val($conn, "SELECT COALESCE(SUM(CASE WHEN l.amount > 0 THEN l.amount ELSE 0 END),0) FROM oa_transaction_lines l WHERE $dp");
         $neg = ur_val($conn, "SELECT COALESCE(SUM(CASE WHEN l.amount < 0 THEN -l.amount ELSE 0 END),0) FROM oa_transaction_lines l WHERE $dp");
-        if ($pos > 0 || $neg > 0) $add('Customer Certificate', 'Others (other adjustments)', 'pi_other_adjustments', 'fa-ellipsis', $neg, $pos);
+        if ($pos > 0 || $neg > 0) $add('Customer Certificate', 'Others (other adjustments)', 'pi_other_adjustments', 'fa-ellipsis', 0, $pos, null, [], $neg);
     }
-    $tot = ['receivable' => 0.0, 'received' => 0.0, 'balance' => 0.0];
-    foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)$r[$k];
+    $tot = ['receivable' => 0.0, 'received' => 0.0, 'paid' => 0.0, 'balance' => 0.0];
+    foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
     foreach ($tot as $k => $v) $tot[$k] = round($v, 2);
     return ['rows' => $rows, 'total' => $tot, 'debit_notes' => round($debit_notes, 2), 'as_at' => $F['as_at']];
 }
