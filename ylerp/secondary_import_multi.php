@@ -295,25 +295,6 @@ if (isset($_POST['action']) && in_array($_POST['action'], ['validate', 'import',
                 $dd = mysqli_real_escape_string($conn, $delivery_date);
                 $fn = mysqli_real_escape_string($conn, $filename);
 
-                if (!function_exists('sec_block_message')) {
-                    function sec_block_message($conn, $dates) {
-                        $parts = [];
-                        foreach ($dates as $d) {
-                            $e = mysqli_real_escape_string($conn, $d);
-                            $r = mysqli_query($conn, "SELECT id, filename, imported_at FROM secondary_invoice_imports WHERE delivery_date = '$e' AND status = 'completed' ORDER BY id DESC LIMIT 1");
-                            if ($r && ($x = mysqli_fetch_assoc($r))) $parts[] = date('d M Y', strtotime($d)) . ' (' . $x['filename'] . ', imported ' . date('d M Y H:i', strtotime($x['imported_at'])) . ')';
-                        }
-                        if (!$parts) return '';
-                        return 'Permission denied: a secondary invoice import already exists for ' . implode('; ', $parts) . '. You cannot import the same delivery date again. '
-                             . 'Please delete the old import (Secondary Import History → Delete) and then import again.';
-                    }
-                }
-                
-                if ($__m = sec_block_message($conn, [$delivery_date])) {
-                    $results[] = ['delivery_date' => $delivery_date, 'success' => false, 'already_imported' => true, 'message' => $__m];
-                    continue;
-                }
-
                 mysqli_begin_transaction($conn);
 
                 // Step 1: archive existing completed import(s) for this date
@@ -753,6 +734,19 @@ document.getElementById('uploadForm').addEventListener('submit', function (e) {
 
             const rows = jsonData.slice(19); // skip header/title rows, same as original
 
+            // New LeverEDGE format has an extra "Tax Amount" column after "Taxable Amount",
+            // which pushes Bill Value / Final Bill Amount / Delivery Person / Delivery Date one
+            // column to the right. Detect it from the header row so both formats import correctly.
+            let colShift = 0;
+            for (let hr = 0; hr < Math.min(jsonData.length, 30); hr++) {
+                const cells = (jsonData[hr] || []).map(c => String(c).trim().toLowerCase());
+                if (cells.includes('bill number') || cells.includes('bill no')) {
+                    colShift = cells.includes('tax amount') ? 1 : 0;
+                    break;
+                }
+            }
+            const S = colShift;
+
             const dataObjects = rows.map(row => ({
                 sales_person_code:            row[1]  || '',
                 t_code:                       row[3]  || '',
@@ -767,12 +761,12 @@ document.getElementById('uploadForm').addEventListener('submit', function (e) {
                 rs_discount:                  row[14] || 0,
                 tot_disc:                     row[15] || 0,
                 total_discount:               row[16] || 0,
-                bill_value:                   row[18] || 0,
-                good_returns_value:           row[19] || 0,
-                damage_expiry_shortage_value: row[20] || 0,
-                final_bill_amount:            row[21] || 0,
-                delivery_person:              row[24] || '',
-                delivery_date_raw:            row[25],
+                bill_value:                   row[18+S] || 0,
+                good_returns_value:           row[19+S] || 0,
+                damage_expiry_shortage_value: row[20+S] || 0,
+                final_bill_amount:            row[21+S] || 0,
+                delivery_person:              row[24+S] || '',
+                delivery_date_raw:            row[25+S],
             }));
 
             const validData = dataObjects.filter(row =>
@@ -874,7 +868,7 @@ function renderDateGroups() {
             </div>
             <div class="date-group-body">
                 ${g.isReplace ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:10px 14px;margin:12px 0;font-size:12px;color:#92400e;">
-                    <i class="fa-solid fa-triangle-exclamation"></i> A secondary import already exists for this date — it cannot be imported again. Delete the old import in Secondary Import History first.
+                    <i class="fa-solid fa-triangle-exclamation"></i> A completed import already exists for this date. Importing will archive the old data to history and replace it.
                 </div>` : ''}
                 <div class="table-responsive">
                     <table class="data-table">
