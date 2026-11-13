@@ -2,8 +2,8 @@ name: Build POS Windows installer
 on:
   workflow_dispatch:
   push:
-    paths: ['pos-desktop/**']
-    tags: ['pos-v*']
+    branches: ['**']
+    paths: ['pos-desktop/**', '.github/workflows/build-pos-windows.yml']
 jobs:
   build:
     runs-on: windows-latest
