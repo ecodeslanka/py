@@ -23,6 +23,7 @@ $csv = fn($v) => array_values(array_filter(array_map('intval', is_array($v) ? $v
 $f_years = $csv($_GET['years'] ?? ''); $f_months = $csv($_GET['months'] ?? ''); $f_period = !empty($_GET['period']);
 $L = ul_compute($conn, $key, ['from' => $f_from, 'to' => $f_to, 'years' => $f_years, 'months' => $f_months, 'period' => $f_period]);
 $stmt = $L['stmt']; $open = $L['open']; $closing = $L['closing']; $tdr = $L['debit']; $tcr = $L['credit'];
+$grp = ul_settle_groups($L['stmt']); $hasGrp = ($grp['done'] || $grp['near'] || $grp['open']);      // settlement status per record (not for ledgers without a link, e.g. Others)
 if (!$f_asc) $stmt = array_reverse($stmt);
 
 if (isset($_GET['export']) && class_exists('ZipArchive')) {
@@ -34,6 +35,14 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     foreach ($stmt as $en) { foreach ([ulr_d($en['date']) === '—' ? '' : ulr_d($en['date']), $en['type'], $en['ref'], $en['desc'], $en['debit'] ?: '', $en['credit'] ?: '', $en['bal']] as $i => $v) $sh->set($r, $i + 1, $v, ['border' => 1] + ($i >= 4 ? ['h' => 'right', 'nf' => 4] : [])); $r++; }
     $tb = ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]; $sh->set($r, 4, 'TOTAL', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 5, round($tdr, 2), $tb); $sh->set($r, 6, round($tcr, 2), $tb); $sh->set($r, 7, $closing, $tb);
     foreach ([13, 18, 34, 60, 15, 15, 16] as $i => $wd) $sh->widths[$i + 1] = $wd; $sh->freeze = [4, 0];
+    if ($hasGrp) {
+        $ss = $X->sheet('Settlement status'); $ss->set(1, 1, $S['label'] . ' — settlement status', ['b' => 1, 'sz' => 15]);
+        foreach (['Status', 'Record', 'Debit', 'Credit', 'Balance', 'Settled %', 'Last settlement'] as $i => $h) $ss->set(3, $i + 1, $h, $H);
+        $sr = 4; foreach (['done' => 'SETTLED ✓', 'near' => 'Nearly settled', 'open' => 'Pending'] as $g => $lab) foreach ($grp[$g] as $b) {
+            foreach ([$lab, $b['label'], round($b['debit'], 2), round($b['credit'], 2), $b['bal'], $b['pct'] / 100, $b['last_credit'] ? ulr_d($b['last_credit']) : ''] as $i => $v) $ss->set($sr, $i + 1, $v, ['border' => 1] + (in_array($i, [2, 3, 4], true) ? ['h' => 'right', 'nf' => 4] : ($i === 5 ? ['h' => 'right', 'pct' => 1] : [])) + ($g === 'done' ? ['bg' => 'F0FDF4'] : ($g === 'near' ? ['bg' => 'FFFBEB'] : [])));
+            $sr++; }
+        foreach ([16, 60, 16, 16, 16, 11, 16] as $i => $wd) $ss->widths[$i + 1] = $wd; $ss->freeze = [3, 0];
+    }
     $tmp = tempnam(sys_get_temp_dir(), 'ul'); $X->save($tmp);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="ledger_' . $key . '_' . date('Ymd_His') . '.xlsx"');
     header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
@@ -51,6 +60,10 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? ulr_d($f_from) 
 .ulr .tw{overflow:auto;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-height:72vh}.ulr table{width:100%;border-collapse:collapse;font-size:13px}.ulr th{background:#1e3a8a;color:#fff;padding:9px 10px;text-align:left;position:sticky;top:0;white-space:nowrap}.ulr td{padding:8px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top}.ulr .r{text-align:right;font-variant-numeric:tabular-nums}.ulr tr:hover td{background:#f8fafc}
 .ulr tr.first td{background:#eef2ff;font-weight:700}.ulr .dr{color:#b91c1c;font-weight:700}.ulr .cr{color:#15803d;font-weight:700}.ulr .bl{font-weight:800}.ulr .ty{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#e0e7ff;color:#3730a3;white-space:nowrap}.ulr .ty.k{background:#dcfce7;color:#166534}
 .ulr tfoot td{background:#fde68a;font-weight:800;position:sticky;bottom:0}
+.ulr .sltabs{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}.ulr .sltabs button{padding:8px 16px;border:1.5px solid #c7d2fe;background:#fff;color:#1e3a8a;border-radius:9px;font:600 13px inherit;cursor:pointer}.ulr .sltabs button.on{background:#1e3a8a;color:#fff;border-color:#1e3a8a}.ulr .sltabs .cnt{font-weight:500;font-size:11.5px;opacity:.85;margin-left:6px}
+.ulr .grp{background:#fff;border:1.5px solid var(--c);border-radius:12px;margin-bottom:12px;overflow:hidden}.ulr .gh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 14px;background:var(--b);border-bottom:1px solid var(--c)}.ulr .gh b{font-size:14px;color:var(--c)}.ulr .gh em{font-style:normal;font-size:12px;color:#475569}.ulr .gh .gs{margin-left:auto;font-size:12px;color:#475569;font-variant-numeric:tabular-nums}
+.ulr .gi{width:26px;height:26px;border-radius:50%;background:var(--c);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}.ulr td.tk{color:var(--c);font-weight:800;font-size:16px;text-align:center}.ulr .gnone{padding:14px;color:#9ca3af;font-size:13px}
+.ulr tr.sch{cursor:pointer}.ulr .pbar{height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden}.ulr .pbar i{display:block;height:100%;border-radius:99px}.ulr .pp{font-size:11px;color:#64748b}
 </style>
 <div class="ulr">
   <h2><i class="fa-solid <?= ulr_h($S['icon']) ?>" style="color:#1e3a8a"></i> <?= ulr_h($S['label']) ?> — Ledger</h2>
@@ -71,12 +84,39 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? ulr_d($f_from) 
     <div class="s"><small>Total debit</small><b>Rs. <?= number_format($tdr, 2) ?></b></div><div class="s"><small>Total credit</small><b>Rs. <?= number_format($tcr, 2) ?></b></div>
     <?php if ($f_from && !$f_period): ?><div class="s"><small>Opening balance</small><b>Rs. <?= ulr_m($open, false) ?></b></div><?php endif; ?></div>
 
-  <div class="tw"><table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>
-  <?php foreach ($stmt as $i => $en): ?><tr class="<?= $i === 0 && !$f_asc ? 'first' : '' ?>"><td style="white-space:nowrap"><?= ulr_d($en['date']) ?></td><td><span class="ty <?= $en['credit'] ? 'k' : '' ?>"><?= ulr_h($en['type']) ?></span></td>
+  <?php if ($hasGrp): ?>
+  <div class="sltabs"><button type="button" data-v="stmt" class="on"><i class="fa-solid fa-list"></i> Statement</button><button type="button" data-v="settle"><i class="fa-solid fa-circle-check"></i> Settlement status <span class="cnt"><?= count($grp['done']) ?> ✓ · <?= count($grp['near']) ?> nearly · <?= count($grp['open']) ?> pending</span></button>
+    <span id="slGBar" style="display:none;margin-left:auto;font-size:12.5px"><span class="chip" id="slGTxt" style="margin:0"></span> <a href="#" id="slGClr" style="color:#1e3a8a;font-weight:700">show all ✕</a></span></div>
+  <div id="slSettle" style="display:none">
+  <?php foreach (['done' => ['Settled', '✓', '#16a34a', '#f0fdf4'], 'near' => ['Nearly settled (90 % or more)', '◐', '#d97706', '#fffbeb'], 'open' => ['Pending / not settled', '○', '#b91c1c', '#fef2f2']] as $g => [$gl, $gi, $gc, $gb]): ?>
+    <div class="grp" style="--c:<?= $gc ?>;--b:<?= $gb ?>"><div class="gh"><span class="gi"><?= $gi ?></span><b><?= $gl ?></b><em><?= count($grp[$g]) ?> record<?= count($grp[$g]) === 1 ? '' : 's' ?></em>
+      <span class="gs">Debit <?= number_format(array_sum(array_column($grp[$g], 'debit')), 2) ?> · Credit <?= number_format(array_sum(array_column($grp[$g], 'credit')), 2) ?></span></div>
+      <?php if ($grp[$g]): ?><div class="tw" style="max-height:none"><table><thead><tr><th style="width:34px"></th><th>Record</th><th>Date</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th><th style="width:170px">Settled</th><th>Last settlement</th></tr></thead><tbody>
+      <?php foreach ($grp[$g] as $b): ?><tr class="sch" data-g="<?= ulr_h($b['key']) ?>" data-gl="<?= ulr_h($b['label']) ?>" title="Click to see the entries of this record"><td class="tk"><?= $gi ?></td><td><b><?= ulr_h($b['label']) ?></b></td><td><?= ulr_d($b['first']) ?></td><td class="r"><?= number_format($b['debit'], 2) ?></td><td class="r"><?= number_format($b['credit'], 2) ?></td>
+        <td class="r" style="font-weight:800;color:<?= $b['bal'] >= 5 ? '#b91c1c' : '#15803d' ?>"><?= ulr_m($b['bal'] < 5 && $b['bal'] > -5 ? 0 : $b['bal'], false) ?></td>
+        <td><div class="pbar"><i style="width:<?= $b['pct'] ?>%;background:<?= $gc ?>"></i></div><span class="pp"><?= $b['pct'] ?>%</span></td><td><?= $b['last_credit'] ? ulr_d($b['last_credit']) : '—' ?></td></tr>
+      <?php endforeach; ?></tbody></table></div><?php else: ?><div class="gnone">None.</div><?php endif; ?></div>
+  <?php endforeach; ?>
+  </div>
+  <?php endif; ?>
+  <div id="slStmt"><div class="tw"><table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>
+  <?php foreach ($stmt as $i => $en): ?><tr data-g="<?= ulr_h($en['grp'] ?? '') ?>" class="<?= $i === 0 && !$f_asc ? 'first' : '' ?>"><td style="white-space:nowrap"><?= ulr_d($en['date']) ?></td><td><span class="ty <?= $en['credit'] ? 'k' : '' ?>"><?= ulr_h($en['type']) ?></span></td>
     <td style="font-size:12px;color:#374151;max-width:260px"><?= ulr_h($en['ref']) ?></td><td style="max-width:520px"><?= ulr_h($en['desc']) ?></td>
     <td class="r dr"><?= $en['debit'] ? number_format($en['debit'], 2) : '' ?></td><td class="r cr"><?= $en['credit'] ? number_format($en['credit'], 2) : '' ?></td><td class="r bl"><?= ulr_m($en['bal'], false) ?></td></tr>
   <?php endforeach; if (!$stmt): ?><tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:28px">No entries for these filters.</td></tr><?php endif; ?></tbody>
-  <?php if ($stmt): ?><tfoot><tr><td colspan="4">TOTAL</td><td class="r"><?= number_format($tdr, 2) ?></td><td class="r"><?= number_format($tcr, 2) ?></td><td class="r"><?= ulr_m($closing, false) ?></td></tr></tfoot><?php endif; ?></table></div>
+  <?php if ($stmt): ?><tfoot><tr><td colspan="4">TOTAL</td><td class="r"><?= number_format($tdr, 2) ?></td><td class="r"><?= number_format($tcr, 2) ?></td><td class="r"><?= ulr_m($closing, false) ?></td></tr></tfoot><?php endif; ?></table></div></div>
 </div>
-<script>document.getElementById('ulTog').addEventListener('click',function(){ document.getElementById('ulBody').classList.toggle('collapsed'); });</script>
+<script>
+document.getElementById('ulTog').addEventListener('click',function(){ document.getElementById('ulBody').classList.toggle('collapsed'); });
+(function(){
+  if(!document.querySelector('.sltabs')) return;
+  var KEY='ul_view_v1';
+  function view(v){ document.getElementById('slStmt').style.display=v==='stmt'?'block':'none'; document.getElementById('slSettle').style.display=v==='settle'?'block':'none'; [].forEach.call(document.querySelectorAll('.sltabs button'),function(b){ b.classList.toggle('on',b.dataset.v===v); }); try{ localStorage.setItem(KEY,v); }catch(e){} }
+  function only(g,label){ [].forEach.call(document.querySelectorAll('#slStmt tbody tr[data-g]'),function(r){ r.style.display=(g===null||r.dataset.g===g)?'':'none'; }); document.getElementById('slGBar').style.display=g===null?'none':'inline'; if(g!==null) document.getElementById('slGTxt').textContent=label; }
+  [].forEach.call(document.querySelectorAll('.sltabs button'),function(b){ b.addEventListener('click',function(){ view(b.dataset.v); }); });
+  [].forEach.call(document.querySelectorAll('tr.sch'),function(r){ r.addEventListener('click',function(){ only(r.dataset.g,r.dataset.gl); view('stmt'); }); });
+  document.getElementById('slGClr').addEventListener('click',function(e){ e.preventDefault(); only(null); });
+  var v0='stmt'; try{ v0=localStorage.getItem(KEY)||'stmt'; }catch(e){} view(v0==='settle'?'settle':'stmt');
+})();
+</script>
 <?php include 'footer.php'; ?>
