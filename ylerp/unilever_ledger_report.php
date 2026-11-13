@@ -87,17 +87,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? ulr_d($f_from) 
   <?php if ($hasGrp): ?>
   <div class="sltabs"><button type="button" data-v="stmt" class="on"><i class="fa-solid fa-list"></i> Statement</button><button type="button" data-v="settle"><i class="fa-solid fa-circle-check"></i> Settlement status <span class="cnt"><?= count($grp['done']) ?> ✓ · <?= count($grp['near']) ?> nearly · <?= count($grp['open']) ?> pending</span></button>
     <span id="slGBar" style="display:none;margin-left:auto;font-size:12.5px"><span class="chip" id="slGTxt" style="margin:0"></span> <a href="#" id="slGClr" style="color:#1e3a8a;font-weight:700">show all ✕</a></span></div>
-  <div id="slSettle" style="display:none">
-  <?php foreach (['done' => ['Settled', '✓', '#16a34a', '#f0fdf4'], 'near' => ['Nearly settled (90 % or more)', '◐', '#d97706', '#fffbeb'], 'open' => ['Pending / not settled', '○', '#b91c1c', '#fef2f2']] as $g => [$gl, $gi, $gc, $gb]): ?>
-    <div class="grp" style="--c:<?= $gc ?>;--b:<?= $gb ?>"><div class="gh"><span class="gi"><?= $gi ?></span><b><?= $gl ?></b><em><?= count($grp[$g]) ?> record<?= count($grp[$g]) === 1 ? '' : 's' ?></em>
-      <span class="gs">Debit <?= number_format(array_sum(array_column($grp[$g], 'debit')), 2) ?> · Credit <?= number_format(array_sum(array_column($grp[$g], 'credit')), 2) ?></span></div>
-      <?php if ($grp[$g]): ?><div class="tw" style="max-height:none"><table><thead><tr><th style="width:34px"></th><th>Record</th><th>Date</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th><th style="width:170px">Settled</th><th>Last settlement</th></tr></thead><tbody>
-      <?php foreach ($grp[$g] as $b): ?><tr class="sch" data-g="<?= ulr_h($b['key']) ?>" data-gl="<?= ulr_h($b['label']) ?>" title="Click to see the entries of this record"><td class="tk"><?= $gi ?></td><td><b><?= ulr_h($b['label']) ?></b></td><td><?= ulr_d($b['first']) ?></td><td class="r"><?= number_format($b['debit'], 2) ?></td><td class="r"><?= number_format($b['credit'], 2) ?></td>
-        <td class="r" style="font-weight:800;color:<?= $b['bal'] >= 5 ? '#b91c1c' : '#15803d' ?>"><?= ulr_m($b['bal'] < 5 && $b['bal'] > -5 ? 0 : $b['bal'], false) ?></td>
-        <td><div class="pbar"><i style="width:<?= $b['pct'] ?>%;background:<?= $gc ?>"></i></div><span class="pp"><?= $b['pct'] ?>%</span></td><td><?= $b['last_credit'] ? ulr_d($b['last_credit']) : '—' ?></td></tr>
-      <?php endforeach; ?></tbody></table></div><?php else: ?><div class="gnone">None.</div><?php endif; ?></div>
-  <?php endforeach; ?>
-  </div>
+  <div id="slSettle" style="display:none"><style><?= ul_settle_css() ?></style><?= ul_settle_view($grp) ?></div>
   <?php endif; ?>
   <div id="slStmt"><div class="tw"><table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>
   <?php foreach ($stmt as $i => $en): ?><tr data-g="<?= ulr_h($en['grp'] ?? '') ?>" class="<?= $i === 0 && !$f_asc ? 'first' : '' ?>"><td style="white-space:nowrap"><?= ulr_d($en['date']) ?></td><td><span class="ty <?= $en['credit'] ? 'k' : '' ?>"><?= ulr_h($en['type']) ?></span></td>
@@ -114,7 +104,13 @@ document.getElementById('ulTog').addEventListener('click',function(){ document.g
   function view(v){ document.getElementById('slStmt').style.display=v==='stmt'?'block':'none'; document.getElementById('slSettle').style.display=v==='settle'?'block':'none'; [].forEach.call(document.querySelectorAll('.sltabs button'),function(b){ b.classList.toggle('on',b.dataset.v===v); }); try{ localStorage.setItem(KEY,v); }catch(e){} }
   function only(g,label){ [].forEach.call(document.querySelectorAll('#slStmt tbody tr[data-g]'),function(r){ r.style.display=(g===null||r.dataset.g===g)?'':'none'; }); document.getElementById('slGBar').style.display=g===null?'none':'inline'; if(g!==null) document.getElementById('slGTxt').textContent=label; }
   [].forEach.call(document.querySelectorAll('.sltabs button'),function(b){ b.addEventListener('click',function(){ view(b.dataset.v); }); });
-  [].forEach.call(document.querySelectorAll('tr.sch'),function(r){ r.addEventListener('click',function(){ only(r.dataset.g,r.dataset.gl); view('stmt'); }); });
+  [].forEach.call(document.querySelectorAll('.stbtn'),function(r){ r.addEventListener('click',function(e){ e.stopPropagation(); only(r.dataset.g,r.dataset.gl); view('stmt'); }); });
+  /* settlement view: open / close the entries of a record */
+  document.addEventListener('click',function(e){ var h=e.target.closest('tr.strh'); if(h&&!e.target.closest('.stbtn')) h.parentNode.classList.toggle('open'); });
+  var ex=document.getElementById('stExp'), co=document.getElementById('stCol');
+  if(ex) ex.addEventListener('click',function(){ [].forEach.call(document.querySelectorAll('.strec'),function(t){ t.classList.add('open'); }); });
+  if(co) co.addEventListener('click',function(){ [].forEach.call(document.querySelectorAll('.strec'),function(t){ t.classList.remove('open'); }); });
+
   document.getElementById('slGClr').addEventListener('click',function(e){ e.preventDefault(); only(null); });
   var v0='stmt'; try{ v0=localStorage.getItem(KEY)||'stmt'; }catch(e){} view(v0==='settle'?'settle':'stmt');
 })();

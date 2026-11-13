@@ -100,13 +100,14 @@ function ul_settle_groups($stmt) {
     $by = [];
     foreach ($stmt as $en) {
         if (!isset($en['grp']) || $en['grp'] === null) continue;
-        $k = $en['grp']; if (!isset($by[$k])) $by[$k] = ['key' => $k, 'label' => $en['glabel'], 'debit' => 0.0, 'credit' => 0.0, 'first' => $en['date'], 'last_credit' => ''];
-        $by[$k]['debit'] += $en['debit']; $by[$k]['credit'] += $en['credit'];
+        $k = $en['grp']; if (!isset($by[$k])) $by[$k] = ['key' => $k, 'label' => $en['glabel'], 'debit' => 0.0, 'credit' => 0.0, 'first' => $en['date'], 'last_credit' => '', 'entries' => []];
+        $by[$k]['debit'] += $en['debit']; $by[$k]['credit'] += $en['credit']; $by[$k]['entries'][] = $en;
         if ($en['date'] !== '' && ($by[$k]['first'] === '' || $en['date'] < $by[$k]['first'])) $by[$k]['first'] = $en['date'];
         if ($en['credit'] > 0 && $en['date'] > $by[$k]['last_credit']) $by[$k]['last_credit'] = $en['date'];
     }
     $g = ['done' => [], 'near' => [], 'open' => []];
     foreach ($by as $b) {
+        $run = 0.0; foreach ($b['entries'] as &$ee) { $run += $ee['debit'] - $ee['credit']; $ee['rbal'] = round($run, 2); } unset($ee);     // balance running inside the record
         $b['bal'] = round($b['debit'] - $b['credit'], 2); $b['pct'] = $b['debit'] > 0 ? min(100, round($b['credit'] / $b['debit'] * 100)) : ($b['credit'] > 0 ? 100 : 0);
         $st = ($b['debit'] > 0 && $b['bal'] < 5) || ($b['debit'] <= 0 && $b['credit'] > 0) ? 'done' : ($b['pct'] >= 90 ? 'near' : 'open');
         $g[$st][] = $b;
@@ -115,6 +116,52 @@ function ul_settle_groups($stmt) {
     usort($g['near'], fn($a, $b) => $b['pct'] <=> $a['pct'] ?: $b['bal'] <=> $a['bal']);
     usort($g['open'], fn($a, $b) => $b['bal'] <=> $a['bal']);
     return $g;
+}
+/** the Settlement status view (same look for every ledger): record header with tick / totals / progress, its ledger entries underneath, UNSETTLED set clearly in red */
+function ul_settle_view($grp) {
+    $n = fn($v) => number_format((float)$v, 2); $bm = fn($v) => $v < 0 ? '(' . number_format(abs($v), 2) . ')' : number_format($v, 2);
+    $dt = fn($d) => $d ? date('d M Y', strtotime($d)) : '—'; $h = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    $meta = ['done' => ['SETTLED', '✓', '#16a34a', '#f0fdf4', 'fully settled'], 'near' => ['NEARLY SETTLED', '◐', '#d97706', '#fffbeb', '90 % or more settled — a small balance is left'], 'open' => ['UNSETTLED', '!', '#dc2626', '#fef2f2', 'still to be settled']];
+    ob_start(); ?>
+<div class="stl">
+  <div class="stsum">
+  <?php foreach (['done', 'near', 'open'] as $g): [$gl, $gi, $gc, $gb, $gd] = $meta[$g]; $left = array_sum(array_map(fn($b) => max(0, $b['bal']), $grp[$g])); ?>
+    <div class="stc" style="--c:<?= $gc ?>;--b:<?= $gb ?>"><span class="gi"><?= $gi ?></span><div><b><?= count($grp[$g]) ?></b> <?= $gl ?><small><?= $g === 'done' ? 'Debit ' . $n(array_sum(array_column($grp[$g], 'debit'))) : 'Still to settle Rs. ' . $n($left) ?></small></div></div>
+  <?php endforeach; ?>
+    <div class="stx"><button type="button" id="stExp">Expand all entries</button><button type="button" id="stCol">Collapse all</button></div>
+  </div>
+  <?php foreach (['open', 'near', 'done'] as $g): [$gl, $gi, $gc, $gb, $gd] = $meta[$g]; $left = array_sum(array_map(fn($b) => max(0, $b['bal']), $grp[$g])); ?>
+  <div class="stg" style="--c:<?= $gc ?>;--b:<?= $gb ?>">
+    <div class="sth"><span class="gi"><?= $gi ?></span><b><?= $gl ?></b><em><?= count($grp[$g]) ?> record<?= count($grp[$g]) === 1 ? '' : 's' ?> · <?= $gd ?></em>
+      <span class="sts">Debit <?= $n(array_sum(array_column($grp[$g], 'debit'))) ?> · Credit <?= $n(array_sum(array_column($grp[$g], 'credit'))) ?><?= $g !== 'done' ? ' · <b>Still to settle Rs. ' . $n($left) . '</b>' : '' ?></span></div>
+    <?php if ($grp[$g]): ?><div class="stw"><table class="stt"><thead><tr><th style="width:34px"></th><th>Record / Date</th><th>Type</th><th>Reference · Description</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th><th style="width:170px">Settled</th></tr></thead>
+      <?php foreach ($grp[$g] as $b): $rid = 'r' . md5($b['key']); ?>
+      <tbody class="strec <?= $g === 'done' ? '' : 'open' ?>" data-r="<?= $rid ?>">
+        <tr class="strh"><td class="tk"><span class="chev">▸</span></td><td><b><?= $h($b['label']) ?></b><br><small><?= $dt($b['first']) ?><?= $b['last_credit'] ? ' · last settlement ' . $dt($b['last_credit']) : '' ?></small></td><td></td><td><button type="button" class="stbtn" data-g="<?= $h($b['key']) ?>" data-gl="<?= $h($b['label']) ?>">open in statement ↗</button></td>
+          <td class="r"><b><?= $n($b['debit']) ?></b></td><td class="r"><b><?= $n($b['credit']) ?></b></td><td class="r" style="font-weight:800;color:<?= $b['bal'] >= 5 ? '#b91c1c' : '#15803d' ?>"><?= $bm($b['bal'] < 5 && $b['bal'] > -5 ? 0 : $b['bal']) ?></td>
+          <td><div class="pbar"><i style="width:<?= $b['pct'] ?>%;background:<?= $gc ?>"></i></div><span class="pp"><?= $b['pct'] ?>% settled</span></td></tr>
+        <?php foreach ($b['entries'] as $e): ?>
+        <tr class="stent"><td></td><td class="ed"><?= $dt($e['date']) ?></td><td><span class="ty <?= $e['credit'] ? 'k' : '' ?>"><?= $h($e['type']) ?></span></td><td class="er"><?= $h($e['ref']) ?><?= $e['desc'] !== '' ? ' · <span>' . $h($e['desc']) . '</span>' : '' ?></td>
+          <td class="r dr"><?= $e['debit'] ? $n($e['debit']) : '' ?></td><td class="r cr"><?= $e['credit'] ? $n($e['credit']) : '' ?></td><td class="r"><?= $bm($e['rbal']) ?></td><td></td></tr>
+        <?php endforeach; ?>
+      </tbody>
+      <?php endforeach; ?></table></div><?php else: ?><div class="stn">None — nothing in this group.</div><?php endif; ?>
+  </div>
+  <?php endforeach; ?>
+</div>
+<?php return ob_get_clean();
+}
+function ul_settle_css() { return <<<'CSS'
+.stl .stsum{display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;margin-bottom:12px}.stl .stc{display:flex;gap:10px;align-items:center;background:var(--b);border:1.5px solid var(--c);border-radius:12px;padding:10px 16px;min-width:190px}.stl .stc b{font-size:22px;color:var(--c)}.stl .stc small{display:block;font-size:11.5px;color:#475569;margin-top:1px}
+.stl .gi{width:28px;height:28px;border-radius:50%;background:var(--c);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex:0 0 28px}
+.stl .stx{margin-left:auto;display:flex;gap:6px;align-items:center}.stl .stx button{padding:7px 12px;border:1.5px solid #c7d2fe;background:#fff;color:#1e3a8a;border-radius:8px;font:600 12px inherit;cursor:pointer}
+.stl .stg{background:#fff;border:1.5px solid var(--c);border-radius:12px;margin-bottom:14px;overflow:hidden}.stl .sth{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--b);border-bottom:1.5px solid var(--c)}.stl .sth b{font-size:14px;color:var(--c);letter-spacing:.04em}.stl .sth em{font-style:normal;font-size:12px;color:#475569}.stl .sts{margin-left:auto;font-size:12px;color:#475569;font-variant-numeric:tabular-nums}.stl .sts b{color:var(--c);font-size:12.5px;letter-spacing:0}
+.stl .stw{overflow-x:auto}.stl table.stt{width:100%;border-collapse:collapse;font-size:12.5px}.stl .stt th{background:#f1f5f9;color:#475569;padding:7px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}.stl .stt td{padding:7px 10px;vertical-align:top}.stl .r{text-align:right;font-variant-numeric:tabular-nums}
+.stl .strec{border-top:1px solid #e5e7eb}.stl tr.strh{background:var(--b);cursor:pointer}.stl tr.strh:hover{filter:brightness(.97)}.stl td.tk{text-align:center;color:var(--c);font-weight:800}.stl .chev{display:inline-block;transition:transform .15s}.stl .strec.open .chev{transform:rotate(90deg)}
+.stl tr.stent{display:none;background:#fff;border-top:1px dashed #e2e8f0}.stl .strec.open tr.stent{display:table-row}.stl .ed{white-space:nowrap;color:#475569}.stl .er{color:#334155;max-width:560px}.stl .er span{color:#94a3b8}
+.stl .dr{color:#b91c1c;font-weight:700}.stl .cr{color:#15803d;font-weight:700}.stl .ty{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10.5px;font-weight:700;background:#e0e7ff;color:#3730a3;white-space:nowrap}.stl .ty.k{background:#dcfce7;color:#166534}
+.stl .pbar{height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden}.stl .pbar i{display:block;height:100%;border-radius:99px}.stl .pp{font-size:11px;color:#64748b}.stl .stbtn{border:none;background:transparent;color:#1e3a8a;font:600 11.5px inherit;cursor:pointer;padding:0}.stl .stn{padding:14px;color:#9ca3af;font-size:13px}
+CSS;
 }
 /** filter + running balance (same rules as the Scheme Ledger): from → opening balance before it, to / years / months → keep */
 function ul_compute($conn, $key, $o = []) {
