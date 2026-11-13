@@ -600,6 +600,18 @@ function rbac_resolve($page) {
     $page = strtolower($page);
     $menu = rbac_menu_pages();
     if (isset($menu[$page])) return [$page, 'view'];
+    // secondary-invoice import pages / endpoints are opened from several menu pages:
+    // allow whichever of them the role can add records on (Import Summary, Invoice Wise Sales History)
+    static $multi = ['import_secondary_invoices','import_secondary_invoices_multidate','secondary_import_multi',
+                     'process_secondary_import','process_secondary_import_multidate',
+                     'validate_import_data','validate_import_data_multidate'];
+    if (in_array($page, $multi, true)) {
+        $c = rbac_context();
+        foreach (['import_history','invoice_wise_sales_history','secondary_import_history'] as $t) {
+            if (isset($menu[$t]) && !empty($c['perms'][$t]['view']) && !empty($c['perms'][$t]['create'])) return [$t, 'create'];
+        }
+        return ['import_history', 'create'];
+    }
     if (isset($GLOBALS['RBAC_RELATED_PAGES'][$page])) return $GLOBALS['RBAC_RELATED_PAGES'][$page];
     if ($inf = rbac_infer_related($page)) return $inf;   // delete_x / edit_x / add_x → page x
     return [null, null];   // unprotected (only login)
@@ -725,7 +737,7 @@ function rbac_is_ajax() {
     $xrw = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '');
     $acc = strtolower($_SERVER['HTTP_ACCEPT'] ?? '');
     return $xrw === 'xmlhttprequest' || strpos($acc, 'application/json') !== false
-        || (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_REQUEST['action']) && strpos($acc, 'text/html') === false);
+        || (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && strpos($acc, 'text/html') === false);
 }
 
 function rbac_deny($action, $page) {
