@@ -8,6 +8,14 @@
  */
 if (!function_exists('sl_compute')) {
 function sl_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); }
+/** scheme no of a claim certificate description: the part before the first "-" if it is a known scheme, else any word / number in the line that equals a scheme code ($set = array_flip of codes) */
+function sl_cc_scheme($desc, array $set) {
+    $desc = (string)$desc;
+    $first = sl_norm(explode('-', $desc, 2)[0]);
+    if ($first !== '' && isset($set[$first])) return $first;
+    foreach (preg_split('/[^A-Za-z0-9]+/', $desc, -1, PREG_SPLIT_NO_EMPTY) as $t) { $t = sl_norm($t); if (isset($set[$t])) return $t; }
+    return null;
+}
 function sl_tbl($conn, $t) { $r = mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $t) . "'"); return $r && mysqli_num_rows($r) > 0; }
 function sl_compute($conn, $o) {
     $e = fn($v) => mysqli_real_escape_string($conn, (string)$v);
@@ -30,13 +38,13 @@ function sl_compute($conn, $o) {
         $entries[] = ['date' => $date ?: '', 'scheme' => trim($x['activity_code']), 'desc' => $sc['desc'], 'type' => 'Claim', 'ref' => $x['claim_moc_ref'] !== '' && $x['claim_moc_ref'] !== null ? 'Claim MOC ' . $x['claim_moc_ref'] : 'MOC ' . $x['moc_ref'], 'debit' => (float)$x['claim_amount'], 'credit' => 0.0, 'o' => 1];
     }
     if ($has_cc && $schemes) {
-        $codes = array_map(fn($k) => "'" . $e($k) . "'", array_keys($schemes));
-        $r = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, imported_at, claim_description, actual_amount,
-                                         UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) AS sn
-                                  FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND claim_description NOT LIKE '-%'
-                                    AND UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) IN (" . implode(',', $codes) . ") AND COALESCE(actual_amount,0) <> 0");
+        $set = array_flip(array_keys($schemes));
+        $r = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, imported_at, claim_description, actual_amount
+                                  FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND COALESCE(actual_amount,0) <> 0");
         while ($r && ($x = mysqli_fetch_assoc($r))) {
-            $sn = $x['sn']; $date = $x['invoice_date'] ?: ($x['banking_date'] ?: substr((string)$x['imported_at'], 0, 10));
+            $sn = sl_cc_scheme($x['claim_description'], $set);
+            if ($sn === null) continue;
+            $date = $x['invoice_date'] ?: ($x['banking_date'] ?: substr((string)$x['imported_at'], 0, 10));
             $entries[] = ['date' => $date ?: '', 'scheme' => $sn, 'desc' => $schemes[$sn]['desc'] ?? '', 'type' => 'Claim certificate', 'ref' => 'Tax inv ' . $x['tax_invoice_no'] . ' · ' . $x['claim_description'], 'debit' => 0.0, 'credit' => (float)$x['actual_amount'], 'o' => 2];
         }
     }

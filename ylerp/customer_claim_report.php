@@ -154,8 +154,15 @@ if (isset($_GET['export_xlsx'])) {
     $sh->set(1, 1, 'Customer Claim Report — all rows of the table' . ((trim($_REQUEST['date_from'] ?? '') . trim($_REQUEST['date_to'] ?? '')) !== '' ? ' (' . trim($_REQUEST['date_from'] ?? '…') . ' to ' . trim($_REQUEST['date_to'] ?? '…') . ')' : ''), ['b' => 1, 'sz' => 14]);
     foreach ($heads as $i => $h) $sh->set(3, $i + 1, $h, $H);
     $r = 4; $n = 0; $ta = $tv = $tt = 0.0;
+    $known = [];   // known scheme codes (Scheme Status import) for the description search
+    $kq = @mysqli_query($conn, "SELECT DISTINCT activity_code FROM scheme_status_items WHERE activity_code <> ''");
+    while ($kq && ($kr = mysqli_fetch_row($kq))) $known[strtoupper(preg_replace('/\.0+$/', '', trim($kr[0])))] = 1;
     if ($res) while ($x = mysqli_fetch_assoc($res)) {
         $n++; $desc = (string)$x['claim_description']; $sn = (strpos($desc, '-') !== false) ? trim(substr($desc, 0, strpos($desc, '-'))) : '';
+        $nk = strtoupper(preg_replace('/\.0+$/', '', $sn));
+        if ($known && ($nk === '' || !isset($known[$nk]))) {   // first part is not a scheme no → look for a scheme no anywhere in the description line
+            foreach (preg_split('/[^A-Za-z0-9]+/', $desc, -1, PREG_SPLIT_NO_EMPTY) as $tk) { $tk = strtoupper(preg_replace('/\.0+$/', '', $tk)); if (isset($known[$tk])) { $sn = $tk; break; } }
+        }
         $a = (float)$x['actual_amount']; $v = (float)$x['vat_amount']; $t = (float)$x['total_amount']; $ta += $a; $tv += $v; $tt += $t;
         $vals = [$n, $x['customer_code'], $x['customer_name'], $x['file_name'], $x['upload_date'], $x['ledger_type'], $x['status'], $x['claim_type'], $x['tax_invoice_no'], $x['invoice_date'], $x['banking_date'], $x['entity'], $sn, $desc, $a, $v, $t, $x['imported_at'], $x['imported_by']];
         foreach ($vals as $i => $val) $sh->set($r, $i + 1, $val === null ? '' : $val, ['border' => 1] + (in_array($i, [14, 15, 16], true) ? ['h' => 'right', 'nf' => 4] : []));
