@@ -9,57 +9,26 @@ date_default_timezone_set('Asia/Colombo');
 ob_start();
 include 'config.php';
 function sl_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
-function sl_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); }
+require_once __DIR__ . '/scheme_ledger_lib.php';
 function sl_ok($d) { return (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$d); }
 function sl_d($v) { return $v ? date('d M Y', strtotime($v)) : '—'; }
 function sl_m($v, $dash = true) { if ($v === null || $v === '') return $dash ? '' : '0.00'; return $v < 0 ? '(' . number_format(abs($v), 2) . ')' : number_format($v, 2); }
-$q = fn($t) => ($r = mysqli_query($GLOBALS['conn'], "SHOW TABLES LIKE '$t'")) && mysqli_num_rows($r) > 0;
-$has_items = $q('scheme_status_items'); $has_cc = $q('claim_cert_items');
+$has_items = sl_tbl($conn, 'scheme_status_items');
 $e = fn($v) => mysqli_real_escape_string($GLOBALS['conn'], (string)$v);
 
 $f_from = sl_ok($_GET['date_from'] ?? '') ? $_GET['date_from'] : '';
 $f_to   = sl_ok($_GET['date_to'] ?? '') ? $_GET['date_to'] : '';
 if ($f_from && $f_to && $f_to < $f_from) [$f_from, $f_to] = [$f_to, $f_from];
 $f_moc = trim($_GET['moc'] ?? ''); $f_q = trim($_GET['q'] ?? ''); $f_asc = !empty($_GET['oldest_first']);
+$csv = fn($v) => array_values(array_filter(array_map('intval', is_array($v) ? $v : preg_split('/[,\s]+/', (string)$v, -1, PREG_SPLIT_NO_EMPTY))));
+$f_years = $csv($_GET['years'] ?? ''); $f_months = $csv($_GET['months'] ?? '');
 
-/* schemes that take part (never DAMAGE) */
-$schemes = []; $mocs = [];
-if ($has_items) {
-    $w = ["UPPER(TRIM(activity_type)) <> 'DAMAGE'"];
-    if ($f_moc !== '') $w[] = "moc_ref = '{$e($f_moc)}'";
-    if ($f_q !== '') { $s = $e($f_q); $w[] = "(activity_code LIKE '%$s%' OR activity_desc LIKE '%$s%')"; }
-    $r = mysqli_query($conn, "SELECT * FROM scheme_status_items WHERE " . implode(' AND ', $w));
-    while ($r && ($x = mysqli_fetch_assoc($r))) { $k = sl_norm($x['activity_code']); $schemes[$k]['rows'][] = $x; if (!isset($schemes[$k]['desc'])) $schemes[$k]['desc'] = $x['activity_desc']; }
-    $r = mysqli_query($conn, "SELECT DISTINCT moc_ref FROM scheme_status_items WHERE moc_ref <> '' AND UPPER(TRIM(activity_type)) <> 'DAMAGE' ORDER BY moc_ref DESC"); while ($r && ($x = mysqli_fetch_assoc($r))) $mocs[] = $x['moc_ref'];
-}
-/* entries */
-$entries = [];
-foreach ($schemes as $k => $sc) foreach ($sc['rows'] as $x) {
-    if ($x['claim_amount'] === null || (float)$x['claim_amount'] <= 0) continue;
-    $date = $x['claim_date'] ?: ($x['end_date'] ?: $x['start_date']);
-    $entries[] = ['date' => $date ?: '', 'scheme' => trim($x['activity_code']), 'desc' => $sc['desc'], 'type' => 'Claim', 'ref' => $x['claim_moc_ref'] !== '' && $x['claim_moc_ref'] !== null ? 'Claim MOC ' . $x['claim_moc_ref'] : 'MOC ' . $x['moc_ref'], 'debit' => (float)$x['claim_amount'], 'credit' => 0.0, 'o' => 1];
-}
-if ($has_cc && $schemes) {
-    $codes = array_map(fn($k) => "'" . $e($k) . "'", array_keys($schemes));
-    $r = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, imported_at, customer_code, claim_description, actual_amount,
-                                     UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) AS sn
-                              FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND claim_description NOT LIKE '-%'
-                                AND UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) IN (" . implode(',', $codes) . ") AND COALESCE(actual_amount,0) <> 0");
-    while ($r && ($x = mysqli_fetch_assoc($r))) {
-        $sn = $x['sn']; $date = $x['invoice_date'] ?: ($x['banking_date'] ?: substr((string)$x['imported_at'], 0, 10));
-        $entries[] = ['date' => $date ?: '', 'scheme' => $sn, 'desc' => $schemes[$sn]['desc'] ?? '', 'type' => 'Claim certificate', 'ref' => 'Tax inv ' . $x['tax_invoice_no'] . ' · ' . $x['claim_description'], 'debit' => 0.0, 'credit' => (float)$x['actual_amount'], 'o' => 2];
-    }
-}
-/* statement: oldest → newest with a running balance, opening balance before the "from" date */
-usort($entries, fn($a, $b) => strcmp($a['date'], $b['date']) ?: $a['o'] <=> $b['o'] ?: strcmp($a['scheme'], $b['scheme']));
-$open = 0.0; $stmt = []; $bal = 0.0; $tdr = 0.0; $tcr = 0.0;
-foreach ($entries as $en) {
-    if ($f_from && $en['date'] !== '' && $en['date'] < $f_from) { $open += $en['debit'] - $en['credit']; continue; }
-    if ($f_to && $en['date'] !== '' && $en['date'] > $f_to) continue;
-    $stmt[] = $en;
-}
-$bal = $open; foreach ($stmt as &$en) { $bal += $en['debit'] - $en['credit']; $en['bal'] = round($bal, 2); $tdr += $en['debit']; $tcr += $en['credit']; } unset($en);
-$closing = round($bal, 2);
+/* MOC Ref list for the filter */
+$mocs = [];
+if ($has_items) { $r = mysqli_query($conn, "SELECT DISTINCT moc_ref FROM scheme_status_items WHERE moc_ref <> '' AND UPPER(TRIM(activity_type)) <> 'DAMAGE' ORDER BY moc_ref DESC"); while ($r && ($x = mysqli_fetch_assoc($r))) $mocs[] = $x['moc_ref']; }
+/* the statement (shared calculation: also used by the dashboard) */
+$L = sl_compute($conn, ['from' => $f_from, 'to' => $f_to, 'moc' => $f_moc, 'q' => $f_q, 'years' => $f_years, 'months' => $f_months]);
+$stmt = $L['stmt']; $open = $L['open']; $closing = $L['closing']; $tdr = $L['debit']; $tcr = $L['credit']; $schemes = array_fill(0, $L['schemes'], 1);
 if (!$f_asc) $stmt = array_reverse($stmt);      // newest first: the last balance is the first line
 
 /* Excel */
@@ -80,7 +49,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
 }
 ob_end_flush();
 include 'header.php';
-$active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sl_d($f_from) : '…') . ' → ' . ($f_to ? sl_d($f_to) : '…') : '', $f_moc !== '' ? 'MOC ' . $f_moc : '', $f_q !== '' ? '“' . $f_q . '”' : '', $f_asc ? 'Oldest first' : '']);
+$active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sl_d($f_from) : '…') . ' → ' . ($f_to ? sl_d($f_to) : '…') : '', $f_moc !== '' ? 'MOC ' . $f_moc : '', $f_years ? 'Year ' . implode(', ', $f_years) : '', $f_months ? 'Month ' . implode(', ', array_map(fn($m) => date('M', mktime(0, 0, 0, $m, 1)), $f_months)) : '', $f_q !== '' ? '“' . $f_q . '”' : '', $f_asc ? 'Oldest first' : '']);
 ?>
 <style>
 .slr{max-width:1500px;margin:0 auto;padding:16px;font-family:'Inter',system-ui,sans-serif;color:#111827}.slr h2{margin:0 0 3px;font-size:22px}.slr .sub{color:#6b7280;font-size:13px;margin:0 0 14px}
@@ -103,6 +72,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sl_d($f_from) :
       <div class="fld"><label>Date to</label><input type="date" name="date_to" value="<?= sl_h($f_to) ?>"></div>
       <div class="fld"><label>MOC Ref</label><select name="moc"><option value="">All</option><?php foreach ($mocs as $m): ?><option <?= $f_moc === $m ? 'selected' : '' ?>><?= sl_h($m) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Scheme no / description</label><input type="search" name="q" value="<?= sl_h($f_q) ?>" placeholder="scheme no or description"></div>
+      <?php if ($f_years): ?><input type="hidden" name="years" value="<?= sl_h(implode(',', $f_years)) ?>"><?php endif; ?><?php if ($f_months): ?><input type="hidden" name="months" value="<?= sl_h(implode(',', $f_months)) ?>"><?php endif; ?>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;padding-bottom:8px"><input type="checkbox" name="oldest_first" value="1" <?= $f_asc ? 'checked' : '' ?>> Oldest first</label>
       <button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Show</button><a class="btn o" href="scheme_ledger_report.php">Reset</a>
       <a class="btn o" data-no-loader href="?<?= sl_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></div></form>
