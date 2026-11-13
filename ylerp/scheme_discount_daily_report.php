@@ -14,6 +14,15 @@ $ready = $has && mysqli_num_rows($has) > 0;
 /* scheme code key: same code whether it is typed 41388823, ' 41388823 ' or 41388823.0 (case ignored) — defined first: the pop-up requests below use it */
 function sd_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); }
 
+/** scheme nos written inside the activity description, e.g. "Ponds FC Value Bill [DC] Dis (National)41425974" -> 41425974 (6+ digit numbers) */
+function sd_desc_keys($desc) { preg_match_all('/\d{6,}/', (string)$desc, $m); return array_values(array_unique(array_map('sd_norm', $m[0]))); }
+/** first of [activity code, numbers in the description] that has claim certificate rows in $tally */
+function sd_cc_pick(array $tally, $code, $desc) {
+    $k = sd_norm($code); if (isset($tally[$k])) return $tally[$k];
+    foreach (sd_desc_keys($desc) as $a) if (isset($tally[$a])) return $tally[$a];
+    return null;
+}
+
 /* bill-wise rows of one scheme code (Bill Wise Scheme Analysis import = bws_items) for the pop-up */
 if (($_GET['ajax'] ?? '') === 'bws_rows') {
     while (ob_get_level()) ob_end_clean();
@@ -65,7 +74,7 @@ if (($_GET['ajax'] ?? '') === 'claim_rows') {
     $code = trim($_GET['code'] ?? ''); $out = ['success' => true, 'rows' => [], 'actual' => 0, 'vat' => 0, 'count' => 0];
     $chk = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
     if ($code === '' || !$chk || !mysqli_num_rows($chk)) { echo json_encode(['success' => false, 'message' => 'No Customer Claim Certificate data.']); exit; }
-    $t = sd_cc_tally($conn, [sd_norm($code)], true)[sd_norm($code)] ?? null;
+    $t = sd_cc_pick(sd_cc_tally($conn, array_merge([sd_norm($code)], sd_desc_keys($_GET['desc'] ?? '')), true), $code, $_GET['desc'] ?? '');
     if ($t) { $out['rows'] = $t['rows']; $out['actual'] = $t['act']; $out['vat'] = $t['vat']; }
     $out['count'] = count($out['rows']); $out['actual'] = round($out['actual'], 2); $out['vat'] = round($out['vat'], 2);
     echo json_encode($out); exit;
@@ -113,13 +122,15 @@ if ($items && $cb && mysqli_num_rows($cb)) {
     while ($q && ($x = mysqli_fetch_assoc($q))) $bws[$x['sn']] = ['n' => (int)$x['n'], 'sd' => round((float)$x['sd'] + (float)$x['fv'], 2), 'disc' => (float)$x['sd'], 'fv' => (float)$x['fv']];     // scheme discount + free value (where the bill wise data has one)
 }
 /* claim certificates (Customer Claim Certificate Import): scheme no = part before the first "-", else any scheme no found in the description (sd_cc_tally) — feeds Claim Certificate Actual, Balance, totals, monthly summary and the Excel export */
-$cc = [];
+$cc = []; $cct = [];
 $cq = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
 if ($items && $cq && mysqli_num_rows($cq)) {
-    foreach (sd_cc_tally($conn, array_values(array_unique(array_map(fn($x) => sd_norm($x['activity_code']), $items)))) as $k => $t) $cc[$k] = ['n' => $t['n'], 'act' => $t['act']];
+    $allk = [];
+    foreach ($items as $x) { $allk[sd_norm($x['activity_code'])] = 1; foreach (sd_desc_keys($x['activity_desc']) as $a) $allk[$a] = 1; }
+    $cct = sd_cc_tally($conn, array_keys($allk));     // claim certificate rows per scheme no (first part of the description, else anywhere in it)
 }
 foreach ($items as &$__x) {
-    $k = sd_norm($__x['activity_code']); $b = $bws[$k] ?? null; $c2 = $cc[$k] ?? null;
+    $k = sd_norm($__x['activity_code']); $b = $bws[$k] ?? null; $c2 = $cct ? sd_cc_pick($cct, $__x['activity_code'], $__x['activity_desc']) : null;   // scheme code not on the certificate -> the number written in the scheme description
     $__x['bws_n'] = $b ? $b['n'] : 0; $__x['bws_sd'] = $b ? $b['sd'] : null;
     $__x['cc_n'] = $c2 ? $c2['n'] : 0; $__x['cc_act'] = $c2 ? $c2['act'] : null;
     $has_claim = $__x['claim_amount'] !== null;
@@ -249,7 +260,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
   document.addEventListener('click',function(e){ var a=e.target.closest('.bwsl,.ccl'); if(!a) return; e.preventDefault(); var claim=a.classList.contains('ccl');
     $('bwsT').textContent='Scheme '+a.dataset.code+(claim?' — claim certificate rows (Customer Claim Certificate Import)':' — scheme discount as per invoice (bill wise rows)'); $('bwsS').textContent=a.dataset.desc||''; $('bwsK').innerHTML='Loading…'; $('bwsB').innerHTML=''; $('bwsH').innerHTML='';
     m.style.display='flex'; document.body.style.overflow='hidden';
-    fetch('scheme_discount_daily_report.php?ajax='+(claim?'claim_rows':'bws_rows')+'&code='+encodeURIComponent(a.dataset.code),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+    fetch('scheme_discount_daily_report.php?ajax='+(claim?'claim_rows':'bws_rows')+'&code='+encodeURIComponent(a.dataset.code)+'&desc='+encodeURIComponent(a.dataset.desc||''),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
       if(!d.success){ $('bwsK').innerHTML='<span style="color:#b91c1c">'+esc(d.message||'Could not load')+'</span>'; return; }
       var cap=d.count>=5000?'<span style="color:#b45309">first 5,000 rows shown</span>':'';
       if(claim){
