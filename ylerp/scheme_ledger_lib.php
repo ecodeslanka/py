@@ -39,11 +39,16 @@ function sl_compute($conn, $o) {
     }
     if ($has_cc && $schemes) {
         $set = array_flip(array_keys($schemes));
+        // scheme whose code is not on the certificate: use the scheme no written in its description, e.g. "Ponds FC Value Bill [DC] Dis (National)41425974"
+        $alt = [];
+        foreach ($schemes as $k => $sc) { preg_match_all('/\d{6,}/', (string)($sc['desc'] ?? ''), $mm); foreach ($mm[0] as $a) { $a = sl_norm($a); if (!isset($set[$a]) && !isset($alt[$a])) $alt[$a] = $k; } }
+        $set2 = $set + array_fill_keys(array_keys($alt), 1);
         $r = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, imported_at, claim_description, actual_amount
                                   FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND COALESCE(actual_amount,0) <> 0");
         while ($r && ($x = mysqli_fetch_assoc($r))) {
-            $sn = sl_cc_scheme($x['claim_description'], $set);
+            $sn = sl_cc_scheme($x['claim_description'], $set2);
             if ($sn === null) continue;
+            if (isset($alt[$sn]) && !isset($set[$sn])) $sn = $alt[$sn];
             $date = $x['invoice_date'] ?: ($x['banking_date'] ?: substr((string)$x['imported_at'], 0, 10));
             $entries[] = ['date' => $date ?: '', 'scheme' => $sn, 'desc' => $schemes[$sn]['desc'] ?? '', 'type' => 'Claim certificate', 'ref' => 'Tax inv ' . $x['tax_invoice_no'] . ' · ' . $x['claim_description'], 'debit' => 0.0, 'credit' => (float)$x['actual_amount'], 'o' => 2];
         }
