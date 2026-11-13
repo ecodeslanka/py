@@ -8,11 +8,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
     if (empty($_SESSION['user_id'])) { echo json_encode(['success' => false, 'message' => 'Please log in.']); exit; }
     require_once __DIR__ . '/unilever_receivable_lib.php';
     $F = ur_filters($_GET);
-    $d = ur_summary($conn, $F);
-    $rows = array_values(array_filter($d['rows'], fn($r) => rbac_can('view', $r['page'])));   // only what this role may open
+    /* what this role may open — worked out BEFORE the session is released */
+    $allowed = []; foreach (['purchase_return_summary_report', 'damaged_claim', 'scheme_ledger_report', 'debit_note', 'dal', 'promoters_salary_cl', 'sr_incentive_cc', 'sscl_vat', 'pi_other_adjustments'] as $pg) $allowed[$pg] = rbac_can('view', $pg);
+    /* the summary can take a few seconds: let go of the session file lock first, otherwise every other page / request of this user waits for it */
+    session_write_close();
+    /* short cache (90 s) per filter set — the Refresh button skips it */
+    $ck = rtrim(sys_get_temp_dir(), '/\\') . '/yms_ur_' . md5(__DIR__ . json_encode($F)) . '.json';
+    $d = null;
+    if (empty($_GET['nocache']) && is_file($ck) && (time() - filemtime($ck)) < 90) $d = json_decode((string)@file_get_contents($ck), true);
+    if (!is_array($d)) { $d = ur_summary($conn, $F); @file_put_contents($ck, json_encode($d)); }
+    $rows = array_values(array_filter($d['rows'], fn($r) => !empty($allowed[$r['page']])));   // only what this role may open
     $tot = ['receivable' => 0, 'received' => 0, 'paid' => 0, 'balance' => 0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
-    echo json_encode(['success' => true, 'rows' => $rows, 'total' => array_map(fn($v) => round($v, 2), $tot), 'debit_notes' => $d['debit_notes'], 'debit_notes_ok' => rbac_can('view', 'debit_note'),
+    echo json_encode(['success' => true, 'rows' => $rows, 'total' => array_map(fn($v) => round($v, 2), $tot), 'debit_notes' => $d['debit_notes'], 'debit_notes_ok' => !empty($allowed['debit_note']),
                       'as_at' => $F['as_at'], 'filters' => $F]);
     exit;
 }
@@ -117,9 +125,10 @@ body.ms-dark .ur,body.ms-dark .ur-t tbody tr{background:#1f2937;border-color:#37
   function restore(){ var s=null; try{ s=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
     $('urAsAtIn').value=today(); if(!s) return; $('urFrom').value=s.from||''; $('urTo').value=s.to||''; $('urLast').checked=!!s.last; setPicked('urYMenu',s.y||[]); setPicked('urMMenu',s.m||[]); }
   var LEDGER='';
-  function load(){
+  function load(fresh){
     var f=read(); save(f); sync();
-    var qs=new URLSearchParams({ajax:'ur_summary',as_at:f.as_at,from:f.from,to:f.to,years:f.years,months:f.months});
+    var qs=new URLSearchParams({ajax:'ur_summary',as_at:f.as_at,from:f.from,to:f.to,years:f.years,months:f.months}); if(fresh) qs.set('nocache','1');
+    $('urBody').style.opacity='.45'; $('urAsAt').textContent='loading…';
     fetch('index.php?'+qs.toString(),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
       if(!d.success||!d.rows||!d.rows.length){ box.style.display='none'; return; }
       box.style.display='block';
@@ -135,7 +144,7 @@ body.ms-dark .ur,body.ms-dark .ur-t tbody tr{background:#1f2937;border-color:#37
           +'<td class="r">'+(r.receivable?fmt(r.receivable):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.paid!=null&&r.paid>0?fmt(r.paid):'<span class="ur-dash">—</span>')+'</td>'
           +'<td class="r"><span class="ur-bal '+bc+'">'+neg(r.balance)+'</span></td>'
           +'<td class="ur-rcv"><div class="ur-bar"><i class="'+cls+'" style="width:'+pc+'%"></i></div><div class="ur-pc">'+pc+'% recovered</div></td></tr>'; }).join('');
-      $('urFoot').innerHTML='<tr><td colspan="2">Total</td><td class="r">'+fmt(t.receivable)+'</td><td class="r">'+fmt(t.received)+'</td><td class="r">'+fmt(t.paid)+'</td><td class="r">'+neg(t.balance)+'</td><td></td></tr>';
+      $('urBody').style.opacity='1'; $('urFoot').innerHTML='<tr><td colspan="2">Total</td><td class="r">'+fmt(t.receivable)+'</td><td class="r">'+fmt(t.received)+'</td><td class="r">'+fmt(t.paid)+'</td><td class="r">'+neg(t.balance)+'</td><td></td></tr>';
     }).catch(function(){ box.style.display='none'; });
   }
   /* Scheme Ledger window */
@@ -148,9 +157,9 @@ body.ms-dark .ur,body.ms-dark .ur-t tbody tr{background:#1f2937;border-color:#37
   document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&$('urModal').classList.contains('open')) closeLedger(); });
   $('urBody').addEventListener('click',function(e){ var tr=e.target.closest('tr'); if(!tr) return; if(tr.dataset.ledger) openLedger(tr.dataset.ledger); else if(tr.dataset.p) location.href=tr.dataset.p; });
   $('urKpis').addEventListener('click',function(e){ var k=e.target.closest('[data-go]'); if(k) location.href=k.dataset.go; });
-  $('urApply').addEventListener('click',load); $('urReload').addEventListener('click',load);
+  $('urApply').addEventListener('click',function(){ load(false); }); $('urReload').addEventListener('click',function(){ load(true); });
   $('urReset').addEventListener('click',function(){ $('urAsAtIn').value=today(); $('urFrom').value=''; $('urTo').value=''; $('urLast').checked=false; setPicked('urYMenu',[]); setPicked('urMMenu',[]); load(); });
-  restore(); sync(); load();
+  restore(); sync(); load(false);
 })();
 </script>
 

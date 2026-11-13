@@ -8,6 +8,9 @@ if (!function_exists('al_ensure')) {
 function al_ensure() {
     global $conn;
     static $done = false; if ($done) return; $done = true;
+    /* the tables / columns only need checking once in a while, not on every single request */
+    $__flag = rtrim(sys_get_temp_dir(), '/\\') . '/yms_al_ok_' . md5(__DIR__) . '.flag';
+    if (is_file($__flag) && (time() - filemtime($__flag)) < 3600) return;
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS activity_log (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NULL, username VARCHAR(100) NULL, role_name VARCHAR(100) NULL,
@@ -20,6 +23,7 @@ function al_ensure() {
         $r = @mysqli_query($conn, "SHOW COLUMNS FROM users LIKE '$c'");
         if ($r && !mysqli_num_rows($r)) @mysqli_query($conn, "ALTER TABLE users ADD COLUMN `$c` $def");
     }
+    @file_put_contents($__flag, date('c'));
 }
 function al_ip() {
     foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $k)
