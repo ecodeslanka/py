@@ -35,6 +35,10 @@ $rows_result = mysqli_query($conn,
             SUM(short_excess)                                               AS net_se,
             SUM(CASE WHEN short_excess < 0 THEN -short_excess ELSE 0 END)   AS short_qty,
             SUM(CASE WHEN short_excess > 0 THEN  short_excess ELSE 0 END)   AS excess_qty,
+            -- good units missing (Adj Good - Actual) that came back as extra damage
+            -- (Actual Dmg - Adj Dmg) are damage, not a real shortage
+            SUM(CASE WHEN actual_qty IS NOT NULL AND actual_damage_qty IS NOT NULL
+                     THEN GREATEST(0, LEAST(COALESCE(adj_qty_good_units,0) - COALESCE(actual_qty,0), COALESCE(actual_damage_qty,0) - COALESCE(adj_qty_damage,0))) ELSE 0 END)                                    AS dmg_short_qty,
             COUNT(*)                                                        AS line_count,
             COUNT(DISTINCT delivery_person_name)                            AS person_count,
             GROUP_CONCAT(
@@ -44,8 +48,8 @@ $rows_result = mysqli_query($conn,
      FROM unloading_data
      WHERE import_id = $import_id
        AND short_excess IS NOT NULL
-       AND short_excess <> 0
      GROUP BY sku_code
+     HAVING SUM(short_excess <> 0) > 0 OR dmg_short_qty > 0
      ORDER BY net_se ASC, sku_code ASC");
 
 // Totals
@@ -53,6 +57,7 @@ $total_short  = 0;
 $total_excess = 0;
 $total_net    = 0;
 $total_actual = 0;
+$total_damage = 0;
 $se_rows = [];
 if ($rows_result) {
     while ($r = mysqli_fetch_assoc($rows_result)) {
@@ -60,6 +65,7 @@ if ($rows_result) {
         $total_excess += floatval($r['excess_qty']);
         $total_net    += floatval($r['net_se']);
         $total_actual += floatval($r['actual_qty']);
+        $total_damage += floatval($r['dmg_short_qty']);
         $se_rows[] = $r;
     }
 }
@@ -212,6 +218,7 @@ if ($rows_result) {
                     <th style="text-align:right;">Qty</th>
                     <th style="text-align:right;">Short</th>
                     <th style="text-align:right;">Excess</th>
+                    <th style="text-align:right;">Damage (shortage.php)</th>
                     <th style="text-align:right;">Net Excess / Short</th>
                 </tr>
             </thead>
@@ -254,6 +261,11 @@ if ($rows_result) {
                             <span style="font-weight:600;color:#16a34a;">+<?php echo number_format($excess_q, 2); ?></span>
                         <?php else: ?><span style="color:#d1d5db;">—</span><?php endif; ?>
                     </td>
+                    <td style="text-align:right;">
+                        <?php $dq = floatval($r['dmg_short_qty']); if ($dq > 0): ?>
+                            <span style="font-weight:600;color:#b45309;"><i class="fa-solid fa-shield-halved"></i> <?php echo number_format($dq, 2); ?></span>
+                        <?php else: ?><span style="color:#d1d5db;">—</span><?php endif; ?>
+                    </td>
                     <td style="text-align:right;background:<?php echo $net_bg; ?>;">
                         <span style="font-weight:700;color:<?php echo $net_color; ?>;"><?php echo $net_txt; ?></span>
                     </td>
@@ -270,11 +282,12 @@ if ($rows_result) {
                     <td style="text-align:right;"><?php echo number_format($total_actual, 2); ?></td>
                     <td style="text-align:right;color:#dc2626;">-<?php echo number_format($total_short, 2); ?></td>
                     <td style="text-align:right;color:#16a34a;">+<?php echo number_format($total_excess, 2); ?></td>
+                    <td style="text-align:right;color:#b45309;"><?php echo number_format($total_damage, 2); ?></td>
                     <td style="text-align:right;color:<?php echo $tn_color; ?>;"><?php echo $tn_txt; ?></td>
                 </tr>
             <?php else: ?>
                 <tr>
-                    <td colspan="8" class="empty-state">
+                    <td colspan="9" class="empty-state">
                         <i class="fa-solid fa-circle-check"></i>
                         <p>No shortage or excess items for this import</p>
                     </td>
@@ -431,6 +444,7 @@ foreach ($se_rows as $r) {
         'net'      => round(floatval($r['net_se']), 2),
         'sku_code' => $r['sku_code'],
         'sku_desc' => $r['sku_desc'],
+        'damage'   => round(floatval($r['dmg_short_qty']), 2),
     ];
 }
 ?>
@@ -555,21 +569,39 @@ function applyNetSystemSe(preview){
             excelTotal = (excelTotal || 0) + q;
         });
 
-        if (Math.abs(net) < 0.005 && excelTotal === null) return;
+        if (Math.abs(net) < 0.005 && excelTotal === null && !(Number(sys.damage) > 0)) return;
 
         let status;
         if (excelTotal === null) status = 'not_in_excel';
         else status = Math.abs(Math.abs(net) - Math.abs(excelTotal)) < 0.005 ? 'matched' : 'mismatch';
 
         const base = rows.find(r => r.match_status !== 'not_in_system') || rows[0] || {};
+
+        // Auto damage (from shortage.php): good units missing (Adj Good - Actual) that came
+        // back as extra damaged units (Actual Dmg - Adj Dmg). If the SKU nets to zero and has
+        // no Excel row, the missing good units are fully explained by damage -> mark damage.
+        const dmg = Math.round((Number(sys.damage) || 0) * 100) / 100;
+        let dmgRef = '', dmgPartial = 0;
+        if (dmg > 0) {
+            if (Math.abs(net) < 0.005 && excelTotal === null) {
+                status = 'damage_cleared';
+                dmgRef = 'Auto: damage ' + dmg.toFixed(2) + ' per shortage.php';
+            } else {
+                dmgPartial = dmg;
+            }
+        }
         out.push({
             ...base,
             sku_code:      base.sku_code || sys.sku_code,
             sku_desc:      base.sku_desc || sys.sku_desc,
             delivery_date: base.delivery_date || IMPORT_DELIVERY_DATE,
-            system_qty:    net,
+            system_qty:    (status === 'damage_cleared' && Math.abs(net) < 0.005) ? -dmg : net,
             excel_qty:     excelTotal === null ? null : Math.round(excelTotal * 100) / 100,
-            match_status:  status
+            match_status:  status,
+            damage_auto:   status === 'damage_cleared',
+            damage_cleared_ref: dmgRef,
+            damage_qty:    dmg,
+            damage_partial: dmgPartial
         });
     });
     return out;
@@ -587,8 +619,10 @@ function renderPreview(){
             statusExtra = `<div class="manual-note"><i class="fa-solid fa-link"></i> Manually matched with <b>${esc(r.manual_matched_sku)}</b> — ${esc(r.manual_matched_desc)} (Excel Qty: ${fmtQty(r.manual_matched_qty)})</div>
                 <button type="button" class="undo-link" onclick="resetRowStatus(${r._id})"><i class="fa-solid fa-rotate-left"></i> Undo</button>`;
         } else if (r.match_status === 'damage_cleared') {
-            statusExtra = `<div class="ikea-note"><i class="fa-solid fa-shield-halved"></i> Marked damage cleared in IKEA${r.damage_cleared_ref ? (' &middot; Ref: <b>' + esc(r.damage_cleared_ref) + '</b>') : ''}</div>
+            statusExtra = `<div class="ikea-note"><i class="fa-solid fa-shield-halved"></i> ${r.damage_auto ? 'Auto-marked damage (' + Number(r.damage_qty).toFixed(2) + ' from shortage.php)' : 'Marked damage cleared in IKEA'}${(!r.damage_auto && r.damage_cleared_ref) ? (' &middot; Ref: <b>' + esc(r.damage_cleared_ref) + '</b>') : ''}</div>
                 <button type="button" class="undo-link" onclick="resetRowStatus(${r._id})"><i class="fa-solid fa-rotate-left"></i> Undo</button>`;
+        } else if (r.damage_partial > 0 && !isConsumed) {
+            statusExtra = `<div class="ikea-note"><i class="fa-solid fa-shield-halved"></i> ${Number(r.damage_partial).toFixed(2)} damage found in shortage.php (good short offset by extra damage)</div>`;
         } else if (isConsumed) {
             statusExtra = `<div class="manual-note-used"><i class="fa-solid fa-check"></i> Used in manual match with <b>${esc(r.consumed_by_sku)}</b></div>`;
         }
@@ -740,6 +774,7 @@ function resetRowStatus(sysId){
 
     if (item.match_status === 'damage_cleared') {
         delete item.damage_cleared_ref;
+        item.damage_auto = false;
     }
 
     item.match_status = 'not_in_excel';
