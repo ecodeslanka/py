@@ -8,6 +8,11 @@ Offline desktop POS (Electron). No database server needed – all data lives in 
 - **Items** – barcode, category, unit, **cost price** and **selling price** (live margin), stock, low-stock alert, add-stock.
 - **Customers & credit** – create customers (also inside the POS), credit limit, opening balance, sell on credit, receive payments, running ledger, receivables report.
 - **Printing** – 58 mm and 80 mm thermal receipts, A4 invoice, choose printer, silent print, preview, reprint.
+- **Inventory** – stock levels, stock-take / adjustments (damage, expiry, count) and a full **inventory log** of every stock movement.
+- **GRN & suppliers** – goods-received notes that raise stock and update cost price, supplier credit balances, **supplier payments** and ledgers.
+- **Daily cash book** – opening, cash in/out, closing, manual entries and day-close cash count with over/short.
+- **Edit saved bills** on the POS screen (`F5`) – stock, credit and profit are corrected and logged.
+- **Modern themes** – light/dark and six accent colours. Powered by [ECODES IT SOLUTIONS](https://ecodes.lk).
 - **Reports** – profit summary (sales, cost, gross profit, expenses, **net profit**), item profit, daily chart, by cashier, stock value, customer credit. CSV export. Expenses page feeds net profit.
 - **Company settings** – name, address, email, contact no., website, **logo upload**, advertisement line and invoice footer printed on every bill.
 - **Users** – default login **admin / admin** (change it in Settings). Roles: Administrator, Cashier (cashier can't see cost/profit or admin pages).

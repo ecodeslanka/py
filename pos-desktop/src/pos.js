@@ -1,6 +1,7 @@
 'use strict';
 /* ===== POS screen ===== */
-const newCart = () => ({ customerId: null, lines: [], discType: 'amt', discVal: 0, note: '' });
+const newCart = () => ({ customerId: null, lines: [], discType: 'amt', discVal: 0, note: '', editId: null, editNo: '', editPaid: 0, editMethod: '' });
+const canEditBills = () => isAdmin() || S.settings.cashierCanEditBills;
 let cart = newCart();
 let selLine = -1;
 let catFilter = 'All';
@@ -21,7 +22,7 @@ PAGES.pos = async function (m) {
   m.innerHTML = `<div class="pos"><section class="catalog">
     <div class="searchbar"><input id="q" placeholder="🔍  Search item or scan barcode…  (F2)" autocomplete="off"></div>
     <div class="chips" id="chips"></div><div class="grid" id="grid"></div>
-    <div class="keys"><span><kbd>F2</kbd> Search</span><span><kbd>F3</kbd> Customer</span><span><kbd>F4</kbd> Discount</span><span><kbd>↑↓</kbd> Select line</span><span><kbd>+</kbd><kbd>−</kbd> Qty</span><span><kbd>Del</kbd> Remove</span><span><kbd>F6</kbd> Hold</span><span><kbd>F7</kbd> Recall</span><span><kbd>F8</kbd> Clear</span><span><kbd>F9</kbd> Pay</span><span><kbd>F10</kbd> Quick cash</span><span><kbd>F1</kbd> Help</span></div>
+    <div class="keys"><span><kbd>F2</kbd> Search</span><span><kbd>F3</kbd> Customer</span><span><kbd>F4</kbd> Discount</span><span><kbd>↑↓</kbd> Select line</span><span><kbd>+</kbd><kbd>−</kbd> Qty</span><span><kbd>Del</kbd> Remove</span><span><kbd>F5</kbd> Edit bill</span><span><kbd>F6</kbd> Hold</span><span><kbd>F7</kbd> Recall</span><span><kbd>F8</kbd> Clear</span><span><kbd>F9</kbd> Pay</span><span><kbd>F10</kbd> Quick cash</span><span><kbd>F1</kbd> Help</span><span class="pwk">Powered by <a href="#" data-ext="https://ecodes.lk">ECODES IT SOLUTIONS</a></span></div>
   </section><aside class="bill" id="bill"></aside></div>`;
   const q = $('#q');
   q.addEventListener('input', renderGrid);
@@ -72,7 +73,8 @@ function renderBill(scroll) {
   const t = cartCalc(), c = custOf();
   const canPrice = isAdmin() || S.settings.cashierCanEditPrice;
   bill.innerHTML = `<div class="top"><button class="cust" data-a="cust"><b>${c ? '👤 ' + esc(c.name) : '👤 Walk-in customer'} <small>(F3)</small></b><small>${c ? (c.balance > 0 ? 'Owes ' + money(c.balance) : 'No dues') + (c.creditLimit ? ' · limit ' + money(c.creditLimit) : '') : 'Click to choose / create customer'}</small></button>
-      <button class="btn sm" data-a="hold" title="F6">⏸ Hold</button><button class="btn sm" data-a="recall" title="F7">📂 Recall</button></div>
+      <button class="btn sm" data-a="hold" title="Hold bill (F6)">⏳</button><button class="btn sm" data-a="recall" title="Recall held bill (F7)">📂</button>${canEditBills() ? '<button class="btn sm" data-a="bills" title="Edit a saved bill (F5)">✏️</button>' : ''}</div>
+    ${cart.editId ? `<div class="editbar"><span>✏️ Editing ${esc(cart.editNo)}</span><button class="btn sm" data-a="canceledit">Cancel edit</button></div>` : ''}
     <div class="lines" id="lines">${cart.lines.length ? cart.lines.map((l, i) => `<div class="ln ${i === selLine ? 'sel' : ''}" data-i="${i}"><div class="nm">${esc(l.name)}</div><div class="tt">${money(l.qty * l.price)}</div>
       <div class="ctl"><button data-a="dec" data-i="${i}">−</button><input data-f="qty" data-i="${i}" type="number" step="any" min="0" value="${l.qty}"><button data-a="inc" data-i="${i}">+</button><span class="muted">×</span><input class="pr" data-f="price" data-i="${i}" type="number" step="any" min="0" value="${l.price}" ${canPrice ? '' : 'disabled'}><button class="x" data-a="del" data-i="${i}">✕</button></div></div>`).join('')
       : '<div class="empty">🛒<br>Scan a barcode or click an item to start the bill</div>'}</div>
@@ -80,7 +82,7 @@ function renderBill(scroll) {
       <div class="tr link" data-a="disc"><span>Discount <small>(F4)</small></span><span>${t.discount ? '- ' + money(t.discount) + (cart.discType === 'pct' ? ` (${cart.discVal}%)` : '') : '—'}</span></div>
       ${S.settings.taxRate ? `<div class="tr"><span>${esc(S.settings.taxName)} ${S.settings.taxRate}%</span><span>${money(t.tax)}</span></div>` : ''}
       <div class="tr grand"><span>TOTAL</span><span>${money(t.total)}</span></div></div>
-    <div class="paybtns"><button class="btn lg" data-a="clear">🗑 Clear (F8)</button><button class="btn ok lg" data-a="quick">⚡ Quick cash (F10)</button><button class="btn primary lg full" data-a="pay" ${cart.lines.length ? '' : 'disabled'}>💳 PAY / CHARGE (F9)</button></div>`;
+    <div class="paybtns"><button class="btn lg" data-a="clear">🗑 Clear (F8)</button><button class="btn ok lg" data-a="quick">⚡ Quick cash (F10)</button><button class="btn primary lg full" data-a="pay" ${cart.lines.length ? '' : 'disabled'}>${cart.editId ? '💾 UPDATE BILL (F9)' : '💳 PAY / CHARGE (F9)'}</button></div>`;
   if (scroll) { const s = $('.ln.sel', bill); if (s) s.scrollIntoView({ block: 'nearest' }); }
 }
 
@@ -104,6 +106,8 @@ function onBillClick(e) {
     case 'cust': pickCustomer(); break;
     case 'disc': discountDialog(); break;
     case 'hold': holdBill(); break;
+    case 'bills': recentBills(); break;
+    case 'canceledit': clearBill(false); break;
     case 'recall': recallBill(); break;
     case 'clear': clearBill(true); break;
     case 'pay': payDialog(); break;
@@ -134,6 +138,7 @@ function posKey(e) {
   if (k === 'F2') { handled(); const q = $('#q'); q.focus(); q.select(); return; }
   if (k === 'F3') { handled(); return pickCustomer(); }
   if (k === 'F4') { handled(); return discountDialog(); }
+  if (k === 'F5') { handled(); return canEditBills() ? recentBills() : undefined; }
   if (k === 'F6') { handled(); return holdBill(); }
   if (k === 'F7') { handled(); return recallBill(); }
   if (k === 'F8') { handled(); return clearBill(true); }
@@ -161,10 +166,10 @@ function qtyDialog(i) {
   });
 }
 function helpDialog() {
-  const rows = [['F2', 'Focus search / barcode box'], ['Enter (in search)', 'Add exact barcode match or first result'], ['F3', 'Choose or create customer'], ['F4', 'Bill discount'],
+  const rows = [['F2', 'Focus search / barcode box'], ['Enter (in search)', 'Add exact barcode match or first result'], ['F3', 'Choose or create customer'], ['F4', 'Bill discount'], ['F5', 'Edit a saved bill in this screen'],
     ['↑ / ↓', 'Select bill line'], ['+ / −', 'Change quantity of selected line'], ['*', 'Type quantity of selected line'], ['Delete', 'Remove selected line'],
     ['F6 / F7', 'Hold bill / Recall held bill'], ['F8', 'Clear bill'], ['F9', 'Open payment'], ['F10', 'Quick cash sale & print'], ['Ctrl+P', 'Reprint last receipt'],
-    ['Alt+1…8', 'Switch pages'], ['F11', 'Full screen'], ['Esc', 'Close dialog / clear search']];
+    ['Alt+1…9', 'Switch pages'], ['F11', 'Full screen'], ['Esc', 'Close dialog / clear search']];
   openModal({ title: '⌨ Keyboard shortcuts', width: 520, body: `<table class="tbl">${rows.map((r) => `<tr><td><kbd>${r[0]}</kbd></td><td>${r[1]}</td></tr>`).join('')}</table>`, buttons: [{ label: 'Close', cls: 'primary', onClick: () => closeModal() }] });
 }
 
@@ -179,6 +184,7 @@ function discountDialog() {
   });
 }
 async function holdBill() {
+  if (cart.editId) return toast('Finish or cancel the bill edit first');
   if (!cart.lines.length) return toast('Nothing to hold');
   await guard(async () => {
     await call('held.save', { name: custOf() ? custOf().name : '', cart });
@@ -235,10 +241,10 @@ function pickCustomer() {
 function payDialog(presetMethod) {
   if (!cart.lines.length) return toast('The bill is empty');
   const t = cartCalc(), c = custOf();
-  let method = presetMethod || 'Cash';
+  let method = presetMethod || (cart.editId && cart.editMethod) || 'Cash';
   const quicks = [50, 100, 500, 1000, 2000, 5000];
   openModal({
-    title: `Payment — ${money(t.total)}`, width: 480, onClose: () => { const q = $('#q'); q && q.focus(); },
+    title: `${cart.editId ? 'Update ' + esc(cart.editNo) : 'Payment'} — ${money(t.total)}`, width: 480, onClose: () => { const q = $('#q'); q && q.focus(); },
     body: `<div class="methods" id="pm">${['Cash', 'Card', 'Online', 'Credit'].map((m) => `<button data-m="${m}">${m}</button>`).join('')}</div>
       <div class="pay-sum"><span>Customer</span><b>${c ? esc(c.name) : 'Walk-in'}</b></div>
       ${c ? `<div class="pay-sum"><span>Previous balance</span><b class="${c.balance > 0 ? 'neg-n' : ''}">${money(c.balance)}</b></div>` : ''}
@@ -258,12 +264,12 @@ function payDialog(presetMethod) {
           ? `<div class="pay-sum"><span>On credit (due)</span><b class="neg-n">${money(due)}</b></div>${c ? `<div class="pay-sum"><span>New balance</span><b>${money(c.balance + due)}</b></div>` : '<div class="neg-n">⚠ Select a customer (F3) to put the balance on credit.</div>'}`
           : `<div class="pay-sum"><span>Change</span><b class="pos-n" style="font-size:26px">${money(change)}</b></div>`;
       };
-      tend.value = t.total; tend.oninput = upd;
+      tend.value = method === 'Credit' ? 0 : (cart.editId && cart.editPaid < t.total ? cart.editPaid : t.total); tend.oninput = upd;
       $('#pm', r).onclick = (e) => { const b = e.target.closest('button'); if (!b) return; method = b.dataset.m; if (method === 'Credit') tend.value = 0; else if (!num(tend.value)) tend.value = t.total; upd(); tend.focus(); tend.select(); };
       $('#qk', r).onclick = (e) => { const b = e.target.closest('button'); if (!b) return; tend.value = b.dataset.q === 'exact' ? t.total : b.dataset.q; upd(); tend.focus(); };
       upd(); tend.focus(); tend.select();
     },
-    buttons: [{ label: 'Cancel', onClick: () => closeModal() }, { label: '✔ Complete sale (Enter)', cls: 'ok', onClick: () => completeSale(method, $('#tend').value, $('#pnote').value, $('#doPrint').checked) }],
+    buttons: [{ label: 'Cancel', onClick: () => closeModal() }, { label: cart.editId ? '💾 Save changes (Enter)' : '✔ Complete sale (Enter)', cls: 'ok', onClick: () => completeSale(method, $('#tend').value, $('#pnote').value, $('#doPrint').checked) }],
   });
 }
 let saving = false;
@@ -271,23 +277,58 @@ async function completeSale(method, tendered, note, print) {
   if (saving) return; saving = true;
   try {
     const t = cartCalc();
-    const sale = await call('sales.create', {
+    const editId = cart.editId;
+    const payload = {
       customerId: cart.customerId, discount: t.discount, tendered: method === 'Credit' ? 0 : num(tendered, t.total),
       method, note, lines: cart.lines.map((l) => ({ itemId: l.itemId, qty: l.qty, price: l.price, name: l.name })),
-    });
+    };
+    const sale = editId ? await call('sales.update', editId, payload) : await call('sales.create', payload);
     lastSale = sale; closeModal(true);
     cart = newCart(); selLine = -1;
     await refreshData(); renderChips(); renderGrid(); renderBill();
     if (print) guard(() => printHtml(saleReceiptHtml(sale)));
-    saleDone(sale);
+    saleDone(sale, !!editId);
   } catch (e) { toast(e.message, 'err'); } finally { saving = false; }
 }
-function saleDone(sale) {
+function saleDone(sale, edited) {
   openModal({
-    title: '✅ Sale completed — ' + esc(sale.no), width: 400, onClose: () => { const q = $('#q'); q && q.focus(); },
+    title: (edited ? '✅ Bill updated — ' : '✅ Sale completed — ') + esc(sale.no), width: 400, onClose: () => { const q = $('#q'); q && q.focus(); },
     body: `<div class="muted" style="text-align:center">Total ${money(sale.total)} · Paid ${money(sale.paid)}</div>${sale.due ? `<div class="big-change" style="color:var(--bad)">${money(sale.due)}<div style="font-size:14px;font-weight:600">added to ${esc(sale.customerName)}'s credit</div></div>` : `<div class="muted" style="text-align:center;margin-top:10px">CHANGE</div><div class="big-change">${money(sale.change)}</div>`}`,
     buttons: [{ label: '🖨 Print again', onClick: () => guard(() => printHtml(saleReceiptHtml(sale))) }, { label: 'New sale (Enter)', cls: 'primary', onClick: () => closeModal() }],
   });
+}
+/* ----- edit a saved bill on the POS screen ----- */
+async function recentBills() {
+  const from = ymd(new Date(Date.now() - 13 * 864e5)), to = ymd(new Date());
+  const rows = await guard(() => call('sales.list', { from, to })); if (!rows) return;
+  const list = rows.filter((s) => !s.voided);
+  const draw = (r, term) => {
+    const t = (term || '').toLowerCase();
+    const f = list.filter((s) => !t || s.no.toLowerCase().includes(t) || s.customerName.toLowerCase().includes(t)).slice(0, 80);
+    $('#rb', r).innerHTML = f.length ? f.map((s, i) => `<div data-s="${s.id}" class="${i === 0 && t ? 'f' : ''}"><span><b>${esc(s.no)}</b> <span class="muted">${esc(s.customerName)} · ${dt(s.date)}</span></span><b>${money(s.total)}</b></div>`).join('') : '<div class="muted">No bills found</div>';
+  };
+  openModal({
+    title: '✏️ Edit a saved bill', width: 560, onClose: () => { const q = $('#q'); q && q.focus(); },
+    body: `<input id="rs" placeholder="Invoice no. or customer — Enter to open first" autocomplete="off"><div class="plist" id="rb"></div><p class="muted" style="margin-bottom:0;font-size:12px">Last 14 days. The bill opens in this POS screen; change items, customer, discount or payment and save.</p>`,
+    onEnter: () => {}, buttons: [{ label: 'Close', onClick: () => closeModal() }],
+    onMount: (r) => {
+      draw(r, '');
+      $('#rs', r).oninput = (e) => draw(r, e.target.value);
+      $('#rs', r).onkeydown = (e) => { if (e.key === 'Enter') { e.stopPropagation(); const f = $('#rb [data-s]', r); if (f) { closeModal(true); loadSaleForEdit(+f.dataset.s); } } };
+      $('#rb', r).onclick = (e) => { const d = e.target.closest('[data-s]'); if (d) { closeModal(true); loadSaleForEdit(+d.dataset.s); } };
+    },
+  });
+}
+async function loadSaleForEdit(id) {
+  const s = await guard(() => call('sales.get', id)); if (!s) return;
+  if (s.voided) return toast('A voided bill cannot be edited', 'err');
+  if (cart.lines.length && !(await confirmBox('Edit bill', 'The current unfinished bill will be replaced. Continue?'))) return;
+  cart = {
+    customerId: s.customerId, discType: 'amt', discVal: s.discount, note: s.note || '', editId: s.id, editNo: s.no, editPaid: s.paid, editMethod: s.method,
+    lines: s.lines.map((l) => ({ itemId: l.itemId, code: l.code, name: l.name, unit: l.unit, price: l.price, qty: l.qty })),
+  };
+  selLine = 0;
+  if (S.page !== 'pos') go('pos'); else { renderBill(); const q = $('#q'); q && q.focus(); }
 }
 async function quickCash() {
   if (!cart.lines.length) return toast('The bill is empty');

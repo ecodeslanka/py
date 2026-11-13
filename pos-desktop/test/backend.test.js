@@ -50,5 +50,48 @@ C('items.save', { name: 'Tea', price: 5 });
 C('backup.restore', b.name);
 C('login', 'admin', 'admin');
 assert.strictEqual(C('items.list', {}).length, 1);
+
+// ---- GRN / suppliers / stock log / bill edit / cash book ----
+const today = new Date(); const pad = (n) => String(n).padStart(2, '0');
+const ymd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+C('settings.save', { taxRate: 0 });
+const sup = C('suppliers.save', { name: 'ABC Traders', opening: 50 });
+const tea = C('items.save', { name: 'Tea', cost: 10, price: 15, stock: 0 });
+const g = C('grn.create', { supplierId: sup.id, invoiceNo: 'S-77', lines: [{ itemId: tea.id, qty: 100, cost: 12, price: 18 }], discount: 100, paid: 400, method: 'Cash' });
+assert.strictEqual(g.total, 1100); assert.strictEqual(g.due, 700);
+let t = C('items.list', {}).find((i) => i.id === tea.id);
+assert.strictEqual(t.stock, 100); assert.strictEqual(t.cost, 12); assert.strictEqual(t.price, 18);
+assert.strictEqual(C('suppliers.list')[0].balance, 750);           // 50 opening + 700 due
+C('suppliers.pay', { supplierId: sup.id, amount: 250, method: 'Bank' });
+assert.strictEqual(C('suppliers.list')[0].balance, 500);
+C('stock.adjust', { itemId: tea.id, mode: 'set', qty: 95, reason: 'Stock take' });
+assert.strictEqual(C('items.list', {}).find((i) => i.id === tea.id).stock, 95);
+const log = C('stock.log', { itemId: tea.id });
+assert.deepStrictEqual(log.map((e) => e.type), ['adjust', 'grn', 'opening'].filter((x) => x !== 'opening'));
+assert.strictEqual(log[0].qty, -5);
+// edit a bill: change qty, stock + log follow, credit recalculated
+let bill = C('sales.create', { lines: [{ itemId: tea.id, qty: 5, price: 18 }], tendered: 90 });
+assert.strictEqual(C('items.list', {}).find((i) => i.id === tea.id).stock, 90);
+bill = C('sales.update', bill.id, { lines: [{ itemId: tea.id, qty: 8, price: 18 }], tendered: 144 });
+assert.strictEqual(bill.total, 144); assert.strictEqual(C('items.list', {}).find((i) => i.id === tea.id).stock, 87);
+assert.strictEqual(C('sales.get', bill.id).history.length, 1);
+// cash book: opening 0 + cash sale 144 + earlier cash sales - GRN cash 400
+C('cashbook.entry', { type: 'out', title: 'Tea for staff', amount: 20 });
+const day = C('cashbook.day', ymd);
+const expectIn = day.rows.reduce((a, r) => a + r.in, 0), expectOut = day.rows.reduce((a, r) => a + r.out, 0);
+assert.strictEqual(day.closing, Math.round((day.opening + expectIn - expectOut) * 100) / 100);
+assert.ok(day.rows.some((r) => r.type === 'grn' && r.out === 400));
+assert.ok(!day.rows.some((r) => r.method === 'Bank'));                // bank payment is not cash
+assert.ok(day.other.some((o) => o.method === 'Bank' && o.out === 250));
+const cl = C('cashbook.close', ymd, day.closing - 10, 'short');
+assert.strictEqual(cl.diff, -10);
+assert.strictEqual(C('cashbook.days', {})[0].counted, day.closing - 10);
+C('grn.void', g.id);
+assert.strictEqual(C('items.list', {}).find((i) => i.id === tea.id).stock, 87 - 100);
+// cashier cannot edit bills unless allowed
+C('login', 'bob', 'pw12');
+assert.throws(() => C('sales.update', bill.id, { lines: [{ itemId: tea.id, qty: 1, price: 18 }] }), /not allowed|Administrator/);
+assert.throws(() => C('grn.list', {}), /Administrator/);
+C('login', 'admin', 'admin');
 be.flush();
 console.log('all backend tests passed');

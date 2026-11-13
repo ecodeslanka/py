@@ -151,11 +151,12 @@ PAGES.sales = async function (m) {
       tableHtml([{ h: 'Invoice', f: (s) => `<b>${esc(s.no)}</b>` }, { h: 'Date', f: (s) => dt(s.date) }, { h: 'Customer', f: (s) => esc(s.customerName) }, { h: 'Cashier', f: (s) => esc(s.userName) },
         { h: 'Total', r: 1, f: (s) => money(s.total) }, { h: 'Paid', r: 1, f: (s) => money(s.paid) }, { h: 'Credit', r: 1, f: (s) => (s.due ? `<span class="neg-n">${money(s.due)}</span>` : '') },
         ...(isAdmin() ? [{ h: 'Profit', r: 1, f: (s) => (s.voided ? '' : `<span class="${sgn(s.profit)}">${money(s.profit)}</span>`) }] : []),
-        { h: 'Status', f: (s) => (s.voided ? '<span class="tag bad">VOID</span>' : '<span class="tag ok">OK</span>') },
-        { h: '', act: 1, f: (s) => `<button class="btn sm" data-a="view" data-id="${s.id}">View / Print</button>${isAdmin() && !s.voided ? ` <button class="btn sm danger" data-a="void" data-id="${s.id}">Void</button>` : ''}` }], rows, 'No sales in this period');
+        { h: 'Status', f: (s) => (s.voided ? '<span class="tag bad">VOID</span>' : s.editedAt ? '<span class="tag warn">EDITED</span>' : '<span class="tag ok">OK</span>') },
+        { h: '', act: 1, f: (s) => `<button class="btn sm" data-a="view" data-id="${s.id}">View / Print</button>${(isAdmin() || S.settings.cashierCanEditBills) && !s.voided ? ` <button class="btn sm" data-a="edit" data-id="${s.id}">✏ Edit</button>` : ''}${isAdmin() && !s.voided ? ` <button class="btn sm danger" data-a="void" data-id="${s.id}">Void</button>` : ''}` }], rows, 'No sales in this period');
     $('#slist').onclick = async (e) => {
       const b = e.target.closest('[data-a]'); if (!b) return;
       const s = rows.find((x) => x.id === +b.dataset.id);
+      if (b.dataset.a === 'edit') return loadSaleForEdit(s.id);
       if (b.dataset.a === 'view') { const full = await guard(() => call('sales.get', s.id)); previewReceipt(saleReceiptHtml(full), 'Invoice ' + s.no); }
       if (b.dataset.a === 'void' && await confirmBox('Void sale', `Void <b>${esc(s.no)}</b>? Stock will be returned and any credit removed.`, 'Void it')) {
         const r = await guard(() => call('sales.void', s.id, 'voided by ' + S.user.name)); if (r) { toast('Sale voided', 'ok'); load(); }
@@ -175,7 +176,7 @@ PAGES.expenses = async function (m) {
     expF = { from: $('#ef').value, to: $('#et').value };
     const rows = await guard(() => call('expenses.list', expF)); if (!rows) return;
     $('#elist').innerHTML = `<div class="cards"><div class="stat r2"><div class="l">Total expenses</div><div class="v">${money(rows.reduce((a, e) => a + e.amount, 0))}</div></div></div>` +
-      tableHtml([{ h: 'Date', f: (e) => e.date }, { h: 'Title', f: (e) => `<b>${esc(e.title)}</b>` }, { h: 'Note', f: (e) => esc(e.note) }, { h: 'Amount', r: 1, f: (e) => money(e.amount) },
+      tableHtml([{ h: 'Date', f: (e) => e.date }, { h: 'Title', f: (e) => `<b>${esc(e.title)}</b>` }, { h: 'Paid by', f: (e) => esc(e.method || 'Cash') }, { h: 'Note', f: (e) => esc(e.note) }, { h: 'Amount', r: 1, f: (e) => money(e.amount) },
         { h: '', act: 1, f: (e) => `<button class="btn sm" data-a="edit" data-id="${e.id}">Edit</button> <button class="btn sm danger" data-a="del" data-id="${e.id}">✕</button>` }], rows, 'No expenses in this period');
     $('#elist').onclick = async (ev) => {
       const b = ev.target.closest('[data-a]'); if (!b) return; const e = rows.find((x) => x.id === +b.dataset.id);
@@ -189,7 +190,7 @@ function expenseForm(e, done) {
   const v = e || { date: ymd(new Date()), title: '', amount: '', note: '' };
   openModal({
     title: e ? 'Edit expense' : 'Add expense', width: 440,
-    body: `<div class="fgrid" id="f"><div><label>Date</label><input type="date" name="date" value="${v.date}"></div><div><label>Amount *</label><input name="amount" type="number" step="any" min="0" value="${v.amount}"></div><div class="full"><label>Title * (rent, electricity, salary…)</label><input name="title" value="${esc(v.title)}"></div><div class="full"><label>Note</label><input name="note" value="${esc(v.note)}"></div></div>`,
+    body: `<div class="fgrid" id="f"><div><label>Date</label><input type="date" name="date" value="${v.date}"></div><div><label>Amount *</label><input name="amount" type="number" step="any" min="0" value="${v.amount}"></div><div class="full"><label>Title * (rent, electricity, salary…)</label><input name="title" value="${esc(v.title)}"></div><div class="full"><label>Paid by (Cash expenses appear in the cash book)</label><select name="method">${['Cash', 'Bank', 'Card', 'Online'].map((x) => `<option ${((v.method || 'Cash') === x) ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div class="full"><label>Note</label><input name="note" value="${esc(v.note)}"></div></div>`,
     buttons: [{ label: 'Cancel', onClick: () => closeModal() }, { label: 'Save', cls: 'primary', onClick: async () => { const o = formVals($('#f')); if (e) o.id = e.id; const r = await guard(() => call('expenses.save', o)); if (r) { closeModal(); done(); } } }],
   });
 }
@@ -305,13 +306,13 @@ PAGES.settings = async function (m) {
     <label class="chk"><input type="checkbox" name="showLogo" ${s.showLogo ? 'checked' : ''}> Print logo</label><label class="chk"><input type="checkbox" name="showWebsite" ${s.showWebsite ? 'checked' : ''}> Print website</label>
     <label class="chk"><input type="checkbox" name="autoPrint" ${s.autoPrint ? 'checked' : ''}> Print after every sale</label><label class="chk"><input type="checkbox" name="silentPrint" ${s.silentPrint ? 'checked' : ''}> Print directly (no dialog)</label>
     <div class="full"><button class="btn" id="ptest">🖨 Print test receipt</button></div></div></div>
-  <div class="panel sect"><h3>🛒 POS rules</h3><div class="fgrid"><label class="chk"><input type="checkbox" name="allowNegativeStock" ${s.allowNegativeStock ? 'checked' : ''}> Allow selling with zero stock</label><label class="chk"><input type="checkbox" name="cashierCanEditPrice" ${s.cashierCanEditPrice ? 'checked' : ''}> Cashier can change price</label><label class="chk"><input type="checkbox" name="cashierCanDiscount" ${s.cashierCanDiscount ? 'checked' : ''}> Cashier can give discount</label></div></div>
+  <div class="panel sect"><h3>🛒 POS rules</h3><div class="fgrid"><label class="chk"><input type="checkbox" name="allowNegativeStock" ${s.allowNegativeStock ? 'checked' : ''}> Allow selling with zero stock</label><label class="chk"><input type="checkbox" name="cashierCanEditPrice" ${s.cashierCanEditPrice ? 'checked' : ''}> Cashier can change price</label><label class="chk"><input type="checkbox" name="cashierCanDiscount" ${s.cashierCanDiscount ? 'checked' : ''}> Cashier can give discount</label><label class="chk"><input type="checkbox" name="cashierCanEditBills" ${s.cashierCanEditBills ? 'checked' : ''}> Cashier can edit own saved bills</label><label class="chk"><input type="checkbox" name="showPoweredBy" ${s.showPoweredBy !== false ? 'checked' : ''}> Print “Powered by ECODES IT SOLUTIONS” on receipts</label></div></div>
   <div class="panel sect"><h3>💾 Backup</h3><div class="fgrid"><div class="full"><label>Backup folder</label><div style="display:flex;gap:6px"><input name="b.dir" id="bdir" value="${esc(b.dir)}" placeholder="Default: Documents\\EasyPOS-Backups"><button class="btn" id="bpick">Browse…</button></div></div>
     <label class="chk"><input type="checkbox" name="b.auto" ${b.auto ? 'checked' : ''}> Automatic backup</label><div><label>Every (minutes, only when data changed)</label><input name="b.everyMinutes" type="number" min="1" value="${b.everyMinutes}"></div>
     <label class="chk"><input type="checkbox" name="b.onExit" ${b.onExit ? 'checked' : ''}> Backup when closing the app</label><div><label>Keep last N backups</label><input name="b.keep" type="number" min="1" value="${b.keep}"></div>
     <div class="full" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ok" id="bnow">Backup now</button><button class="btn" id="bopen">Open folder</button><button class="btn" id="bfile">Restore from file…</button></div><div class="full" id="blist"></div></div></div>
   <div class="panel sect"><h3>🔒 My account</h3><div class="fgrid"><div><label>Current password</label><input id="opw" type="password"></div><div><label>New password</label><input id="npw" type="password"></div><div class="full"><button class="btn" id="pwgo">Change password</button></div></div></div>
-  </div>`;
+  </div><div class="foot-pw">Easy POS · Powered by <a data-ext="https://ecodes.lk">ECODES IT SOLUTIONS</a> · ecodes.lk</div>`;
   const get = () => {
     const o = { company: {}, backup: {} };
     $$('#sf [name]').forEach((el) => {
@@ -351,7 +352,7 @@ PAGES.settings = async function (m) {
 
 /* ===== boot ===== */
 (async function boot() {
-  try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch (_) { /* ignore */ }
+  try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; const a = localStorage.getItem('accent'); if (a) document.documentElement.dataset.accent = a; } catch (_) { /* ignore */ }
   const sess = await call('session').catch(() => null);
   if (sess) { S.user = sess; await startApp(); } else showLogin();
 })();

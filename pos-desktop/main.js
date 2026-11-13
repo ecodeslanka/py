@@ -48,6 +48,13 @@ M.openBackupDir = async () => {
   return true;
 };
 
+// only our own website can be opened from inside the app
+M.openUrl = async (url) => {
+  if (url !== 'https://ecodes.lk') throw new Error('Blocked link');
+  await shell.openExternal(url);
+  return true;
+};
+
 M.appInfo = () => ({ version: app.getVersion(), dataFile: backend.file, platform: process.platform });
 
 M.printers = async () => {

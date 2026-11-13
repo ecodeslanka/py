@@ -15,7 +15,7 @@ li{margin:2px 0}.toc li{margin:3px 0}
 <div class="cover"><div class="big">🏪</div><h1>Easy POS</h1><p>User Manual</p><p style="font-size:11pt">Point of sale · Customer credit · Profit reports · Automatic backup</p></div>
 
 <h2 style="margin-top:0">Contents</h2>
-<ol class="toc"><li>Installing and starting</li><li>Signing in and first-time setup</li><li>Company settings, logo, advertisement and footer</li><li>Creating items (cost price and selling price)</li><li>Making a sale – the POS screen</li><li>Keyboard shortcuts</li><li>Customers and credit</li><li>Printing and receipt printers</li><li>Sales list, reprint and void</li><li>Expenses and profit reports</li><li>Users and permissions</li><li>Backup and restore</li><li>Moving to a new computer</li><li>Troubleshooting</li></ol>
+<ol class="toc"><li>Installing and starting</li><li>Signing in and first-time setup</li><li>Company settings, logo, advertisement and footer</li><li>Creating items (cost price and selling price)</li><li>Making a sale – the POS screen</li><li>Keyboard shortcuts</li><li>Customers and credit</li><li>Printing and receipt printers</li><li>Sales list, reprint and void</li><li>Expenses and profit reports</li><li>Inventory: stock levels, adjustments and the inventory log</li><li>Suppliers and GRN (goods received)</li><li>Supplier payments</li><li>Daily cash book</li><li>Editing a saved bill on the POS screen</li><li>Users and permissions</li><li>Backup and restore</li><li>Moving to a new computer</li><li>Theme and appearance</li><li>Troubleshooting</li></ol>
 
 <h2>1. Installing and starting</h2>
 <ol><li>Double-click <b>EasyPOS-Setup-1.0.0.exe</b>.</li><li>Choose the install folder (or keep the default) and click <b>Install</b>.</li><li>Open <b>Easy POS</b> from the Desktop or Start menu shortcut.</li></ol>
@@ -25,7 +25,7 @@ li{margin:2px 0}.toc li{margin:3px 0}
 <p>On first start sign in with username <b>admin</b> and password <b>admin</b>. Immediately go to <b>Settings → My account</b> and change the password.</p>
 <p><b>Recommended order for a new shop:</b></p>
 <ol><li>Settings → enter company details, upload logo, choose paper size and printer, click <b>Save settings</b>.</li><li>Items → add your products.</li><li>Users → add cashiers.</li><li>Customers → add credit customers (optional; you can also add them while selling).</li></ol>
-<p>Use the left menu to move between pages (or <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>8</kbd>). <b>Theme</b> switches light/dark mode. <b>Logout</b> signs the user out. <kbd>F11</kbd> toggles full screen.</p>
+<p>Use the left menu to move between pages (or <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd>). <b>Theme</b> switches light/dark mode. <b>Logout</b> signs the user out. <kbd>F11</kbd> toggles full screen.</p>
 
 <h2>3. Company settings</h2>
 <img src="img/settings.png">
@@ -73,8 +73,8 @@ li{margin:2px 0}.toc li{margin:3px 0}
 <tr><td><kbd>F1</kbd></td><td>Show shortcut help</td></tr><tr><td><kbd>F2</kbd></td><td>Focus the search / barcode box</td></tr><tr><td><kbd>Enter</kbd> in search</td><td>Add exact barcode match, or the first search result</td></tr>
 <tr><td><kbd>F3</kbd></td><td>Choose or create customer</td></tr><tr><td><kbd>F4</kbd></td><td>Bill discount</td></tr><tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Select a bill line</td></tr>
 <tr><td><kbd>+</kbd> / <kbd>−</kbd></td><td>Increase / decrease quantity of the selected line (search box must be empty)</td></tr><tr><td><kbd>*</kbd></td><td>Type the quantity of the selected line</td></tr><tr><td><kbd>Delete</kbd></td><td>Remove the selected line</td></tr>
-<tr><td><kbd>F6</kbd> / <kbd>F7</kbd></td><td>Hold bill / Recall held bill</td></tr><tr><td><kbd>F8</kbd></td><td>Clear bill</td></tr><tr><td><kbd>F9</kbd></td><td>Payment</td></tr><tr><td><kbd>F10</kbd></td><td>Quick cash sale and print</td></tr>
-<tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Reprint last receipt</td></tr><tr><td><kbd>Esc</kbd></td><td>Close a window / clear search</td></tr><tr><td><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>8</kbd></td><td>Switch pages</td></tr><tr><td><kbd>F11</kbd></td><td>Full screen</td></tr></table>
+<tr><td><kbd>F5</kbd></td><td>Edit a saved bill in the POS screen</td></tr><tr><td><kbd>F6</kbd> / <kbd>F7</kbd></td><td>Hold bill / Recall held bill</td></tr><tr><td><kbd>F8</kbd></td><td>Clear bill</td></tr><tr><td><kbd>F9</kbd></td><td>Payment</td></tr><tr><td><kbd>F10</kbd></td><td>Quick cash sale and print</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Reprint last receipt</td></tr><tr><td><kbd>Esc</kbd></td><td>Close a window / clear search</td></tr><tr><td><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd></td><td>Switch pages</td></tr><tr><td><kbd>F11</kbd></td><td>Full screen</td></tr></table>
 <div class="tip">With a USB barcode scanner, keep the cursor in the search box (press <kbd>F2</kbd>). Each scan adds the item automatically because scanners send <kbd>Enter</kbd> after the code.</div>
 
 <h2>7. Customers and credit</h2>
@@ -101,13 +101,54 @@ li{margin:2px 0}.toc li{margin:3px 0}
 <tr><td>Stock value</td><td>Stock at cost and at selling price, low-stock items.</td></tr><tr><td>Customer credit</td><td>Everyone who owes money and how much.</td></tr></table>
 <p><b>Profit = selling price − cost price</b> of the items sold, after discounts (tax is not counted as profit). <b>Export CSV</b> opens in Excel.</p>
 
-<h2>11. Users and permissions</h2>
+
+<h2>11. Inventory: stock levels, adjustments and the log</h2>
+<img src="img/inventory.png">
+<p><b>Inventory → Stock levels</b> shows every item with quantity, alert level and stock value at cost and selling price. Low-stock items are red.</p>
+<p><b>⚖ Adjust / Count</b> corrects stock: <b>Set counted qty</b> (stock-take – type what you counted), <b>Add</b>, or <b>Remove</b>. Choose a reason (damaged, expired, lost, customer return…) and an optional note. The window shows the new stock before you save.</p>
+<img src="img/invlog.png">
+<p><b>Inventory → Inventory log</b> records <u>every</u> stock movement: sales, voided sales, GRN received, voided GRN, adjustments, bill edits and opening stock. Each line shows the change, stock <i>before → after</i>, reference number, user and note. Filter by dates, type or item, and export to CSV. The <b>Log</b> button on a stock row opens the history of just that item.</p>
+
+<h2>12. Suppliers and GRN (goods received)</h2>
+<img src="img/grn.png">
+<ol><li><b>Purchases → Suppliers → ＋ New supplier</b> (name, phone, address, and an opening balance if you already owe them).</li>
+<li><b>Purchases → GRN → ＋ New GRN</b>. Pick the supplier, date and the supplier's invoice number.</li>
+<li>Type an item name or scan its barcode and press <kbd>Enter</kbd> to add it. For each line enter <b>quantity</b>, <b>cost price</b> and optionally a <b>new selling price</b>.</li>
+<li>Enter a discount, the amount <b>Paid now</b> (<b>Full</b> pays everything) and the payment method. Whatever is not paid is added to the supplier's balance.</li>
+<li>Click <b>Save GRN</b>. Stock increases, the item cost price is updated (untick the box to keep old costs), and an entry is written to the inventory log.</li></ol>
+<p>Open a GRN with <b>View</b> to see its lines. Administrators can <b>Void</b> a GRN – the stock is removed again.</p>
+
+<h2>13. Supplier payments</h2>
+<img src="img/suppliers.png">
+<p>The <b>Suppliers</b> tab shows how much you owe each supplier and the total payable. Use <b>💸 Pay</b> to record a payment (cash, bank, cheque or online), with a date and a note such as the cheque number. <b>Ledger</b> shows all purchases and payments with a running balance. The <b>Supplier payments</b> tab lists every payment for a period (and lets you delete a wrong entry). Cash payments automatically appear in the cash book.</p>
+
+<h2>14. Daily cash book</h2>
+<img src="img/cashbook.png">
+<p><b>Cash Book</b> shows the cash drawer for one day: <b>opening cash → cash in → cash out → closing cash</b>. Use ◀ ▶ or the date box to change day.</p>
+<table><tr><th>Cash IN</th><th>Cash OUT</th></tr><tr><td>Cash sales, customer payments received in cash, GRN refunds, manual “Cash in”</td><td>Cash paid on GRN, supplier payments in cash, cash expenses, sale refunds (voids), manual “Cash out” (bank deposit, drawings…)</td></tr></table>
+<ul><li><b>＋ Cash in / － Cash out</b> – record money that is not a sale or expense (owner capital, bank deposit, petty cash).</li>
+<li><b>⚙ Opening balance</b> – set the cash that was in the drawer when you started using the program (do this once).</li>
+<li><b>🔒 Close day / count cash</b> – type the cash you counted. The program shows <i>over</i> or <i>short</i> against the expected closing cash and saves it.</li>
+<li>Card, bank and online payments are listed separately below the table because they are not in the drawer. Credit sales are not cash until the customer pays.</li></ul>
+<img src="img/cbdays.png">
+<p>The <b>Day-wise summary</b> tab lists opening, in, out, closing, counted cash and difference for every day. Click a date to open that day's book.</p>
+
+<h2>15. Editing a saved bill on the POS screen</h2>
+<img src="img/editbill.png">
+<p>If a bill was entered wrongly you can correct it without leaving the POS screen:</p>
+<ol><li>Press <kbd>F5</kbd> (or the ✏️ button on the bill panel, or <b>Sales → ✏ Edit</b>). Choose the bill from the list – or type the invoice number and press <kbd>Enter</kbd>.</li>
+<li>The bill opens in the normal bill panel with a yellow <b>“Editing INV-…”</b> banner. Change quantities, prices, items, customer or discount exactly as when selling.</li>
+<li>Press <kbd>F9</kbd> and <b>Save changes</b>. Stock, customer credit, cash book and profit are all corrected automatically, and the stock changes are written to the inventory log.</li>
+<li>Use <b>Cancel edit</b> to leave the bill unchanged.</li></ol>
+<p>The invoice number and original date stay the same; edited bills show an <b>EDITED</b> tag in the Sales list. Administrators can always edit bills; cashiers only if you tick <b>Settings → Cashier can edit own saved bills</b>. Voided bills cannot be edited.</p>
+
+<h2>16. Users and permissions</h2>
 <img src="img/users.png">
-<table><tr><th>Role</th><th>Can do</th></tr><tr><td>Administrator</td><td>Everything: items and cost prices, reports, expenses, users, settings, backups, voiding sales.</td></tr>
-<tr><td>Cashier</td><td>POS, customers and credit payments, view/reprint own sales. Cannot see cost price or profit.</td></tr></table>
+<table><tr><th>Role</th><th>Can do</th></tr><tr><td>Administrator</td><td>Everything: items and cost prices, inventory, GRN and suppliers, cash book, reports, expenses, users, settings, backups, voiding sales.</td></tr>
+<tr><td>Cashier</td><td>POS, customers and credit payments, view/reprint own sales (edit them only if allowed). Cannot see cost price, profit, purchases, inventory log or cash book.</td></tr></table>
 <p>Users → <b>＋ New user</b>: enter name, username, password and role. Editing a user with a blank password keeps the old password. A user who has made sales is disabled instead of deleted. At least one active administrator must always exist.</p>
 
-<h2>12. Backup and restore</h2>
+<h2>17. Backup and restore</h2>
 <p>In <b>Settings → Backup</b>:</p>
 <ul><li><b>Backup folder</b> – click <b>Browse…</b> to choose where backups go (default <code>Documents\EasyPOS-Backups</code>). Choosing a USB drive or a synced cloud folder (OneDrive, Google Drive) is recommended.</li>
 <li><b>Automatic backup</b> – runs every N minutes when data has changed, every time the program starts and when it closes. The last N backups are kept; older ones are removed automatically.</li>
@@ -115,10 +156,16 @@ li{margin:2px 0}.toc li{margin:3px 0}
 <li><b>Restore</b> – click Restore next to a backup in the list, or <b>Restore from file…</b> to pick one. A safety backup of the current data is made first, then you sign in again.</li></ul>
 <div class="tip">Always keep at least one backup on a different drive than the computer's own disk.</div>
 
-<h2>13. Moving to a new computer</h2>
+<h2>18. Moving to a new computer</h2>
 <ol><li>On the old PC, copy the newest <code>pos-backup-….json</code> file from the backup folder.</li><li>Install Easy POS on the new PC and sign in with admin / admin.</li><li>Settings → Backup → <b>Restore from file…</b> → choose the file.</li></ol>
 
-<h2>14. Troubleshooting</h2>
+
+<h2>19. Theme and appearance</h2>
+<img src="img/theme.png">
+<p>Click <b>🎨 Theme</b> at the bottom of the left menu to choose <b>Light</b> or <b>Dark</b> mode and one of six accent colours (Indigo, Ocean, Emerald, Violet, Rose, Amber). The choice is remembered on this computer.</p>
+<div class="note">Easy POS is <b>powered by ECODES IT SOLUTIONS</b> — <b>https://ecodes.lk</b>. The credit is shown on the login screen, the menu, the POS screen and Settings, and can be printed on receipts (Settings → POS rules → “Print Powered by…”).</div>
+
+<h2>20. Troubleshooting</h2>
 <table><tr><th>Problem</th><th>Solution</th></tr>
 <tr><td>Forgot the admin password</td><td>Ask another administrator to reset it in Users. If there is none, restore an old backup made while the password was known.</td></tr>
 <tr><td>Nothing prints</td><td>Check the printer works in Windows, select it in Settings, and try <b>Print test receipt</b>. Untick “Print directly” to see the Windows dialog and any error.</td></tr>

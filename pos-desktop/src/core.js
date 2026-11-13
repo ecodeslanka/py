@@ -103,7 +103,8 @@ function receiptFoot(paper) {
   const s = S.settings;
   const ad = s.receiptAd ? `<div class="ad">${esc(s.receiptAd).replace(/\n/g, '<br>')}</div>` : '';
   const foot = s.invoiceFooter ? `<div class="${paper === 'A4' ? 'ft' : 'c'}" style="margin-top:6px">${esc(s.invoiceFooter).replace(/\n/g, '<br>')}</div>` : '';
-  return ad + foot;
+  const pw = s.showPoweredBy === false ? '' : `<div style="text-align:center;font-size:${paper === 'A4' ? '10px' : '9px'};margin-top:6px;color:#555">Powered by ECODES IT SOLUTIONS · ecodes.lk</div>`;
+  return ad + foot + pw;
 }
 function saleReceiptHtml(sale, paperOverride) {
   const paper = paperOverride || S.settings.paper;
@@ -143,9 +144,9 @@ function s_paperWidth() { return S.settings.paper === 'A4' ? 820 : 420; }
 
 /* ===== login / shell ===== */
 const NAV = [
-  ['pos', '🛒', 'POS', false], ['items', '📦', 'Items', true], ['customers', '👥', 'Customers', false],
-  ['sales', '🧾', 'Sales', false], ['reports', '📊', 'Reports', true], ['expenses', '💸', 'Expenses', true],
-  ['users', '🔑', 'Users', true], ['settings', '⚙️', 'Settings', true],
+  ['pos', '🛒', 'POS', false], ['items', '📦', 'Items', true], ['inventory', '📋', 'Inventory', true], ['purchases', '🚚', 'Purchases', true],
+  ['customers', '👥', 'Customers', false], ['sales', '🧾', 'Sales', false], ['cashbook', '📒', 'Cash Book', true],
+  ['reports', '📊', 'Reports', true], ['expenses', '💸', 'Expenses', true], ['users', '🔑', 'Users', true], ['settings', '⚙️', 'Settings', true],
 ];
 
 function showLogin(msg) {
@@ -164,7 +165,8 @@ function showLogin(msg) {
     <div class="row"><label>Username</label><input id="lu" autocomplete="off" value="admin"></div>
     <div class="row"><label>Password</label><input id="lp" type="password"></div>
     <button class="btn primary lg" id="lgo" style="width:100%">Sign in</button>
-    <div class="hint">First time? Sign in with <b>admin</b> / <b>admin</b> and change the password in Settings.</div></div>`;
+    <div class="hint">First time? Sign in with <b>admin</b> / <b>admin</b> and change the password in Settings.</div>
+    <div class="hint" style="margin-top:18px">Powered by <a href="#" data-ext="https://ecodes.lk"><b>ECODES IT SOLUTIONS</b></a> · ecodes.lk</div></div>`;
   $('#lgo').onclick = run;
   el.onkeydown = (e) => { if (e.key === 'Enter') run(); };
   $('#lp').focus();
@@ -181,22 +183,44 @@ function renderNav() {
   const c = S.settings.company;
   $('#nav').innerHTML = `<div class="brand">${c.logo ? `<img src="${c.logo}">` : '🏪'}</div>` +
     NAV.filter((n) => !n[3] || isAdmin()).map((n, i) => `<button data-p="${n[0]}" class="${S.page === n[0] ? 'on' : ''}" title="Alt+${NAV.filter((x) => !x[3] || isAdmin()).indexOf(n) + 1}"><span class="ic">${n[1]}</span>${n[2]}</button>`).join('') +
-    `<div class="sp"></div><button data-act="theme"><span class="ic">🌓</span>Theme</button><div class="who">${esc(S.user.name)}<br><small>${S.user.role}</small></div><button data-act="logout"><span class="ic">⏻</span>Logout</button>`;
+    `<div class="sp"></div><button data-act="theme"><span class="ic">🎨</span>Theme</button><div class="who">${esc(S.user.name)}<br><small>${S.user.role}</small></div><button data-act="logout"><span class="ic">⏻</span>Logout</button>${poweredNav()}`;
 }
 $('#nav').addEventListener('click', async (e) => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.p) go(b.dataset.p);
-  if (b.dataset.act === 'theme') toggleTheme();
+  if (b.dataset.act === 'theme') themeDialog();
   if (b.dataset.act === 'logout') {
     if (typeof cart !== 'undefined' && cart.lines.length && !(await confirmBox('Sign out', 'The current bill is not finished. Sign out anyway?'))) return;
     await call('logout'); showLogin();
   }
 });
-function toggleTheme() {
-  const d = document.documentElement.dataset.theme === 'dark' ? '' : 'dark';
-  document.documentElement.dataset.theme = d;
-  try { localStorage.setItem('theme', d); } catch (_) { /* ignore */ }
+const ACCENTS = [['indigo', '#6366f1', 'Indigo'], ['ocean', '#0ea5e9', 'Ocean'], ['emerald', '#10b981', 'Emerald'], ['violet', '#8b5cf6', 'Violet'], ['rose', '#f43f5e', 'Rose'], ['amber', '#f59e0b', 'Amber']];
+function applyTheme(mode, accent) {
+  const root = document.documentElement;
+  if (mode !== undefined) root.dataset.theme = mode;
+  if (accent !== undefined) root.dataset.accent = accent;
+  try { localStorage.setItem('theme', root.dataset.theme || ''); localStorage.setItem('accent', root.dataset.accent || 'indigo'); } catch (_) { /* ignore */ }
 }
+function themeDialog() {
+  const cur = () => [document.documentElement.dataset.theme || '', document.documentElement.dataset.accent || 'indigo'];
+  const body = () => `<label>Mode</label><div class="methods" id="tm"><button data-m="" class="${cur()[0] === '' ? 'on' : ''}">☀️ Light</button><button data-m="dark" class="${cur()[0] === 'dark' ? 'on' : ''}">🌙 Dark</button></div>
+    <label style="margin-top:14px">Accent colour</label><div class="swatches" id="ta">${ACCENTS.map((a) => `<button data-a="${a[0]}" title="${a[2]}" class="${cur()[1] === a[0] ? 'on' : ''}" style="background:${a[1]}"></button>`).join('')}</div>`;
+  openModal({
+    title: '🎨 Theme', width: 380, body: body(), buttons: [{ label: 'Done', cls: 'primary', onClick: () => closeModal() }],
+    onMount: (r) => {
+      r.querySelector('.mbody').onclick = (e) => {
+        const m = e.target.closest('#tm button'), a = e.target.closest('#ta button');
+        if (m) applyTheme(m.dataset.m, undefined); if (a) applyTheme(undefined, a.dataset.a);
+        r.querySelector('.mbody').innerHTML = body();
+      };
+    },
+  });
+}
+const poweredNav = () => '<a class="pw" data-ext="https://ecodes.lk" title="https://ecodes.lk">Powered by<b>ECODES</b>IT SOLUTIONS</a>';
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-ext]');
+  if (a) { e.preventDefault(); guard(() => call('openUrl', a.dataset.ext)); }
+});
 async function refreshData() {
   const b = await call('bootstrap');
   S.items = b.items; S.customers = b.customers; S.settings = b.settings;
@@ -219,7 +243,7 @@ document.addEventListener('keydown', (e) => {
     else if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && !e.target.closest('[data-noenter]') && modal.onEnter) { e.preventDefault(); modal.onEnter(); }
     return;
   }
-  if (e.altKey && /^[1-8]$/.test(e.key)) {
+  if (e.altKey && /^[1-9]$/.test(e.key)) {
     const pages = NAV.filter((n) => !n[3] || isAdmin());
     const p = pages[+e.key - 1]; if (p) { e.preventDefault(); go(p[0]); }
     return;
