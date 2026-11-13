@@ -30,7 +30,9 @@ if (($_GET['ajax'] ?? '') === 'bws_rows') {
     $code = trim($_GET['code'] ?? ''); $out = ['success' => true, 'rows' => [], 'total' => 0, 'count' => 0, 'free_value' => 0];
     $chk = mysqli_query($conn, "SHOW TABLES LIKE 'bws_items'");
     if ($code === '' || !$chk || !mysqli_num_rows($chk)) { echo json_encode(['success' => false, 'message' => 'No Bill Wise Scheme data.']); exit; }
-    $c = mysqli_real_escape_string($conn, sd_norm($code));
+    $tryk = array_merge([sd_norm($code)], sd_desc_keys($_GET['desc'] ?? '')); $c = '';
+    foreach ($tryk as $tk) { $tkE = mysqli_real_escape_string($conn, $tk); $cr = mysqli_query($conn, "SELECT 1 FROM bws_items WHERE UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) = '$tkE' LIMIT 1"); if ($cr && mysqli_num_rows($cr)) { $c = $tkE; break; } }
+    if ($c === '') $c = mysqli_real_escape_string($conn, sd_norm($code));
     $q = mysqli_query($conn, "SELECT bill_date, bill_no, COALESCE(NULLIF(hul_code,''), party_code) AS outlet, party_name, beat_name, salesman_code, product_name, sold_qty, free_qty, free_value, sch_disc, gross_sales
                               FROM bws_items WHERE UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) = '$c' ORDER BY bill_date, bill_no LIMIT 5000");
     while ($q && ($x = mysqli_fetch_assoc($q))) { $out['rows'][] = $x; $out['total'] += (float)$x['sch_disc']; $out['free_value'] += (float)$x['free_value']; }
@@ -117,7 +119,9 @@ if ($ready) {
 $bws = [];
 $cb = mysqli_query($conn, "SHOW TABLES LIKE 'bws_items'");
 if ($items && $cb && mysqli_num_rows($cb)) {
-    $codes = array_values(array_unique(array_map(fn($x) => "'" . mysqli_real_escape_string($conn, sd_norm($x['activity_code'])) . "'", $items)));
+    $ck = [];   // scheme code, plus the scheme no written in the description (used when the code itself has no bill rows)
+    foreach ($items as $x) { $ck[sd_norm($x['activity_code'])] = 1; foreach (sd_desc_keys($x['activity_desc']) as $a) $ck[$a] = 1; }
+    $codes = array_map(fn($k) => "'" . mysqli_real_escape_string($conn, $k) . "'", array_keys($ck));
     $q = mysqli_query($conn, "SELECT UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) AS sn, COUNT(*) AS n, COALESCE(SUM(sch_disc),0) AS sd, COALESCE(SUM(free_value),0) AS fv FROM bws_items WHERE UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) IN (" . implode(',', $codes) . ") GROUP BY UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no)))");
     while ($q && ($x = mysqli_fetch_assoc($q))) $bws[$x['sn']] = ['n' => (int)$x['n'], 'sd' => round((float)$x['sd'] + (float)$x['fv'], 2), 'disc' => (float)$x['sd'], 'fv' => (float)$x['fv']];     // scheme discount + free value (where the bill wise data has one)
 }
@@ -130,7 +134,7 @@ if ($items && $cq && mysqli_num_rows($cq)) {
     $cct = sd_cc_tally($conn, array_keys($allk));     // claim certificate rows per scheme no (first part of the description, else anywhere in it)
 }
 foreach ($items as &$__x) {
-    $k = sd_norm($__x['activity_code']); $b = $bws[$k] ?? null; $c2 = $cct ? sd_cc_pick($cct, $__x['activity_code'], $__x['activity_desc']) : null;   // scheme code not on the certificate -> the number written in the scheme description
+    $k = sd_norm($__x['activity_code']); $b = $bws ? sd_cc_pick($bws, $__x['activity_code'], $__x['activity_desc']) : null; $c2 = $cct ? sd_cc_pick($cct, $__x['activity_code'], $__x['activity_desc']) : null;   // scheme code not on the certificate -> the number written in the scheme description
     $__x['bws_n'] = $b ? $b['n'] : 0; $__x['bws_sd'] = $b ? $b['sd'] : null;
     $__x['cc_n'] = $c2 ? $c2['n'] : 0; $__x['cc_act'] = $c2 ? $c2['act'] : null;
     $has_claim = $__x['claim_amount'] !== null;
