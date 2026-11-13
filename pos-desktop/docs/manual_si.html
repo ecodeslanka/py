@@ -1,0 +1,176 @@
+<!doctype html><html lang="si"><head><meta charset="utf-8"><title>Easy POS - පරිශීලක අත්පොත</title>
+<style>
+@page{size:A4;margin:18mm 16mm}
+body{font:11pt/1.75 "Noto Sans Sinhala","Iskoola Pota","Segoe UI",Arial,sans-serif;color:#1e293b}
+h1{font-size:28pt;color:#4f46e5;margin:0 0 4px;line-height:1.4}h2{color:#4f46e5;border-bottom:2px solid #e0e7ff;padding-bottom:4px;margin-top:26px;break-after:avoid;font-size:16pt}h3{margin:16px 0 4px;break-after:avoid}
+.cover{height:240mm;display:flex;flex-direction:column;justify-content:center;text-align:center;break-after:page}
+.cover .big{font-size:60pt}.cover p{color:#64748b;font-size:13pt}
+img{max-width:100%;border:1px solid #cbd5e1;border-radius:6px;margin:8px 0;break-inside:avoid}
+table{border-collapse:collapse;width:100%;margin:8px 0}tr{break-inside:avoid}td,th{border:1px solid #e2e8f0;padding:5px 9px;text-align:left;vertical-align:top}th{background:#eef2ff}
+kbd{background:#f1f5f9;border:1px solid #cbd5e1;border-bottom-width:2px;border-radius:4px;padding:0 5px;font:10pt Consolas,monospace}
+code{font:10pt Consolas,monospace;background:#f1f5f9;padding:0 4px;border-radius:3px}
+.tip{background:#fef3c7;border-left:4px solid #d97706;padding:8px 12px;border-radius:4px;margin:10px 0;break-inside:avoid}
+.note{background:#e0f2fe;border-left:4px solid #0284c7;padding:8px 12px;border-radius:4px;margin:10px 0;break-inside:avoid}
+li{margin:3px 0}.toc li{margin:3px 0}
+</style></head><body>
+<div class="cover"><div class="big">🏪</div><h1>Easy POS</h1><p>පරිශීලක අත්පොත</p><p style="font-size:11pt">විකුණුම් (POS) · ගනුදෙනුකරු ණය · ලාභ වාර්තා · ස්වයංක්‍රීය උපස්ථ (Backup)</p><p style="font-size:10pt;margin-top:40px">Powered by ECODES IT SOLUTIONS · https://ecodes.lk</p></div>
+
+<h2 style="margin-top:0">පටුන</h2>
+<ol class="toc"><li>ස්ථාපනය කිරීම සහ ආරම්භ කිරීම</li><li>ඇතුළු වීම සහ මුල් සැකසුම්</li><li>සමාගම් සැකසුම්</li><li>භාණ්ඩ (Items) සෑදීම</li><li>විකිණීම – POS තිරය</li><li>යතුරුපුවරු කෙටිමං</li><li>ගනුදෙනුකරුවන් සහ ණය</li><li>මුද්‍රණය සහ රිසිට්පත් මුද්‍රණ යන්ත්‍ර</li><li>විකුණුම් ලැයිස්තුව, නැවත මුද්‍රණය සහ Void කිරීම</li><li>වියදම් සහ ලාභ වාර්තා</li><li>Inventory: තොග මට්ටම්, ගැලපුම් සහ Inventory Log</li><li>සැපයුම්කරුවන් සහ GRN (භාණ්ඩ ලැබීම්)</li><li>සැපයුම්කරු ගෙවීම්</li><li>දෛනික මුදල් පොත (Cash Book)</li><li>සුරකින ලද බිල්පතක් POS තිරයේම සංස්කරණය කිරීම</li><li>පරිශීලකයන් සහ අවසර</li><li>Backup සහ Restore</li><li>නව පරිගණකයකට මාරු වීම</li><li>Theme සහ පෙනුම</li><li>ගැටලු නිරාකරණය</li></ol>
+
+<h2>1. ස්ථාපනය කිරීම සහ ආරම්භ කිරීම</h2>
+<ol><li><b>EasyPOS-Setup-1.0.0.exe</b> මත ඩබල් ක්ලික් කරන්න.</li><li>ස්ථාපන ෆෝල්ඩරය තෝරන්න (හෝ පෙරනිමිය තබාගන්න) සහ <b>Install</b> ක්ලික් කරන්න.</li><li>Desktop හෝ Start menu හි ඇති <b>Easy POS</b> shortcut එකෙන් වැඩසටහන විවෘත කරන්න.</li></ol>
+<div class="note">අන්තර්ජාලය හෝ දත්ත සමුදා (database) මෘදුකාංග අවශ්‍ය නැත. ඔබේ සියලු දත්ත මෙම පරිගණකයේ එක් ගොනුවක ගබඩා වේ: <code>%APPDATA%\Easy POS\data\pos-data.json</code>. වැඩසටහන Uninstall කළත් දත්ත මැකී නොයයි.</div>
+
+<h2>2. ඇතුළු වීම සහ මුල් සැකසුම්</h2>
+<p>පළමු වරට ඇතුළු වන විට Username: <b>admin</b> සහ Password: <b>admin</b> භාවිතා කරන්න. වහාම <b>Settings → My account</b> වෙත ගොස් මුරපදය වෙනස් කරන්න.</p>
+<p><b>නව වෙළඳසැලක් සඳහා නිර්දේශිත පිළිවෙළ:</b></p>
+<ol><li>Settings → සමාගම් විස්තර ඇතුළත් කරන්න, ලාංඡනය (logo) උඩුගත කරන්න, කඩදාසි ප්‍රමාණය සහ මුද්‍රණ යන්ත්‍රය තෝරා <b>Save settings</b> ක්ලික් කරන්න.</li><li>Items → ඔබේ භාණ්ඩ ඇතුළත් කරන්න.</li><li>Users → කැෂියර්වරුන් (cashiers) එක් කරන්න.</li><li>Customers → ණයට විකුණන ගනුදෙනුකරුවන් එක් කරන්න (විකිණීමේදී ද එක් කළ හැක).</li></ol>
+<p>පිටු අතර මාරු වීමට වම් පස මෙනුව භාවිතා කරන්න (හෝ <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd>). <b>Theme</b> මගින් පෙනුම වෙනස් වේ. <b>Logout</b> මගින් පරිශීලකයා ඉවත් වේ. <kbd>F11</kbd> මගින් පූර්ණ තිරය (full screen) සක්‍රිය/අක්‍රිය කළ හැක.</p>
+
+<h2>3. සමාගම් සැකසුම්</h2>
+<img src="img/settings.png">
+<p><b>Settings</b> පිටුව (administrator ට පමණි) විවෘත කර පහත දෑ පුරවන්න:</p>
+<table><tr><th>ක්ෂේත්‍රය</th><th>කාර්යය</th></tr>
+<tr><td>Company name, address, email, contact no., website</td><td>සෑම රිසිට්පතකම සහ ඉන්වොයිසියකම ඉහළින් මුද්‍රණය වේ.</td></tr>
+<tr><td>Upload logo</td><td>PNG/JPG රූපයක් තෝරන්න. ස්වයංක්‍රීයව කුඩා කර රිසිට්පත්, ඉන්වොයිස් සහ මෙනුවේ පෙන්වයි. <b>Remove</b> මගින් ඉවත් කළ හැක.</td></tr>
+<tr><td>Advertisement / promo message</td><td>කෙටි වෙළඳ දැන්වීමක් (උදා: “2ක් ගන්න 1ක් නොමිලේ – www.myshop.com”) සෑම බිල්පතකම පහළින් මුද්‍රණය වේ.</td></tr>
+<tr><td>Invoice footer</td><td>අවසානයේ මුද්‍රණය වන පණිවිඩය, උදා: “ස්තූතියි! නැවත පැමිණෙන්න.”</td></tr>
+<tr><td>Paper / printer type</td><td>58 mm thermal, 80 mm thermal හෝ A4 ඉන්වොයිසිය.</td></tr>
+<tr><td>Printer</td><td>නිශ්චිත මුද්‍රණ යන්ත්‍රයක් තෝරන්න, නැතහොත් Windows default printer භාවිතා කරන්න.</td></tr>
+<tr><td>Currency symbol, tax name සහ %</td><td>බදු බිල්පතේ මුළු මුදලට එකතු වේ. බදු නැත්නම් 0 තබන්න.</td></tr>
+<tr><td>Print after every sale / Print directly</td><td>සෑම විකිණීමකින් පසු ස්වයංක්‍රීයව මුද්‍රණය කිරීම; Windows dialog එක සහිතව හෝ රහිතව.</td></tr>
+<tr><td>POS rules</td><td>තොග 0 වුවත් විකිණීමට ඉඩ දීම; කැෂියර්වරුන්ට මිල වෙනස් කිරීමට හෝ වට්ටම් දීමට ඉඩ දීම.</td></tr></table>
+<p>රිසිට්පතේ පෙනුම බැලීමට <b>Print test receipt</b> ක්ලික් කරන්න. වෙනස්කම් කළ පසු සෑම විටම <b>Save settings</b> ක්ලික් කරන්න.</p>
+
+<h2>4. භාණ්ඩ (Items) සෑදීම</h2>
+<img src="img/items.png">
+<p><b>Items → ＋ New item</b> වෙත යන්න.</p>
+<table><tr><th>ක්ෂේත්‍රය</th><th>තේරුම</th></tr>
+<tr><td>Barcode / code</td><td>භාණ්ඩයේ barcode එක මෙහි scan කරන්න. හිස්ව තැබුවහොත් කේතයක් ස්වයංක්‍රීයව සෑදේ.</td></tr>
+<tr><td>Item name</td><td>අනිවාර්යයි.</td></tr>
+<tr><td>Category</td><td>POS තිරයේ පෙරහන් (filter) බොත්තම් සඳහා භාවිතා වේ.</td></tr>
+<tr><td>Cost price</td><td>සැපයුම්කරුට ගෙවන මිල. ලාභය ගණනය කිරීමට භාවිතා වේ. කැෂියර්වරුන්ට මෙය නොපෙනේ.</td></tr>
+<tr><td>Selling price</td><td>ගනුදෙනුකරු ගෙවන මිල. එක් ඒකකයක ලාභය සහ ලාභ ප්‍රතිශතය (margin %) සජීවීව පෙන්වයි.</td></tr>
+<tr><td>Stock on hand / Low-stock alert</td><td>වෙළඳසැලේ ඇති ප්‍රමාණය. අනතුරු ඇඟවීමේ මට්ටමට හෝ ඊට අඩු භාණ්ඩ රතු පාටින් පෙන්වයි.</td></tr>
+<tr><td>Track stock</td><td>සේවා හෝ තොග ගණන් නොකරන භාණ්ඩ සඳහා ඉවත් කරන්න.</td></tr></table>
+<ul><li><b>＋ Stock</b> මගින් ලැබුණු තොග එකතු කළ හැක (අවශ්‍ය නම් cost price ද යාවත්කාලීන කළ හැක).</li><li><b>Edit</b> මගින් භාණ්ඩය වෙනස් කරයි. <b>✕</b> මගින් මකයි; දැනටමත් විකුණා ඇති භාණ්ඩ මකනවා වෙනුවට අක්‍රිය (deactivate) කරනු ලබන අතර පැරණි වාර්තා නිවැරදිව පවතී.</li></ul>
+
+<h2>5. විකිණීම – POS තිරය</h2>
+<img src="img/pos.png">
+<ol><li>භාණ්ඩ එකතු කරන්න: <b>barcode scan කරන්න</b>, නමක් ටයිප් කර <kbd>Enter</kbd> ඔබන්න, නැතහොත් භාණ්ඩ කාඩ්පතක් ක්ලික් කරන්න. Category බොත්තම් මගින් පෙරහන් කළ හැක.</li>
+<li>ප්‍රමාණය <b>− / +</b> මගින් හෝ කොටුවේ ටයිප් කර වෙනස් කරන්න. (අවසර ඇත්නම්) සෑම පේළියකම මිල වෙනස් කළ හැක.</li>
+<li><kbd>F3</kbd> මගින් ගනුදෙනුකරු තෝරන්න (මුදල් ගනුදෙනුකරුවන් සඳහා Walk-in ලෙස තබන්න).</li>
+<li><kbd>F4</kbd> මගින් වට්ටම් දෙන්න – මුදලක් හෝ ප්‍රතිශතයක්.</li>
+<li>ගෙවීමේ කවුළුව විවෘත කිරීමට <kbd>F9</kbd> (<b>PAY</b>) ඔබන්න.</li></ol>
+<img src="img/pay.png">
+<p><b>ගෙවීමේ කවුළුව:</b> <b>Cash / Card / Online / Credit</b> තෝරන්න, ලැබුණු මුදල ටයිප් කරන්න (හෝ quick බොත්තම් භාවිතා කරන්න). ආපසු දිය යුතු <b>ඉතිරි මුදල (change)</b> හෝ <b>ණයට</b> යන මුදල පෙන්වයි. විකිණීම සම්පූර්ණ කිරීමට <kbd>Enter</kbd> ඔබන්න.</p>
+<img src="img/done.png">
+<p>විකිණීමෙන් පසු ලොකු අකුරින් <b>change</b> මුදල පෙන්වන අතර (සක්‍රිය නම්) රිසිට්පත ස්වයංක්‍රීයව මුද්‍රණය වේ. ඊළඟ ගනුදෙනුකරු සඳහා <kbd>Enter</kbd> ඔබන්න.</p>
+<ul><li><b>Quick cash (F10)</b> – නිවැරදි මුදලින් මුදල් විකිණීමක් එක යතුරකින් සම්පූර්ණ කර මුද්‍රණය කරයි.</li><li><b>Hold (F6) / Recall (F7)</b> – තවත් ගනුදෙනුකරුවෙකුට සේවය කරන අතරතුර බිල්පතක් තාවකාලිකව තබා පසුව ආපසු ගන්න.</li><li><b>Clear (F8)</b> – බිල්පත හිස් කරයි.</li></ul>
+
+<h2>6. යතුරුපුවරු කෙටිමං</h2>
+<table><tr><th>යතුර</th><th>කාර්යය</th></tr>
+<tr><td><kbd>F1</kbd></td><td>කෙටිමං උදව් පෙන්වයි</td></tr><tr><td><kbd>F2</kbd></td><td>සෙවුම් / barcode කොටුවට යයි</td></tr><tr><td>සෙවුමේදී <kbd>Enter</kbd></td><td>නිවැරදි barcode එකට ගැළපෙන භාණ්ඩය, නැතහොත් පළමු ප්‍රතිඵලය එකතු කරයි</td></tr>
+<tr><td><kbd>F3</kbd></td><td>ගනුදෙනුකරු තෝරන්න හෝ නව එකක් සාදන්න</td></tr><tr><td><kbd>F4</kbd></td><td>බිල්පත් වට්ටම</td></tr><tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>බිල්පතේ පේළියක් තෝරන්න</td></tr>
+<tr><td><kbd>+</kbd> / <kbd>−</kbd></td><td>තෝරාගත් පේළියේ ප්‍රමාණය වැඩි/අඩු කරයි (සෙවුම් කොටුව හිස් විය යුතුය)</td></tr><tr><td><kbd>*</kbd></td><td>තෝරාගත් පේළියේ ප්‍රමාණය ටයිප් කරන්න</td></tr><tr><td><kbd>Delete</kbd></td><td>තෝරාගත් පේළිය ඉවත් කරයි</td></tr>
+<tr><td><kbd>F5</kbd></td><td>සුරකින ලද බිල්පතක් POS තිරයේම සංස්කරණය කරයි</td></tr><tr><td><kbd>F6</kbd> / <kbd>F7</kbd></td><td>බිල්පත Hold කරන්න / Hold කළ බිල්පත ආපසු ගන්න</td></tr><tr><td><kbd>F8</kbd></td><td>බිල්පත හිස් කරන්න</td></tr><tr><td><kbd>F9</kbd></td><td>ගෙවීම</td></tr><tr><td><kbd>F10</kbd></td><td>Quick cash විකිණීම සහ මුද්‍රණය</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>අවසාන රිසිට්පත නැවත මුද්‍රණය කරයි</td></tr><tr><td><kbd>Esc</kbd></td><td>කවුළුවක් වසයි / සෙවුම මකයි</td></tr><tr><td><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd></td><td>පිටු මාරු කරයි</td></tr><tr><td><kbd>F11</kbd></td><td>පූර්ණ තිරය</td></tr></table>
+<div class="tip">USB barcode scanner එකක් භාවිතා කරන විට cursor එක සෙවුම් කොටුවේ තබන්න (<kbd>F2</kbd> ඔබන්න). Scanner එක කේතයෙන් පසු <kbd>Enter</kbd> යවන බැවින් සෑම scan එකකම භාණ්ඩය ස්වයංක්‍රීයව එකතු වේ.</div>
+
+<h2>7. ගනුදෙනුකරුවන් සහ ණය</h2>
+<img src="img/customers.png">
+<p><b>ගනුදෙනුකරුවෙකු සෑදීම:</b> <b>Customers → ＋ New customer</b> හෝ POS තිරයේ <kbd>F3</kbd> ඔබා <b>＋ New customer</b> ක්ලික් කරන්න. අමතර ක්ෂේත්‍ර: credit limit (0 = සීමාවක් නැත) සහ opening balance (ගනුදෙනුකරු දැනටමත් ගෙවිය යුතු මුදල).</p>
+<p><b>ණයට විකිණීම:</b> ගනුදෙනුකරු තෝරා <kbd>F9</kbd> ඔබා <b>Credit</b> (මුළු බිල්පතම ණයට) තෝරන්න, නැතහොත් අඩු මුදලක් ලැබුණු ලෙස ටයිප් කරන්න – ඉතිරිය ගනුදෙනුකරුගේ ශේෂයට එකතු වේ. ණය විකිණීමක් සඳහා ගනුදෙනුකරුවෙකු අවශ්‍යයි; credit limit එක ඉක්මවන්නේ නම් විකිණීම ප්‍රතික්ෂේප වේ.</p>
+<p><b>මුදල් ලැබීම:</b> Customers → <b>💵 Receive</b> → මුදල සහ ගෙවීම් ක්‍රමය ඇතුළත් කරන්න. ශේෂය අඩු වන අතර ගෙවීම් රිසිට්පතක් මුද්‍රණය කළ හැක.</p>
+<p><b>Ledger:</b> සියලු ණය විකුණුම් සහ ගෙවීම් ධාවන ශේෂය (running balance) සමඟ පෙන්වයි. Customers පිටුවේ ඉහළින් ඔබට අයකර ගත යුතු මුළු මුදල පෙන්වයි.</p>
+
+<h2>8. මුද්‍රණය සහ රිසිට්පත් මුද්‍රණ යන්ත්‍ර</h2>
+<ul><li><b>කුඩා thermal (POS) මුද්‍රණ යන්ත්‍ර:</b> Windows හි printer driver එක ස්ථාපනය කර, Settings හි <b>58 mm</b> හෝ <b>80 mm</b> තෝරා printer එක තෝරන්න.</li><li><b>A4 මුද්‍රණ යන්ත්‍ර:</b> භාණ්ඩ වගුවක් සහිත සම්පූර්ණ පිටු ඉන්වොයිසියක් සඳහා <b>A4 invoice</b> තෝරන්න.</li><li>කවුළුවක් නොමැතිව මුද්‍රණය කිරීමට <b>Print directly</b> සලකුණු කරන්න (කවුන්ටරයට වඩාත් සුදුසුයි). සෑම වරම printer තෝරා ගැනීමට එය ඉවත් කරන්න.</li><li>රිසිට්පත කැපී යයි නම් හෝ ඉතා පළලයි නම්, කඩදාසි ප්‍රමාණය රෝලයේ පළලට ගැළපෙන බවත් driver හි paper size රෝලයේ පළලම බවත් පරීක්ෂා කරන්න.</li></ul>
+
+<h2>9. විකුණුම් ලැයිස්තුව, නැවත මුද්‍රණය සහ Void කිරීම</h2>
+<p><b>Sales</b> පිටුව දිනයන් පරාසයක ඉන්වොයිස් සෙවුම සමඟ පෙන්වයි. ඕනෑම ඉන්වොයිසියක් පෙරදසුන් කර නැවත මුද්‍රණය කිරීමට <b>View / Print</b> ක්ලික් කරන්න. Administrator ට විකිණීමක් <b>Void</b> කළ හැක: තොග ආපසු එකතු වන අතර ගනුදෙනුකරුගේ ණය ඉවත් වේ. Void කළ විකුණුම් <b>VOID</b> ලෙස පෙන්වන අතර වාර්තාවලින් බැහැර වේ.</p>
+
+<h2>10. වියදම් සහ ලාභ වාර්තා</h2>
+<img src="img/reports.png">
+<p><b>Expenses</b> (කුලිය, විදුලිය, වැටුප්…) <b>Expenses → ＋ Add expense</b> හි ඇතුළත් කරන්න. ශුද්ධ ලාභය (net profit) ලබා ගැනීමට මේවා අඩු කරයි.</p>
+<p><b>Reports</b> (administrator ට පමණි) – ඉක්මන් පරාසයක් (Today, Yesterday, Last 7 days, This month…) හෝ අභිමත දින තෝරා, ඉන්පසු tab එකක් තෝරන්න:</p>
+<table><tr><th>Tab</th><th>පෙන්වන දෑ</th></tr>
+<tr><td>Profit summary</td><td>බිල්පත් ගණන, විකුණුම්, භාණ්ඩ පිරිවැය, <b>gross profit</b>, වියදම්, <b>net profit</b>, වට්ටම්, බදු, ණයට දුන් මුදල, ලැබුණු ගෙවීම්, ලාභ ප්‍රතිශතය සහ දෛනික ප්‍රස්තාරයක්.</td></tr>
+<tr><td>Item profit</td><td>සෑම භාණ්ඩයකම ප්‍රමාණය, ආදායම, පිරිවැය සහ ලාභය – වැඩිම ලාභය මුලින්.</td></tr>
+<tr><td>Daily</td><td>දිනපතා විකුණුම් සහ ලාභය.</td></tr><tr><td>By cashier</td><td>පරිශීලකයා අනුව විකුණුම් සහ ලාභය.</td></tr>
+<tr><td>Stock value</td><td>පිරිවැය මිලට සහ විකුණුම් මිලට තොග වටිනාකම, අඩු තොග භාණ්ඩ.</td></tr><tr><td>Customer credit</td><td>මුදල් ගෙවීමට ඇති සියලු දෙනා සහ ඒ ප්‍රමාණ.</td></tr></table>
+<p><b>ලාභය = විකුණුම් මිල − විකුණූ භාණ්ඩවල පිරිවැය මිල</b> (වට්ටම්වලින් පසු; බදු ලාභයට ගණන් නොගනී). <b>Export CSV</b> මගින් Excel හි විවෘත කළ හැක.</p>
+
+<h2>11. Inventory: තොග මට්ටම්, ගැලපුම් සහ Inventory Log</h2>
+<img src="img/inventory.png">
+<p><b>Inventory → Stock levels</b> පිටුව සෑම භාණ්ඩයකම ප්‍රමාණය, අනතුරු ඇඟවීමේ මට්ටම සහ පිරිවැය/විකුණුම් මිලට තොග වටිනාකම පෙන්වයි. අඩු තොග භාණ්ඩ රතු පාටින් පෙන්වයි.</p>
+<p><b>⚖ Adjust / Count</b> මගින් තොග නිවැරදි කරයි: <b>Set counted qty</b> (තොග ගණන් කිරීම – ඔබ ගණන් කළ ප්‍රමාණය ටයිප් කරන්න), <b>Add</b> හෝ <b>Remove</b>. හේතුවක් (විනාශය, කල් ඉකුත්වීම, අහිමි වීම, ගනුදෙනුකරු ආපසු දීම…) සහ අවශ්‍ය නම් සටහනක් තෝරන්න. සුරැකීමට පෙර නව තොග ප්‍රමාණය කවුළුවේ පෙන්වයි.</p>
+<img src="img/invlog.png">
+<p><b>Inventory → Inventory log</b> <u>සෑම</u> තොග චලනයක්ම වාර්තා කරයි: විකුණුම්, Void කළ විකුණුම්, GRN ලැබීම්, Void කළ GRN, ගැලපුම්, බිල්පත් සංස්කරණ සහ ආරම්භක තොග. සෑම පේළියකම වෙනස, තොග <i>පෙර → පසු</i>, යොමු අංකය, පරිශීලකයා සහ සටහන පෙන්වයි. දින, වර්ගය හෝ භාණ්ඩය අනුව පෙරහන් කර CSV වෙත ඉවත් කළ හැක. තොග පේළියක <b>Log</b> බොත්තම එම භාණ්ඩයේ ඉතිහාසය පමණක් විවෘත කරයි.</p>
+
+<h2>12. සැපයුම්කරුවන් සහ GRN (භාණ්ඩ ලැබීම්)</h2>
+<img src="img/grn.png">
+<ol><li><b>Purchases → Suppliers → ＋ New supplier</b> (නම, දුරකථනය, ලිපිනය, සහ දැනටමත් ණය නම් opening balance).</li>
+<li><b>Purchases → GRN → ＋ New GRN</b>. සැපයුම්කරු, දිනය සහ සැපයුම්කරුගේ ඉන්වොයිස් අංකය තෝරන්න.</li>
+<li>භාණ්ඩයක නමක් ටයිප් කරන්න හෝ barcode scan කර <kbd>Enter</kbd> ඔබන්න. සෑම පේළියකම <b>ප්‍රමාණය</b>, <b>cost price</b> සහ අවශ්‍ය නම් <b>නව selling price</b> ඇතුළත් කරන්න.</li>
+<li>වට්ටමක්, <b>Paid now</b> මුදල (<b>Full</b> මගින් සියල්ල ගෙවයි) සහ ගෙවීම් ක්‍රමය ඇතුළත් කරන්න. ගෙවා නොමැති ඉතිරිය සැපයුම්කරුගේ ශේෂයට එකතු වේ.</li>
+<li><b>Save GRN</b> ක්ලික් කරන්න. තොග වැඩි වේ, භාණ්ඩයේ cost price යාවත්කාලීන වේ (පැරණි පිරිවැය තබා ගැනීමට කොටුව ඉවත් කරන්න), සහ inventory log එකට සටහනක් ඇතුළත් වේ.</li></ol>
+<p>GRN එකක පේළි බැලීමට <b>View</b> ක්ලික් කරන්න. Administrators ට GRN එකක් <b>Void</b> කළ හැක – ලැබුණු තොග නැවත ඉවත් වේ.</p>
+
+<h2>13. සැපයුම්කරු ගෙවීම්</h2>
+<img src="img/suppliers.png">
+<p><b>Suppliers</b> tab එක සෑම සැපයුම්කරුවෙකුටම ඔබ ගෙවිය යුතු මුදල සහ මුළු ගෙවිය යුතු මුදල පෙන්වයි. ගෙවීමක් (cash, bank, cheque හෝ online) දිනයක් සහ cheque අංකය වැනි සටහනක් සමඟ වාර්තා කිරීමට <b>💸 Pay</b> භාවිතා කරන්න. <b>Ledger</b> මගින් සියලු මිලදී ගැනීම් සහ ගෙවීම් ධාවන ශේෂය සමඟ පෙන්වයි. <b>Supplier payments</b> tab එක කාල පරිච්ඡේදයක සියලු ගෙවීම් ලැයිස්තුගත කරයි (වැරදි සටහනක් මකා දැමිය හැක). Cash ගෙවීම් මුදල් පොතේ (Cash Book) ස්වයංක්‍රීයව පෙන්වයි.</p>
+
+<h2>14. දෛනික මුදල් පොත (Cash Book)</h2>
+<img src="img/cashbook.png">
+<p><b>Cash Book</b> මගින් එක් දිනයක මුදල් ලාච්චුව පෙන්වයි: <b>ආරම්භක මුදල → ඇතුල් වූ මුදල → ඉවත් වූ මුදල → අවසාන මුදල</b>. දිනය වෙනස් කිරීමට ◀ ▶ හෝ දින කොටුව භාවිතා කරන්න.</p>
+<table><tr><th>මුදල් ඇතුල් වීම (IN)</th><th>මුදල් ඉවත් වීම (OUT)</th></tr><tr><td>මුදල් විකුණුම්, මුදලින් ලැබුණු ගනුදෙනුකරු ගෙවීම්, GRN ආපසු ගෙවීම්, අතින් ඇතුළත් කරන “Cash in”</td><td>GRN සඳහා මුදලින් ගෙවීම්, මුදලින් සැපයුම්කරු ගෙවීම්, මුදල් වියදම්, විකුණුම් ආපසු ගෙවීම් (void), අතින් ඇතුළත් කරන “Cash out” (බැංකු තැන්පතු, හිමිකරුගේ ආදායම් ආදිය)</td></tr></table>
+<ul><li><b>＋ Cash in / － Cash out</b> – විකුණුමක් හෝ වියදමක් නොවන මුදල් වාර්තා කරන්න (හිමිකරුගේ ප්‍රාග්ධනය, බැංකු තැන්පතුව, කුඩා වියදම්).</li>
+<li><b>⚙ Opening balance</b> – මෙම වැඩසටහන භාවිතා කිරීම ආරම්භ කරන විට ලාච්චුවේ තිබූ මුදල සකසන්න (එක් වරක් පමණි).</li>
+<li><b>🔒 Close day / count cash</b> – ඔබ ගණන් කළ මුදල ටයිප් කරන්න. අපේක්ෂිත අවසාන මුදලට සාපේක්ෂව <i>වැඩිය</i> හෝ <i>අඩුය</i> යන්න වැඩසටහන පෙන්වා සුරකියි.</li>
+<li>Card, bank සහ online ගෙවීම් ලාච්චුවේ නොමැති බැවින් වගුවට පහළින් වෙනම ලැයිස්තුගත කරයි. ණය විකුණුම් ගනුදෙනුකරු ගෙවන තුරු මුදල් ලෙස නොසැලකේ.</li></ul>
+<img src="img/cbdays.png">
+<p><b>Day-wise summary</b> tab එක සෑම දිනකම ආරම්භක, ඇතුල්, ඉවත්, අවසාන, ගණන් කළ මුදල සහ වෙනස පෙන්වයි. එම දිනයේ පොත විවෘත කිරීමට දිනයක් ක්ලික් කරන්න.</p>
+
+<h2>15. සුරකින ලද බිල්පතක් POS තිරයේම සංස්කරණය කිරීම</h2>
+<img src="img/editbill.png">
+<p>බිල්පතක් වැරදි ලෙස ඇතුළත් කළේ නම් POS තිරයෙන් පිටතට නොගොස් නිවැරදි කළ හැක:</p>
+<ol><li><kbd>F5</kbd> ඔබන්න (හෝ බිල්පත් පැනලයේ ✏️ බොත්තම, හෝ <b>Sales → ✏ Edit</b>). ලැයිස්තුවෙන් බිල්පත තෝරන්න – නැතහොත් ඉන්වොයිස් අංකය ටයිප් කර <kbd>Enter</kbd> ඔබන්න.</li>
+<li>බිල්පත සාමාන්‍ය බිල්පත් පැනලයේ කහ පැහැති <b>“Editing INV-…”</b> පුවරුවක් සහිතව විවෘත වේ. විකිණීමේදී මෙන්ම ප්‍රමාණ, මිල, භාණ්ඩ, ගනුදෙනුකරු හෝ වට්ටම වෙනස් කරන්න.</li>
+<li><kbd>F9</kbd> ඔබා <b>Save changes</b> ක්ලික් කරන්න. තොග, ගනුදෙනුකරු ණය, මුදල් පොත සහ ලාභය සියල්ල ස්වයංක්‍රීයව නිවැරදි වන අතර තොග වෙනස්කම් inventory log එකේ සටහන් වේ.</li>
+<li>බිල්පත වෙනස් නොකර ඉවත් වීමට <b>Cancel edit</b> භාවිතා කරන්න.</li></ol>
+<p>ඉන්වොයිස් අංකය සහ මුල් දිනය නොවෙනස්ව පවතී; සංස්කරණය කළ බිල්පත් Sales ලැයිස්තුවේ <b>EDITED</b> ලෙස සලකුණු වේ. Administrators ට සැමවිටම බිල්පත් සංස්කරණය කළ හැක; කැෂියර්වරුන්ට <b>Settings → Cashier can edit own saved bills</b> සලකුණු කළහොත් පමණි. Void කළ බිල්පත් සංස්කරණය කළ නොහැක.</p>
+
+<h2>16. පරිශීලකයන් සහ අවසර</h2>
+<img src="img/users.png">
+<table><tr><th>භූමිකාව (Role)</th><th>කළ හැකි දෑ</th></tr><tr><td>Administrator</td><td>සියල්ල: භාණ්ඩ සහ cost price, inventory, GRN සහ සැපයුම්කරුවන්, මුදල් පොත, වාර්තා, වියදම්, පරිශීලකයන්, සැකසුම්, backup සහ විකුණුම් void කිරීම.</td></tr>
+<tr><td>Cashier</td><td>POS, ගනුදෙනුකරුවන් සහ ණය ගෙවීම්, තමන්ගේ විකුණුම් බැලීම/නැවත මුද්‍රණය (අවසර ඇත්නම් සංස්කරණය). Cost price, ලාභය, මිලදී ගැනීම්, inventory log හෝ මුදල් පොත බැලිය නොහැක.</td></tr></table>
+<p>Users → <b>＋ New user</b>: නම, username, මුරපදය සහ role ඇතුළත් කරන්න. පරිශීලකයෙකු සංස්කරණය කරන විට මුරපදය හිස්ව තැබුවහොත් පැරණි මුරපදය පවතී. විකුණුම් සිදුකර ඇති පරිශීලකයෙකු මකනවා වෙනුවට අක්‍රිය කරයි. අවම වශයෙන් එක් සක්‍රිය administrator කෙනෙකු සැමවිටම සිටිය යුතුය.</p>
+
+<h2>17. Backup සහ Restore</h2>
+<p><b>Settings → Backup</b> හි:</p>
+<ul><li><b>Backup folder</b> – උපස්ථ යන ස්ථානය තේරීමට <b>Browse…</b> ක්ලික් කරන්න (පෙරනිමිය <code>Documents\EasyPOS-Backups</code>). USB drive එකක් හෝ OneDrive/Google Drive වැනි සමමුහුර්ත ෆෝල්ඩරයක් නිර්දේශිතයි.</li>
+<li><b>Automatic backup</b> – දත්ත වෙනස් වී ඇත්නම් සෑම විනාඩි N කට වරක්, සෑම වරම වැඩසටහන ආරම්භ වන විට සහ වසන විට ක්‍රියාත්මක වේ. අවසාන N උපස්ථ තබා ගන්නා අතර පැරණි ඒවා ස්වයංක්‍රීයව ඉවත් වේ.</li>
+<li><b>Backup now</b> – ක්ෂණික අතින් උපස්ථයක්. <b>Open folder</b> මගින් Windows Explorer හි උපස්ථ ගොනු පෙන්වයි.</li>
+<li><b>Restore</b> – ලැයිස්තුවේ ඇති උපස්ථයක් ඉදිරිපිට Restore ක්ලික් කරන්න, නැතහොත් <b>Restore from file…</b> මගින් ගොනුවක් තෝරන්න. පළමුව වත්මන් දත්තවල ආරක්ෂිත උපස්ථයක් සාදනු ලබන අතර, ඉන්පසු ඔබට නැවත ඇතුළු වීමට සිදුවේ.</li></ul>
+<div class="tip">අවම වශයෙන් එක් උපස්ථයක් පරිගණකයේ තැටියට වඩා වෙනස් තැටියක (drive) සැමවිටම තබා ගන්න.</div>
+
+<h2>18. නව පරිගණකයකට මාරු වීම</h2>
+<ol><li>පැරණි පරිගණකයේ backup ෆෝල්ඩරයෙන් අලුත්ම <code>pos-backup-….json</code> ගොනුව පිටපත් කරන්න.</li><li>නව පරිගණකයේ Easy POS ස්ථාපනය කර admin / admin මගින් ඇතුළු වන්න.</li><li>Settings → Backup → <b>Restore from file…</b> → එම ගොනුව තෝරන්න.</li></ol>
+
+<h2>19. Theme සහ පෙනුම</h2>
+<img src="img/theme.png">
+<p>වම් මෙනුවේ පහළ ඇති <b>🎨 Theme</b> ක්ලික් කර <b>Light</b> හෝ <b>Dark</b> ප්‍රකාරය සහ වර්ණ හයෙන් එකක් (Indigo, Ocean, Emerald, Violet, Rose, Amber) තෝරන්න. ඔබේ තේරීම මෙම පරිගණකයේ මතක තබා ගනී.</p>
+<div class="note">Easy POS <b>ECODES IT SOLUTIONS</b> විසින් බලගන්වන ලද (<b>Powered by ECODES IT SOLUTIONS</b>) මෘදුකාංගයකි — <b>https://ecodes.lk</b>. මෙම සටහන login තිරයේ, මෙනුවේ, POS තිරයේ සහ Settings හි පෙන්වන අතර රිසිට්පත්වල ද මුද්‍රණය කළ හැක (Settings → POS rules → “Print Powered by…”).</div>
+
+<h2>20. ගැටලු නිරාකරණය</h2>
+<table><tr><th>ගැටලුව</th><th>විසඳුම</th></tr>
+<tr><td>admin මුරපදය අමතක වුණා</td><td>වෙනත් administrator කෙනෙකුට Users හි එය reset කිරීමට ඉල්ලන්න. එවැන්නෙකු නොමැති නම්, මුරපදය දැන සිටි කාලයේ සාදන ලද පැරණි backup එකක් restore කරන්න.</td></tr>
+<tr><td>කිසිවක් මුද්‍රණය නොවේ</td><td>Windows හි මුද්‍රණ යන්ත්‍රය ක්‍රියා කරන බව පරීක්ෂා කර, Settings හි එය තෝරා <b>Print test receipt</b> උත්සාහ කරන්න. Windows dialog එක සහ දෝෂ බැලීමට “Print directly” ඉවත් කරන්න.</td></tr>
+<tr><td>Barcode එක හමු නොවේ</td><td>Items හි භාණ්ඩයේ code එක barcode එකට හරියටම ගැළපෙන බවත් භාණ්ඩය Active බවත් තහවුරු කරන්න.</td></tr>
+<tr><td>“Credit limit exceeded”</td><td>ගනුදෙනුකරුගෙන් ගෙවීමක් ලබා ගන්න, නැතහොත් Customers → Edit හි සීමාව වැඩි කරන්න.</td></tr>
+<tr><td>“Select a customer to sell on credit”</td><td>ගෙවීමට පෙර <kbd>F3</kbd> ඔබා ගනුදෙනුකරුවෙකු තෝරන්න.</td></tr>
+<tr><td>Settings හි backup අනතුරු ඇඟවීමක්</td><td>Backup ෆෝල්ඩරය ලබා ගත නොහැකි විය හැක (drive ඉවත් කර හෝ පිරී ඇත). වෙනත් ෆෝල්ඩරයක් තෝරන්න.</td></tr></table>
+<p style="text-align:center;color:#64748b;margin-top:30px;font-size:10pt">Easy POS · Powered by ECODES IT SOLUTIONS · https://ecodes.lk</p>
+</body></html>
