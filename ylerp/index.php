@@ -43,7 +43,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
   <div class="ur-head">
     <div class="ur-title"><span class="ur-ic"><i class="fa-solid fa-scale-balanced"></i></span>
       <div><h3>Unilever Receivable Summary</h3><small id="urAsAt">live from Customer Ledger &amp; Vendor Ledger</small></div></div>
-    <button type="button" class="ur-btn" id="urReload" title="Recalculate now"><i class="fa-solid fa-rotate"></i> Refresh</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="ur-btn" id="urPrint" href="unilever_summary_print.php" data-no-loader title="One A4 page: print or download as PDF" style="text-decoration:none"><i class="fa-solid fa-file-pdf"></i> Print / PDF</a>
+    <button type="button" class="ur-btn" id="urReload" title="Recalculate now"><i class="fa-solid fa-rotate"></i> Refresh</button></div>
   </div>
   <div class="ur-filters">
     <div class="ur-mode" id="urMode"><button type="button" data-m="asat" class="on"><i class="fa-regular fa-calendar-check"></i> As at</button><button type="button" data-m="range"><i class="fa-solid fa-arrows-left-right"></i> Date range</button></div>
@@ -190,6 +191,7 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
     var f=read(); save(f); sync();
     var qs=new URLSearchParams({ajax:'ur_summary',mode:f.mode,as_at:f.as_at,from:f.from,to:f.to,years:f.years,months:f.months}); if(fresh) qs.set('nocache','1');
     $('urBody').style.opacity='.45'; $('urAsAt').textContent='loading…';
+    $('urPrint').href='unilever_summary_print.php?'+new URLSearchParams({mode:f.mode,as_at:f.as_at,from:f.from,to:f.to,years:f.years,months:f.months}).toString();
     fetch('index.php?'+qs.toString(),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
       box.style.display='block'; $('urPaidCard').style.display='';
       if(!d.success){ err('The summary could not be loaded: '+esc(d.message||'unknown error'),true); return; }
