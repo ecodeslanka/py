@@ -35,10 +35,15 @@ $rows_result = mysqli_query($conn,
             SUM(short_excess)                                               AS net_se,
             SUM(CASE WHEN short_excess < 0 THEN -short_excess ELSE 0 END)   AS short_qty,
             SUM(CASE WHEN short_excess > 0 THEN  short_excess ELSE 0 END)   AS excess_qty,
-            -- good units missing (Adj Good - Actual) that came back as extra damage
-            -- (Actual Dmg - Adj Dmg) are damage, not a real shortage
-            SUM(CASE WHEN actual_qty IS NOT NULL AND actual_damage_qty IS NOT NULL
-                     THEN GREATEST(0, LEAST(COALESCE(adj_qty_good_units,0) - COALESCE(actual_qty,0), COALESCE(actual_damage_qty,0) - COALESCE(adj_qty_damage,0))) ELSE 0 END)                                    AS dmg_short_qty,
+            -- damage taken from the shortage.php line details:
+            --  (a) short lines: damaged units entered on the line (Actual Dmg, else Adj Dmg),
+            --      limited to that line's shortage
+            --  (b) other lines: good units missing that came back as extra damage
+            SUM(CASE WHEN short_excess < 0
+                     THEN LEAST(-short_excess, COALESCE(actual_damage_qty, adj_qty_damage, 0))
+                     ELSE 0 END)                                            AS dmg_short_qty,
+            SUM(CASE WHEN short_excess >= 0 AND actual_qty IS NOT NULL AND actual_damage_qty IS NOT NULL
+                     THEN GREATEST(0, LEAST(COALESCE(adj_qty_good_units,0) - COALESCE(actual_qty,0), COALESCE(actual_damage_qty,0) - COALESCE(adj_qty_damage,0))) ELSE 0 END)                                    AS dmg_offset_qty,
             COUNT(*)                                                        AS line_count,
             COUNT(DISTINCT delivery_person_name)                            AS person_count,
             GROUP_CONCAT(
@@ -49,7 +54,7 @@ $rows_result = mysqli_query($conn,
      WHERE import_id = $import_id
        AND short_excess IS NOT NULL
      GROUP BY sku_code
-     HAVING SUM(short_excess <> 0) > 0 OR dmg_short_qty > 0
+     HAVING SUM(short_excess <> 0) > 0 OR dmg_offset_qty > 0
      ORDER BY net_se ASC, sku_code ASC");
 
 // Totals
@@ -445,6 +450,7 @@ foreach ($se_rows as $r) {
         'sku_code' => $r['sku_code'],
         'sku_desc' => $r['sku_desc'],
         'damage'   => round(floatval($r['dmg_short_qty']), 2),
+        'offset'   => round(floatval($r['dmg_offset_qty']), 2),
     ];
 }
 ?>
@@ -569,7 +575,7 @@ function applyNetSystemSe(preview){
             excelTotal = (excelTotal || 0) + q;
         });
 
-        if (Math.abs(net) < 0.005 && excelTotal === null && !(Number(sys.damage) > 0)) return;
+        if (Math.abs(net) < 0.005 && excelTotal === null && !(Number(sys.offset) > 0)) return;
 
         let status;
         if (excelTotal === null) status = 'not_in_excel';
@@ -577,25 +583,30 @@ function applyNetSystemSe(preview){
 
         const base = rows.find(r => r.match_status !== 'not_in_system') || rows[0] || {};
 
-        // Auto damage (from shortage.php): good units missing (Adj Good - Actual) that came
-        // back as extra damaged units (Actual Dmg - Adj Dmg). If the SKU nets to zero and has
-        // no Excel row, the missing good units are fully explained by damage -> mark damage.
-        const dmg = Math.round((Number(sys.damage) || 0) * 100) / 100;
-        let dmgRef = '', dmgPartial = 0;
-        if (dmg > 0) {
-            if (Math.abs(net) < 0.005 && excelTotal === null) {
-                status = 'damage_cleared';
-                dmgRef = 'Auto: damage ' + dmg.toFixed(2) + ' per shortage.php';
-            } else {
-                dmgPartial = dmg;
-            }
+        // Auto damage from the shortage.php details:
+        //  - damaged units on short lines are removed from the shortage; if nothing is left
+        //    (no Excel row) or what is left equals the Excel qty -> marked damage
+        //  - net-zero SKU whose missing good units came back as extra damage -> marked damage
+        const dmgS = Math.round((Number(sys.damage) || 0) * 100) / 100;
+        const dmgO = Math.round((Number(sys.offset) || 0) * 100) / 100;
+        let dmg = 0, dmgRef = '', dmgPartial = 0, shownQty = net;
+        if (net < 0 && dmgS > 0) {
+            dmg = dmgS;
+            const left = Math.round((-net - dmgS) * 100) / 100;
+            if ((excelTotal === null && left < 0.005) ||
+                (excelTotal !== null && Math.abs(left - Math.abs(excelTotal)) < 0.005)) status = 'damage_cleared';
+            else dmgPartial = dmgS;
+        } else if (Math.abs(net) < 0.005 && dmgO > 0) {
+            dmg = dmgO; shownQty = -dmgO;
+            if (excelTotal === null) status = 'damage_cleared'; else dmgPartial = dmgO;
         }
+        if (status === 'damage_cleared') dmgRef = 'Auto: damage ' + dmg.toFixed(2) + ' per shortage.php';
         out.push({
             ...base,
             sku_code:      base.sku_code || sys.sku_code,
             sku_desc:      base.sku_desc || sys.sku_desc,
             delivery_date: base.delivery_date || IMPORT_DELIVERY_DATE,
-            system_qty:    (status === 'damage_cleared' && Math.abs(net) < 0.005) ? -dmg : net,
+            system_qty:    shownQty,
             excel_qty:     excelTotal === null ? null : Math.round(excelTotal * 100) / 100,
             match_status:  status,
             damage_auto:   status === 'damage_cleared',
@@ -622,7 +633,7 @@ function renderPreview(){
             statusExtra = `<div class="ikea-note"><i class="fa-solid fa-shield-halved"></i> ${r.damage_auto ? 'Auto-marked damage (' + Number(r.damage_qty).toFixed(2) + ' from shortage.php)' : 'Marked damage cleared in IKEA'}${(!r.damage_auto && r.damage_cleared_ref) ? (' &middot; Ref: <b>' + esc(r.damage_cleared_ref) + '</b>') : ''}</div>
                 <button type="button" class="undo-link" onclick="resetRowStatus(${r._id})"><i class="fa-solid fa-rotate-left"></i> Undo</button>`;
         } else if (r.damage_partial > 0 && !isConsumed) {
-            statusExtra = `<div class="ikea-note"><i class="fa-solid fa-shield-halved"></i> ${Number(r.damage_partial).toFixed(2)} damage found in shortage.php (good short offset by extra damage)</div>`;
+            statusExtra = `<div class="ikea-note"><i class="fa-solid fa-shield-halved"></i> ${Number(r.damage_partial).toFixed(2)} damage found in shortage.php details — not enough to clear the whole shortage</div>`;
         } else if (isConsumed) {
             statusExtra = `<div class="manual-note-used"><i class="fa-solid fa-check"></i> Used in manual match with <b>${esc(r.consumed_by_sku)}</b></div>`;
         }
