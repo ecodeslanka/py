@@ -1,0 +1,129 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Easy POS - User Manual</title>
+<style>
+@page{size:A4;margin:18mm 16mm}
+body{font:11pt/1.5 "Segoe UI",Arial,sans-serif;color:#1e293b}
+h1{font-size:26pt;color:#4f46e5;margin:0 0 4px}h2{color:#4f46e5;border-bottom:2px solid #e0e7ff;padding-bottom:4px;margin-top:26px;break-after:avoid}h3{margin:16px 0 4px;break-after:avoid}
+.cover{height:240mm;display:flex;flex-direction:column;justify-content:center;text-align:center;break-after:page}
+.cover .big{font-size:60pt}.cover p{color:#64748b;font-size:13pt}
+img{max-width:100%;border:1px solid #cbd5e1;border-radius:6px;margin:8px 0;break-inside:avoid}
+table{border-collapse:collapse;width:100%;margin:8px 0}tr{break-inside:avoid}td,th{border:1px solid #e2e8f0;padding:5px 9px;text-align:left;vertical-align:top}th{background:#eef2ff}
+kbd{background:#f1f5f9;border:1px solid #cbd5e1;border-bottom-width:2px;border-radius:4px;padding:0 5px;font:10pt Consolas,monospace}
+.tip{background:#fef3c7;border-left:4px solid #d97706;padding:8px 12px;border-radius:4px;margin:10px 0;break-inside:avoid}
+.note{background:#e0f2fe;border-left:4px solid #0284c7;padding:8px 12px;border-radius:4px;margin:10px 0;break-inside:avoid}
+li{margin:2px 0}.toc li{margin:3px 0}
+</style></head><body>
+<div class="cover"><div class="big">🏪</div><h1>Easy POS</h1><p>User Manual</p><p style="font-size:11pt">Point of sale · Customer credit · Profit reports · Automatic backup</p></div>
+
+<h2 style="margin-top:0">Contents</h2>
+<ol class="toc"><li>Installing and starting</li><li>Signing in and first-time setup</li><li>Company settings, logo, advertisement and footer</li><li>Creating items (cost price and selling price)</li><li>Making a sale – the POS screen</li><li>Keyboard shortcuts</li><li>Customers and credit</li><li>Printing and receipt printers</li><li>Sales list, reprint and void</li><li>Expenses and profit reports</li><li>Users and permissions</li><li>Backup and restore</li><li>Moving to a new computer</li><li>Troubleshooting</li></ol>
+
+<h2>1. Installing and starting</h2>
+<ol><li>Double-click <b>EasyPOS-Setup-1.0.0.exe</b>.</li><li>Choose the install folder (or keep the default) and click <b>Install</b>.</li><li>Open <b>Easy POS</b> from the Desktop or Start menu shortcut.</li></ol>
+<div class="note">No internet and no database software are needed. All your data is stored in one file on this computer: <code>%APPDATA%\Easy POS\data\pos-data.json</code>. Uninstalling the program does not delete your data.</div>
+
+<h2>2. Signing in and first-time setup</h2>
+<p>On first start sign in with username <b>admin</b> and password <b>admin</b>. Immediately go to <b>Settings → My account</b> and change the password.</p>
+<p><b>Recommended order for a new shop:</b></p>
+<ol><li>Settings → enter company details, upload logo, choose paper size and printer, click <b>Save settings</b>.</li><li>Items → add your products.</li><li>Users → add cashiers.</li><li>Customers → add credit customers (optional; you can also add them while selling).</li></ol>
+<p>Use the left menu to move between pages (or <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>8</kbd>). <b>Theme</b> switches light/dark mode. <b>Logout</b> signs the user out. <kbd>F11</kbd> toggles full screen.</p>
+
+<h2>3. Company settings</h2>
+<img src="img/settings.png">
+<p>Open <b>Settings</b> (administrator only) and fill in:</p>
+<table><tr><th>Field</th><th>What it does</th></tr>
+<tr><td>Company name, address, email, contact no., website</td><td>Printed at the top of every receipt and invoice.</td></tr>
+<tr><td>Upload logo</td><td>Choose a PNG/JPG. It is resized automatically and shown on receipts, invoices and in the menu. <b>Remove</b> clears it.</td></tr>
+<tr><td>Advertisement / promo message</td><td>A short advert (e.g. “Buy 2 get 1 free – visit www.myshop.com”) printed near the bottom of every bill.</td></tr>
+<tr><td>Invoice footer</td><td>Closing text such as “Thank you! Goods once sold are not returnable.”</td></tr>
+<tr><td>Paper / printer type</td><td>58 mm thermal, 80 mm thermal or A4 invoice.</td></tr>
+<tr><td>Printer</td><td>Choose a specific printer or use the Windows default.</td></tr>
+<tr><td>Currency symbol, tax name and %</td><td>Tax is added to the bill total. Leave 0 for no tax.</td></tr>
+<tr><td>Print after every sale / Print directly</td><td>Automatic printing with or without the Windows print dialog.</td></tr>
+<tr><td>POS rules</td><td>Allow selling when stock is 0; let cashiers change prices or give discounts.</td></tr></table>
+<p>Click <b>Print test receipt</b> to preview the layout. Always click <b>Save settings</b> after changes.</p>
+
+<h2>4. Creating items</h2>
+<img src="img/items.png">
+<p>Go to <b>Items → ＋ New item</b>.</p>
+<table><tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>Barcode / code</td><td>Scan the product barcode here. Leave blank to auto-create a code.</td></tr>
+<tr><td>Item name</td><td>Required.</td></tr>
+<tr><td>Category</td><td>Used for the filter buttons on the POS screen.</td></tr>
+<tr><td>Cost price</td><td>What you pay the supplier. Used to calculate profit. Cashiers cannot see it.</td></tr>
+<tr><td>Selling price</td><td>What the customer pays. The profit per unit and margin % are shown live.</td></tr>
+<tr><td>Stock on hand / Low-stock alert</td><td>Quantity in the shop. Items at or below the alert level are highlighted red.</td></tr>
+<tr><td>Track stock</td><td>Untick for services or items without stock counting.</td></tr></table>
+<ul><li><b>＋ Stock</b> adds received goods (and optionally updates the cost price).</li><li><b>Edit</b> changes an item. <b>✕</b> deletes it; items already sold are only deactivated so old reports stay correct.</li></ul>
+
+<h2>5. Making a sale – the POS screen</h2>
+<img src="img/pos.png">
+<ol><li>Add items: <b>scan a barcode</b>, type a name and press <kbd>Enter</kbd>, or click an item card. Use the category buttons to filter.</li>
+<li>Adjust quantity with <b>− / +</b> or type in the box. The price can be changed per line (if allowed).</li>
+<li>Choose the customer with <kbd>F3</kbd> (leave as Walk-in for cash customers).</li>
+<li>Add a discount with <kbd>F4</kbd> – an amount or a percentage.</li>
+<li>Press <kbd>F9</kbd> (<b>PAY</b>) to open the payment window.</li></ol>
+<img src="img/pay.png">
+<p><b>Payment window:</b> pick <b>Cash / Card / Online / Credit</b>, type the amount received (or use the quick buttons). The window shows the <b>change</b> to give back, or the amount that will go on <b>credit</b>. Press <kbd>Enter</kbd> to complete the sale.</p>
+<img src="img/done.png">
+<p>A big <b>change</b> display appears after the sale and the receipt prints automatically (if enabled). Press <kbd>Enter</kbd> for the next customer.</p>
+<ul><li><b>Quick cash (F10)</b> – exact cash payment and print in one key.</li><li><b>Hold (F6) / Recall (F7)</b> – park a bill while serving another customer, then bring it back.</li><li><b>Clear (F8)</b> – empty the bill.</li></ul>
+
+<h2>6. Keyboard shortcuts</h2>
+<table><tr><th>Key</th><th>Action</th></tr>
+<tr><td><kbd>F1</kbd></td><td>Show shortcut help</td></tr><tr><td><kbd>F2</kbd></td><td>Focus the search / barcode box</td></tr><tr><td><kbd>Enter</kbd> in search</td><td>Add exact barcode match, or the first search result</td></tr>
+<tr><td><kbd>F3</kbd></td><td>Choose or create customer</td></tr><tr><td><kbd>F4</kbd></td><td>Bill discount</td></tr><tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Select a bill line</td></tr>
+<tr><td><kbd>+</kbd> / <kbd>−</kbd></td><td>Increase / decrease quantity of the selected line (search box must be empty)</td></tr><tr><td><kbd>*</kbd></td><td>Type the quantity of the selected line</td></tr><tr><td><kbd>Delete</kbd></td><td>Remove the selected line</td></tr>
+<tr><td><kbd>F6</kbd> / <kbd>F7</kbd></td><td>Hold bill / Recall held bill</td></tr><tr><td><kbd>F8</kbd></td><td>Clear bill</td></tr><tr><td><kbd>F9</kbd></td><td>Payment</td></tr><tr><td><kbd>F10</kbd></td><td>Quick cash sale and print</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Reprint last receipt</td></tr><tr><td><kbd>Esc</kbd></td><td>Close a window / clear search</td></tr><tr><td><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>8</kbd></td><td>Switch pages</td></tr><tr><td><kbd>F11</kbd></td><td>Full screen</td></tr></table>
+<div class="tip">With a USB barcode scanner, keep the cursor in the search box (press <kbd>F2</kbd>). Each scan adds the item automatically because scanners send <kbd>Enter</kbd> after the code.</div>
+
+<h2>7. Customers and credit</h2>
+<img src="img/customers.png">
+<p><b>Create a customer</b> in <b>Customers → ＋ New customer</b>, or press <kbd>F3</kbd> on the POS screen and click <b>＋ New customer</b>. Optional fields: credit limit (0 = no limit) and opening balance (money the customer already owes).</p>
+<p><b>Selling on credit:</b> select the customer, press <kbd>F9</kbd>, then either choose <b>Credit</b> (whole bill on credit) or type a smaller amount received – the remainder is added to the customer's balance. A customer is required for any credit sale, and the sale is refused if the credit limit would be exceeded.</p>
+<p><b>Receiving money:</b> Customers → <b>💵 Receive</b> → enter the amount and method. The balance goes down and a payment receipt can be printed.</p>
+<p><b>Ledger:</b> shows every credit sale and payment with a running balance. The top of the Customers page shows the total you still have to collect.</p>
+
+<h2>8. Printing and receipt printers</h2>
+<ul><li><b>Small thermal printers (POS printers):</b> install the printer driver in Windows, then in Settings choose <b>58 mm</b> or <b>80 mm</b> and select the printer.</li><li><b>A4 printers:</b> choose <b>A4 invoice</b> for a full-page invoice with item table.</li><li>Tick <b>Print directly</b> to print without the Windows dialog (best for the counter). Untick it to choose a printer every time.</li><li>If the receipt is cut off or too wide, check the paper size matches the printer roll and that the driver paper size is the roll width.</li></ul>
+
+<h2>9. Sales list, reprint and void</h2>
+<p><b>Sales</b> lists invoices for a date range with search. Click <b>View / Print</b> to preview and reprint any invoice. Administrators can <b>Void</b> a sale: stock is returned and any credit is removed from the customer. Voided sales show <b>VOID</b> and are excluded from reports.</p>
+
+<h2>10. Expenses and profit reports</h2>
+<img src="img/reports.png">
+<p><b>Expenses</b> (rent, electricity, salaries…) are entered under <b>Expenses → ＋ Add expense</b>. They are subtracted to give net profit.</p>
+<p><b>Reports</b> (administrator only) – choose a quick range (Today, Yesterday, Last 7 days, This month, …) or custom dates, then a tab:</p>
+<table><tr><th>Tab</th><th>Shows</th></tr>
+<tr><td>Profit summary</td><td>Bills, sales, cost of goods, <b>gross profit</b>, expenses, <b>net profit</b>, discounts, tax, credit given, payments received, margin %, and a daily chart.</td></tr>
+<tr><td>Item profit</td><td>Quantity, revenue, cost and profit for every item, best first.</td></tr>
+<tr><td>Daily</td><td>Sales and profit per day.</td></tr><tr><td>By cashier</td><td>Sales and profit per user.</td></tr>
+<tr><td>Stock value</td><td>Stock at cost and at selling price, low-stock items.</td></tr><tr><td>Customer credit</td><td>Everyone who owes money and how much.</td></tr></table>
+<p><b>Profit = selling price − cost price</b> of the items sold, after discounts (tax is not counted as profit). <b>Export CSV</b> opens in Excel.</p>
+
+<h2>11. Users and permissions</h2>
+<img src="img/users.png">
+<table><tr><th>Role</th><th>Can do</th></tr><tr><td>Administrator</td><td>Everything: items and cost prices, reports, expenses, users, settings, backups, voiding sales.</td></tr>
+<tr><td>Cashier</td><td>POS, customers and credit payments, view/reprint own sales. Cannot see cost price or profit.</td></tr></table>
+<p>Users → <b>＋ New user</b>: enter name, username, password and role. Editing a user with a blank password keeps the old password. A user who has made sales is disabled instead of deleted. At least one active administrator must always exist.</p>
+
+<h2>12. Backup and restore</h2>
+<p>In <b>Settings → Backup</b>:</p>
+<ul><li><b>Backup folder</b> – click <b>Browse…</b> to choose where backups go (default <code>Documents\EasyPOS-Backups</code>). Choosing a USB drive or a synced cloud folder (OneDrive, Google Drive) is recommended.</li>
+<li><b>Automatic backup</b> – runs every N minutes when data has changed, every time the program starts and when it closes. The last N backups are kept; older ones are removed automatically.</li>
+<li><b>Backup now</b> – instant manual backup. <b>Open folder</b> shows the backup files in Windows Explorer.</li>
+<li><b>Restore</b> – click Restore next to a backup in the list, or <b>Restore from file…</b> to pick one. A safety backup of the current data is made first, then you sign in again.</li></ul>
+<div class="tip">Always keep at least one backup on a different drive than the computer's own disk.</div>
+
+<h2>13. Moving to a new computer</h2>
+<ol><li>On the old PC, copy the newest <code>pos-backup-….json</code> file from the backup folder.</li><li>Install Easy POS on the new PC and sign in with admin / admin.</li><li>Settings → Backup → <b>Restore from file…</b> → choose the file.</li></ol>
+
+<h2>14. Troubleshooting</h2>
+<table><tr><th>Problem</th><th>Solution</th></tr>
+<tr><td>Forgot the admin password</td><td>Ask another administrator to reset it in Users. If there is none, restore an old backup made while the password was known.</td></tr>
+<tr><td>Nothing prints</td><td>Check the printer works in Windows, select it in Settings, and try <b>Print test receipt</b>. Untick “Print directly” to see the Windows dialog and any error.</td></tr>
+<tr><td>Barcode not found</td><td>Make sure the item's code in Items matches the barcode exactly and the item is Active.</td></tr>
+<tr><td>“Credit limit exceeded”</td><td>Receive a payment from the customer or raise the limit in Customers → Edit.</td></tr>
+<tr><td>“Select a customer to sell on credit”</td><td>Press <kbd>F3</kbd> and choose a customer before paying.</td></tr>
+<tr><td>Backup warning in Settings</td><td>The backup folder may be unavailable (drive removed or full). Choose another folder.</td></tr></table>
+</body></html>
