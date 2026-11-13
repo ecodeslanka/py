@@ -2,7 +2,7 @@
 /**
  * scheme_ledger_lib.php — the Scheme Ledger calculation, shared by scheme_ledger_report.php and the dashboard.
  *   Debit  = Claim Amount of the Current Scheme Status upload (DAMAGE schemes left out)
- *   Credit = Claim Certificate actual amount whose description starts with the scheme no
+ *   Credit = Claim Certificate actual amount whose description starts with the scheme no, or has it anywhere in the line
  *   Balance = running Debit − Credit
  * Options: from, to (dates), moc, q (scheme no / description), years[], months[] (of the entry date).
  */

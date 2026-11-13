@@ -2,7 +2,7 @@
 /**
  * scheme_ledger_report.php — Scheme Ledger (Vendor Ledger)
  * A statement per scheme: the CLAIM AMOUNT of the uploaded Current Scheme Status Report is the DEBIT,
- * the CLAIM CERTIFICATE ACTUAL AMOUNT (Customer Claim Certificate Import, scheme no = claim description before the first "-") is the CREDIT.
+ * the CLAIM CERTIFICATE ACTUAL AMOUNT (Customer Claim Certificate Import, scheme no = claim description before the first "-", else any scheme no found in the description line) is the CREDIT.
  * Balance = running total of Debit − Credit.  The closing (last) balance is shown at the top; newest entries first.
  */
 date_default_timezone_set('Asia/Colombo');
@@ -77,7 +77,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sl_d($f_from) :
 </style>
 <div class="slr">
   <h2><i class="fa-solid fa-book-open" style="color:#1e3a8a"></i> Scheme Ledger</h2>
-  <p class="sub">Statement per scheme: <b>Debit</b> = Claim Amount (Current Scheme Status upload) · <b>Credit</b> = Claim Certificate Actual Amount (Customer Claim Certificate Import) · <b>Balance</b> = Debit − Credit. The last (closing) balance is at the top.</p>
+  <p class="sub">Statement per scheme: <b>Debit</b> = Claim Amount (Current Scheme Status upload) · <b>Credit</b> = Claim Certificate Actual Amount (Customer Claim Certificate Import; the scheme no is read from the start of the claim description, or from anywhere in it) · <b>Balance</b> = Debit − Credit. The last (closing) balance is at the top.</p>
   <?php if (!$has_items): ?><div class="card" style="color:#92400e;background:#fffbeb">No scheme data yet — import the Excel in <a href="scheme_status_report.php">Current Scheme Status Import</a>.</div><?php endif; ?>
 
   <form class="card" method="get"><div class="ftog" id="slTog"><b><i class="fa-solid fa-sliders"></i> Filters</b><?php foreach ($active as $c): ?><span class="chip"><?= sl_h($c) ?></span><?php endforeach; if (!$active): ?><span style="color:#9ca3af;font-size:12.5px">none — click to open</span><?php endif; ?><i class="fa-solid fa-chevron-down" style="margin-left:auto"></i></div>
