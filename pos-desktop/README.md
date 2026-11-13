@@ -32,6 +32,11 @@ npm run dist
 ```
 The installer appears in `pos-desktop/dist/`. It lets the user choose the install folder and creates Desktop/Start-menu shortcuts.
 
+## Build the Mac installer (.dmg)
+A Mac installer can only be built on macOS, so GitHub's macOS runner does it: the same workflow produces **`EasyPOS-Mac`** (artifact) containing `EasyPOS-1.0.0-mac-arm64.dmg` (Apple-silicon) and `EasyPOS-1.0.0-mac-x64.dmg` (Intel). On a Mac: `cd pos-desktop && npm install && npm run dist:mac`.
+
+The app is ad-hoc signed, not notarized (no paid Apple Developer account). First launch: right-click the app → **Open**, or run `xattr -cr "/Applications/Easy POS.app"`. On Mac laptops use `Fn`+`F9` etc. for the function keys. Data lives in `~/Library/Application Support/Easy POS/data/`.
+
 ## Run for development
 ```bash
 npm install

@@ -21,6 +21,13 @@ li{margin:2px 0}.toc li{margin:3px 0}
 <ol><li>Double-click <b>EasyPOS-Setup-1.0.0.exe</b>.</li><li>Choose the install folder (or keep the default) and click <b>Install</b>.</li><li>Open <b>Easy POS</b> from the Desktop or Start menu shortcut.</li></ol>
 <div class="note">No internet and no database software are needed. All your data is stored in one file on this computer: <code>%APPDATA%\Easy POS\data\pos-data.json</code>. Uninstalling the program does not delete your data.</div>
 
+<h3>Installing on a Mac</h3>
+<ol><li>Use <b>EasyPOS-1.0.0-mac-arm64.dmg</b> for Apple-silicon Macs (M1, M2, M3, M4) or <b>EasyPOS-1.0.0-mac-x64.dmg</b> for Intel Macs (Apple menu → About This Mac shows which you have).</li>
+<li>Open the DMG and <b>drag Easy POS onto the Applications folder</b>, then open it from Applications or Launchpad.</li>
+<li>The app is not signed with an Apple Developer certificate, so the <b>first time</b> macOS may refuse to open it. <b>Right-click (or Control-click) the app → Open → Open</b>. If you see “damaged”, open <b>Terminal</b> and run: <code>xattr -cr "/Applications/Easy POS.app"</code>, then open it again. (Or: System Settings → Privacy &amp; Security → <b>Open Anyway</b>.)</li>
+<li>Your data is stored in <code>~/Library/Application Support/Easy POS/data/pos-data.json</code>; backups go to <code>Documents/EasyPOS-Backups</code> unless you choose another folder.</li></ol>
+<div class="tip">On Mac laptops the <kbd>F1</kbd>–<kbd>F12</kbd> keys control brightness/volume by default. Hold <kbd>Fn</kbd> with the key (e.g. <kbd>Fn</kbd>+<kbd>F9</kbd> to pay), or turn on “Use F1, F2, etc. keys as standard function keys” in System Settings → Keyboard. <kbd>Cmd</kbd> works for copy/paste/quit; <kbd>Ctrl</kbd>+<kbd>P</kbd> reprints the last receipt.</div>
+
 <h2>2. Signing in and first-time setup</h2>
 <p>On first start sign in with username <b>admin</b> and password <b>admin</b>. Immediately go to <b>Settings → My account</b> and change the password.</p>
 <p><b>Recommended order for a new shop:</b></p>

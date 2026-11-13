@@ -22,6 +22,13 @@ li{margin:3px 0}.toc li{margin:3px 0}
 <ol><li><b>EasyPOS-Setup-1.0.0.exe</b> මත ඩබල් ක්ලික් කරන්න.</li><li>ස්ථාපන ෆෝල්ඩරය තෝරන්න (හෝ පෙරනිමිය තබාගන්න) සහ <b>Install</b> ක්ලික් කරන්න.</li><li>Desktop හෝ Start menu හි ඇති <b>Easy POS</b> shortcut එකෙන් වැඩසටහන විවෘත කරන්න.</li></ol>
 <div class="note">අන්තර්ජාලය හෝ දත්ත සමුදා (database) මෘදුකාංග අවශ්‍ය නැත. ඔබේ සියලු දත්ත මෙම පරිගණකයේ එක් ගොනුවක ගබඩා වේ: <code>%APPDATA%\Easy POS\data\pos-data.json</code>. වැඩසටහන Uninstall කළත් දත්ත මැකී නොයයි.</div>
 
+<h3>Mac පරිගණකයක ස්ථාපනය</h3>
+<ol><li>Apple silicon Mac (M1, M2, M3, M4) සඳහා <b>EasyPOS-1.0.0-mac-arm64.dmg</b> ද, Intel Mac සඳහා <b>EasyPOS-1.0.0-mac-x64.dmg</b> ද භාවිතා කරන්න (ඔබේ Mac එක කුමක්දැයි Apple menu → About This Mac හි බලන්න).</li>
+<li>DMG ගොනුව විවෘත කර <b>Easy POS ඉරියව් Applications ෆෝල්ඩරයට ඇදගෙන යන්න</b> (drag), ඉන්පසු Applications හෝ Launchpad හි සිට විවෘත කරන්න.</li>
+<li>මෙම යෙදුම Apple Developer සහතිකයකින් අත්සන් කර නොමැති බැවින් <b>පළමු වරට</b> macOS එය විවෘත කිරීම ප්‍රතික්ෂේප කළ හැක. <b>යෙදුම මත Right-click (හෝ Control-click) → Open → Open</b> කරන්න. “damaged” පණිවිඩයක් පෙනේ නම් <b>Terminal</b> විවෘත කර <code>xattr -cr "/Applications/Easy POS.app"</code> ධාවනය කර නැවත විවෘත කරන්න. (නැතහොත්: System Settings → Privacy &amp; Security → <b>Open Anyway</b>.)</li>
+<li>ඔබේ දත්ත <code>~/Library/Application Support/Easy POS/data/pos-data.json</code> හි ගබඩා වේ; වෙනත් ෆෝල්ඩරයක් නොතෝරන්නේ නම් backup <code>Documents/EasyPOS-Backups</code> වෙත යයි.</li></ol>
+<div class="tip">Mac ලැප්ටොප්වල <kbd>F1</kbd>–<kbd>F12</kbd> යතුරු පෙරනිමියෙන් දීප්තිය/ශබ්දය පාලනය කරයි. යතුර සමඟ <kbd>Fn</kbd> ඔබාගෙන සිටින්න (උදා: ගෙවීමට <kbd>Fn</kbd>+<kbd>F9</kbd>), නැතහොත් System Settings → Keyboard හි “Use F1, F2, etc. keys as standard function keys” සක්‍රිය කරන්න. Copy/Paste/Quit සඳහා <kbd>Cmd</kbd> ක්‍රියා කරයි.</div>
+
 <h2>2. ඇතුළු වීම සහ මුල් සැකසුම්</h2>
 <p>පළමු වරට ඇතුළු වන විට Username: <b>admin</b> සහ Password: <b>admin</b> භාවිතා කරන්න. වහාම <b>Settings → My account</b> වෙත ගොස් මුරපදය වෙනස් කරන්න.</p>
 <p><b>නව වෙළඳසැලක් සඳහා නිර්දේශිත පිළිවෙළ:</b></p>

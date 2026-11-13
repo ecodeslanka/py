@@ -95,7 +95,14 @@ function createWindow() {
     backgroundColor: '#0f172a', title: 'Easy POS', show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  Menu.setApplicationMenu(null);
+  if (process.platform === 'darwin') {
+    // macOS needs a real menu for Cmd+Q / copy / paste to work
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { role: 'appMenu' }, { role: 'editMenu' },
+      { label: 'View', submenu: [{ role: 'togglefullscreen' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },
+      { role: 'windowMenu' },
+    ]));
+  } else Menu.setApplicationMenu(null);
   win.once('ready-to-show', () => { win.maximize(); win.show(); });
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

@@ -9,7 +9,8 @@
   "scripts": {
     "start": "electron .",
     "test": "node test/backend.test.js",
-    "dist": "electron-builder --win nsis --x64"
+    "dist": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac dmg --x64 --arm64"
   },
   "devDependencies": {
     "electron": "33.2.1",
@@ -18,10 +19,25 @@
   "build": {
     "appId": "com.easypos.desktop",
     "productName": "Easy POS",
-    "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "backend.js", "src/**/*", "build/icon.png"],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "backend.js",
+      "src/**/*",
+      "build/icon.png"
+    ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.ico"
     },
     "nsis": {
@@ -32,6 +48,38 @@
       "shortcutName": "Easy POS",
       "deleteAppDataOnUninstall": false,
       "artifactName": "EasyPOS-Setup-${version}.exe"
+    },
+    "mac": {
+      "category": "public.app-category.business",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "artifactName": "EasyPOS-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Easy POS ${version}",
+      "contents": [
+        {
+          "x": 150,
+          "y": 190
+        },
+        {
+          "x": 390,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   }
 }
