@@ -20,13 +20,13 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
     if (empty($_GET['nocache']) && is_file($ck) && (time() - filemtime($ck)) < 90) $d = json_decode((string)@file_get_contents($ck), true);
     if (!is_array($d) || !isset($d['rows'])) { $d = ur_summary($conn, $F); @file_put_contents($ck, json_encode($d, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR)); }
     $rows = array_values(array_filter($d['rows'], fn($r) => !empty($allowed[$r['page']])));   // only what this role may open
-    $tot = ['receivable' => 0, 'received' => 0, 'paid' => 0, 'balance' => 0];
+    $tot = ['open' => 0, 'receivable' => 0, 'received' => 0, 'paid' => 0, 'balance' => 0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
-    $tg = ['rec' => ['receivable' => 0, 'received' => 0, 'balance' => 0], 'paid' => ['paid' => 0, 'received' => 0, 'balance' => 0]];
+    $tg = ['rec' => ['open' => 0, 'receivable' => 0, 'received' => 0, 'balance' => 0], 'paid' => ['open' => 0, 'paid' => 0, 'received' => 0, 'balance' => 0]];
     foreach ($rows as $r) { $g = $r['group'] ?? 'rec'; foreach ($tg[$g] as $k => $_) $tg[$g][$k] += (float)($r[$k] ?? 0); }
     foreach ($tg as $g => $a) foreach ($a as $k => $v) $tg[$g][$k] = round($v, 2);
     $__out(['success' => true, 'rows' => $rows, 'total' => array_map(fn($v) => round($v, 2), $tot), 'groups' => $tg, 'debit_notes' => $d['debit_notes'] ?? 0, 'debit_notes_ok' => !empty($allowed['debit_note']),
-            'allowed_any' => in_array(true, $allowed, true), 'warn' => $d['warn'] ?? [], 'as_at' => $F['as_at'], 'filters' => $F]);
+            'allowed_any' => in_array(true, $allowed, true), 'warn' => $d['warn'] ?? [], 'as_at' => $F['as_at'], 'mode' => $F['mode'], 'from' => $F['from'], 'to' => $F['to'], 'filters' => $F]);
     } catch (Throwable $ex) { $__out(['success' => false, 'message' => $ex->getMessage() . ' (' . basename($ex->getFile()) . ':' . $ex->getLine() . ')']); }
 }
 ?>
@@ -46,9 +46,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
     <button type="button" class="ur-btn" id="urReload" title="Recalculate now"><i class="fa-solid fa-rotate"></i> Refresh</button>
   </div>
   <div class="ur-filters">
-    <label>As at<input type="date" id="urAsAtIn"></label>
-    <label>From<input type="date" id="urFrom"></label>
-    <label>To<input type="date" id="urTo"></label>
+    <div class="ur-mode" id="urMode"><button type="button" data-m="asat" class="on"><i class="fa-regular fa-calendar-check"></i> As at</button><button type="button" data-m="range"><i class="fa-solid fa-arrows-left-right"></i> Date range</button></div>
+    <label id="urLAs">As at<input type="date" id="urAsAtIn"></label>
+    <label class="urr">From<input type="date" id="urFrom"></label>
+    <label class="urr">To<input type="date" id="urTo"></label>
     <div class="urm" id="urYM"><button type="button" class="urm-b"><span>All years</span> <i class="fa-solid fa-chevron-down"></i></button><div class="urm-m" id="urYMenu"></div></div>
     <div class="urm" id="urMM"><button type="button" class="urm-b"><span>All months</span> <i class="fa-solid fa-chevron-down"></i></button><div class="urm-m" id="urMMenu"></div></div>
     <label class="urck"><input type="checkbox" id="urLast"> With last year</label>
@@ -66,14 +67,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
   <div class="ur-card ur-tcard">
     <div class="ur-ch"><span><i class="fa-solid fa-hand-holding-dollar" style="color:#2563eb"></i> Receivable from Unilever</span><small>Customer Ledger &amp; Vendor Ledger</small></div>
     <div class="ur-scroll"><table class="ur-t">
-      <thead><tr><th>Source</th><th>Description</th><th class="r">Receivable</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
+      <thead><tr><th>Source</th><th>Description</th><th class="r ur-op">Opening</th><th class="r">Receivable</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
       <tbody id="urBody"></tbody><tfoot id="urFoot"></tfoot></table></div>
   </div>
 
   <div class="ur-card ur-tcard" id="urPaidCard">
     <div class="ur-ch"><span><i class="fa-solid fa-money-bill-transfer" style="color:#d97706"></i> Paid by us — claimed back from Unilever</span><small>Drivers &amp; Loyalty · Promoters Salary · SR Incentive</small></div>
     <div class="ur-scroll"><table class="ur-t">
-      <thead><tr><th>Source</th><th>Description</th><th class="r">Paid</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
+      <thead><tr><th>Source</th><th>Description</th><th class="r ur-op">Opening</th><th class="r">Paid</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
       <tbody id="urBody2"></tbody><tfoot id="urFoot2"></tfoot></table></div>
   </div>
 
@@ -92,6 +93,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
 .ur-btn{border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.14);color:#fff;border-radius:10px;padding:8px 16px;font:600 13px inherit;cursor:pointer}.ur-btn:hover{background:rgba(255,255,255,.26)}
 .ur-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:14px 18px;margin:14px 0;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 2px 10px rgba(15,23,42,.05)}
 .ur-filters label{display:flex;flex-direction:column;gap:3px;font-size:10.5px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em}.ur-filters input[type=date]{padding:7px 9px;border:1.5px solid #d1d5db;border-radius:8px;font:inherit;font-size:13px;color:#111827;text-transform:none}
+.ur-mode{display:inline-flex;background:#f1f5f9;border-radius:10px;padding:3px;gap:2px;align-self:flex-end}.ur-mode button{border:none;background:transparent;padding:7px 13px;border-radius:8px;font:600 12.5px inherit;color:#475569;cursor:pointer}.ur-mode button.on{background:#1e3a8a;color:#fff;box-shadow:0 2px 6px rgba(30,58,138,.3)}
+.ur-filters input:disabled{background:#f1f5f9;color:#9ca3af;cursor:not-allowed}.ur-filters label.off{opacity:.55}
+.ur-op{display:none}.ur-range .ur-op{display:table-cell}
 .ur-filters .urck{flex-direction:row;align-items:center;gap:7px;font-size:12.5px;text-transform:none;color:#334155;padding-bottom:8px;letter-spacing:0}.ur-go{padding:8px 18px;border:none;border-radius:9px;background:linear-gradient(120deg,#1e3a8a,#2563eb);color:#fff;font:600 13px inherit;cursor:pointer}.ur-rs{padding:8px 12px;border:1.5px solid #cbd5e1;border-radius:9px;background:#fff;color:#475569;font:600 13px inherit;cursor:pointer}
 .urm{position:relative}.urm-b{min-width:130px;padding:7px 10px;border:1.5px solid #d1d5db;border-radius:8px;background:#fff;font:inherit;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;height:35px;color:#111827}
 .urm-m{display:none;position:absolute;z-index:80;top:100%;left:0;min-width:100%;margin-top:4px;background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:8px;white-space:nowrap;max-height:300px;overflow:auto}.urm.open .urm-m{display:block}
@@ -143,12 +147,20 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
     w.addEventListener('change',sync); w.addEventListener('click',function(e){ var a=e.target.closest('[data-all],[data-none]'); if(!a) return; e.preventDefault(); [].forEach.call($(x[1]).querySelectorAll('input[type=checkbox]'),function(c){ c.checked=a.hasAttribute('data-all'); }); sync(); }); });
   document.addEventListener('click',function(e){ if(!e.target.closest('.urm')) [].forEach.call(document.querySelectorAll('.urm.open'),function(m){ m.classList.remove('open'); }); });
   function today(){ var d=new Date(); return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10); }
+  /* As at and Date range exclude each other: choosing one switches the other off */
+  var MODE='asat';
+  function setMode(m){ MODE=m; [].forEach.call(document.querySelectorAll('#urMode button'),function(b){ b.classList.toggle('on',b.dataset.m===m); });
+    $('urAsAtIn').disabled=(m==='range'); $('urLAs').classList.toggle('off',m==='range');
+    [].forEach.call(document.querySelectorAll('.urr'),function(l){ l.classList.toggle('off',m!=='range'); l.querySelector('input').disabled=(m!=='range'); });
+    if(m==='asat'){ $('urFrom').value=''; $('urTo').value=''; if(!$('urAsAtIn').value) $('urAsAtIn').value=today(); } }
+  document.getElementById('urMode').addEventListener('click',function(e){ var b=e.target.closest('button'); if(b) setMode(b.dataset.m); });
   function read(){ var y=picked('urYMenu').map(Number), last=$('urLast').checked;
     if(last){ var s={}; (y.length?y:[thisYear]).forEach(function(v){ s[v]=1; s[v-1]=1; }); y=Object.keys(s).map(Number).sort(function(a,b){ return b-a; }); }
-    return {as_at:$('urAsAtIn').value||today(),from:$('urFrom').value,to:$('urTo').value,years:y.join(','),months:picked('urMMenu').join(','),last:last?1:0,_y:picked('urYMenu')}; }
-  function save(f){ try{ localStorage.setItem(KEY,JSON.stringify({as_at:f.as_at,from:f.from,to:f.to,y:f._y,m:f.months?f.months.split(','):[],last:f.last})); }catch(e){} }
+    var range=MODE==='range'&&($('urFrom').value||$('urTo').value);
+    return {mode:range?'range':'asat',as_at:$('urAsAtIn').value||today(),from:range?$('urFrom').value:'',to:range?$('urTo').value:'',years:y.join(','),months:picked('urMMenu').join(','),last:last?1:0,_y:picked('urYMenu')}; }
+  function save(f){ try{ localStorage.setItem(KEY,JSON.stringify({mode:f.mode,as_at:f.as_at,from:f.from,to:f.to,y:f._y,m:f.months?f.months.split(','):[],last:f.last})); }catch(e){} }
   function restore(){ var s=null; try{ s=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
-    $('urAsAtIn').value=today(); if(!s) return; $('urFrom').value=s.from||''; $('urTo').value=s.to||''; $('urLast').checked=!!s.last; setPicked('urYMenu',s.y||[]); setPicked('urMMenu',s.m||[]); }
+    $('urAsAtIn').value=today(); if(!s){ setMode('asat'); return; } $('urFrom').value=s.from||''; $('urTo').value=s.to||''; $('urLast').checked=!!s.last; setPicked('urYMenu',s.y||[]); setPicked('urMMenu',s.m||[]); setMode(s.mode==='range'?'range':'asat'); if(s.mode==='range'){ $('urFrom').value=s.from||''; $('urTo').value=s.to||''; } }
 
   /* ── pieces ── */
   function kpi(icon,lab,val,sub,a,b,s){ return '<div class="ur-k" style="--a:'+a+';--b:'+b+';--s:'+s+'"><span><i class="fa-solid '+icon+'"></i>'+lab+'</span><b>Rs. '+val+'</b><small>'+sub+'</small></div>'; }
@@ -166,24 +178,25 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
     var pc=base>0?Math.max(0,Math.min(100,Math.round((r.received||0)/base*100))):0, cls=pc>=95?'':(pc>=60?'warn':'low'), bc=r.balance>0.5?'pos':(r.balance<-0.5?'neg':'zero');
     return '<tr '+(r.ledger?'data-ledger="'+esc(r.ledger)+'" data-title="'+esc(r.label)+' — Ledger"':'data-p="'+esc(r.page)+'.php"')+'><td><span class="ur-src '+(r.source==='Customer Ledger'?'cl':'cc')+'">'+esc(r.source)+'</span></td>'
       +'<td><div class="ur-desc"><i class="fa-solid '+esc(r.icon)+'"></i>'+esc(r.label)+(r.ledger?' <span class="lk">ledger</span>':'')+'</div></td>'
-      +'<td class="r">'+(base?fmt(base):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td>'
+      +'<td class="r ur-op">'+(r.open?neg(r.open):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(base?fmt(base):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td>'
       +'<td class="r"><span class="ur-bal '+bc+'">'+neg(r.balance)+'</span></td>'
       +'<td class="ur-rcv"><div class="ur-bar"><i class="'+cls+'" style="width:'+pc+'%"></i></div><div class="ur-pc">'+pc+'% recovered</div></td></tr>';
   }
-  function foot(first,tot){ return '<tr><td colspan="2">Total</td><td class="r">'+fmt(tot[first])+'</td><td class="r">'+fmt(tot.received)+'</td><td class="r">'+neg(tot.balance)+'</td><td></td></tr>'; }
+  function foot(first,tot){ return '<tr><td colspan="2">Total</td><td class="r ur-op">'+neg(tot.open||0)+'</td><td class="r">'+fmt(tot[first])+'</td><td class="r">'+fmt(tot.received)+'</td><td class="r">'+neg(tot.balance)+'</td><td></td></tr>'; }
   function err(msg,retry){ box.style.display='block'; $('urAsAt').textContent='could not load'; $('urKpis').innerHTML=''; $('urDonut').innerHTML=''; $('urBars').innerHTML=''; $('urFoot').innerHTML=''; $('urFoot2').innerHTML=''; $('urBody2').innerHTML=''; $('urPaidCard').style.display='none';
-    $('urBody').style.opacity='1'; $('urBody').innerHTML='<tr><td colspan="6" style="padding:26px;text-align:center;cursor:default;color:'+(retry?'#b91c1c':'#64748b')+';font-weight:600">'+msg+(retry?' <button type="button" class="ur-go" onclick="document.getElementById(\'urReload\').click()" style="margin-left:10px">Try again</button>':'')+'</td></tr>'; }
+    $('urBody').style.opacity='1'; $('urBody').innerHTML='<tr><td colspan="7" style="padding:26px;text-align:center;cursor:default;color:'+(retry?'#b91c1c':'#64748b')+';font-weight:600">'+msg+(retry?' <button type="button" class="ur-go" onclick="document.getElementById(\'urReload\').click()" style="margin-left:10px">Try again</button>':'')+'</td></tr>'; }
 
   function load(fresh){
     var f=read(); save(f); sync();
-    var qs=new URLSearchParams({ajax:'ur_summary',as_at:f.as_at,from:f.from,to:f.to,years:f.years,months:f.months}); if(fresh) qs.set('nocache','1');
+    var qs=new URLSearchParams({ajax:'ur_summary',mode:f.mode,as_at:f.as_at,from:f.from,to:f.to,years:f.years,months:f.months}); if(fresh) qs.set('nocache','1');
     $('urBody').style.opacity='.45'; $('urAsAt').textContent='loading…';
     fetch('index.php?'+qs.toString(),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
       box.style.display='block'; $('urPaidCard').style.display='';
       if(!d.success){ err('The summary could not be loaded: '+esc(d.message||'unknown error'),true); return; }
       if(!d.rows.length){ err(d.allowed_any===false?'Your role is not allowed to view any of the ledger pages in this summary. Ask the administrator to give you the View right on them (User Role).':'No ledger data found for these filters yet.',false); return; }
-      var info=[]; if(f.years) info.push('year '+f.years.split(',').join(', ')); if(f.months) info.push(f.months.split(',').map(function(v){ return MON[v-1]; }).join(', ')); if(f.from||f.to) info.push((f.from||'…')+' → '+(f.to||'…'));
-      $('urAsAt').textContent='as at '+d.as_at+(info.length?' · '+info.join(' · '):'')+' · live from Customer Ledger & Vendor Ledger'+((d.warn&&d.warn.length)?' · ⚠ '+d.warn.join(' '):'');
+      var info=[]; if(f.years) info.push('year '+f.years.split(',').join(', ')); if(f.months) info.push(f.months.split(',').map(function(v){ return MON[v-1]; }).join(', '));
+      var range=d.mode==='range'; box.classList.toggle('ur-range',range);
+      $('urAsAt').textContent=(range?'period '+(d.from||'…')+' → '+(d.to||'…')+' (entries inside the range, opening balance before it)':'as at '+d.as_at)+(info.length?' · '+info.join(' · '):'')+' · live from Customer Ledger & Vendor Ledger'+((d.warn&&d.warn.length)?' · ⚠ '+d.warn.join(' '):'');
       var G=d.groups||{rec:{receivable:0,received:0,balance:0},paid:{paid:0,received:0,balance:0}}, t=d.total, claimed=(G.rec.receivable||0)+(G.paid.paid||0), pct=claimed>0?(t.received/claimed*100):0;
       $('urKpis').innerHTML=kpi('fa-hand-holding-dollar','Receivable',fmt(G.rec.receivable||0),'from Unilever','#2563eb','#1d4ed8','rgba(37,99,235,.35)')
         +kpi('fa-money-bill-transfer','Paid out',fmt(G.paid.paid||0),'claimed back','#f59e0b','#d97706','rgba(217,119,6,.35)')
@@ -191,7 +204,7 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
         +kpi('fa-scale-balanced','Net balance',neg(t.balance),t.balance>0?'Unilever owes us':'settled / over-received',t.balance>0?'#ef4444':'#14b8a6',t.balance>0?'#b91c1c':'#0f766e',t.balance>0?'rgba(185,28,28,.35)':'rgba(15,118,110,.35)');
       $('urDonut').innerHTML=donut(pct,t.received,claimed-t.received); $('urBars').innerHTML=bars(d.rows);
       var rec=d.rows.filter(function(r){ return (r.group||'rec')==='rec'; }), paid=d.rows.filter(function(r){ return r.group==='paid'; });
-      $('urBody').style.opacity='1'; $('urBody').innerHTML=rec.map(function(r){ return line(r,r.receivable||0); }).join('')||'<tr><td colspan="6" style="padding:18px;text-align:center;cursor:default;color:#94a3b8">No lines.</td></tr>'; $('urFoot').innerHTML=foot('receivable',G.rec);
+      $('urBody').style.opacity='1'; $('urBody').innerHTML=rec.map(function(r){ return line(r,r.receivable||0); }).join('')||'<tr><td colspan="7" style="padding:18px;text-align:center;cursor:default;color:#94a3b8">No lines.</td></tr>'; $('urFoot').innerHTML=foot('receivable',G.rec);
       $('urPaidCard').style.display=paid.length?'':'none'; $('urBody2').innerHTML=paid.map(function(r){ return line(r,r.paid||0); }).join(''); $('urFoot2').innerHTML=foot('paid',G.paid);
     }).catch(function(){ err('The summary could not be loaded (the server did not answer correctly).',true); });
   }
@@ -204,7 +217,7 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
   document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&$('urModal').classList.contains('open')) closeLedger(); });
   box.addEventListener('click',function(e){ var t=e.target.closest('tr[data-ledger],tr[data-p],.ur-bar-row'); if(!t||!box.contains(t)) return; if(t.dataset.ledger) openLedger(t.dataset.ledger,t.dataset.title); else if(t.dataset.p) location.href=t.dataset.p; });
   $('urApply').addEventListener('click',function(){ load(false); }); $('urReload').addEventListener('click',function(){ load(true); });
-  $('urReset').addEventListener('click',function(){ $('urAsAtIn').value=today(); $('urFrom').value=''; $('urTo').value=''; $('urLast').checked=false; setPicked('urYMenu',[]); setPicked('urMMenu',[]); load(false); });
+  $('urReset').addEventListener('click',function(){ $('urAsAtIn').value=today(); $('urFrom').value=''; $('urTo').value=''; $('urLast').checked=false; setPicked('urYMenu',[]); setPicked('urMMenu',[]); setMode('asat'); load(false); });
   restore(); sync(); load(false);
 })();
 </script>

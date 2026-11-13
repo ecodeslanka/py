@@ -19,6 +19,10 @@ function ur_filters($src) {
     $F = ['as_at' => ur_ok($src['as_at'] ?? '') ? $src['as_at'] : date('Y-m-d'), 'from' => ur_ok($src['from'] ?? '') ? $src['from'] : '', 'to' => ur_ok($src['to'] ?? '') ? $src['to'] : '',
           'years' => $ints($src['years'] ?? '', 2000, 2100), 'months' => $ints($src['months'] ?? '', 1, 12)];
     if ($F['from'] && $F['to'] && $F['to'] < $F['from']) [$F['from'], $F['to']] = [$F['to'], $F['from']];
+    /* two modes that exclude each other: AS AT a date (everything up to it)  ·  DATE RANGE (only the entries inside it, with the opening balance before it) */
+    $F['mode'] = (($src['mode'] ?? '') === 'range' && ($F['from'] || $F['to'])) ? 'range' : 'asat';
+    if ($F['mode'] === 'range') { if (!$F['to']) $F['to'] = date('Y-m-d'); }
+    else { $F['from'] = ''; $F['to'] = ''; }
     return $F;
 }
 /** SQL condition on a DATE expression */
@@ -35,13 +39,13 @@ function ur_summary($conn, $F = null) {
     $F = $F ?: ur_filters([]);
     $rows = []; $debit_notes = 0.0; $warn = [];
     if (is_file(__DIR__ . '/unilever_ledger_lib.php')) require_once __DIR__ . '/unilever_ledger_lib.php';
-    $to = $F['as_at']; if ($F['to'] && $F['to'] < $to) $to = $F['to'];
+    $to = $F['mode'] === 'range' ? $F['to'] : $F['as_at'];
     $opt = ['from' => $F['from'], 'to' => $to, 'years' => $F['years'], 'months' => $F['months']];
     $lp = ['date_to' => $to]; if ($F['from']) $lp['date_from'] = $F['from']; if ($F['years']) $lp['years'] = implode(',', $F['years']); if ($F['months']) $lp['months'] = implode(',', $F['months']);
     $add = function ($S, $L, $link) use (&$rows) {
         $paid = $S['group'] === 'paid';
         $rows[] = ['source' => $S['source'], 'label' => $S['label'], 'page' => $S['page'], 'icon' => $S['icon'], 'group' => $S['group'], 'ledger' => $link,
-                   'receivable' => $paid ? 0.0 : round($L['debit'], 2), 'received' => round($L['credit'], 2), 'paid' => $paid ? round($L['debit'], 2) : null, 'balance' => round($L['closing'], 2)];
+                   'open' => round($L['open'], 2), 'receivable' => $paid ? 0.0 : round($L['debit'], 2), 'received' => round($L['credit'], 2), 'paid' => $paid ? round($L['debit'], 2) : null, 'balance' => round($L['closing'], 2)];
     };
     /* every line = the closing figures of its own LEDGER (debit / credit / closing balance), and the line opens that ledger */
     if (!function_exists('ul_compute')) $warn[] = 'unilever_ledger_lib.php is not uploaded on the server — only the Scheme line can be shown until it is.';
@@ -61,8 +65,8 @@ function ur_summary($conn, $F = null) {
         $add(['source' => 'Customer Certificate', 'label' => 'Scheme Discount & Free Issues', 'page' => 'scheme_ledger_report', 'icon' => 'fa-tags', 'group' => 'rec'], $L, 'scheme_ledger_report.php?' . http_build_query($lp));
     }
     $line('dn'); $line('sscl'); $line('dal'); $line('pscl'); $line('sricc'); $line('others');
-    $tot = ['receivable' => 0.0, 'received' => 0.0, 'paid' => 0.0, 'balance' => 0.0];
+    $tot = ['open' => 0.0, 'receivable' => 0.0, 'received' => 0.0, 'paid' => 0.0, 'balance' => 0.0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
     foreach ($tot as $k => $v) $tot[$k] = round($v, 2);
-    return ['rows' => $rows, 'total' => $tot, 'debit_notes' => round($debit_notes, 2), 'as_at' => $F['as_at'], 'warn' => $warn];
+    return ['rows' => $rows, 'total' => $tot, 'debit_notes' => round($debit_notes, 2), 'as_at' => $F['as_at'], 'mode' => $F['mode'], 'from' => $F['from'], 'to' => $F['to'], 'warn' => $warn];
 }
