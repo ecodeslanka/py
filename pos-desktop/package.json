@@ -10,7 +10,7 @@
     "start": "electron .",
     "test": "node test/backend.test.js",
     "dist": "electron-builder --win nsis --x64",
-    "dist:mac": "electron-builder --mac dmg --x64 --arm64"
+    "dist:mac": "electron-builder --mac dir --x64 --arm64 && bash scripts/make-dmg.sh"
   },
   "devDependencies": {
     "electron": "33.2.1",
