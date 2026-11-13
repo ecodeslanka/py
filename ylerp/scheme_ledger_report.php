@@ -29,6 +29,23 @@ if ($has_items) { $r = mysqli_query($conn, "SELECT DISTINCT moc_ref FROM scheme_
 /* the statement (shared calculation: also used by the dashboard) */
 $L = sl_compute($conn, ['from' => $f_from, 'to' => $f_to, 'moc' => $f_moc, 'q' => $f_q, 'years' => $f_years, 'months' => $f_months, 'period' => $f_period]);
 $stmt = $L['stmt']; $open = $L['open']; $closing = $L['closing']; $tdr = $L['debit']; $tcr = $L['credit']; $schemes = array_fill(0, $L['schemes'], 1);
+/* SETTLEMENT STATUS per scheme: Settled ✓ (balance under Rs. 5 or credit ≥ debit) · Nearly settled (90 % or more) · Pending */
+$bySch = [];
+foreach ($L['stmt'] as $en) {
+    $k = $en['scheme']; if (!isset($bySch[$k])) $bySch[$k] = ['scheme' => $k, 'desc' => $en['desc'], 'debit' => 0.0, 'credit' => 0.0, 'last' => '', 'last_credit' => ''];
+    $bySch[$k]['debit'] += $en['debit']; $bySch[$k]['credit'] += $en['credit'];
+    if ($en['date'] > $bySch[$k]['last']) $bySch[$k]['last'] = $en['date'];
+    if ($en['credit'] > 0 && $en['date'] > $bySch[$k]['last_credit']) $bySch[$k]['last_credit'] = $en['date'];
+}
+$grp = ['done' => [], 'near' => [], 'open' => []];
+foreach ($bySch as $k => $b) {
+    $b['bal'] = round($b['debit'] - $b['credit'], 2); $b['pct'] = $b['debit'] > 0 ? min(100, round($b['credit'] / $b['debit'] * 100)) : ($b['credit'] > 0 ? 100 : 0);
+    $st = ($b['debit'] > 0 && ($b['bal'] < 5)) || ($b['debit'] <= 0 && $b['credit'] > 0) ? 'done' : ($b['pct'] >= 90 ? 'near' : 'open');
+    $grp[$st][] = $b;
+}
+usort($grp['done'], fn($a, $b) => strcmp($b['last_credit'] ?: $b['last'], $a['last_credit'] ?: $a['last']));   // latest settlement first
+usort($grp['near'], fn($a, $b) => $b['pct'] <=> $a['pct'] ?: $b['bal'] <=> $a['bal']);
+usort($grp['open'], fn($a, $b) => $b['bal'] <=> $a['bal']);
 if (!$f_asc) $stmt = array_reverse($stmt);      // newest first: the last balance is the first line
 
 /* Excel */
@@ -43,6 +60,12 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     foreach ($stmt as $en) { foreach ([sl_d($en['date']) === '—' ? '' : sl_d($en['date']), $en['scheme'], $en['desc'], $en['type'], $en['ref'], $en['debit'] ?: '', $en['credit'] ?: '', $en['bal']] as $i => $v) $sh->set($r, $i + 1, $v, ['border' => 1] + ($i >= 5 ? ['h' => 'right', 'nf' => 4] : [])); $r++; }
     $tb = ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]; $sh->set($r, 5, 'TOTAL', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 6, round($tdr, 2), $tb); $sh->set($r, 7, round($tcr, 2), $tb); $sh->set($r, 8, $closing, $tb);
     foreach ([13, 14, 40, 17, 52, 15, 15, 16] as $i => $wd) $sh->widths[$i + 1] = $wd; $sh->freeze = [4, 0];
+    $ss = $X->sheet('Settlement status'); $ss->set(1, 1, 'Scheme settlement status', ['b' => 1, 'sz' => 15]);
+    foreach (['Status', 'Scheme No', 'Description', 'Debit (claim)', 'Credit (settled)', 'Balance', 'Settled %', 'Last settlement'] as $i => $h) $ss->set(3, $i + 1, $h, $H);
+    $sr = 4; foreach (['done' => 'SETTLED ✓', 'near' => 'Nearly settled', 'open' => 'Pending'] as $g => $lab) foreach ($grp[$g] as $b) {
+        foreach ([$lab, $b['scheme'], $b['desc'], round($b['debit'], 2), round($b['credit'], 2), $b['bal'], $b['pct'] / 100, $b['last_credit'] ? sl_d($b['last_credit']) : ''] as $i => $v) $ss->set($sr, $i + 1, $v, ['border' => 1] + (in_array($i, [3, 4, 5], true) ? ['h' => 'right', 'nf' => 4] : ($i === 6 ? ['h' => 'right', 'pct' => 1] : [])) + ($g === 'done' ? ['bg' => 'F0FDF4'] : ($g === 'near' ? ['bg' => 'FFFBEB'] : [])));
+        $sr++; }
+    foreach ([16, 14, 40, 16, 16, 16, 11, 16] as $i => $wd) $ss->widths[$i + 1] = $wd; $ss->freeze = [3, 0];
     $tmp = tempnam(sys_get_temp_dir(), 'sl'); $X->save($tmp);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="scheme_ledger_' . date('Ymd_His') . '.xlsx"');
     header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
@@ -60,6 +83,10 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sl_d($f_from) :
 .slr .tw{overflow:auto;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-height:72vh}.slr table{width:100%;border-collapse:collapse;font-size:13px}.slr th{background:#1e3a8a;color:#fff;padding:9px 10px;text-align:left;position:sticky;top:0;white-space:nowrap}.slr td{padding:8px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top}.slr .r{text-align:right;font-variant-numeric:tabular-nums}.slr tr:hover td{background:#f8fafc}
 .slr tr.first td{background:#eef2ff;font-weight:700}.slr .dr{color:#b91c1c;font-weight:700}.slr .cr{color:#15803d;font-weight:700}.slr .bl{font-weight:800}.slr .ty{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700}.slr .ty.c{background:#fee2e2;color:#b91c1c}.slr .ty.k{background:#dcfce7;color:#166534}
 .slr tfoot td{background:#fde68a;font-weight:800;position:sticky;bottom:0}
+.slr .sltabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.slr .sltabs button{padding:8px 16px;border:1.5px solid #c7d2fe;background:#fff;color:#1e3a8a;border-radius:9px;font:600 13px inherit;cursor:pointer}.slr .sltabs button.on{background:#1e3a8a;color:#fff;border-color:#1e3a8a}.slr .sltabs .cnt{font-weight:500;font-size:11.5px;opacity:.85;margin-left:6px}
+.slr .grp{background:#fff;border:1.5px solid var(--c);border-radius:12px;margin-bottom:12px;overflow:hidden}.slr .gh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 14px;background:var(--b);border-bottom:1px solid var(--c)}.slr .gh b{font-size:14px;color:var(--c)}.slr .gh em{font-style:normal;font-size:12px;color:#475569}.slr .gh .gs{margin-left:auto;font-size:12px;color:#475569;font-variant-numeric:tabular-nums}
+.slr .gi{width:26px;height:26px;border-radius:50%;background:var(--c);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}.slr td.tk{color:var(--c);font-weight:800;font-size:16px;text-align:center}.slr .gnone{padding:14px;color:#9ca3af;font-size:13px}
+.slr tr.sch{cursor:pointer}.slr .pbar{height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden}.slr .pbar i{display:block;height:100%;border-radius:99px}.slr .pp{font-size:11px;color:#64748b}
 </style>
 <div class="slr">
   <h2><i class="fa-solid fa-book-open" style="color:#1e3a8a"></i> Scheme Ledger</h2>
@@ -81,12 +108,36 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sl_d($f_from) :
     <div class="s"><small>Total debit (claims)</small><b>Rs. <?= number_format($tdr, 2) ?></b></div><div class="s"><small>Total credit (claim certificates)</small><b>Rs. <?= number_format($tcr, 2) ?></b></div>
     <?php if ($f_from && !$f_period): ?><div class="s"><small>Opening balance</small><b>Rs. <?= sl_m($open, false) ?></b></div><?php endif; ?><div class="s"><small>Schemes</small><b><?= number_format(count($schemes)) ?></b></div></div>
 
-  <div class="tw"><table><thead><tr><th>Date</th><th>Scheme No</th><th>Description</th><th>Type</th><th>Reference</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>
+  <div class="sltabs"><button type="button" data-v="stmt" class="on"><i class="fa-solid fa-list"></i> Statement</button><button type="button" data-v="settle"><i class="fa-solid fa-circle-check"></i> Settlement status <span class="cnt"><?= count($grp['done']) ?> ✓ · <?= count($grp['near']) ?> nearly · <?= count($grp['open']) ?> pending</span></button></div>
+
+  <div id="slSettle" style="display:none">
+  <?php foreach (['done' => ['Settled', '✓', '#16a34a', '#f0fdf4'], 'near' => ['Nearly settled (90 % or more)', '◐', '#d97706', '#fffbeb'], 'open' => ['Pending / not settled', '○', '#b91c1c', '#fef2f2']] as $g => [$gl, $gi, $gc, $gb]): ?>
+    <div class="grp" style="--c:<?= $gc ?>;--b:<?= $gb ?>"><div class="gh"><span class="gi"><?= $gi ?></span><b><?= $gl ?></b><em><?= count($grp[$g]) ?> scheme<?= count($grp[$g]) === 1 ? '' : 's' ?></em>
+      <span class="gs">Debit <?= number_format(array_sum(array_column($grp[$g], 'debit')), 2) ?> · Credit <?= number_format(array_sum(array_column($grp[$g], 'credit')), 2) ?></span></div>
+      <?php if ($grp[$g]): ?><div class="tw" style="max-height:none"><table><thead><tr><th style="width:34px"></th><th>Scheme No</th><th>Description</th><th class="r">Debit (claim)</th><th class="r">Credit (settled)</th><th class="r">Balance</th><th style="width:170px">Settled</th><th>Last settlement</th></tr></thead><tbody>
+      <?php foreach ($grp[$g] as $b): ?><tr class="sch" data-s="<?= sl_h($b['scheme']) ?>" title="Click to see the statement of this scheme"><td class="tk"><?= $gi ?></td><td><b><?= sl_h($b['scheme']) ?></b></td><td><?= sl_h($b['desc']) ?></td><td class="r"><?= number_format($b['debit'], 2) ?></td><td class="r"><?= number_format($b['credit'], 2) ?></td>
+        <td class="r" style="font-weight:800;color:<?= $b['bal'] >= 5 ? '#b91c1c' : '#15803d' ?>"><?= sl_m($b['bal'] < 5 && $b['bal'] > -5 ? 0 : $b['bal'], false) ?></td>
+        <td><div class="pbar"><i style="width:<?= $b['pct'] ?>%;background:<?= $gc ?>"></i></div><span class="pp"><?= $b['pct'] ?>%</span></td><td><?= $b['last_credit'] ? sl_d($b['last_credit']) : '—' ?></td></tr>
+      <?php endforeach; ?></tbody></table></div><?php else: ?><div class="gnone">None.</div><?php endif; ?></div>
+  <?php endforeach; ?>
+  </div>
+
+  <div id="slStmt"><div class="tw"><table><thead><tr><th>Date</th><th>Scheme No</th><th>Description</th><th>Type</th><th>Reference</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>
   <?php foreach ($stmt as $i => $en): ?><tr class="<?= $i === 0 && !$f_asc ? 'first' : '' ?>"><td style="white-space:nowrap"><?= sl_d($en['date']) ?></td><td><b><?= sl_h($en['scheme']) ?></b></td><td><?= sl_h($en['desc']) ?></td>
     <td><span class="ty <?= $en['type'] === 'Claim' ? 'c' : 'k' ?>"><?= sl_h($en['type']) ?></span></td><td style="font-size:12px;color:#4b5563;max-width:340px"><?= sl_h($en['ref']) ?></td>
     <td class="r dr"><?= $en['debit'] ? number_format($en['debit'], 2) : '' ?></td><td class="r cr"><?= $en['credit'] ? number_format($en['credit'], 2) : '' ?></td><td class="r bl"><?= sl_m($en['bal'], false) ?></td></tr>
   <?php endforeach; if (!$stmt): ?><tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:28px">No entries for these filters.</td></tr><?php endif; ?></tbody>
-  <?php if ($stmt): ?><tfoot><tr><td colspan="5">TOTAL</td><td class="r"><?= number_format($tdr, 2) ?></td><td class="r"><?= number_format($tcr, 2) ?></td><td class="r"><?= sl_m($closing, false) ?></td></tr></tfoot><?php endif; ?></table></div>
+  <?php if ($stmt): ?><tfoot><tr><td colspan="5">TOTAL</td><td class="r"><?= number_format($tdr, 2) ?></td><td class="r"><?= number_format($tcr, 2) ?></td><td class="r"><?= sl_m($closing, false) ?></td></tr></tfoot><?php endif; ?></table></div></div>
 </div>
-<script>document.getElementById('slTog').addEventListener('click',function(){ document.getElementById('slBody').classList.toggle('collapsed'); });</script>
+<script>
+document.getElementById('slTog').addEventListener('click',function(){ document.getElementById('slBody').classList.toggle('collapsed'); });
+(function(){
+  var KEY='sl_view_v1';
+  function view(v){ document.getElementById('slStmt').style.display=v==='stmt'?'block':'none'; document.getElementById('slSettle').style.display=v==='settle'?'block':'none'; [].forEach.call(document.querySelectorAll('.sltabs button'),function(b){ b.classList.toggle('on',b.dataset.v===v); }); try{ localStorage.setItem(KEY,v); }catch(e){} }
+  [].forEach.call(document.querySelectorAll('.sltabs button'),function(b){ b.addEventListener('click',function(){ view(b.dataset.v); }); });
+  /* click a scheme: its own statement */
+  [].forEach.call(document.querySelectorAll('tr.sch'),function(r){ r.addEventListener('click',function(){ var p=new URLSearchParams(location.search); p.set('q',r.dataset.s); try{ localStorage.setItem(KEY,'stmt'); }catch(e){} location.search=p.toString(); }); });
+  var v0='stmt'; try{ v0=localStorage.getItem(KEY)||'stmt'; }catch(e){} view(v0==='settle'?'settle':'stmt');
+})();
+</script>
 <?php include 'footer.php'; ?>
