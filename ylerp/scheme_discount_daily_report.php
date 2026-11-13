@@ -25,23 +25,50 @@ if (($_GET['ajax'] ?? '') === 'bws_rows') {
     $out['count'] = count($out['rows']); $out['total'] = round($out['total'], 2); $out['free_value'] = round($out['free_value'], 2);
     echo json_encode($out); exit;
 }
-/* claim certificate rows (customer_claim.php import = claim_cert_items) whose description starts with this scheme no, e.g. "41440127-B418050926-Ponds FW 100g ETE 20" */
+/* scheme code key: same code whether it is typed 41388823, ' 41388823 ' or 41388823.0 (case ignored) */
+if (!function_exists('sd_norm')) { function sd_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); } }
+/**
+ * Claim certificate rows (claim_cert_items) tallied to scheme codes.
+ * 1) the part of the description before the first "-" is the scheme no (e.g. "41398595-B27181224-Buy Rexona 80g ...");
+ * 2) if that does not tally with a scheme code, any other word / number anywhere in the description line
+ *    (e.g. "B27181224-41398595 BuyRexona80g&GetDis") that equals a scheme code is used.
+ * $codes = normalised scheme codes wanted. Returns code => ['n'=>count,'act'=>sum,'rows'=>[...]] (rows only when $withRows).
+ */
+function sd_cc_tally($conn, array $codes, $withRows = false) {
+    $out = [];
+    $chk = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
+    if (!$codes || !$chk || !mysqli_num_rows($chk)) return $out;
+    $set = array_flip($codes);
+    $q = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, customer_code, customer_name, claim_type, entity, claim_description, actual_amount, vat_amount, total_amount
+                              FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' ORDER BY invoice_date, tax_invoice_no");
+    while ($q && ($x = mysqli_fetch_assoc($q))) {
+        $d = (string)$x['claim_description'];
+        $hit = null;
+        $first = sd_norm(explode('-', $d, 2)[0]);
+        if ($first !== '' && isset($set[$first])) $hit = $first;
+        else foreach (preg_split('/[^A-Za-z0-9]+/', $d, -1, PREG_SPLIT_NO_EMPTY) as $t) {
+            $t = sd_norm($t);
+            if (isset($set[$t])) { $hit = $t; break; }
+        }
+        if ($hit === null) continue;
+        if (!isset($out[$hit])) $out[$hit] = ['n' => 0, 'act' => 0.0, 'vat' => 0.0, 'rows' => []];
+        $out[$hit]['n']++; $out[$hit]['act'] += (float)$x['actual_amount']; $out[$hit]['vat'] += (float)$x['vat_amount'];
+        if ($withRows && count($out[$hit]['rows']) < 5000) $out[$hit]['rows'][] = $x;
+    }
+    return $out;
+}
+/* claim certificate rows (customer_claim.php import = claim_cert_items) whose description carries this scheme no (first part, else anywhere in the line), e.g. "41440127-B418050926-Ponds FW 100g ETE 20" */
 if (($_GET['ajax'] ?? '') === 'claim_rows') {
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json; charset=utf-8');
     $code = trim($_GET['code'] ?? ''); $out = ['success' => true, 'rows' => [], 'actual' => 0, 'vat' => 0, 'count' => 0];
     $chk = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
     if ($code === '' || !$chk || !mysqli_num_rows($chk)) { echo json_encode(['success' => false, 'message' => 'No Customer Claim Certificate data.']); exit; }
-    $c = mysqli_real_escape_string($conn, strtoupper(preg_replace('/\.0+$/', '', $code)));
-    $q = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, customer_code, customer_name, claim_type, entity, claim_description, actual_amount, vat_amount, total_amount
-                              FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND claim_description NOT LIKE '-%'
-                                AND UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) = '$c' ORDER BY invoice_date, tax_invoice_no LIMIT 5000");
-    while ($q && ($x = mysqli_fetch_assoc($q))) { $out['rows'][] = $x; $out['actual'] += (float)$x['actual_amount']; $out['vat'] += (float)$x['vat_amount']; }
+    $t = sd_cc_tally($conn, [sd_norm($code)], true)[sd_norm($code)] ?? null;
+    if ($t) { $out['rows'] = $t['rows']; $out['actual'] = $t['act']; $out['vat'] = $t['vat']; }
     $out['count'] = count($out['rows']); $out['actual'] = round($out['actual'], 2); $out['vat'] = round($out['vat'], 2);
     echo json_encode($out); exit;
 }
-/* scheme code key: same code whether it is typed 41388823, ' 41388823 ' or 41388823.0 (case ignored) */
-function sd_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); }
 /** rounding crumbs (under Rs. 5 either way, e.g. 0.01 or (1.70)) count as 0 — change SD_ZERO_LIMIT to move the limit */
 if (!defined('SD_ZERO_LIMIT')) define('SD_ZERO_LIMIT', 5);
 function sd_zero($v) { return abs((float)$v) < SD_ZERO_LIMIT ? 0.0 : (float)$v; }
@@ -88,12 +115,7 @@ if ($items && $cb && mysqli_num_rows($cb)) {
 $cc = [];
 $cq = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
 if ($items && $cq && mysqli_num_rows($cq)) {
-    $codes2 = array_values(array_unique(array_map(fn($x) => "'" . mysqli_real_escape_string($conn, sd_norm($x['activity_code'])) . "'", $items)));
-    $q = mysqli_query($conn, "SELECT UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) AS sn, COUNT(*) AS n, COALESCE(SUM(actual_amount),0) AS act
-                              FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND claim_description NOT LIKE '-%'
-                                AND UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1)))) IN (" . implode(',', $codes2) . ")
-                              GROUP BY UPPER(TRIM(TRAILING '.0' FROM TRIM(SUBSTRING_INDEX(claim_description, '-', 1))))");
-    while ($q && ($x = mysqli_fetch_assoc($q))) $cc[$x['sn']] = ['n' => (int)$x['n'], 'act' => (float)$x['act']];
+    foreach (sd_cc_tally($conn, array_values(array_unique(array_map(fn($x) => sd_norm($x['activity_code']), $items)))) as $k => $t) $cc[$k] = ['n' => $t['n'], 'act' => $t['act']];
 }
 foreach ($items as &$__x) {
     $k = sd_norm($__x['activity_code']); $b = $bws[$k] ?? null; $c2 = $cc[$k] ?? null;
