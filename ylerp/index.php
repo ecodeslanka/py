@@ -77,11 +77,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
       <tbody id="urBody2"></tbody><tfoot id="urFoot2"></tfoot></table></div>
   </div>
 
-  <div class="ur-note"><span class="dot pos"></span> Balance + = Unilever still owes us &nbsp; <span class="dot neg"></span> Balance ( ) = received more than claimed &nbsp;·&nbsp; Scheme Discount &amp; Free Issues = the Scheme Ledger (debit / credit / closing balance) — click it to open the ledger. Click any other line to open its page.</div>
+  <div class="ur-note"><span class="dot pos"></span> Balance + = Unilever still owes us &nbsp; <span class="dot neg"></span> Balance ( ) = received more than claimed &nbsp;·&nbsp; Every line is the closing figure of its own ledger (debit / credit / balance) — click a line or a bar to open that ledger.</div>
 </div>
 <!-- Scheme Ledger window (above the site header) -->
 <div class="ur-modal" id="urModal" aria-hidden="true"><div class="ur-mbox">
-  <div class="ur-mhead"><div><b>Scheme Ledger</b><small id="urMSub"></small></div><a class="ur-mopen" id="urMOpen" target="_blank" rel="noopener" title="Open in a new tab"><i class="fa-solid fa-up-right-from-square"></i></a><button type="button" id="urMClose" title="Close (Esc)"><i class="fa-solid fa-xmark"></i></button></div>
+  <div class="ur-mhead"><div><b id="urMTitle">Ledger</b><small id="urMSub"></small></div><a class="ur-mopen" id="urMOpen" target="_blank" rel="noopener" title="Open in a new tab"><i class="fa-solid fa-up-right-from-square"></i></a><button type="button" id="urMClose" title="Close (Esc)"><i class="fa-solid fa-xmark"></i></button></div>
   <div class="ur-mbody"><div class="ur-mload" id="urMLoad">Loading the ledger…</div><iframe id="urMFrame" title="Scheme Ledger"></iframe></div>
 </div></div>
 <style>
@@ -160,11 +160,11 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
   function bars(rows){
     var items=rows.map(function(r){ return {l:r.label,v:r.balance,r:r}; }).sort(function(a,b){ return Math.abs(b.v)-Math.abs(a.v); }), mx=Math.max.apply(null,items.map(function(i){ return Math.abs(i.v); }).concat([1]));
     return items.map(function(i){ var w=Math.max(2,Math.abs(i.v)/mx*100), col=i.v>0.5?'linear-gradient(90deg,#f87171,#dc2626)':'linear-gradient(90deg,#4ade80,#16a34a)';
-      return '<div class="ur-bar-row" '+(i.r.ledger?'data-ledger="'+esc(i.r.ledger)+'"':'data-p="'+esc(i.r.page)+'.php"')+' title="'+esc(i.l)+'"><div class="bl">'+esc(i.l)+'</div><div class="bt"><i style="left:0;width:'+w+'%;background:'+col+'"></i></div><div class="bv" style="color:'+(i.v>0.5?'#b91c1c':'#15803d')+'">'+neg(i.v)+'</div></div>'; }).join('');
+      return '<div class="ur-bar-row" '+(i.r.ledger?'data-ledger="'+esc(i.r.ledger)+'" data-title="'+esc(i.l)+' — Ledger"':'data-p="'+esc(i.r.page)+'.php"')+' title="'+esc(i.l)+'"><div class="bl">'+esc(i.l)+'</div><div class="bt"><i style="left:0;width:'+w+'%;background:'+col+'"></i></div><div class="bv" style="color:'+(i.v>0.5?'#b91c1c':'#15803d')+'">'+neg(i.v)+'</div></div>'; }).join('');
   }
   function line(r,base,paidMode){
     var pc=base>0?Math.max(0,Math.min(100,Math.round((r.received||0)/base*100))):0, cls=pc>=95?'':(pc>=60?'warn':'low'), bc=r.balance>0.5?'pos':(r.balance<-0.5?'neg':'zero');
-    return '<tr '+(r.ledger?'data-ledger="'+esc(r.ledger)+'"':'data-p="'+esc(r.page)+'.php"')+'><td><span class="ur-src '+(r.source==='Customer Ledger'?'cl':'cc')+'">'+esc(r.source)+'</span></td>'
+    return '<tr '+(r.ledger?'data-ledger="'+esc(r.ledger)+'" data-title="'+esc(r.label)+' — Ledger"':'data-p="'+esc(r.page)+'.php"')+'><td><span class="ur-src '+(r.source==='Customer Ledger'?'cl':'cc')+'">'+esc(r.source)+'</span></td>'
       +'<td><div class="ur-desc"><i class="fa-solid '+esc(r.icon)+'"></i>'+esc(r.label)+(r.ledger?' <span class="lk">ledger</span>':'')+'</div></td>'
       +'<td class="r">'+(base?fmt(base):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td>'
       +'<td class="r"><span class="ur-bal '+bc+'">'+neg(r.balance)+'</span></td>'
@@ -196,13 +196,13 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
     }).catch(function(){ err('The summary could not be loaded (the server did not answer correctly).',true); });
   }
   var EMBED='header.header,.header,aside.sidebar,#sidebar,.sidebar-overlay,.ms-edge-toggle,footer.footer,.page-header{display:none!important;}body{padding-top:0!important;margin-top:0!important;}.main-content{margin-left:0!important;margin-top:0!important;padding-top:10px!important;width:100%!important;max-width:100%!important;}';
-  function openLedger(url){ var fr=$('urMFrame'), body=document.querySelector('.ur-mbody'); body.classList.remove('ready'); $('urMOpen').href=url; $('urMSub').textContent=' ';
+  function openLedger(url,title){ var fr=$('urMFrame'), body=document.querySelector('.ur-mbody'); body.classList.remove('ready'); $('urMOpen').href=url; $('urMTitle').textContent=title||'Ledger'; $('urMSub').textContent=' ';
     fr.onload=function(){ try{ var d=fr.contentDocument; if(d&&d.head&&!d.getElementById('urcss')){ var st=d.createElement('style'); st.id='urcss'; st.textContent=EMBED; d.head.appendChild(st); } }catch(e){} body.classList.add('ready'); };
     fr.src=url; $('urModal').classList.add('open'); document.body.style.overflow='hidden'; }
   function closeLedger(){ $('urModal').classList.remove('open'); document.body.style.overflow=''; $('urMFrame').removeAttribute('src'); }
   $('urMClose').addEventListener('click',closeLedger); $('urModal').addEventListener('click',function(e){ if(e.target===$('urModal')) closeLedger(); });
   document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&$('urModal').classList.contains('open')) closeLedger(); });
-  box.addEventListener('click',function(e){ var t=e.target.closest('tr[data-ledger],tr[data-p],.ur-bar-row'); if(!t||!box.contains(t)) return; if(t.dataset.ledger) openLedger(t.dataset.ledger); else if(t.dataset.p) location.href=t.dataset.p; });
+  box.addEventListener('click',function(e){ var t=e.target.closest('tr[data-ledger],tr[data-p],.ur-bar-row'); if(!t||!box.contains(t)) return; if(t.dataset.ledger) openLedger(t.dataset.ledger,t.dataset.title); else if(t.dataset.p) location.href=t.dataset.p; });
   $('urApply').addEventListener('click',function(){ load(false); }); $('urReload').addEventListener('click',function(){ load(true); });
   $('urReset').addEventListener('click',function(){ $('urAsAtIn').value=today(); $('urFrom').value=''; $('urTo').value=''; $('urLast').checked=false; setPicked('urYMenu',[]); setPicked('urMMenu',[]); load(false); });
   restore(); sync(); load(false);
