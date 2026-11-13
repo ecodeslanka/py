@@ -11,6 +11,9 @@ include 'config.php';
 $has = mysqli_query($conn, "SHOW TABLES LIKE 'scheme_status_items'");
 $ready = $has && mysqli_num_rows($has) > 0;
 
+/* scheme code key: same code whether it is typed 41388823, ' 41388823 ' or 41388823.0 (case ignored) — defined first: the pop-up requests below use it */
+function sd_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); }
+
 /* bill-wise rows of one scheme code (Bill Wise Scheme Analysis import = bws_items) for the pop-up */
 if (($_GET['ajax'] ?? '') === 'bws_rows') {
     while (ob_get_level()) ob_end_clean();
@@ -25,8 +28,6 @@ if (($_GET['ajax'] ?? '') === 'bws_rows') {
     $out['count'] = count($out['rows']); $out['total'] = round($out['total'], 2); $out['free_value'] = round($out['free_value'], 2);
     echo json_encode($out); exit;
 }
-/* scheme code key: same code whether it is typed 41388823, ' 41388823 ' or 41388823.0 (case ignored) */
-if (!function_exists('sd_norm')) { function sd_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((string)$c))); } }
 /**
  * Claim certificate rows (claim_cert_items) tallied to scheme codes.
  * 1) the part of the description before the first "-" is the scheme no (e.g. "41398595-B27181224-Buy Rexona 80g ...");
