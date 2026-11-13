@@ -2,10 +2,12 @@
 /* ── Dashboard data: Unilever Receivable Summary (loaded after the page, only rows the user may view) ── */
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
     ob_start();
+    @ini_set('display_errors', '0'); @error_reporting(0);
+    $__out = function ($arr) { $j = json_encode($arr, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR); while (ob_get_level()) ob_end_clean(); header('Content-Type: application/json; charset=utf-8'); echo $j !== false ? $j : '{"success":false,"message":"Could not encode the summary."}'; exit; };
+    register_shutdown_function(function () use ($__out) { $e = error_get_last(); if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) $__out(['success' => false, 'message' => 'Server error: ' . $e['message'] . ' (' . basename($e['file']) . ':' . $e['line'] . ')']); });
     include 'config.php';
-    while (ob_get_level()) ob_end_clean();
-    header('Content-Type: application/json; charset=utf-8');
-    if (empty($_SESSION['user_id'])) { echo json_encode(['success' => false, 'message' => 'Please log in.']); exit; }
+    if (empty($_SESSION['user_id'])) $__out(['success' => false, 'message' => 'Please log in.']);
+    try {
     require_once __DIR__ . '/unilever_receivable_lib.php';
     $F = ur_filters($_GET);
     /* what this role may open — worked out BEFORE the session is released */
@@ -16,13 +18,13 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
     $ck = rtrim(sys_get_temp_dir(), '/\\') . '/yms_ur_' . md5(__DIR__ . json_encode($F)) . '.json';
     $d = null;
     if (empty($_GET['nocache']) && is_file($ck) && (time() - filemtime($ck)) < 90) $d = json_decode((string)@file_get_contents($ck), true);
-    if (!is_array($d)) { $d = ur_summary($conn, $F); @file_put_contents($ck, json_encode($d)); }
+    if (!is_array($d) || !isset($d['rows'])) { $d = ur_summary($conn, $F); @file_put_contents($ck, json_encode($d, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR)); }
     $rows = array_values(array_filter($d['rows'], fn($r) => !empty($allowed[$r['page']])));   // only what this role may open
     $tot = ['receivable' => 0, 'received' => 0, 'paid' => 0, 'balance' => 0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
-    echo json_encode(['success' => true, 'rows' => $rows, 'total' => array_map(fn($v) => round($v, 2), $tot), 'debit_notes' => $d['debit_notes'], 'debit_notes_ok' => !empty($allowed['debit_note']),
-                      'as_at' => $F['as_at'], 'filters' => $F]);
-    exit;
+    $__out(['success' => true, 'rows' => $rows, 'total' => array_map(fn($v) => round($v, 2), $tot), 'debit_notes' => $d['debit_notes'] ?? 0, 'debit_notes_ok' => !empty($allowed['debit_note']),
+            'allowed_any' => in_array(true, $allowed, true), 'as_at' => $F['as_at'], 'filters' => $F]);
+    } catch (Throwable $ex) { $__out(['success' => false, 'message' => $ex->getMessage() . ' (' . basename($ex->getFile()) . ':' . $ex->getLine() . ')']); }
 }
 ?>
 <?php include 'header.php'; ?>
@@ -130,8 +132,9 @@ body.ms-dark .ur,body.ms-dark .ur-t tbody tr{background:#1f2937;border-color:#37
     var qs=new URLSearchParams({ajax:'ur_summary',as_at:f.as_at,from:f.from,to:f.to,years:f.years,months:f.months}); if(fresh) qs.set('nocache','1');
     $('urBody').style.opacity='.45'; $('urAsAt').textContent='loading…';
     fetch('index.php?'+qs.toString(),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
-      if(!d.success||!d.rows||!d.rows.length){ box.style.display='none'; return; }
       box.style.display='block';
+      if(!d.success){ $('urAsAt').textContent='could not load'; $('urBody').style.opacity='1'; $('urKpis').innerHTML=''; $('urFoot').innerHTML=''; $('urBody').innerHTML='<tr><td colspan="7" style="padding:26px;text-align:center;cursor:default;color:#b91c1c;font-weight:600">The summary could not be loaded: '+String(d.message||'unknown error').replace(/</g,'&lt;')+' <button type="button" class="ur-go" onclick="document.getElementById(\'urReload\').click()" style="margin-left:10px">Try again</button></td></tr>'; return; }
+      if(!d.rows.length){ $('urAsAt').textContent='nothing to show'; $('urBody').style.opacity='1'; $('urKpis').innerHTML=''; $('urFoot').innerHTML=''; $('urBody').innerHTML='<tr><td colspan="7" style="padding:26px;text-align:center;cursor:default;color:#64748b">'+(d.allowed_any===false?'Your role is not allowed to view any of the ledger pages in this summary. Ask the administrator to give you the View right on them (User Role).':'No ledger data found for these filters yet.')+'</td></tr>'; return; }
       var info=[]; if(f.years) info.push('year '+f.years.split(',').join(', ')); if(f.months) info.push(f.months.split(',').map(function(v){ return MON[v-1]; }).join(', ')); if(f.from||f.to) info.push((f.from||'…')+' → '+(f.to||'…'));
       $('urAsAt').textContent='as at '+d.as_at+(info.length?' · '+info.join(' · '):'')+' · live from Customer Ledger & Vendor Ledger';
       var t=d.total, K=[['Receivable',fmt(t.receivable),'#2563eb','#eff6ff','#bfdbfe',''],['Received',fmt(t.received),'#16a34a','#f0fdf4','#bbf7d0',''],['Paid out',fmt(t.paid),'#d97706','#fffbeb','#fde68a','']];
@@ -145,7 +148,7 @@ body.ms-dark .ur,body.ms-dark .ur-t tbody tr{background:#1f2937;border-color:#37
           +'<td class="r"><span class="ur-bal '+bc+'">'+neg(r.balance)+'</span></td>'
           +'<td class="ur-rcv"><div class="ur-bar"><i class="'+cls+'" style="width:'+pc+'%"></i></div><div class="ur-pc">'+pc+'% recovered</div></td></tr>'; }).join('');
       $('urBody').style.opacity='1'; $('urFoot').innerHTML='<tr><td colspan="2">Total</td><td class="r">'+fmt(t.receivable)+'</td><td class="r">'+fmt(t.received)+'</td><td class="r">'+fmt(t.paid)+'</td><td class="r">'+neg(t.balance)+'</td><td></td></tr>';
-    }).catch(function(){ box.style.display='none'; });
+    }).catch(function(err){ box.style.display='block'; $('urBody').style.opacity='1'; $('urAsAt').textContent='could not load'; $('urBody').innerHTML='<tr><td colspan="7" style="padding:26px;text-align:center;cursor:default;color:#b91c1c;font-weight:600">The summary could not be loaded (the server did not answer correctly). <button type="button" class="ur-go" onclick="document.getElementById(\'urReload\').click()" style="margin-left:10px">Try again</button></td></tr>'; });
   }
   /* Scheme Ledger window */
   var EMBED='header.header,.header,aside.sidebar,#sidebar,.sidebar-overlay,.ms-edge-toggle,footer.footer,.page-header{display:none!important;}body{padding-top:0!important;margin-top:0!important;}.main-content{margin-left:0!important;margin-top:0!important;padding-top:10px!important;width:100%!important;max-width:100%!important;}';
