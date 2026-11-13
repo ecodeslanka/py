@@ -234,6 +234,62 @@ include 'header.php';
     </button>
 </div>
 
+<?php
+/* ---- Locked / failed-attempt accounts ---- */
+$flRows = [];
+$flTimeCol = '';
+$flc = @mysqli_query($conn, "SHOW COLUMNS FROM login_attempts");
+if ($flc) { $fl = []; while ($c = mysqli_fetch_assoc($flc)) $fl[] = $c['Field'];
+    foreach (['attempt_time','attempted_at','attempt_at','created_at','login_time','timestamp'] as $c) if (in_array($c, $fl, true)) { $flTimeCol = $c; break; } }
+$flq = mysqli_query($conn, "SELECT id, username, description, failed_attempts, locked_until, lock_reason
+                            FROM users
+                            WHERE COALESCE(failed_attempts,0) > 0 OR (locked_until IS NOT NULL AND locked_until > NOW())
+                            ORDER BY (locked_until IS NOT NULL AND locked_until > NOW()) DESC, failed_attempts DESC, username ASC");
+if ($flq) while ($r = mysqli_fetch_assoc($flq)) {
+    $un = mysqli_real_escape_string($conn, $r['username']);
+    $last = $flc ? mysqli_fetch_assoc(mysqli_query($conn, "SELECT ip_address" . ($flTimeCol ? ", `$flTimeCol` AS t" : "") . " FROM login_attempts WHERE username = '$un' AND success = 0 ORDER BY id DESC LIMIT 1")) : null;
+    $r['ip'] = $last['ip_address'] ?? ''; $r['t'] = $last['t'] ?? '';
+    $flRows[] = $r;
+}
+$flLocked = 0; foreach ($flRows as $r) if (!empty($r['locked_until']) && strtotime($r['locked_until']) > time()) $flLocked++;
+if ($flRows): ?>
+<div class="content-card" style="border-left:4px solid #dc2626;margin-bottom:20px;">
+    <h3 class="card-title" style="display:flex;align-items:center;gap:8px;">
+        <i class="fa-solid fa-user-lock" style="color:#dc2626"></i> Locked &amp; Failed-Login Accounts
+        <span style="font-size:12px;font-weight:600;background:#fee2e2;color:#991b1b;border-radius:10px;padding:2px 10px;"><?php echo $flLocked; ?> locked</span>
+        <span style="font-size:12px;font-weight:600;background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 10px;"><?php echo count($flRows) - $flLocked; ?> with failed attempts</span>
+    </h3>
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead><tr><th>User</th><th style="text-align:center;">Failed attempts</th><th>Status</th><th>Last failed from</th><th>Last failed at</th><th style="width:130px;">Action</th></tr></thead>
+            <tbody>
+            <?php foreach ($flRows as $r):
+                $isL = !empty($r['locked_until']) && strtotime($r['locked_until']) > time();
+                $adm = $isL && al_is_admin_lock($r['locked_until']);
+                $mins = $isL ? (int)ceil((strtotime($r['locked_until']) - time()) / 60) : 0; ?>
+            <tr>
+                <td><strong><?php echo htmlspecialchars($r['username']); ?></strong><?php if (!empty($r['description'])): ?><div style="font-size:11.5px;color:#6b7280;"><?php echo htmlspecialchars($r['description']); ?></div><?php endif; ?></td>
+                <td style="text-align:center;"><span style="font-weight:700;color:<?php echo (int)$r['failed_attempts'] >= 5 ? '#dc2626' : '#b45309'; ?>;"><?php echo (int)$r['failed_attempts']; ?></span></td>
+                <td>
+                    <?php if ($isL): ?>
+                        <span class="badge" style="background:#fee2e2;color:#991b1b;"><i class="fa-solid fa-lock"></i> <?php echo $adm ? 'Locked by admin' : 'Locked (failed attempts)'; ?></span>
+                        <?php if (!$adm): ?><div style="font-size:11.5px;color:#6b7280;">auto-unlocks in <?php echo $mins; ?> min</div><?php endif; ?>
+                    <?php else: ?>
+                        <span class="badge" style="background:#fef3c7;color:#92400e;"><i class="fa-solid fa-triangle-exclamation"></i> Not locked yet</span>
+                    <?php endif; ?>
+                </td>
+                <td><?php echo htmlspecialchars($r['ip'] ?: '—'); ?></td>
+                <td style="white-space:nowrap;"><?php echo $r['t'] ? htmlspecialchars(date('d M Y H:i', strtotime($r['t']))) : '—'; ?></td>
+                <td><a href="?action=unlock_user&uid=<?php echo (int)$r['id']; ?>" class="btn btn-sm" style="background:#16a34a;color:#fff;text-decoration:none;padding:6px 12px;border-radius:6px;font-size:12.5px;font-weight:600;"
+                       onclick="return confirm('<?php echo $isL ? 'Unlock' : 'Reset failed attempts for'; ?> this user?')"><i class="fa-solid fa-lock-open"></i> <?php echo $isL ? 'Unlock' : 'Reset'; ?></a></td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Users List -->
 <div class="content-card">
     <h3 class="card-title">All Users</h3>
