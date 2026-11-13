@@ -67,14 +67,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
   <div class="ur-card ur-tcard">
     <div class="ur-ch"><span><i class="fa-solid fa-hand-holding-dollar" style="color:#2563eb"></i> Receivable from Unilever</span><small>Customer Ledger &amp; Vendor Ledger</small></div>
     <div class="ur-scroll"><table class="ur-t">
-      <thead><tr><th>Source</th><th>Description</th><th class="r ur-op">Opening</th><th class="r">Receivable</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
+      <thead><tr><th>Source</th><th>Description</th><th class="r">Receivable</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
       <tbody id="urBody"></tbody><tfoot id="urFoot"></tfoot></table></div>
   </div>
 
   <div class="ur-card ur-tcard" id="urPaidCard">
     <div class="ur-ch"><span><i class="fa-solid fa-money-bill-transfer" style="color:#d97706"></i> Paid by us — claimed back from Unilever</span><small>Drivers &amp; Loyalty · Promoters Salary · SR Incentive</small></div>
     <div class="ur-scroll"><table class="ur-t">
-      <thead><tr><th>Source</th><th>Description</th><th class="r ur-op">Opening</th><th class="r">Paid</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
+      <thead><tr><th>Source</th><th>Description</th><th class="r">Paid</th><th class="r">Received</th><th class="r">Balance</th><th class="ur-rcv">Recovered</th></tr></thead>
       <tbody id="urBody2"></tbody><tfoot id="urFoot2"></tfoot></table></div>
   </div>
 
@@ -178,13 +178,13 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
     var pc=base>0?Math.max(0,Math.min(100,Math.round((r.received||0)/base*100))):0, cls=pc>=95?'':(pc>=60?'warn':'low'), bc=r.balance>0.5?'pos':(r.balance<-0.5?'neg':'zero');
     return '<tr '+(r.ledger?'data-ledger="'+esc(r.ledger)+'" data-title="'+esc(r.label)+' — Ledger"':'data-p="'+esc(r.page)+'.php"')+'><td><span class="ur-src '+(r.source==='Customer Ledger'?'cl':'cc')+'">'+esc(r.source)+'</span></td>'
       +'<td><div class="ur-desc"><i class="fa-solid '+esc(r.icon)+'"></i>'+esc(r.label)+(r.ledger?' <span class="lk">ledger</span>':'')+'</div></td>'
-      +'<td class="r ur-op">'+(r.open?neg(r.open):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(base?fmt(base):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td>'
+      +'<td class="r">'+(base?fmt(base):'<span class="ur-dash">—</span>')+'</td><td class="r">'+(r.received?fmt(r.received):'<span class="ur-dash">—</span>')+'</td>'
       +'<td class="r"><span class="ur-bal '+bc+'">'+neg(r.balance)+'</span></td>'
       +'<td class="ur-rcv"><div class="ur-bar"><i class="'+cls+'" style="width:'+pc+'%"></i></div><div class="ur-pc">'+pc+'% recovered</div></td></tr>';
   }
-  function foot(first,tot){ return '<tr><td colspan="2">Total</td><td class="r ur-op">'+neg(tot.open||0)+'</td><td class="r">'+fmt(tot[first])+'</td><td class="r">'+fmt(tot.received)+'</td><td class="r">'+neg(tot.balance)+'</td><td></td></tr>'; }
+  function foot(first,tot){ return '<tr><td colspan="2">Total</td><td class="r">'+fmt(tot[first])+'</td><td class="r">'+fmt(tot.received)+'</td><td class="r">'+neg(tot.balance)+'</td><td></td></tr>'; }
   function err(msg,retry){ box.style.display='block'; $('urAsAt').textContent='could not load'; $('urKpis').innerHTML=''; $('urDonut').innerHTML=''; $('urBars').innerHTML=''; $('urFoot').innerHTML=''; $('urFoot2').innerHTML=''; $('urBody2').innerHTML=''; $('urPaidCard').style.display='none';
-    $('urBody').style.opacity='1'; $('urBody').innerHTML='<tr><td colspan="7" style="padding:26px;text-align:center;cursor:default;color:'+(retry?'#b91c1c':'#64748b')+';font-weight:600">'+msg+(retry?' <button type="button" class="ur-go" onclick="document.getElementById(\'urReload\').click()" style="margin-left:10px">Try again</button>':'')+'</td></tr>'; }
+    $('urBody').style.opacity='1'; $('urBody').innerHTML='<tr><td colspan="6" style="padding:26px;text-align:center;cursor:default;color:'+(retry?'#b91c1c':'#64748b')+';font-weight:600">'+msg+(retry?' <button type="button" class="ur-go" onclick="document.getElementById(\'urReload\').click()" style="margin-left:10px">Try again</button>':'')+'</td></tr>'; }
 
   function load(fresh){
     var f=read(); save(f); sync();
@@ -195,8 +195,8 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
       if(!d.success){ err('The summary could not be loaded: '+esc(d.message||'unknown error'),true); return; }
       if(!d.rows.length){ err(d.allowed_any===false?'Your role is not allowed to view any of the ledger pages in this summary. Ask the administrator to give you the View right on them (User Role).':'No ledger data found for these filters yet.',false); return; }
       var info=[]; if(f.years) info.push('year '+f.years.split(',').join(', ')); if(f.months) info.push(f.months.split(',').map(function(v){ return MON[v-1]; }).join(', '));
-      var range=d.mode==='range'; box.classList.toggle('ur-range',range);
-      $('urAsAt').textContent=(range?'period '+(d.from||'…')+' → '+(d.to||'…')+' (entries inside the range, opening balance before it)':'as at '+d.as_at)+(info.length?' · '+info.join(' · '):'')+' · live from Customer Ledger & Vendor Ledger'+((d.warn&&d.warn.length)?' · ⚠ '+d.warn.join(' '):'');
+      var range=d.mode==='range';
+      $('urAsAt').textContent=(range?'period '+(d.from||'…')+' → '+(d.to||'…')+' · only the transactions inside the range (balance = debit − credit)':'as at '+d.as_at+' · closing balances')+(info.length?' · '+info.join(' · '):'')+' · live from Customer Ledger & Vendor Ledger'+((d.warn&&d.warn.length)?' · ⚠ '+d.warn.join(' '):'');
       var G=d.groups||{rec:{receivable:0,received:0,balance:0},paid:{paid:0,received:0,balance:0}}, t=d.total, claimed=(G.rec.receivable||0)+(G.paid.paid||0), pct=claimed>0?(t.received/claimed*100):0;
       $('urKpis').innerHTML=kpi('fa-hand-holding-dollar','Receivable',fmt(G.rec.receivable||0),'from Unilever','#2563eb','#1d4ed8','rgba(37,99,235,.35)')
         +kpi('fa-money-bill-transfer','Paid out',fmt(G.paid.paid||0),'claimed back','#f59e0b','#d97706','rgba(217,119,6,.35)')
@@ -204,7 +204,7 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
         +kpi('fa-scale-balanced','Net balance',neg(t.balance),t.balance>0?'Unilever owes us':'settled / over-received',t.balance>0?'#ef4444':'#14b8a6',t.balance>0?'#b91c1c':'#0f766e',t.balance>0?'rgba(185,28,28,.35)':'rgba(15,118,110,.35)');
       $('urDonut').innerHTML=donut(pct,t.received,claimed-t.received); $('urBars').innerHTML=bars(d.rows);
       var rec=d.rows.filter(function(r){ return (r.group||'rec')==='rec'; }), paid=d.rows.filter(function(r){ return r.group==='paid'; });
-      $('urBody').style.opacity='1'; $('urBody').innerHTML=rec.map(function(r){ return line(r,r.receivable||0); }).join('')||'<tr><td colspan="7" style="padding:18px;text-align:center;cursor:default;color:#94a3b8">No lines.</td></tr>'; $('urFoot').innerHTML=foot('receivable',G.rec);
+      $('urBody').style.opacity='1'; $('urBody').innerHTML=rec.map(function(r){ return line(r,r.receivable||0); }).join('')||'<tr><td colspan="6" style="padding:18px;text-align:center;cursor:default;color:#94a3b8">No lines.</td></tr>'; $('urFoot').innerHTML=foot('receivable',G.rec);
       $('urPaidCard').style.display=paid.length?'':'none'; $('urBody2').innerHTML=paid.map(function(r){ return line(r,r.paid||0); }).join(''); $('urFoot2').innerHTML=foot('paid',G.paid);
     }).catch(function(){ err('The summary could not be loaded (the server did not answer correctly).',true); });
   }

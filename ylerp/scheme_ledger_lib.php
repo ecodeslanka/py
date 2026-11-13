@@ -11,7 +11,7 @@ function sl_norm($c) { return strtoupper(preg_replace('/\.0+$/', '', trim((strin
 function sl_tbl($conn, $t) { $r = mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $t) . "'"); return $r && mysqli_num_rows($r) > 0; }
 function sl_compute($conn, $o) {
     $e = fn($v) => mysqli_real_escape_string($conn, (string)$v);
-    $from = $o['from'] ?? ''; $to = $o['to'] ?? ''; $moc = trim($o['moc'] ?? ''); $q = trim($o['q'] ?? '');
+    $from = $o['from'] ?? ''; $to = $o['to'] ?? ''; $period = !empty($o['period']);   // period = only the transactions inside the range (balance = debit − credit of the range) $moc = trim($o['moc'] ?? ''); $q = trim($o['q'] ?? '');
     $years = array_values(array_filter(array_map('intval', $o['years'] ?? []))); $months = array_values(array_filter(array_map('intval', $o['months'] ?? [])));
     $has_items = sl_tbl($conn, 'scheme_status_items'); $has_cc = sl_tbl($conn, 'claim_cert_items');
     $schemes = [];
@@ -43,7 +43,7 @@ function sl_compute($conn, $o) {
     $open = 0.0; $stmt = [];
     foreach ($entries as $en) {
         $d = $en['date'];
-        if ($from && $d !== '' && $d < $from) { $open += $en['debit'] - $en['credit']; continue; }
+        if ($from && $d !== '' && $d < $from) { if (!$period) $open += $en['debit'] - $en['credit']; continue; }     // period view: nothing is carried in
         if ($to && $d !== '' && $d > $to) continue;
         if ($years  && ($d === '' || !in_array((int)substr($d, 0, 4), $years, true)))  continue;
         if ($months && ($d === '' || !in_array((int)substr($d, 5, 2), $months, true))) continue;

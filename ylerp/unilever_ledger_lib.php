@@ -96,14 +96,14 @@ function ul_entries($conn, $key) {
 }
 /** filter + running balance (same rules as the Scheme Ledger): from → opening balance before it, to / years / months → keep */
 function ul_compute($conn, $key, $o = []) {
-    $from = $o['from'] ?? ''; $to = $o['to'] ?? '';
+    $from = $o['from'] ?? ''; $to = $o['to'] ?? ''; $period = !empty($o['period']);   // period = only the transactions inside the range (balance = debit − credit of the range)
     $years = array_values(array_filter(array_map('intval', $o['years'] ?? []))); $months = array_values(array_filter(array_map('intval', $o['months'] ?? [])));
     $E = ul_entries($conn, $key);
     usort($E, fn($a, $b) => strcmp($a['date'], $b['date']) ?: $a['o'] <=> $b['o']);
     $open = 0.0; $stmt = [];
     foreach ($E as $en) {
         $d = $en['date'];
-        if ($from && $d !== '' && $d < $from) { $open += $en['debit'] - $en['credit']; continue; }
+        if ($from && $d !== '' && $d < $from) { if (!$period) $open += $en['debit'] - $en['credit']; continue; }     // period view: nothing is carried in
         if ($to && $d !== '' && $d > $to) continue;
         if ($years  && ($d === '' || !in_array((int)substr($d, 0, 4), $years, true)))  continue;
         if ($months && ($d === '' || !in_array((int)substr($d, 5, 2), $months, true))) continue;

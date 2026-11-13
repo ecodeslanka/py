@@ -21,13 +21,13 @@ $f_to   = sl_ok($_GET['date_to'] ?? '') ? $_GET['date_to'] : '';
 if ($f_from && $f_to && $f_to < $f_from) [$f_from, $f_to] = [$f_to, $f_from];
 $f_moc = trim($_GET['moc'] ?? ''); $f_q = trim($_GET['q'] ?? ''); $f_asc = !empty($_GET['oldest_first']);
 $csv = fn($v) => array_values(array_filter(array_map('intval', is_array($v) ? $v : preg_split('/[,\s]+/', (string)$v, -1, PREG_SPLIT_NO_EMPTY))));
-$f_years = $csv($_GET['years'] ?? ''); $f_months = $csv($_GET['months'] ?? '');
+$f_years = $csv($_GET['years'] ?? ''); $f_months = $csv($_GET['months'] ?? ''); $f_period = !empty($_GET['period']);
 
 /* MOC Ref list for the filter */
 $mocs = [];
 if ($has_items) { $r = mysqli_query($conn, "SELECT DISTINCT moc_ref FROM scheme_status_items WHERE moc_ref <> '' AND UPPER(TRIM(activity_type)) <> 'DAMAGE' ORDER BY moc_ref DESC"); while ($r && ($x = mysqli_fetch_assoc($r))) $mocs[] = $x['moc_ref']; }
 /* the statement (shared calculation: also used by the dashboard) */
-$L = sl_compute($conn, ['from' => $f_from, 'to' => $f_to, 'moc' => $f_moc, 'q' => $f_q, 'years' => $f_years, 'months' => $f_months]);
+$L = sl_compute($conn, ['from' => $f_from, 'to' => $f_to, 'moc' => $f_moc, 'q' => $f_q, 'years' => $f_years, 'months' => $f_months, 'period' => $f_period]);
 $stmt = $L['stmt']; $open = $L['open']; $closing = $L['closing']; $tdr = $L['debit']; $tcr = $L['credit']; $schemes = array_fill(0, $L['schemes'], 1);
 if (!$f_asc) $stmt = array_reverse($stmt);      // newest first: the last balance is the first line
 
@@ -72,14 +72,14 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sl_d($f_from) :
       <div class="fld"><label>Date to</label><input type="date" name="date_to" value="<?= sl_h($f_to) ?>"></div>
       <div class="fld"><label>MOC Ref</label><select name="moc"><option value="">All</option><?php foreach ($mocs as $m): ?><option <?= $f_moc === $m ? 'selected' : '' ?>><?= sl_h($m) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Scheme no / description</label><input type="search" name="q" value="<?= sl_h($f_q) ?>" placeholder="scheme no or description"></div>
-      <?php if ($f_years): ?><input type="hidden" name="years" value="<?= sl_h(implode(',', $f_years)) ?>"><?php endif; ?><?php if ($f_months): ?><input type="hidden" name="months" value="<?= sl_h(implode(',', $f_months)) ?>"><?php endif; ?>
+      <?php if ($f_period): ?><input type="hidden" name="period" value="1"><?php endif; ?><?php if ($f_years): ?><input type="hidden" name="years" value="<?= sl_h(implode(',', $f_years)) ?>"><?php endif; ?><?php if ($f_months): ?><input type="hidden" name="months" value="<?= sl_h(implode(',', $f_months)) ?>"><?php endif; ?>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;padding-bottom:8px"><input type="checkbox" name="oldest_first" value="1" <?= $f_asc ? 'checked' : '' ?>> Oldest first</label>
       <button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Show</button><a class="btn o" href="scheme_ledger_report.php">Reset</a>
       <a class="btn o" data-no-loader href="?<?= sl_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></div></form>
 
-  <div class="hero"><div><small>Closing balance (last balance)</small><b style="color:<?= $closing > 0.5 ? '#fca5a5' : ($closing < -0.5 ? '#86efac' : '#fff') ?>">Rs. <?= sl_m($closing, false) ?></b></div>
+  <div class="hero"><div><small><?= $f_period ? 'Balance of the period (debit − credit)' : 'Closing balance (last balance)' ?></small><b style="color:<?= $closing > 0.5 ? '#fca5a5' : ($closing < -0.5 ? '#86efac' : '#fff') ?>">Rs. <?= sl_m($closing, false) ?></b></div>
     <div class="s"><small>Total debit (claims)</small><b>Rs. <?= number_format($tdr, 2) ?></b></div><div class="s"><small>Total credit (claim certificates)</small><b>Rs. <?= number_format($tcr, 2) ?></b></div>
-    <?php if ($f_from): ?><div class="s"><small>Opening balance</small><b>Rs. <?= sl_m($open, false) ?></b></div><?php endif; ?><div class="s"><small>Schemes</small><b><?= number_format(count($schemes)) ?></b></div></div>
+    <?php if ($f_from && !$f_period): ?><div class="s"><small>Opening balance</small><b>Rs. <?= sl_m($open, false) ?></b></div><?php endif; ?><div class="s"><small>Schemes</small><b><?= number_format(count($schemes)) ?></b></div></div>
 
   <div class="tw"><table><thead><tr><th>Date</th><th>Scheme No</th><th>Description</th><th>Type</th><th>Reference</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>
   <?php foreach ($stmt as $i => $en): ?><tr class="<?= $i === 0 && !$f_asc ? 'first' : '' ?>"><td style="white-space:nowrap"><?= sl_d($en['date']) ?></td><td><b><?= sl_h($en['scheme']) ?></b></td><td><?= sl_h($en['desc']) ?></td>

@@ -40,8 +40,8 @@ function ur_summary($conn, $F = null) {
     $rows = []; $debit_notes = 0.0; $warn = [];
     if (is_file(__DIR__ . '/unilever_ledger_lib.php')) require_once __DIR__ . '/unilever_ledger_lib.php';
     $to = $F['mode'] === 'range' ? $F['to'] : $F['as_at'];
-    $opt = ['from' => $F['from'], 'to' => $to, 'years' => $F['years'], 'months' => $F['months']];
-    $lp = ['date_to' => $to]; if ($F['from']) $lp['date_from'] = $F['from']; if ($F['years']) $lp['years'] = implode(',', $F['years']); if ($F['months']) $lp['months'] = implode(',', $F['months']);
+    $opt = ['period' => $F['mode'] === 'range', 'from' => $F['from'], 'to' => $to, 'years' => $F['years'], 'months' => $F['months']];
+    $lp = ['date_to' => $to]; if ($F['mode'] === 'range') $lp['period'] = 1; if ($F['from']) $lp['date_from'] = $F['from']; if ($F['years']) $lp['years'] = implode(',', $F['years']); if ($F['months']) $lp['months'] = implode(',', $F['months']);
     $add = function ($S, $L, $link) use (&$rows) {
         $paid = $S['group'] === 'paid';
         $rows[] = ['source' => $S['source'], 'label' => $S['label'], 'page' => $S['page'], 'icon' => $S['icon'], 'group' => $S['group'], 'ledger' => $link,

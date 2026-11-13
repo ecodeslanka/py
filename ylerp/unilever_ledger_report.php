@@ -20,8 +20,8 @@ $f_from = ulr_ok($_GET['date_from'] ?? '') ? $_GET['date_from'] : ''; $f_to = ul
 if ($f_from && $f_to && $f_to < $f_from) [$f_from, $f_to] = [$f_to, $f_from];
 $f_asc = !empty($_GET['oldest_first']);
 $csv = fn($v) => array_values(array_filter(array_map('intval', is_array($v) ? $v : preg_split('/[,\s]+/', (string)$v, -1, PREG_SPLIT_NO_EMPTY))));
-$f_years = $csv($_GET['years'] ?? ''); $f_months = $csv($_GET['months'] ?? '');
-$L = ul_compute($conn, $key, ['from' => $f_from, 'to' => $f_to, 'years' => $f_years, 'months' => $f_months]);
+$f_years = $csv($_GET['years'] ?? ''); $f_months = $csv($_GET['months'] ?? ''); $f_period = !empty($_GET['period']);
+$L = ul_compute($conn, $key, ['from' => $f_from, 'to' => $f_to, 'years' => $f_years, 'months' => $f_months, 'period' => $f_period]);
 $stmt = $L['stmt']; $open = $L['open']; $closing = $L['closing']; $tdr = $L['debit']; $tcr = $L['credit'];
 if (!$f_asc) $stmt = array_reverse($stmt);
 
@@ -62,14 +62,14 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? ulr_d($f_from) 
     <div class="fbody <?= $active ? 'collapsed' : '' ?>" id="ulBody" style="margin-top:12px"><div class="row">
       <div class="fld"><label>Date from</label><input type="date" name="date_from" value="<?= ulr_h($f_from) ?>"></div>
       <div class="fld"><label>Date to / as at</label><input type="date" name="date_to" value="<?= ulr_h($f_to) ?>"></div>
-      <?php if ($f_years): ?><input type="hidden" name="years" value="<?= ulr_h(implode(',', $f_years)) ?>"><?php endif; ?><?php if ($f_months): ?><input type="hidden" name="months" value="<?= ulr_h(implode(',', $f_months)) ?>"><?php endif; ?>
+      <?php if ($f_period): ?><input type="hidden" name="period" value="1"><?php endif; ?><?php if ($f_years): ?><input type="hidden" name="years" value="<?= ulr_h(implode(',', $f_years)) ?>"><?php endif; ?><?php if ($f_months): ?><input type="hidden" name="months" value="<?= ulr_h(implode(',', $f_months)) ?>"><?php endif; ?>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;padding-bottom:8px"><input type="checkbox" name="oldest_first" value="1" <?= $f_asc ? 'checked' : '' ?>> Oldest first</label>
       <button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Show</button><a class="btn o" href="unilever_ledger_report.php?src=<?= ulr_h($key) ?>">Reset</a>
       <a class="btn o" data-no-loader href="?<?= ulr_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></div></form>
 
-  <div class="hero"><div><small>Closing balance (last balance)</small><b style="color:<?= $closing > 0.5 ? '#fca5a5' : ($closing < -0.5 ? '#86efac' : '#fff') ?>">Rs. <?= ulr_m($closing, false) ?></b></div>
+  <div class="hero"><div><small><?= $f_period ? 'Balance of the period (debit − credit)' : 'Closing balance (last balance)' ?></small><b style="color:<?= $closing > 0.5 ? '#fca5a5' : ($closing < -0.5 ? '#86efac' : '#fff') ?>">Rs. <?= ulr_m($closing, false) ?></b></div>
     <div class="s"><small>Total debit</small><b>Rs. <?= number_format($tdr, 2) ?></b></div><div class="s"><small>Total credit</small><b>Rs. <?= number_format($tcr, 2) ?></b></div>
-    <?php if ($f_from): ?><div class="s"><small>Opening balance</small><b>Rs. <?= ulr_m($open, false) ?></b></div><?php endif; ?></div>
+    <?php if ($f_from && !$f_period): ?><div class="s"><small>Opening balance</small><b>Rs. <?= ulr_m($open, false) ?></b></div><?php endif; ?></div>
 
   <div class="tw"><table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead><tbody>
   <?php foreach ($stmt as $i => $en): ?><tr class="<?= $i === 0 && !$f_asc ? 'first' : '' ?>"><td style="white-space:nowrap"><?= ulr_d($en['date']) ?></td><td><span class="ty <?= $en['credit'] ? 'k' : '' ?>"><?= ulr_h($en['type']) ?></span></td>
