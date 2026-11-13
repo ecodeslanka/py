@@ -5,7 +5,8 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const n2 = (v) => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
 const num = (v, d = 0) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
-const S = { user: null, settings: null, items: [], customers: [], page: 'pos' };
+const S = { user: null, settings: null, items: [], customers: [], cats: [], page: 'pos' };
+const catNames = (type) => S.cats.filter((c) => c.type === type).map((c) => c.name).sort((a, b) => a.localeCompare(b));
 const call = (name, ...args) => window.api(name, ...args);
 const money = (v) => (S.settings ? S.settings.currency + ' ' : '') + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const qtyFmt = (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 3 });
@@ -174,8 +175,10 @@ function showLogin(msg) {
 
 async function startApp() {
   const b = await call('bootstrap');
-  S.user = b.user; S.settings = b.settings; S.items = b.items; S.customers = b.customers;
+  S.user = b.user; S.settings = b.settings; S.items = b.items; S.customers = b.customers; S.cats = b.categories || [];
   $('#app').classList.remove('hidden');
+  $('#statusbar').classList.remove('hidden');
+  startChrome();
   S.page = 'pos';
   renderNav(); go('pos');
 }
@@ -195,23 +198,130 @@ $('#nav').addEventListener('click', async (e) => {
   }
 });
 const ACCENTS = [['indigo', '#6366f1', 'Indigo'], ['ocean', '#0ea5e9', 'Ocean'], ['emerald', '#10b981', 'Emerald'], ['violet', '#8b5cf6', 'Violet'], ['rose', '#f43f5e', 'Rose'], ['amber', '#f59e0b', 'Amber']];
-function applyTheme(mode, accent) {
+function applyTheme(mode, accent, style, density) {
   const root = document.documentElement;
   if (mode !== undefined) root.dataset.theme = mode;
   if (accent !== undefined) root.dataset.accent = accent;
-  try { localStorage.setItem('theme', root.dataset.theme || ''); localStorage.setItem('accent', root.dataset.accent || 'indigo'); } catch (_) { /* ignore */ }
+  if (style !== undefined) root.dataset.style = style;
+  if (density !== undefined) root.dataset.density = density;
+  try {
+    localStorage.setItem('theme', root.dataset.theme || ''); localStorage.setItem('accent', root.dataset.accent || 'indigo');
+    localStorage.setItem('style', root.dataset.style || 'desktop'); localStorage.setItem('density', root.dataset.density || 'comfortable');
+  } catch (_) { /* ignore */ }
 }
 function themeDialog() {
-  const cur = () => [document.documentElement.dataset.theme || '', document.documentElement.dataset.accent || 'indigo'];
-  const body = () => `<label>Mode</label><div class="methods" id="tm"><button data-m="" class="${cur()[0] === '' ? 'on' : ''}">☀️ Light</button><button data-m="dark" class="${cur()[0] === 'dark' ? 'on' : ''}">🌙 Dark</button></div>
-    <label style="margin-top:14px">Accent colour</label><div class="swatches" id="ta">${ACCENTS.map((a) => `<button data-a="${a[0]}" title="${a[2]}" class="${cur()[1] === a[0] ? 'on' : ''}" style="background:${a[1]}"></button>`).join('')}</div>`;
+  const d = document.documentElement.dataset;
+  const cur = () => [d.theme || '', d.accent || 'indigo', d.style || 'desktop', d.density || 'comfortable'];
+  const seg = (id, items, val) => `<div class="methods" id="${id}">${items.map((x) => `<button data-v="${x[0]}" class="${val === x[0] ? 'on' : ''}">${x[1]}</button>`).join('')}</div>`;
+  const body = () => { const c = cur(); return `<label>Mode</label>${seg('tm', [['', '☀️ Light'], ['dark', '🌙 Dark']], c[0])}
+    <label style="margin-top:14px">Style</label>${seg('ts', [['desktop', '🖥 Desktop'], ['rounded', '🫧 Rounded']], c[2])}
+    <label style="margin-top:14px">Density</label>${seg('td', [['comfortable', 'Comfortable'], ['compact', 'Compact']], c[3])}
+    <label style="margin-top:14px">Accent colour</label><div class="swatches" id="ta">${ACCENTS.map((a) => `<button data-a="${a[0]}" title="${a[2]}" class="${c[1] === a[0] ? 'on' : ''}" style="background:${a[1]}"></button>`).join('')}</div>`; };
   openModal({
-    title: '🎨 Theme', width: 380, body: body(), buttons: [{ label: 'Done', cls: 'primary', onClick: () => closeModal() }],
+    title: '🎨 Theme', width: 420, body: body(), buttons: [{ label: 'Done', cls: 'primary', onClick: () => closeModal() }],
     onMount: (r) => {
       r.querySelector('.mbody').onclick = (e) => {
-        const m = e.target.closest('#tm button'), a = e.target.closest('#ta button');
-        if (m) applyTheme(m.dataset.m, undefined); if (a) applyTheme(undefined, a.dataset.a);
+        const v = e.target.closest('button'); if (!v) return;
+        const grp = v.parentElement.id;
+        if (grp === 'tm') applyTheme(v.dataset.v); if (grp === 'ts') applyTheme(undefined, undefined, v.dataset.v);
+        if (grp === 'td') applyTheme(undefined, undefined, undefined, v.dataset.v); if (grp === 'ta') applyTheme(undefined, v.dataset.a);
         r.querySelector('.mbody').innerHTML = body();
+      };
+    },
+  });
+}
+
+/* ===== desktop chrome: toolbar (top) + status bar (bottom) ===== */
+let chromeTimer = null, lastBackupText = '';
+function renderTopbar(page) {
+  const nav = NAV.find((n) => n[0] === page) || NAV[0];
+  $('#topbar').innerHTML = `<span class="crumb">🏪 <b>${esc(S.settings.company.name || 'Easy POS')}</b> <i>›</i> ${nav[1]} ${nav[2]}</span><span class="sp"></span>
+    <span class="tb-clock" id="tbclock"></span><button class="tb-btn" data-act="theme" title="Theme / style / density">🎨</button><button class="tb-btn" data-act="help" title="Keyboard shortcuts (F1)">⌨</button>`;
+  tickClock();
+}
+function tickClock() {
+  const n = new Date(), t = n.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const c = $('#tbclock'); if (c) c.textContent = `${ymd(n)}  ${t}`;
+  const sc = $('#sbclock'); if (sc) sc.textContent = t;
+}
+async function refreshBackupText() {
+  if (!isAdmin()) { lastBackupText = ''; return; }
+  try {
+    const L = await call('backup.list');
+    lastBackupText = L.lastError ? '⚠ Backup problem' : L.last ? '💾 Last backup ' + dt(L.last.at).slice(5) : L.files.length ? '💾 ' + dt(L.files[0].mtime).slice(5) : '⚠ No backup yet';
+  } catch (_) { lastBackupText = ''; }
+  renderStatusbar();
+}
+function renderStatusbar() {
+  $('#statusbar').innerHTML = `<span>● Ready</span><span>👤 ${esc(S.user.name)} <small>(${S.user.role})</small></span><span>🏪 ${esc(S.settings.company.name || '')}</span>${lastBackupText ? `<span>${lastBackupText}</span>` : ''}
+    <span class="sp"></span><span id="sbclock"></span><span class="sb-pw">Powered by <a data-ext="https://ecodes.lk">ECODES IT SOLUTIONS</a></span>`;
+  tickClock();
+}
+function startChrome() {
+  renderStatusbar(); refreshBackupText();
+  if (chromeTimer) clearInterval(chromeTimer);
+  let n = 0; chromeTimer = setInterval(() => { tickClock(); if (++n % 10 === 0) refreshBackupText(); }, 30000);
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#topbar [data-act]'); if (!b) return;
+  if (b.dataset.act === 'theme') themeDialog();
+  if (b.dataset.act === 'help' && typeof helpDialog === 'function') helpDialog();
+});
+
+/* ===== categories: picker with inline "＋ new", and a manager dialog ===== */
+function catSelectHtml(type, current, name = 'category') {
+  const names = catNames(type);
+  if (current && !names.includes(current)) names.push(current);
+  return `<div class="catpick"><select name="${name}"><option value="">— None —</option>${names.map((n) => `<option value="${esc(n)}" ${n === current ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+    <button type="button" class="btn sm" data-newcat title="Create a new category">＋ New</button></div>
+    <div class="newcat hidden"><input maxlength="40" placeholder="New category name — Enter to add"><button type="button" class="btn sm primary" data-addcat>Add</button></div>`;
+}
+function bindCatPick(root, type) {
+  const add = async () => {
+    const inp = $('.newcat input', root); const name = inp.value.trim(); if (!name) return;
+    const rec = await guard(() => call('categories.save', { type, name })); if (!rec) return;
+    if (!S.cats.some((c) => c.id === rec.id)) S.cats.push(rec);
+    const sel = $('.catpick select', root);
+    if (![...sel.options].some((o) => o.value === rec.name)) sel.add(new Option(rec.name, rec.name));
+    sel.value = rec.name; inp.value = ''; $('.newcat', root).classList.add('hidden'); toast('Category “' + rec.name + '” added', 'ok');
+  };
+  root.addEventListener('click', (e) => {
+    if (e.target.closest('[data-newcat]')) { const n = $('.newcat', root); n.classList.toggle('hidden'); if (!n.classList.contains('hidden')) $('input', n).focus(); }
+    if (e.target.closest('[data-addcat]')) add();
+  });
+  $('.newcat input', root).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); add(); } });
+}
+async function categoryManager(type, done) {
+  const label = type === 'item' ? 'Item categories' : 'Expense categories', unit = type === 'item' ? 'items' : 'expenses';
+  const draw = async (r) => {
+    const list = await call('categories.list', type);
+    S.cats = [...S.cats.filter((c) => c.type !== type), ...list.map(({ count, ...c }) => c)];
+    $('#cmlist', r).innerHTML = list.length ? list.map((c) => `<div class="crow" data-id="${c.id}"><span class="cname">${esc(c.name)}</span><span class="muted">${c.count} ${unit}</span>
+      <button class="btn sm" data-ren="${c.id}">Rename</button><button class="btn sm danger" data-del="${c.id}">✕</button></div>`).join('') : '<div class="empty">No categories yet — add one above</div>';
+  };
+  openModal({
+    title: '🗂 ' + label, width: 460, onEnter: () => {}, onClose: () => done && done(),
+    body: `<div style="display:flex;gap:8px;margin-bottom:12px"><input id="cmnew" maxlength="40" placeholder="New category name…" autocomplete="off"><button class="btn primary" id="cmadd">＋ Add</button></div><div class="plist" id="cmlist" style="max-height:340px"></div>
+      <p class="muted" style="font-size:12px;margin:10px 0 0">Deleting a category keeps its ${unit}; they just become uncategorised. Renaming updates all ${unit} that use it.</p>`,
+    buttons: [{ label: 'Close', cls: 'primary', onClick: () => closeModal() }],
+    onMount: (r) => {
+      draw(r);
+      const add = async () => { const inp = $('#cmnew', r); const name = inp.value.trim(); if (!name) return; if (await guard(() => call('categories.save', { type, name }))) { inp.value = ''; await draw(r); inp.focus(); } };
+      $('#cmadd', r).onclick = add; $('#cmnew', r).onkeydown = (e) => { if (e.key === 'Enter') { e.stopPropagation(); add(); } };
+      $('#cmlist', r).onclick = async (e) => {
+        const del = e.target.closest('[data-del]'), ren = e.target.closest('[data-ren]');
+        if (del) {
+          if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = 'Sure?'; setTimeout(() => { if (del.isConnected) { del.dataset.sure = ''; del.textContent = '✕'; } }, 3000); return; }
+          if (await guard(() => call('categories.delete', +del.dataset.del)) !== undefined) await draw(r);
+        }
+        if (ren) {
+          const row = ren.closest('.crow'), cur = $('.cname', row).textContent;
+          row.innerHTML = `<input class="rn" maxlength="40" value="${esc(cur)}"><button class="btn sm primary" data-save>Save</button><button class="btn sm" data-cancel>Cancel</button>`;
+          const inp = $('.rn', row); inp.focus(); inp.select();
+          const save = async () => { if (await guard(() => call('categories.save', { id: +row.dataset.id, type, name: inp.value }))) await draw(r); };
+          inp.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.stopPropagation(); save(); } if (ev.key === 'Escape') { ev.stopPropagation(); draw(r); } };
+          row.onclick = (ev) => { if (ev.target.closest('[data-save]')) save(); if (ev.target.closest('[data-cancel]')) draw(r); };
+        }
       };
     },
   });
@@ -223,7 +333,7 @@ document.addEventListener('click', (e) => {
 });
 async function refreshData() {
   const b = await call('bootstrap');
-  S.items = b.items; S.customers = b.customers; S.settings = b.settings;
+  S.items = b.items; S.customers = b.customers; S.settings = b.settings; S.cats = b.categories || S.cats;
 }
 function go(page) {
   S.page = page;
@@ -231,6 +341,7 @@ function go(page) {
   const m = $('#main');
   m.classList.toggle('nopad', page === 'pos');
   m.scrollTop = 0; m.onclick = null;
+  renderTopbar(page);
   guard(async () => { await PAGES[page](m); });
 }
 const PAGES = {};

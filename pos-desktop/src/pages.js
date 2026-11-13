@@ -1,28 +1,45 @@
 'use strict';
 /* ===== Items ===== */
-let itemQ = '', itemLowOnly = false;
+let itemQ = '', itemCat = '', itemStock = '', itemStatus = 'active';
 PAGES.items = async function (m) {
   S.allItems = await call('items.list', { includeInactive: true });
+  const cats = await call('categories.list', 'item');
+  S.cats = [...S.cats.filter((c) => c.type !== 'item'), ...cats.map(({ count, ...c }) => c)];
+  const stockState = (i) => (!i.trackStock ? 'na' : i.stock <= 0 ? 'out' : i.stock <= i.minStock ? 'low' : 'in');
   const draw = () => {
     const q = itemQ.toLowerCase();
-    const rows = S.allItems.filter((i) => (!q || i.name.toLowerCase().includes(q) || String(i.code).toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q)) && (!itemLowOnly || (i.trackStock && i.stock <= i.minStock)));
+    const rows = S.allItems.filter((i) =>
+      (!q || i.name.toLowerCase().includes(q) || String(i.code).toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q)) &&
+      (!itemCat || (itemCat === '__none__' ? !i.category : i.category === itemCat)) &&
+      (itemStatus === 'all' || (itemStatus === 'active' ? i.active !== false : i.active === false)) &&
+      (!itemStock || stockState(i) === itemStock));
+    $('#icount').textContent = rows.length + ' of ' + S.allItems.length + ' items';
     $('#ilist').innerHTML = tableHtml([
       { h: 'Code', f: (i) => esc(i.code) }, { h: 'Item', f: (i) => `<b>${esc(i.name)}</b> ${i.active === false ? '<span class="tag bad">inactive</span>' : ''}` },
-      { h: 'Category', f: (i) => esc(i.category) }, { h: 'Cost', r: 1, f: (i) => money(i.cost) }, { h: 'Selling', r: 1, f: (i) => money(i.price) },
+      { h: 'Category', f: (i) => (i.category ? `<span class="tag">${esc(i.category)}</span>` : '<span class="muted">—</span>') }, { h: 'Cost', r: 1, f: (i) => money(i.cost) }, { h: 'Selling', r: 1, f: (i) => money(i.price) },
       { h: 'Margin', r: 1, f: (i) => { const p = i.price ? ((i.price - i.cost) / i.price) * 100 : 0; return `<span class="${sgn(p)}">${p.toFixed(1)}%</span>`; } },
       { h: 'Stock', r: 1, f: (i) => (i.trackStock ? `<span class="tag ${i.stock <= i.minStock ? 'bad' : 'ok'}">${qtyFmt(i.stock)} ${esc(i.unit)}</span>` : '<span class="muted">n/a</span>') },
       { h: '', act: 1, f: (i) => `<button class="btn sm" data-a="stock" data-id="${i.id}">＋ Stock</button> <button class="btn sm" data-a="edit" data-id="${i.id}">Edit</button> <button class="btn sm danger" data-a="del" data-id="${i.id}">✕</button>` },
-    ], rows, 'No items found');
+    ], rows, 'No items match the filters');
   };
-  m.innerHTML = `<div class="page-h"><h2>📦 Items</h2><button class="btn primary" data-a="new">＋ New item</button></div>
-    <div class="toolbar"><div class="grow"><input id="iq" placeholder="Search name, barcode, category…" value="${esc(itemQ)}"></div><label class="chk"><input type="checkbox" id="ilow" ${itemLowOnly ? 'checked' : ''}> Low stock only</label></div><div id="ilist"></div>`;
+  const opt = (v, t, cur) => `<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(t)}</option>`;
+  m.innerHTML = `<div class="page-h"><h2>📦 Items</h2><button class="btn" data-a="cats">🗂 Categories</button><button class="btn primary" data-a="new">＋ New item</button></div>
+    <div class="toolbar filters"><div class="grow"><label>Search</label><input id="iq" placeholder="Name, barcode or category…" value="${esc(itemQ)}"></div>
+      <div><label>Category</label><select id="icat" class="fx">${opt('', 'All categories', itemCat)}${cats.map((c) => opt(c.name, `${c.name} (${c.count})`, itemCat)).join('')}${opt('__none__', 'Uncategorised', itemCat)}</select></div>
+      <div><label>Stock</label><select id="istock" class="fx">${opt('', 'Any stock', itemStock)}${opt('in', 'In stock', itemStock)}${opt('low', 'Low stock', itemStock)}${opt('out', 'Out of stock', itemStock)}</select></div>
+      <div><label>Status</label><select id="istatus" class="fx">${opt('active', 'Active', itemStatus)}${opt('inactive', 'Inactive', itemStatus)}${opt('all', 'All', itemStatus)}</select></div>
+      <button class="btn" id="iclear" title="Clear all filters">✕ Clear</button><span class="muted" id="icount" style="align-self:center"></span></div><div id="ilist"></div>`;
   draw();
   $('#iq').oninput = (e) => { itemQ = e.target.value; draw(); };
-  $('#ilow').onchange = (e) => { itemLowOnly = e.target.checked; draw(); };
+  $('#icat').onchange = (e) => { itemCat = e.target.value; draw(); };
+  $('#istock').onchange = (e) => { itemStock = e.target.value; draw(); };
+  $('#istatus').onchange = (e) => { itemStatus = e.target.value; draw(); };
+  $('#iclear').onclick = () => { itemQ = itemCat = itemStock = ''; itemStatus = 'active'; go('items'); };
   m.onclick = async (e) => {
     const b = e.target.closest('[data-a]'); if (!b) return;
+    if (b.dataset.a === 'new') return itemForm(null);
+    if (b.dataset.a === 'cats') return categoryManager('item', () => go('items'));
     const it = S.allItems.find((i) => i.id === +b.dataset.id);
-    if (b.dataset.a === 'new') itemForm(null);
     if (b.dataset.a === 'edit') itemForm(it);
     if (b.dataset.a === 'stock') stockForm(it);
     if (b.dataset.a === 'del' && await confirmBox('Delete item', `Delete <b>${esc(it.name)}</b>? Items used in past sales are only deactivated.`)) {
@@ -32,18 +49,17 @@ PAGES.items = async function (m) {
 };
 function itemForm(it) {
   const v = it || { code: '', name: '', category: '', unit: 'pcs', cost: '', price: '', stock: 0, minStock: 0, trackStock: true, active: true };
-  const cats = [...new Set(S.allItems.map((i) => i.category).filter(Boolean))];
   openModal({
     title: it ? 'Edit item' : 'New item', width: 640,
     body: `<div class="fgrid" id="f"><div><label>Barcode / code (blank = auto)</label><input name="code" value="${esc(v.code)}"></div><div><label>Item name *</label><input name="name" value="${esc(v.name)}"></div>
-      <div><label>Category</label><input name="category" list="cats" value="${esc(v.category)}"><datalist id="cats">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></div><div><label>Unit</label><input name="unit" value="${esc(v.unit)}" placeholder="pcs, kg, box…"></div>
+      <div><label>Category</label>${catSelectHtml('item', v.category)}</div><div><label>Unit</label><input name="unit" value="${esc(v.unit)}" placeholder="pcs, kg, box…"></div>
       <div><label>Cost price</label><input name="cost" type="number" step="any" min="0" value="${v.cost}"></div><div><label>Selling price *</label><input name="price" type="number" step="any" min="0" value="${v.price}"></div>
       <div><label>Stock on hand</label><input name="stock" type="number" step="any" value="${v.stock}"></div><div><label>Low-stock alert at</label><input name="minStock" type="number" step="any" value="${v.minStock}"></div>
       <div class="full" id="mg" class="muted"></div>
       <label class="chk"><input type="checkbox" name="trackStock" ${v.trackStock ? 'checked' : ''}> Track stock</label><label class="chk"><input type="checkbox" name="active" ${v.active !== false ? 'checked' : ''}> Active (shown in POS)</label></div>`,
     onMount: (r) => {
       const upd = () => { const c = num($('[name=cost]', r).value), p = num($('[name=price]', r).value); $('#mg', r).innerHTML = `Profit per unit: <b class="${sgn(p - c)}">${money(p - c)}</b> · Margin <b>${p ? (((p - c) / p) * 100).toFixed(1) : 0}%</b>`; };
-      r.addEventListener('input', upd); upd();
+      $('#f', r).addEventListener('input', upd); upd(); bindCatPick($('#f', r), 'item');
     },
     buttons: [{ label: 'Cancel', onClick: () => closeModal() }, {
       label: 'Save', cls: 'primary', onClick: async () => {
@@ -168,30 +184,49 @@ PAGES.sales = async function (m) {
 };
 
 /* ===== Expenses ===== */
-let expF = null;
+let expF = null, expCat = '', expQ = '';
 PAGES.expenses = async function (m) {
   if (!expF) { const d = new Date(); expF = { from: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), to: ymd(d) }; }
-  m.innerHTML = `<div class="page-h"><h2>💸 Expenses</h2><button class="btn primary" id="enew">＋ Add expense</button></div><div class="toolbar"><div><label>From</label><input type="date" class="fx" id="ef" value="${expF.from}"></div><div><label>To</label><input type="date" class="fx" id="et" value="${expF.to}"></div><button class="btn" id="ego">Show</button></div><div id="elist"></div>`;
+  const cats = await call('categories.list', 'expense');
+  S.cats = [...S.cats.filter((c) => c.type !== 'expense'), ...cats.map(({ count, ...c }) => c)];
+  const opt = (v, t, cur) => `<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(t)}</option>`;
+  m.innerHTML = `<div class="page-h"><h2>💸 Expenses</h2><button class="btn" id="ecats">🗂 Categories</button><button class="btn primary" id="enew">＋ Add expense</button></div>
+    <div class="toolbar filters"><div><label>From</label><input type="date" class="fx" id="ef" value="${expF.from}"></div><div><label>To</label><input type="date" class="fx" id="et" value="${expF.to}"></div>
+      <div><label>Category</label><select id="ecat" class="fx">${opt('', 'All categories', expCat)}${cats.map((c) => opt(c.name, c.name, expCat)).join('')}${opt('__none__', 'Uncategorised', expCat)}</select></div>
+      <div class="grow"><label>Search title / note</label><input id="eq" value="${esc(expQ)}"></div><button class="btn primary" id="ego">Show</button><button class="btn" id="eclear" title="Clear filters">✕ Clear</button></div><div id="elist"></div>`;
   const load = async () => {
-    expF = { from: $('#ef').value, to: $('#et').value };
-    const rows = await guard(() => call('expenses.list', expF)); if (!rows) return;
-    $('#elist').innerHTML = `<div class="cards"><div class="stat r2"><div class="l">Total expenses</div><div class="v">${money(rows.reduce((a, e) => a + e.amount, 0))}</div></div></div>` +
-      tableHtml([{ h: 'Date', f: (e) => e.date }, { h: 'Title', f: (e) => `<b>${esc(e.title)}</b>` }, { h: 'Paid by', f: (e) => esc(e.method || 'Cash') }, { h: 'Note', f: (e) => esc(e.note) }, { h: 'Amount', r: 1, f: (e) => money(e.amount) },
-        { h: '', act: 1, f: (e) => `<button class="btn sm" data-a="edit" data-id="${e.id}">Edit</button> <button class="btn sm danger" data-a="del" data-id="${e.id}">✕</button>` }], rows, 'No expenses in this period');
+    expF = { from: $('#ef').value, to: $('#et').value }; expCat = $('#ecat').value; expQ = $('#eq').value;
+    const all = await guard(() => call('expenses.list', { ...expF, category: expCat })); if (!all) return;
+    const q = expQ.trim().toLowerCase();
+    const rows = q ? all.filter((e) => (e.title + ' ' + (e.note || '')).toLowerCase().includes(q)) : all;
+    const by = {}; rows.forEach((e) => { const k = e.category || 'Uncategorised'; by[k] = (by[k] || 0) + e.amount; });
+    const top = Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    $('#elist').innerHTML = `<div class="cards"><div class="stat r2"><div class="l">Total expenses (${rows.length})</div><div class="v">${money(rows.reduce((a, e) => a + e.amount, 0))}</div></div>${top.map(([k, v]) => `<div class="stat o"><div class="l">${esc(k)}</div><div class="v" style="font-size:18px">${money(v)}</div></div>`).join('')}</div>` +
+      tableHtml([{ h: 'Date', f: (e) => e.date }, { h: 'Title', f: (e) => `<b>${esc(e.title)}</b>` }, { h: 'Category', f: (e) => (e.category ? `<span class="tag">${esc(e.category)}</span>` : '<span class="muted">—</span>') },
+        { h: 'Paid by', f: (e) => esc(e.method || 'Cash') }, { h: 'Note', f: (e) => esc(e.note) }, { h: 'Amount', r: 1, f: (e) => money(e.amount) },
+        { h: '', act: 1, f: (e) => `<button class="btn sm" data-a="edit" data-id="${e.id}">Edit</button> <button class="btn sm danger" data-a="del" data-id="${e.id}">✕</button>` }], rows, 'No expenses match the filters');
     $('#elist').onclick = async (ev) => {
       const b = ev.target.closest('[data-a]'); if (!b) return; const e = rows.find((x) => x.id === +b.dataset.id);
-      if (b.dataset.a === 'edit') expenseForm(e, load);
+      if (b.dataset.a === 'edit') expenseForm(e, () => go('expenses'));
       if (b.dataset.a === 'del' && await confirmBox('Delete', 'Delete this expense?')) { await guard(() => call('expenses.delete', e.id)); load(); }
     };
   };
-  $('#ego').onclick = load; $('#enew').onclick = () => expenseForm(null, load); load();
+  $('#ego').onclick = load; $('#ecat').onchange = load; $('#eq').onkeydown = (e) => { if (e.key === 'Enter') load(); };
+  $('#eclear').onclick = () => { expCat = ''; expQ = ''; expF = null; go('expenses'); };
+  $('#enew').onclick = () => expenseForm(null, () => go('expenses')); $('#ecats').onclick = () => categoryManager('expense', () => go('expenses'));
+  load();
 };
 function expenseForm(e, done) {
-  const v = e || { date: ymd(new Date()), title: '', amount: '', note: '' };
+  const v = e || { date: ymd(new Date()), title: '', amount: '', note: '', category: '', method: 'Cash' };
   openModal({
-    title: e ? 'Edit expense' : 'Add expense', width: 440,
-    body: `<div class="fgrid" id="f"><div><label>Date</label><input type="date" name="date" value="${v.date}"></div><div><label>Amount *</label><input name="amount" type="number" step="any" min="0" value="${v.amount}"></div><div class="full"><label>Title * (rent, electricity, salary…)</label><input name="title" value="${esc(v.title)}"></div><div class="full"><label>Paid by (Cash expenses appear in the cash book)</label><select name="method">${['Cash', 'Bank', 'Card', 'Online'].map((x) => `<option ${((v.method || 'Cash') === x) ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div class="full"><label>Note</label><input name="note" value="${esc(v.note)}"></div></div>`,
-    buttons: [{ label: 'Cancel', onClick: () => closeModal() }, { label: 'Save', cls: 'primary', onClick: async () => { const o = formVals($('#f')); if (e) o.id = e.id; const r = await guard(() => call('expenses.save', o)); if (r) { closeModal(); done(); } } }],
+    title: e ? 'Edit expense' : 'Add expense', width: 480,
+    body: `<div class="fgrid" id="f"><div><label>Date</label><input type="date" name="date" value="${v.date}"></div><div><label>Amount *</label><input name="amount" type="number" step="any" min="0" value="${v.amount}"></div>
+      <div class="full"><label>Title * (rent, electricity, salary…)</label><input name="title" value="${esc(v.title)}"></div>
+      <div><label>Expense category</label>${catSelectHtml('expense', v.category)}</div>
+      <div><label>Paid by (Cash shows in cash book)</label><select name="method">${['Cash', 'Bank', 'Card', 'Online'].map((x) => `<option ${((v.method || 'Cash') === x) ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+      <div class="full"><label>Note</label><input name="note" value="${esc(v.note)}"></div></div>`,
+    onMount: (r) => bindCatPick($('#f', r), 'expense'),
+    buttons: [{ label: 'Cancel', onClick: () => closeModal() }, { label: 'Save', cls: 'primary', onClick: async () => { const o = formVals($('#f')); if (e) o.id = e.id; const r = await guard(() => call('expenses.save', o)); if (r) { closeModal(); toast('Expense saved', 'ok'); done(); } } }],
   });
 }
 
@@ -212,7 +247,7 @@ PAGES.reports = async function (m) {
   m.innerHTML = `<div class="page-h"><h2>📊 Reports & Profit</h2></div>
     <div class="toolbar"><div class="tabs" id="qr" style="margin:0">${[['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['month', 'This month'], ['lastmonth', 'Last month'], ['year', 'This year'], ['all', 'All time']].map((x) => `<button data-r="${x[0]}">${x[1]}</button>`).join('')}</div>
     <div><label>From</label><input type="date" class="fx" id="rf" value="${repF.from}"></div><div><label>To</label><input type="date" class="fx" id="rt" value="${repF.to}"></div><button class="btn primary" id="rgo">Show</button></div>
-    <div class="tabs" id="rt2">${[['summary', 'Profit summary'], ['items', 'Item profit'], ['daily', 'Daily'], ['users', 'By cashier'], ['stock', 'Stock value'], ['recv', 'Customer credit']].map((x) => `<button data-t="${x[0]}" class="${repTab === x[0] ? 'on' : ''}">${x[1]}</button>`).join('')}</div><div id="rbody"></div>`;
+    <div class="tabs" id="rt2">${[['summary', 'Profit summary'], ['items', 'Item profit'], ['category', 'Category profit'], ['expcat', 'Expense categories'], ['daily', 'Daily'], ['users', 'By cashier'], ['stock', 'Stock value'], ['recv', 'Customer credit']].map((x) => `<button data-t="${x[0]}" class="${repTab === x[0] ? 'on' : ''}">${x[1]}</button>`).join('')}</div><div id="rbody"></div>`;
   const load = async () => {
     repF = { from: $('#rf').value, to: $('#rt').value };
     $$('#rt2 button').forEach((b) => b.classList.toggle('on', b.dataset.t === repTab));
@@ -232,11 +267,28 @@ PAGES.reports = async function (m) {
       if (repTab === 'summary') {
         body.innerHTML = `<div class="cards"><div class="stat"><div class="l">Bills</div><div class="v">${s.bills}</div></div><div class="stat"><div class="l">Sales (incl. tax)</div><div class="v">${money(s.sales)}</div></div><div class="stat o"><div class="l">Cost of goods</div><div class="v">${money(s.cost)}</div></div><div class="stat g"><div class="l">Gross profit</div><div class="v">${money(s.grossProfit)}</div></div><div class="stat r2"><div class="l">Expenses</div><div class="v">${money(s.expenses)}</div></div><div class="stat ${s.netProfit >= 0 ? 'g' : 'r2'}"><div class="l">NET PROFIT</div><div class="v ${sgn(s.netProfit)}">${money(s.netProfit)}</div></div></div>
           <div class="panel"><table class="tbl">${[['Gross sales (before discount)', s.gross], ['Discounts given', -s.discount], [(S.settings.taxName || 'Tax') + ' collected', s.tax], ['Total sales', s.sales], ['Cash/amount collected on bills', s.cashCollected], ['Sold on credit (unpaid)', s.creditGiven], ['Customer credit payments received', s.paymentsReceived], ['Profit margin', s.margin.toFixed(1) + '%'], ['Voided bills', s.voided]].map((r) => `<tr><td>${r[0]}</td><td class="r"><b>${typeof r[1] === 'number' ? money(r[1]) : r[1]}</b></td></tr>`).join('')}</table></div>
-          <h3 style="margin:18px 0 6px">Daily sales & profit</h3><div class="panel">${bars(R.daily)}</div>`;
+          <h3 style="margin:18px 0 6px">Daily sales & profit</h3><div class="panel">${bars(R.daily)}</div>${R.expensesByCategory.length ? `<h3 style="margin:18px 0 6px">Expenses by category</h3>${tableHtml([{ h: 'Category', f: (c) => esc(c.category) }, { h: 'Amount', r: 1, f: (c) => money(c.amount) }], R.expensesByCategory)}` : ''}`;
         csvData = ['profit-summary.csv', ['Metric', 'Value'], [['Bills', s.bills], ['Sales', s.sales], ['Cost', s.cost], ['Gross profit', s.grossProfit], ['Expenses', s.expenses], ['Net profit', s.netProfit]]];
       } else if (repTab === 'items') {
-        body.innerHTML = exportBtn() + tableHtml([{ h: 'Item', f: (i) => `<b>${esc(i.name)}</b>` }, { h: 'Qty sold', r: 1, f: (i) => qtyFmt(i.qty) }, { h: 'Revenue', r: 1, f: (i) => money(i.revenue) }, { h: 'Cost', r: 1, f: (i) => money(i.cost) }, { h: 'Profit', r: 1, f: (i) => `<b class="${sgn(i.profit)}">${money(i.profit)}</b>` }, { h: 'Margin', r: 1, f: (i) => (i.revenue ? ((i.profit / i.revenue) * 100).toFixed(1) + '%' : '') }], R.byItem, 'No sales in this period');
-        csvData = ['item-profit.csv', ['Item', 'Qty', 'Revenue', 'Cost', 'Profit'], R.byItem.map((i) => [i.name, i.qty, i.revenue, i.cost, i.profit])];
+        const cats = [...new Set(R.byItem.map((i) => i.category).filter(Boolean))].sort();
+        const showItems = () => {
+          const f = $('#ipcat') ? $('#ipcat').value : '';
+          const rows = R.byItem.filter((i) => !f || i.category === f);
+          $('#iptbl').innerHTML = tableHtml([{ h: 'Item', f: (i) => `<b>${esc(i.name)}</b>` }, { h: 'Category', f: (i) => esc(i.category) }, { h: 'Qty sold', r: 1, f: (i) => qtyFmt(i.qty) }, { h: 'Revenue', r: 1, f: (i) => money(i.revenue) }, { h: 'Cost', r: 1, f: (i) => money(i.cost) }, { h: 'Profit', r: 1, f: (i) => `<b class="${sgn(i.profit)}">${money(i.profit)}</b>` }, { h: 'Margin', r: 1, f: (i) => (i.revenue ? ((i.profit / i.revenue) * 100).toFixed(1) + '%' : '') }], rows, 'No sales in this period');
+          csvData = ['item-profit.csv', ['Item', 'Category', 'Qty', 'Revenue', 'Cost', 'Profit'], rows.map((i) => [i.name, i.category, i.qty, i.revenue, i.cost, i.profit])];
+        };
+        body.innerHTML = `<div class="toolbar">${`<div><label>Category</label><select id="ipcat" class="fx"><option value="">All categories</option>${cats.map((c) => `<option>${esc(c)}</option>`).join('')}</select></div>`}<div style="align-self:flex-end">${exportBtn()}</div></div><div id="iptbl"></div>`;
+        $('#ipcat').onchange = showItems; showItems();
+      } else if (repTab === 'category') {
+        const tot = R.byCategory.reduce((a, c) => a + c.profit, 0);
+        body.innerHTML = exportBtn() + tableHtml([{ h: 'Item category', f: (c) => `<b>${esc(c.category)}</b>` }, { h: 'Qty sold', r: 1, f: (c) => qtyFmt(c.qty) }, { h: 'Revenue', r: 1, f: (c) => money(c.revenue) }, { h: 'Cost', r: 1, f: (c) => money(c.cost) },
+          { h: 'Profit', r: 1, f: (c) => `<b class="${sgn(c.profit)}">${money(c.profit)}</b>` }, { h: 'Margin', r: 1, f: (c) => (c.revenue ? ((c.profit / c.revenue) * 100).toFixed(1) + '%' : '') }, { h: 'Share of profit', f: (c) => `<div class="meter"><i style="width:${tot > 0 ? Math.max(0, Math.min(100, (c.profit / tot) * 100)) : 0}%"></i></div>` }], R.byCategory, 'No sales in this period');
+        csvData = ['category-profit.csv', ['Category', 'Qty', 'Revenue', 'Cost', 'Profit'], R.byCategory.map((c) => [c.category, c.qty, c.revenue, c.cost, c.profit])];
+      } else if (repTab === 'expcat') {
+        const tot = R.expensesByCategory.reduce((a, c) => a + c.amount, 0);
+        body.innerHTML = `<div class="cards"><div class="stat r2"><div class="l">Total expenses</div><div class="v">${money(tot)}</div></div><div class="stat ${s.netProfit >= 0 ? 'g' : 'r2'}"><div class="l">Net profit</div><div class="v">${money(s.netProfit)}</div></div></div>` + exportBtn() +
+          tableHtml([{ h: 'Expense category', f: (c) => `<b>${esc(c.category)}</b>` }, { h: 'Entries', r: 1, f: (c) => c.count }, { h: 'Amount', r: 1, f: (c) => `<b>${money(c.amount)}</b>` }, { h: '% of expenses', r: 1, f: (c) => (tot ? ((c.amount / tot) * 100).toFixed(1) + '%' : '') }, { h: '', f: (c) => `<div class="meter bad"><i style="width:${tot ? (c.amount / tot) * 100 : 0}%"></i></div>` }], R.expensesByCategory, 'No expenses in this period');
+        csvData = ['expenses-by-category.csv', ['Category', 'Entries', 'Amount'], R.expensesByCategory.map((c) => [c.category, c.count, c.amount])];
       } else if (repTab === 'daily') {
         body.innerHTML = exportBtn() + tableHtml([{ h: 'Date', f: (d) => d.date }, { h: 'Bills', r: 1, f: (d) => d.bills }, { h: 'Sales', r: 1, f: (d) => money(d.sales) }, { h: 'Cost', r: 1, f: (d) => money(d.cost) }, { h: 'Profit', r: 1, f: (d) => `<b class="${sgn(d.profit)}">${money(d.profit)}</b>` }], R.daily.slice().reverse(), 'No sales in this period');
         csvData = ['daily.csv', ['Date', 'Bills', 'Sales', 'Cost', 'Profit'], R.daily.map((d) => [d.date, d.bills, d.sales, d.cost, d.profit])];
@@ -352,7 +404,8 @@ PAGES.settings = async function (m) {
 
 /* ===== boot ===== */
 (async function boot() {
-  try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; const a = localStorage.getItem('accent'); if (a) document.documentElement.dataset.accent = a; } catch (_) { /* ignore */ }
+  document.documentElement.dataset.style = 'desktop'; document.documentElement.dataset.density = 'comfortable';
+  try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; const a = localStorage.getItem('accent'); if (a) document.documentElement.dataset.accent = a; const st = localStorage.getItem('style'); if (st) document.documentElement.dataset.style = st; const de = localStorage.getItem('density'); if (de) document.documentElement.dataset.density = de; } catch (_) { /* ignore */ }
   const sess = await call('session').catch(() => null);
   if (sess) { S.user = sess; await startApp(); } else showLogin();
 })();

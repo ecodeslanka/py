@@ -93,5 +93,36 @@ C('login', 'bob', 'pw12');
 assert.throws(() => C('sales.update', bill.id, { lines: [{ itemId: tea.id, qty: 1, price: 18 }] }), /not allowed|Administrator/);
 assert.throws(() => C('grn.list', {}), /Administrator/);
 C('login', 'admin', 'admin');
+
+// ---- categories + expense categories ----
+const ec = C('categories.list', 'expense');
+assert.ok(ec.some((c) => c.name === 'Rent') && ec.length >= 8);                    // seeded defaults
+const ic = C('categories.save', { type: 'item', name: 'Beverages' });
+assert.throws(() => C('categories.save', { type: 'item', name: 'beverages' }), /already exists/);
+const soda = C('items.save', { name: 'Soda', cost: 20, price: 35, stock: 10, category: 'Beverages' });
+assert.strictEqual(soda.category, 'Beverages');
+C('items.save', { name: 'Biscuit', cost: 10, price: 18, stock: 5, category: 'Snacks (auto)' }); // unknown -> auto-created
+assert.ok(C('categories.list', 'item').some((c) => c.name === 'Snacks (auto)'));
+C('categories.save', { id: ic.id, type: 'item', name: 'Drinks' });                   // rename cascades
+assert.strictEqual(C('items.list', {}).find((i) => i.id === soda.id).category, 'Drinks');
+const sale2 = C('sales.create', { lines: [{ itemId: soda.id, qty: 2, price: 35 }], tendered: 70 });
+const rep = C('reports.profit', {});
+assert.ok(rep.byCategory.some((c) => c.category === 'Drinks' && c.qty === 2 && c.profit === 30));
+C('expenses.save', { title: 'July rent', amount: 100, category: 'Rent' });
+C('expenses.save', { title: 'Bulbs', amount: 40, category: 'Electricity' });
+C('expenses.save', { title: 'Misc', amount: 5 });
+const r2 = C('reports.profit', {});
+assert.strictEqual(r2.expensesByCategory.find((c) => c.category === 'Rent').amount, 100);
+assert.ok(r2.expensesByCategory.some((c) => c.category === 'Uncategorised'));
+assert.strictEqual(C('expenses.list', { category: 'Rent' }).length, 1);
+assert.strictEqual(C('expenses.list', { category: '__none__' }).filter((e) => e.title === 'Misc').length, 1);
+const rentCat = ec.find((c) => c.name === 'Rent');
+C('categories.delete', rentCat.id);
+assert.strictEqual(C('expenses.list', { category: '__none__' }).filter((e) => e.title === 'July rent').length, 1); // uncategorised, not lost
+const newCat = C('categories.save', { type: 'expense', name: 'Packaging' });
+assert.ok(newCat.id > 8 && C('categories.list').filter((c) => c.id === newCat.id).length === 1);  // no id collision
+C('login', 'bob', 'pw12');
+assert.throws(() => C('categories.save', { type: 'item', name: 'X' }), /Administrator/);
+C('login', 'admin', 'admin');
 be.flush();
 console.log('all backend tests passed');

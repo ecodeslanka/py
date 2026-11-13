@@ -12,7 +12,8 @@ Offline desktop POS (Electron). No database server needed – all data lives in 
 - **GRN & suppliers** – goods-received notes that raise stock and update cost price, supplier credit balances, **supplier payments** and ledgers.
 - **Daily cash book** – opening, cash in/out, closing, manual entries and day-close cash count with over/short.
 - **Edit saved bills** on the POS screen (`F5`) – stock, credit and profit are corrected and logged.
-- **Modern themes** – light/dark and six accent colours. Powered by [ECODES IT SOLUTIONS](https://ecodes.lk).
+- **Categories & filters** – managed item categories (create / rename / delete, pick or add one right in the item form), filters on Items / Inventory / Reports, and managed **expense categories** with category filter and category reports.
+- **Desktop-style UI** – top toolbar, bottom status bar, Desktop or Rounded style, Comfortable or Compact density. **Modern themes** – light/dark and six accent colours. Powered by [ECODES IT SOLUTIONS](https://ecodes.lk).
 - **Reports** – profit summary (sales, cost, gross profit, expenses, **net profit**), item profit, daily chart, by cashier, stock value, customer credit. CSV export. Expenses page feeds net profit.
 - **Company settings** – name, address, email, contact no., website, **logo upload**, advertisement line and invoice footer printed on every bill.
 - **Users** – default login **admin / admin** (change it in Settings). Roles: Administrator, Cashier (cashier can't see cost/profit or admin pages).

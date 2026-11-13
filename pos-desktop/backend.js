@@ -59,10 +59,12 @@ function mergeDeep(base, extra) {
   return out;
 }
 
+const DEFAULT_EXPENSE_CATS = ['Rent', 'Electricity', 'Water', 'Salaries', 'Transport', 'Maintenance', 'Marketing', 'Other'];
+
 function freshDb() {
   return {
     version: 1,
-    seq: { item: 0, customer: 0, sale: 0, user: 0, expense: 0, payment: 0, held: 0, supplier: 0, grn: 0, spay: 0, slog: 0, cash: 0 },
+    seq: { item: 0, customer: 0, sale: 0, user: 0, expense: 0, payment: 0, held: 0, supplier: 0, grn: 0, spay: 0, slog: 0, cash: 0, cat: DEFAULT_EXPENSE_CATS.length },
     settings: defaultSettings(),
     users: [{
       id: 1, name: 'Administrator', username: 'admin', password: hashPw('admin'),
@@ -70,6 +72,7 @@ function freshDb() {
     }],
     items: [], customers: [], sales: [], payments: [], expenses: [], held: [],
     suppliers: [], grns: [], supplierPayments: [], stockLog: [], cashEntries: [], cashCloses: [],
+    categories: DEFAULT_EXPENSE_CATS.map((name, i) => ({ id: i + 1, type: 'expense', name })),
   };
 }
 function normalizeDb(raw) {
@@ -80,6 +83,19 @@ function normalizeDb(raw) {
   for (const k of ['users', 'items', 'customers', 'sales', 'payments', 'expenses', 'held', 'suppliers', 'grns', 'supplierPayments', 'stockLog', 'cashEntries', 'cashCloses']) {
     if (!Array.isArray(out[k])) out[k] = [];
   }
+  // categories: older data files have none -> build the list from what is already used
+  if (!Array.isArray(raw.categories)) {
+    out.categories = [];
+    let id = 0;
+    const add = (type, name) => { name = String(name || '').trim(); if (name && !out.categories.some((c) => c.type === type && c.name.toLowerCase() === name.toLowerCase())) out.categories.push({ id: ++id, type, name }); };
+    for (const it of out.items) add('item', it.category);
+    DEFAULT_EXPENSE_CATS.forEach((n) => add('expense', n));
+    for (const e of out.expenses) add('expense', e.category);
+    out.seq.cat = Math.max(out.seq.cat || 0, id);
+  } else {
+    out.seq.cat = Math.max(out.seq.cat || 0, ...out.categories.map((c) => c.id), 0);
+  }
+  if (out.seq.cat < out.categories.length && !raw.categories) out.seq.cat = out.categories.length;
   return out;
 }
 
@@ -226,8 +242,52 @@ function createBackend({ dataDir, defaultBackupDir }) {
       user: session,
       settings: db.settings,
       items: H['items.list']([{}]),
+      categories: db.categories,
       customers: db.customers.map((c) => customerWithBalance(c, m)),
     };
+  };
+
+  // ---------- categories (item + expense) ----------
+  const catKey = (v) => String(v || '').trim().toLowerCase();
+  function ensureCat(type, name) {
+    name = String(name || '').trim();
+    if (!name) return '';
+    let c = db.categories.find((x) => x.type === type && catKey(x.name) === catKey(name));
+    if (!c) { c = { id: nextId('cat'), type, name: name.slice(0, 40) }; db.categories.push(c); }
+    return c.name;
+  }
+  H['categories.list'] = ([type]) => {
+    need();
+    const use = (c) => (c.type === 'item' ? db.items.filter((i) => i.category === c.name).length : db.expenses.filter((e) => e.category === c.name).length);
+    return db.categories.filter((c) => !type || c.type === type).map((c) => ({ ...c, count: use(c) })).sort((a, b) => a.name.localeCompare(b.name));
+  };
+  H['categories.save'] = ([c]) => {
+    admin();
+    const type = c.type === 'expense' ? 'expense' : 'item';
+    const name = String(c.name || '').trim().slice(0, 40);
+    if (!name) throw new Error('Category name is required');
+    if (db.categories.some((x) => x.type === type && x.id !== c.id && catKey(x.name) === catKey(name))) throw new Error('This category already exists');
+    let rec;
+    if (c.id) {
+      rec = db.categories.find((x) => x.id === c.id);
+      if (!rec) throw new Error('Category not found');
+      const old = rec.name;
+      rec.name = name;
+      if (old !== name) {
+        if (rec.type === 'item') db.items.forEach((i) => { if (i.category === old) i.category = name; });
+        else db.expenses.forEach((e) => { if (e.category === old) e.category = name; });
+      }
+    } else { rec = { id: nextId('cat'), type, name }; db.categories.push(rec); }
+    save(); return rec;
+  };
+  H['categories.delete'] = ([id]) => {
+    admin();
+    const rec = db.categories.find((x) => x.id === id);
+    if (!rec) return true;
+    if (rec.type === 'item') db.items.forEach((i) => { if (i.category === rec.name) i.category = ''; });
+    else db.expenses.forEach((e) => { if (e.category === rec.name) e.category = ''; });
+    db.categories = db.categories.filter((x) => x.id !== id);
+    save(); return true;
   };
 
   // settings
@@ -309,7 +369,7 @@ function createBackend({ dataDir, defaultBackupDir }) {
     if (!code) code = String(1000 + rec.id);
     if (db.items.some((x) => x.id !== rec.id && String(x.code).toLowerCase() === code.toLowerCase())) throw new Error('Barcode / code already used by another item');
     Object.assign(rec, {
-      code, name, category: String(it.category || '').trim(), unit: String(it.unit || 'pcs').trim() || 'pcs',
+      code, name, category: ensureCat('item', it.category), unit: String(it.unit || 'pcs').trim() || 'pcs',
       cost: round2(cost), price: round2(price), minStock: num(it.minStock),
       trackStock: it.trackStock !== false, active: it.active !== false,
     });
@@ -504,7 +564,7 @@ function createBackend({ dataDir, defaultBackupDir }) {
   H['held.delete'] = ([id]) => { need(); db.held = db.held.filter((h) => h.id !== id); save(); return true; };
 
   // expenses
-  H['expenses.list'] = ([f]) => { admin(); const r = parseRange(f); return db.expenses.filter((e) => inRange(e.date + 'T12:00:00', r)).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id); };
+  H['expenses.list'] = ([f]) => { admin(); f = f || {}; const r = parseRange(f); return db.expenses.filter((e) => inRange(e.date + 'T12:00:00', r) && (!f.category || (e.category || '') === (f.category === '__none__' ? '' : f.category))).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id); };
   H['expenses.save'] = ([e]) => {
     admin();
     const amount = round2(num(e.amount));
@@ -513,7 +573,7 @@ function createBackend({ dataDir, defaultBackupDir }) {
     let rec;
     if (e.id) { rec = db.expenses.find((x) => x.id === e.id); if (!rec) throw new Error('Expense not found'); }
     else { rec = { id: nextId('expense') }; db.expenses.push(rec); }
-    Object.assign(rec, { date: e.date || nowIso().slice(0, 10), title: String(e.title).trim(), amount, method: e.method || 'Cash', note: String(e.note || '') });
+    Object.assign(rec, { date: e.date || nowIso().slice(0, 10), title: String(e.title).trim(), amount, method: e.method || 'Cash', category: ensureCat('expense', e.category), note: String(e.note || '') });
     save(); return rec;
   };
   H['expenses.delete'] = ([id]) => { admin(); db.expenses = db.expenses.filter((x) => x.id !== id); save(); return true; };
@@ -524,7 +584,7 @@ function createBackend({ dataDir, defaultBackupDir }) {
     const r = parseRange(f);
     const sales = db.sales.filter((s) => !s.voided && inRange(s.date, r));
     const voided = db.sales.filter((s) => s.voided && inRange(s.date, r)).length;
-    const days = new Map(), items = new Map(), users = new Map();
+    const days = new Map(), items = new Map(), users = new Map(), cats = new Map();
     const sum = { bills: sales.length, gross: 0, discount: 0, tax: 0, sales: 0, cost: 0, grossProfit: 0, cashCollected: 0, creditGiven: 0 };
     for (const s of sales) {
       sum.gross += s.subtotal; sum.discount += s.discount; sum.tax += s.tax; sum.sales += s.total;
@@ -536,13 +596,18 @@ function createBackend({ dataDir, defaultBackupDir }) {
       u.bills++; u.sales += s.total; u.profit += s.profit; users.set(s.userName, u);
       const ratio = s.subtotal > 0 ? (s.subtotal - s.discount) / s.subtotal : 1;
       for (const l of s.lines) {
-        const row = items.get(l.itemId) || { itemId: l.itemId, name: l.name, code: l.code, qty: 0, revenue: 0, cost: 0, profit: 0 };
+        const catName = (db.items.find((x) => x.id === l.itemId) || {}).category || 'Uncategorised';
+        const row = items.get(l.itemId) || { itemId: l.itemId, name: l.name, code: l.code, category: catName, qty: 0, revenue: 0, cost: 0, profit: 0 };
         const rev = l.total * ratio;
+        const cr = cats.get(catName) || { category: catName, qty: 0, revenue: 0, cost: 0, profit: 0 };
+        cr.qty += l.qty; cr.revenue += rev; cr.cost += l.cost * l.qty; cr.profit += rev - l.cost * l.qty; cats.set(catName, cr);
         row.qty += l.qty; row.revenue += rev; row.cost += l.cost * l.qty; row.profit += rev - l.cost * l.qty;
         items.set(l.itemId, row);
       }
     }
     const expenses = db.expenses.filter((e) => inRange(e.date + 'T12:00:00', r));
+    const expCat = new Map();
+    for (const e of expenses) { const k = e.category || 'Uncategorised'; const x = expCat.get(k) || { category: k, count: 0, amount: 0 }; x.count++; x.amount += e.amount; expCat.set(k, x); }
     sum.expenses = expenses.reduce((a, e) => a + e.amount, 0);
     sum.netProfit = sum.grossProfit - sum.expenses;
     sum.paymentsReceived = db.payments.filter((p) => inRange(p.date, r)).reduce((a, p) => a + p.amount, 0);
@@ -555,6 +620,8 @@ function createBackend({ dataDir, defaultBackupDir }) {
       daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)).map(fix),
       byItem: [...items.values()].sort((a, b) => b.profit - a.profit).map(fix),
       byUser: [...users.values()].map(fix),
+      byCategory: [...cats.values()].sort((a, b) => b.profit - a.profit).map(fix),
+      expensesByCategory: [...expCat.values()].sort((a, b) => b.amount - a.amount).map(fix),
       expenses,
     };
   };

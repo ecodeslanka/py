@@ -56,6 +56,14 @@ li{margin:3px 0}.toc li{margin:3px 0}
 <tr><td>Track stock</td><td>සේවා හෝ තොග ගණන් නොකරන භාණ්ඩ සඳහා ඉවත් කරන්න.</td></tr></table>
 <ul><li><b>＋ Stock</b> මගින් ලැබුණු තොග එකතු කළ හැක (අවශ්‍ය නම් cost price ද යාවත්කාලීන කළ හැක).</li><li><b>Edit</b> මගින් භාණ්ඩය වෙනස් කරයි. <b>✕</b> මගින් මකයි; දැනටමත් විකුණා ඇති භාණ්ඩ මකනවා වෙනුවට අක්‍රිය (deactivate) කරනු ලබන අතර පැරණි වාර්තා නිවැරදිව පවතී.</li></ul>
 
+<h3>භාණ්ඩ කාණ්ඩ (Categories) සහ පෙරහන් (Filters)</h3>
+<img src="img/catmgr.png">
+<p><b>කාණ්ඩ සෑදීම:</b> <b>Items</b> පිටුවේ <b>🗂 Categories</b> ක්ලික් කරන්න. නමක් ටයිප් කර <kbd>Enter</kbd> ඔබා එකතු කරන්න. <b>Rename</b> මගින් එම කාණ්ඩය භාවිතා කරන සියලු භාණ්ඩවල නම වෙනස් වේ. <b>✕</b> (තහවුරු කිරීමට දෙවරක් ක්ලික් කරන්න) මගින් කාණ්ඩය මකයි – එහි භාණ්ඩ ඉතිරි වන අතර “Uncategorised” බවට පත්වේ.</p>
+<img src="img/itemform.png">
+<p><b>භාණ්ඩයකට කාණ්ඩයක් තේරීම:</b> භාණ්ඩ පෝරමයේ <b>Category</b> drop-down එකෙන් තෝරන්න. අලුත් එකක් අවශ්‍යද? drop-down එක අසල <b>＋ New</b> ක්ලික් කර නම ටයිප් කර <kbd>Enter</kbd> ඔබන්න – එය ක්ෂණිකව සෑදී තෝරා ගැනේ.</p>
+<img src="img/items-filter.png">
+<p><b>පෙරහන්:</b> Items පිටුවේ පෙරහන් තීරුවක් ඇත – <b>Search</b>, <b>Category</b> (භාණ්ඩ ගණන සහිතව), <b>Stock</b> (In stock / Low / Out of stock) සහ <b>Status</b> (Active / Inactive / All). <b>✕ Clear</b> මගින් සියල්ල යළි සකසයි. එම Category පෙරහනම <b>Inventory → Stock levels</b> සහ <b>Reports → Item profit</b> හි ද ඇත. POS තිරයේ භාණ්ඩ ජාලයට ඉහළින් ඇති කාණ්ඩ බොත්තම් මගින් ඔබ විකුණන භාණ්ඩ පෙරහන් කරයි.</p>
+
 <h2>5. විකිණීම – POS තිරය</h2>
 <img src="img/pos.png">
 <ol><li>භාණ්ඩ එකතු කරන්න: <b>barcode scan කරන්න</b>, නමක් ටයිප් කර <kbd>Enter</kbd> ඔබන්න, නැතහොත් භාණ්ඩ කාඩ්පතක් ක්ලික් කරන්න. Category බොත්තම් මගින් පෙරහන් කළ හැක.</li>
@@ -101,6 +109,12 @@ li{margin:3px 0}.toc li{margin:3px 0}
 <tr><td>Daily</td><td>දිනපතා විකුණුම් සහ ලාභය.</td></tr><tr><td>By cashier</td><td>පරිශීලකයා අනුව විකුණුම් සහ ලාභය.</td></tr>
 <tr><td>Stock value</td><td>පිරිවැය මිලට සහ විකුණුම් මිලට තොග වටිනාකම, අඩු තොග භාණ්ඩ.</td></tr><tr><td>Customer credit</td><td>මුදල් ගෙවීමට ඇති සියලු දෙනා සහ ඒ ප්‍රමාණ.</td></tr></table>
 <p><b>ලාභය = විකුණුම් මිල − විකුණූ භාණ්ඩවල පිරිවැය මිල</b> (වට්ටම්වලින් පසු; බදු ලාභයට ගණන් නොගනී). <b>Export CSV</b> මගින් Excel හි විවෘත කළ හැක.</p>
+
+<h3>වියදම් කාණ්ඩ (Expense categories)</h3>
+<img src="img/expenses.png">
+<p>වියදම් කාණ්ඩ අනුව කණ්ඩායම් කළ හැක (Rent, Electricity, Water, Salaries, Transport, Maintenance, Marketing, Other දැනටමත් ඇත). <b>Expenses</b> පිටුවේ <b>🗂 Categories</b> ක්ලික් කර කාණ්ඩ එකතු කරන්න, නම වෙනස් කරන්න හෝ මකන්න. <b>Add expense</b> පෝරමයේ <b>Expense category</b> drop-down එකෙන් තෝරන්න (හෝ ක්ෂණිකව සෑදීමට <b>＋ New</b>).</p>
+<p>Expenses පිටුව <b>දිනය, කාණ්ඩය සහ වචනයෙන්</b> පෙරහන් කරන අතර මුළු මුදල සහ විශාලතම කාණ්ඩ කාඩ්පත් ලෙස පෙන්වයි. <b>Reports → Expense categories</b> සෑම කාණ්ඩයක්ම එහි සටහන් ගණන, මුදල සහ මුළු වියදමෙන් ඇති කොටස සමඟ ලැයිස්තුගත කරයි; <b>Reports → Category profit</b> සෑම <i>භාණ්ඩ කාණ්ඩයකම</i> විකුණුම්, පිරිවැය සහ ලාභය පෙන්වයි.</p>
+<img src="img/rep-category.png">
 
 <h2>11. Inventory: තොග මට්ටම්, ගැලපුම් සහ Inventory Log</h2>
 <img src="img/inventory.png">
@@ -161,7 +175,8 @@ li{margin:3px 0}.toc li{margin:3px 0}
 
 <h2>19. Theme සහ පෙනුම</h2>
 <img src="img/theme.png">
-<p>වම් මෙනුවේ පහළ ඇති <b>🎨 Theme</b> ක්ලික් කර <b>Light</b> හෝ <b>Dark</b> ප්‍රකාරය සහ වර්ණ හයෙන් එකක් (Indigo, Ocean, Emerald, Violet, Rose, Amber) තෝරන්න. ඔබේ තේරීම මෙම පරිගණකයේ මතක තබා ගනී.</p>
+<p><b>🎨 Theme</b> (වම් මෙනුවේ හෝ ඉහළ තීරුවේ) ක්ලික් කර <b>Light / Dark</b> ප්‍රකාරය, <b>Style</b> – <b>Desktop</b> (පැතලි පැනල, වගු රේඛා සහිත, window ආකාරයේ කවුළු; සාම්ප්‍රදායික desktop වැඩසටහනක් මෙන්) හෝ <b>Rounded</b> (මෘදු නවීන කාඩ්පත්) – <b>Density</b> (<b>Comfortable</b> හෝ කුඩා තිර සහ දිගු ලැයිස්තු සඳහා <b>Compact</b>) සහ වර්ණ හයෙන් එකක් තෝරන්න. ඉහළ තීරුව ඔබ සිටින පිටුව සහ දිනය/වේලාව පෙන්වයි; පහළ status bar එක පිවිසුණු පරිශීලකයා, වෙළඳසැලේ නම, අවසන් backup සහ වේලාව පෙන්වයි. ඔබේ තේරීම් මෙම පරිගණකයේ මතක තබා ගනී.</p>
+<img src="img/pos-desktop.png">
 <div class="note">Easy POS <b>ECODES IT SOLUTIONS</b> විසින් බලගන්වන ලද (<b>Powered by ECODES IT SOLUTIONS</b>) මෘදුකාංගයකි — <b>https://ecodes.lk</b>. මෙම සටහන login තිරයේ, මෙනුවේ, POS තිරයේ සහ Settings හි පෙන්වන අතර රිසිට්පත්වල ද මුද්‍රණය කළ හැක (Settings → POS rules → “Print Powered by…”).</div>
 
 <h2>20. ගැටලු නිරාකරණය</h2>

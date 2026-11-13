@@ -1,6 +1,6 @@
 'use strict';
 /* ===== Inventory: stock levels, adjustments, movement log ===== */
-let invTab = 'stock', invQ = '', invLow = false, invLog = null;
+let invTab = 'stock', invQ = '', invLow = false, invCat = '', invLog = null;
 const MOVE = { sale: ['Sale', 'out'], void: ['Sale void', 'in'], grn: ['GRN received', 'in'], 'grn-void': ['GRN void', 'out'], adjust: ['Adjustment', ''], 'bill-edit': ['Bill edit', ''], opening: ['Opening stock', 'in'] };
 const tabsHtml = (id, tabs, cur) => `<div class="tabs" id="${id}">${tabs.map((t) => `<button data-t="${t[0]}" class="${cur === t[0] ? 'on' : ''}">${t[1]}</button>`).join('')}</div>`;
 
@@ -13,12 +13,14 @@ async function drawStock() {
   const R = await guard(() => call('reports.stock')); if (!R) return;
   const low = R.rows.filter((i) => i.low).length;
   $('#ibody').innerHTML = `<div class="cards"><div class="stat"><div class="l">Stock value (cost)</div><div class="v">${money(R.totals.costValue)}</div></div><div class="stat g"><div class="l">Stock value (selling)</div><div class="v">${money(R.totals.retailValue)}</div></div><div class="stat ${low ? 'r2' : 'g'}"><div class="l">Low-stock items</div><div class="v">${low}</div></div></div>
-    <div class="toolbar"><div class="grow"><input id="invq" placeholder="Search item / barcode / category…" value="${esc(invQ)}"></div><label class="chk"><input type="checkbox" id="invlow" ${invLow ? 'checked' : ''}> Low stock only</label></div><div id="stbl"></div>`;
+    <div class="toolbar filters"><div class="grow"><label>Search</label><input id="invq" placeholder="Item / barcode / category…" value="${esc(invQ)}"></div>
+    <div><label>Category</label><select id="invcat" class="fx"><option value="">All categories</option>${[...new Set(R.rows.map((i) => i.category).filter(Boolean))].sort().map((c) => `<option ${invCat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}<option value="__none__" ${invCat === '__none__' ? 'selected' : ''}>Uncategorised</option></select></div>
+    <label class="chk" style="align-self:flex-end;padding-bottom:9px"><input type="checkbox" id="invlow" ${invLow ? 'checked' : ''}> Low stock only</label></div><div id="stbl"></div>`;
   const draw = () => {
     const q = invQ.toLowerCase();
-    const rows = R.rows.filter((i) => (!q || (i.name + i.code + (i.category || '')).toLowerCase().includes(q)) && (!invLow || i.low));
+    const rows = R.rows.filter((i) => (!q || (i.name + i.code + (i.category || '')).toLowerCase().includes(q)) && (!invLow || i.low) && (!invCat || (invCat === '__none__' ? !i.category : i.category === invCat)));
     $('#stbl').innerHTML = tableHtml([
-      { h: 'Code', f: (i) => esc(i.code) }, { h: 'Item', f: (i) => `<b>${esc(i.name)}</b>` }, { h: 'Category', f: (i) => esc(i.category) },
+      { h: 'Code', f: (i) => esc(i.code) }, { h: 'Item', f: (i) => `<b>${esc(i.name)}</b>` }, { h: 'Category', f: (i) => (i.category ? `<span class="tag">${esc(i.category)}</span>` : '') },
       { h: 'In stock', r: 1, f: (i) => (i.trackStock ? `<span class="tag ${i.low ? 'bad' : 'ok'}">${qtyFmt(i.stock)} ${esc(i.unit)}</span>` : '<span class="muted">not tracked</span>') },
       { h: 'Alert at', r: 1, f: (i) => (i.trackStock ? qtyFmt(i.minStock) : '') }, { h: 'Cost value', r: 1, f: (i) => (i.trackStock ? money(i.costValue) : '') },
       { h: '', act: 1, f: (i) => (i.trackStock ? `<button class="btn sm" data-a="adj" data-id="${i.id}">⚖ Adjust / Count</button> <button class="btn sm" data-a="log" data-id="${i.id}">Log</button>` : '') },
@@ -27,6 +29,7 @@ async function drawStock() {
   draw();
   $('#invq').oninput = (e) => { invQ = e.target.value; draw(); };
   $('#invlow').onchange = (e) => { invLow = e.target.checked; draw(); };
+  $('#invcat').onchange = (e) => { invCat = e.target.value; draw(); };
   $('#ibody').onclick = (e) => {
     const b = e.target.closest('[data-a]'); if (!b) return;
     const it = R.rows.find((x) => x.id === +b.dataset.id);

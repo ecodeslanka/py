@@ -55,6 +55,14 @@ li{margin:2px 0}.toc li{margin:3px 0}
 <tr><td>Track stock</td><td>Untick for services or items without stock counting.</td></tr></table>
 <ul><li><b>＋ Stock</b> adds received goods (and optionally updates the cost price).</li><li><b>Edit</b> changes an item. <b>✕</b> deletes it; items already sold are only deactivated so old reports stay correct.</li></ul>
 
+<h3>Item categories and filters</h3>
+<img src="img/catmgr.png">
+<p><b>Create categories:</b> on the <b>Items</b> page click <b>🗂 Categories</b>. Type a name and press <kbd>Enter</kbd> to add. <b>Rename</b> changes the name on every item that uses it. <b>✕</b> (click twice to confirm) deletes the category – its items are kept and become “Uncategorised”.</p>
+<img src="img/itemform.png">
+<p><b>Select a category on an item:</b> in the item form, pick it from the <b>Category</b> drop-down. Need a new one? Click <b>＋ New</b> beside the drop-down, type the name and press <kbd>Enter</kbd> – it is created and selected immediately.</p>
+<img src="img/items-filter.png">
+<p><b>Filters:</b> the Items page has a filter bar – <b>Search</b>, <b>Category</b> (with item counts), <b>Stock</b> (In stock / Low / Out of stock) and <b>Status</b> (Active / Inactive / All). <b>✕ Clear</b> resets them. The same Category filter is available in <b>Inventory → Stock levels</b> and <b>Reports → Item profit</b>. On the POS screen the category buttons above the item grid filter the items you sell.</p>
+
 <h2>5. Making a sale – the POS screen</h2>
 <img src="img/pos.png">
 <ol><li>Add items: <b>scan a barcode</b>, type a name and press <kbd>Enter</kbd>, or click an item card. Use the category buttons to filter.</li>
@@ -101,6 +109,12 @@ li{margin:2px 0}.toc li{margin:3px 0}
 <tr><td>Stock value</td><td>Stock at cost and at selling price, low-stock items.</td></tr><tr><td>Customer credit</td><td>Everyone who owes money and how much.</td></tr></table>
 <p><b>Profit = selling price − cost price</b> of the items sold, after discounts (tax is not counted as profit). <b>Export CSV</b> opens in Excel.</p>
 
+
+<h3>Expense categories</h3>
+<img src="img/expenses.png">
+<p>Expenses can be grouped by category (Rent, Electricity, Water, Salaries, Transport, Maintenance, Marketing, Other are provided). On <b>Expenses</b> click <b>🗂 Categories</b> to add, rename or delete categories. In the <b>Add expense</b> form choose the <b>Expense category</b> from the drop-down (or <b>＋ New</b> to create one on the spot).</p>
+<p>The Expenses page filters by <b>date, category and text</b>, and shows the total plus the biggest categories as cards. <b>Reports → Expense categories</b> lists each category with its entries, amount and share of total expenses; <b>Reports → Category profit</b> shows sales, cost and profit for each <i>item</i> category.</p>
+<img src="img/rep-category.png">
 
 <h2>11. Inventory: stock levels, adjustments and the log</h2>
 <img src="img/inventory.png">
@@ -162,7 +176,8 @@ li{margin:2px 0}.toc li{margin:3px 0}
 
 <h2>19. Theme and appearance</h2>
 <img src="img/theme.png">
-<p>Click <b>🎨 Theme</b> at the bottom of the left menu to choose <b>Light</b> or <b>Dark</b> mode and one of six accent colours (Indigo, Ocean, Emerald, Violet, Rose, Amber). The choice is remembered on this computer.</p>
+<p>Click <b>🎨 Theme</b> (left menu or top bar) to choose <b>Light / Dark</b> mode, the <b>Style</b> – <b>Desktop</b> (flat panels, grid tables, window-style dialogs, like a classic desktop program) or <b>Rounded</b> (soft modern cards) – the <b>Density</b> (<b>Comfortable</b> or <b>Compact</b> for small screens and long lists) and one of six accent colours. The top bar shows where you are and the date/time; the bottom status bar shows the signed-in user, shop name, last backup and the time. Your choices are remembered on this computer.</p>
+<img src="img/pos-desktop.png">
 <div class="note">Easy POS is <b>powered by ECODES IT SOLUTIONS</b> — <b>https://ecodes.lk</b>. The credit is shown on the login screen, the menu, the POS screen and Settings, and can be printed on receipts (Settings → POS rules → “Print Powered by…”).</div>
 
 <h2>20. Troubleshooting</h2>
