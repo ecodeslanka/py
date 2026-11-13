@@ -38,7 +38,7 @@ function ur_summary($conn, $F = null) {
     $add = function ($source, $label, $page, $icon, $rec, $recd, $balance = null, $extra = [], $paid = null) use (&$rows) {
         $rec = (float)$rec; $recd = (float)$recd;
         $base = $paid !== null ? (float)$paid : $rec;          // paid-out lines claim back what we paid
-        $rows[] = ['source' => $source, 'label' => $label, 'page' => $page, 'icon' => $icon, 'receivable' => round($rec, 2), 'received' => round($recd, 2), 'paid' => $paid === null ? null : round((float)$paid, 2),
+        $rows[] = ['source' => $source, 'label' => $label, 'page' => $page, 'icon' => $icon, 'group' => $paid !== null ? 'paid' : 'rec', 'receivable' => round($rec, 2), 'received' => round($recd, 2), 'paid' => $paid === null ? null : round((float)$paid, 2),
                    'balance' => round($balance === null ? $base - $recd : $balance, 2)] + $extra;
     };
     $mdate = fn($y, $m) => "STR_TO_DATE(CONCAT($y,'-',LPAD($m,2,'0'),'-01'),'%Y-%m-%d')";
@@ -109,7 +109,7 @@ function ur_summary($conn, $F = null) {
         $dp = ur_dp($conn, 'l.line_date', $F);
         $pos = ur_val($conn, "SELECT COALESCE(SUM(CASE WHEN l.amount > 0 THEN l.amount ELSE 0 END),0) FROM oa_transaction_lines l WHERE $dp");
         $neg = ur_val($conn, "SELECT COALESCE(SUM(CASE WHEN l.amount < 0 THEN -l.amount ELSE 0 END),0) FROM oa_transaction_lines l WHERE $dp");
-        if ($pos > 0 || $neg > 0) $add('Customer Certificate', 'Others (other adjustments)', 'pi_other_adjustments', 'fa-ellipsis', 0, $pos, null, [], $neg);
+        if ($pos > 0 || $neg > 0) $add('Customer Certificate', 'Others (other adjustments)', 'pi_other_adjustments', 'fa-ellipsis', $neg, $pos);
     }
     $tot = ['receivable' => 0.0, 'received' => 0.0, 'paid' => 0.0, 'balance' => 0.0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);
