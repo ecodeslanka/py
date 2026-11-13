@@ -111,7 +111,7 @@ if ($items && $cb && mysqli_num_rows($cb)) {
     $q = mysqli_query($conn, "SELECT UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) AS sn, COUNT(*) AS n, COALESCE(SUM(sch_disc),0) AS sd, COALESCE(SUM(free_value),0) AS fv FROM bws_items WHERE UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no))) IN (" . implode(',', $codes) . ") GROUP BY UPPER(TRIM(TRAILING '.0' FROM TRIM(scheme_no)))");
     while ($q && ($x = mysqli_fetch_assoc($q))) $bws[$x['sn']] = ['n' => (int)$x['n'], 'sd' => round((float)$x['sd'] + (float)$x['fv'], 2), 'disc' => (float)$x['sd'], 'fv' => (float)$x['fv']];     // scheme discount + free value (where the bill wise data has one)
 }
-/* claim certificates (Customer Claim Certificate Import): the scheme no is the part of the claim description before the first "-" */
+/* claim certificates (Customer Claim Certificate Import): scheme no = part before the first "-", else any scheme no found in the description (sd_cc_tally) — feeds Claim Certificate Actual, Balance, totals, monthly summary and the Excel export */
 $cc = [];
 $cq = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
 if ($items && $cq && mysqli_num_rows($cq)) {
