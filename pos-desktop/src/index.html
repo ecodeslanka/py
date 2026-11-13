@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-src about: data:;">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Easy POS</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="login" class="login hidden"></div>
+<div id="app" class="app hidden">
+  <nav id="nav" class="nav"></nav>
+  <main id="main" class="main"></main>
+</div>
+<div id="modal" class="overlay"></div>
+<div id="toasts" class="toasts"></div>
+<script src="core.js"></script>
+<script src="pos.js"></script>
+<script src="pages.js"></script>
+</body>
+</html>
