@@ -201,8 +201,8 @@ body.ms-dark .ur-card,body.ms-dark .ur-filters,body.ms-dark .ur-t tbody tr{backg
       $('urAsAt').textContent=(range?'period '+(d.from||'…')+' → '+(d.to||'…')+' · only the transactions inside the range (balance = debit − credit)':'as at '+d.as_at+' · closing balances')+(info.length?' · '+info.join(' · '):'')+' · live from Customer Ledger & Vendor Ledger'+((d.warn&&d.warn.length)?' · ⚠ '+d.warn.join(' '):'');
       var G=d.groups||{rec:{receivable:0,received:0,balance:0},paid:{paid:0,received:0,balance:0}}, t=d.total, claimed=(G.rec.receivable||0)+(G.paid.paid||0), pct=claimed>0?(t.received/claimed*100):0;
       $('urKpis').innerHTML=kpi('fa-hand-holding-dollar','Receivable',fmt(G.rec.receivable||0),'from Unilever','#2563eb','#1d4ed8','rgba(37,99,235,.35)')
-        +kpi('fa-money-bill-transfer','Paid out',fmt(G.paid.paid||0),'claimed back','#f59e0b','#d97706','rgba(217,119,6,.35)')
         +kpi('fa-circle-check','Received',fmt(t.received),Math.round(pct)+'% of everything claimed','#22c55e','#15803d','rgba(21,128,61,.35)')
+        +kpi('fa-money-bill-transfer','Paid out',fmt(G.paid.paid||0),'claimed back','#f59e0b','#d97706','rgba(217,119,6,.35)')
         +kpi('fa-scale-balanced','Net balance',neg(t.balance),t.balance>0?'Unilever owes us':'settled / over-received',t.balance>0?'#ef4444':'#14b8a6',t.balance>0?'#b91c1c':'#0f766e',t.balance>0?'rgba(185,28,28,.35)':'rgba(15,118,110,.35)');
       $('urDonut').innerHTML=donut(pct,t.received,claimed-t.received); $('urBars').innerHTML=bars(d.rows);
       var rec=d.rows.filter(function(r){ return (r.group||'rec')==='rec'; }), paid=d.rows.filter(function(r){ return r.group==='paid'; });

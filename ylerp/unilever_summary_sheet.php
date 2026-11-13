@@ -22,8 +22,8 @@ function ursp_sheet($d, $meta) {
 
   <div class="kp">
     <div class="k k1"><span>Receivable</span><b>Rs. <?= ursp_n($G['rec']['receivable'] ?? 0) ?></b><small>from Unilever</small></div>
-    <div class="k k2"><span>Paid out</span><b>Rs. <?= ursp_n($G['paid']['paid'] ?? 0) ?></b><small>claimed back</small></div>
     <div class="k k3"><span>Received</span><b>Rs. <?= ursp_n($t['received']) ?></b><small><?= round($pct) ?>% of everything claimed</small></div>
+    <div class="k k2"><span>Paid out</span><b>Rs. <?= ursp_n($G['paid']['paid'] ?? 0) ?></b><small>claimed back</small></div>
     <div class="k <?= $t['balance'] > 0.5 ? 'k4' : 'k5' ?>"><span>Net balance</span><b>Rs. <?= ursp_b($t['balance']) ?></b><small><?= $t['balance'] > 0.5 ? 'Unilever owes us' : 'settled / over-received' ?></small></div>
   </div>
 
