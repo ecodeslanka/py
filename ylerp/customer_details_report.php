@@ -207,7 +207,7 @@ $cnt = fn($f) => count(array_filter($rows, $f));
     <tr data-t="<?= cd_h($x['t_code']) ?>"><td class="l"><b><?= cd_h($x['t_code']) ?></b></td><td class="l"><?= cd_h($x['shop']) ?></td><td><?= cd_h($x['pm']) ?></td><td><?= cd_h($x['channel'] ?: '—') ?></td>
       <td><span class="b <?= $x['cwd'] === 'Yes' ? 'y' : 'n' ?>"><?= $x['cwd'] ?></span></td>
       <td><?= $x['rt'] ? '<span class="b rt">' . $x['rt'] . '</span>' : '<span style="color:#d1d5db">0</span>' ?></td><td><?= $x['sb'] ? '<span class="b sb">' . $x['sb'] . '</span>' : '<span style="color:#d1d5db">0</span>' ?></td>
-      <td><?= $x['policy'] === 'none' ? '<span style="color:#d1d5db">n/a</span>' : ($x['viol'] ? '<span class="b v">' . $x['viol'] . ' time' . ($x['viol'] > 1 ? 's' : '') . '</span>' : '<span style="color:#d1d5db">0</span>') ?></td>
+      <td><?= $x['policy'] === 'none' ? '<span style="color:#d1d5db">n/a</span>' : ($x['viol'] ? '<span class="b v">' . $x['viol'] . '</span>' : '<span style="color:#d1d5db">0</span>') ?></td>
       <td><?= $x['cn'] ? '<span class="b c">' . number_format($x['cv'], 2) . ' (' . $x['cn'] . ')</span>' : '<span style="color:#d1d5db">—</span>' ?></td><td><b><?= $x['avg'] ?></b></td></tr>
   <?php endforeach; if (!$rows) echo '<tr><td colspan="10" style="padding:22px;color:#9ca3af">No customers match.</td></tr>'; ?></tbody></table></div>
 </div>
