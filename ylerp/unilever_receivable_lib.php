@@ -64,6 +64,15 @@ function ur_summary($conn, $F = null) {
         $L = sl_compute($conn, $opt);
         $add(['source' => 'Customer Certificate', 'label' => 'Scheme Discount & Free Issues', 'page' => 'scheme_ledger_report', 'icon' => 'fa-tags', 'group' => 'rec'], $L, 'scheme_ledger_report.php?' . http_build_query($lp));
     }
+    /* Unreconciled claim certificates (Weekly Activities (TTS) certificates whose scheme no is not in the Scheme Discount Daily Report) — the ACTUAL amount of the report's "Unreconciled" tab */
+    if (function_exists('sl_unreconciled') && ur_has_table($conn, 'claim_cert_items')) {
+        $U = sl_unreconciled($conn, $opt);
+        if ($U['n'] > 0) {
+            $ulp = ['tab' => 'unr']; if ($F['mode'] === 'range' && $F['from']) $ulp['ub_from'] = $F['from']; $ulp['ub_to'] = $to;
+            $rows[] = ['source' => 'Claim Certificate', 'label' => 'Unreconciled Claim Certificates', 'page' => 'scheme_discount_daily_report', 'icon' => 'fa-triangle-exclamation', 'group' => 'rec', 'ledger' => 'scheme_discount_daily_report.php?' . http_build_query($ulp),
+                       'open' => 0.0, 'receivable' => 0.0, 'received' => $U['actual'], 'paid' => null, 'balance' => round(-$U['actual'], 2), 'count' => $U['n']];
+        }
+    }
     $line('dn'); $line('sscl'); $line('dal'); $line('pscl'); $line('sricc'); $line('others');
     $tot = ['open' => 0.0, 'receivable' => 0.0, 'received' => 0.0, 'paid' => 0.0, 'balance' => 0.0];
     foreach ($rows as $r) foreach ($tot as $k => $_) $tot[$k] += (float)($r[$k] ?? 0);

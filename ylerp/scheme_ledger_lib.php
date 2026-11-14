@@ -37,21 +37,30 @@ function sl_compute($conn, $o) {
         $date = $x['claim_date'] ?: ($x['end_date'] ?: $x['start_date']);
         $entries[] = ['date' => $date ?: '', 'scheme' => trim($x['activity_code']), 'desc' => $sc['desc'], 'type' => 'Claim', 'ref' => $x['claim_moc_ref'] !== '' && $x['claim_moc_ref'] !== null ? 'Claim MOC ' . $x['claim_moc_ref'] : 'MOC ' . $x['moc_ref'], 'debit' => (float)$x['claim_amount'], 'credit' => 0.0, 'o' => 1];
     }
+    $ccsum = []; $ccvat = []; $ccdate = [];
     if ($has_cc && $schemes) {
         $set = array_flip(array_keys($schemes));
         // scheme whose code is not on the certificate: use the scheme no written in its description, e.g. "Ponds FC Value Bill [DC] Dis (National)41425974"
         $alt = [];
         foreach ($schemes as $k => $sc) { preg_match_all('/\d{6,}/', (string)($sc['desc'] ?? ''), $mm); foreach ($mm[0] as $a) { $a = sl_norm($a); if (!isset($set[$a]) && !isset($alt[$a])) $alt[$a] = $k; } }
         $set2 = $set + array_fill_keys(array_keys($alt), 1);
-        $r = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, imported_at, claim_description, actual_amount
+        $r = mysqli_query($conn, "SELECT tax_invoice_no, invoice_date, banking_date, imported_at, claim_description, actual_amount, vat_amount
                                   FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' AND COALESCE(actual_amount,0) <> 0");
         while ($r && ($x = mysqli_fetch_assoc($r))) {
             $sn = sl_cc_scheme($x['claim_description'], $set2);
             if ($sn === null) continue;
             if (isset($alt[$sn]) && !isset($set[$sn])) $sn = $alt[$sn];
             $date = $x['invoice_date'] ?: ($x['banking_date'] ?: substr((string)$x['imported_at'], 0, 10));
+            $ccsum[$sn] = ($ccsum[$sn] ?? 0) + (float)$x['actual_amount']; $ccvat[$sn] = ($ccvat[$sn] ?? 0) + (float)$x['vat_amount']; if (($ccdate[$sn] ?? '') < (string)$date) $ccdate[$sn] = (string)$date;
             $entries[] = ['date' => $date ?: '', 'scheme' => $sn, 'desc' => $schemes[$sn]['desc'] ?? '', 'type' => 'Claim certificate', 'ref' => 'Tax inv ' . $x['tax_invoice_no'] . ' · ' . $x['claim_description'], 'debit' => 0.0, 'credit' => (float)$x['actual_amount'], 'o' => 2];
         }
+    }
+    /* VAT of the claim certificates: when what is still unpaid (claim − certificate amount) is FULLY the same as the VAT amount of the certificates, that VAT settles it (same rule as the Scheme Discount Daily Report) */
+    foreach ($schemes as $k => $sc) {
+        $claim = 0.0; foreach ($sc['rows'] as $x) if ($x['claim_amount'] !== null && (float)$x['claim_amount'] > 0) $claim += (float)$x['claim_amount'];
+        $diff = round($claim - ($ccsum[$k] ?? 0), 2); $vat = round($ccvat[$k] ?? 0, 2);
+        if ($claim > 0 && $vat > 0 && $diff > 0 && abs($diff - $vat) <= 0.01)
+            $entries[] = ['date' => $ccdate[$k] ?? '', 'scheme' => trim($sc['rows'][0]['activity_code']), 'desc' => $sc['desc'] ?? '', 'type' => 'Claim certificate VAT', 'ref' => 'VAT of the claim certificates — the same as the unpaid difference', 'debit' => 0.0, 'credit' => $vat, 'o' => 3];
     }
     usort($entries, fn($a, $b) => strcmp($a['date'], $b['date']) ?: $a['o'] <=> $b['o'] ?: strcmp($a['scheme'], $b['scheme']));
     $open = 0.0; $stmt = [];
@@ -66,5 +75,45 @@ function sl_compute($conn, $o) {
     $bal = $open; $tdr = 0.0; $tcr = 0.0;
     foreach ($stmt as &$en) { $bal += $en['debit'] - $en['credit']; $en['bal'] = round($bal, 2); $tdr += $en['debit']; $tcr += $en['credit']; } unset($en);
     return ['stmt' => $stmt, 'open' => $open, 'closing' => round($bal, 2), 'debit' => $tdr, 'credit' => $tcr, 'schemes' => count($schemes), 'has_items' => $has_items];
+}
+
+/** scheme no of a certificate description by the Customer Claim Report rule: middle number (6+ digits after the first "-", not a batch code) else first number */
+function sl_scheme_fm($desc) {
+    $desc = (string)$desc; $first = ''; $mid = '';
+    $dash = strpos($desc, '-'); $head = $dash === false ? $desc : substr($desc, 0, $dash);
+    if (preg_match('/^\s*(\d{6,})/', $head, $m)) $first = $m[1];
+    $rest = $dash === false ? '' : substr($desc, $dash + 1);
+    if ($rest !== '' && preg_match('/(?<![A-Za-z0-9])(\d{6,})/', $rest, $m)) $mid = $m[1];
+    return $mid !== '' ? [$mid, 'M'] : ($first !== '' ? [$first, 'F'] : ['', '']);
+}
+/**
+ * UNRECONCILED claim certificates (same as the "Unreconciled claim certificates" tab of the Scheme Discount Daily Report):
+ * claim type "Weekly Activities (TTS)" whose scheme no is not a scheme no of that report (Current Scheme Status + HUL / TOT masters + the numbers in their descriptions).
+ * Banking date is the date; $o = from / to / years / months / period like sl_compute. Returns n, actual, vat, total.
+ */
+function sl_unreconciled($conn, $o) {
+    $out = ['n' => 0, 'actual' => 0.0, 'vat' => 0.0, 'total' => 0.0];
+    if (!sl_tbl($conn, 'claim_cert_items')) return $out;
+    $known = []; $add = function ($c, $d) use (&$known) { $known[sl_norm($c)] = 1; if (preg_match_all('/\d{6,}/', (string)$d, $m)) foreach ($m[0] as $a) $known[sl_norm($a)] = 1; };
+    if (sl_tbl($conn, 'scheme_status_items')) { $r = mysqli_query($conn, "SELECT activity_code, activity_desc FROM scheme_status_items WHERE UPPER(TRIM(activity_type)) <> 'DAMAGE'"); while ($r && ($x = mysqli_fetch_row($r))) $add($x[0], $x[1]); }
+    if (sl_tbl($conn, 'scheme_master_items'))  { $r = mysqli_query($conn, "SELECT activity_code, activity_desc FROM scheme_master_items"); while ($r && ($x = mysqli_fetch_row($r))) $add($x[0], $x[1]); }
+    unset($known['']);
+    $e = fn($v) => mysqli_real_escape_string($conn, (string)$v);
+    $w = ["claim_description IS NOT NULL", "claim_description <> ''", "LOWER(claim_type) LIKE '%weekly activities%tts%'"];
+    $from = $o['from'] ?? ''; $to = $o['to'] ?? ''; $period = !empty($o['period']);
+    if ($to) $w[] = "(banking_date IS NULL OR banking_date <= '{$e($to)}')";
+    if ($from && $period) $w[] = "banking_date >= '{$e($from)}'";
+    $years = array_values(array_filter(array_map('intval', $o['years'] ?? []))); $months = array_values(array_filter(array_map('intval', $o['months'] ?? [])));
+    if ($years)  $w[] = "YEAR(banking_date) IN (" . implode(',', $years) . ")";
+    if ($months) $w[] = "MONTH(banking_date) IN (" . implode(',', $months) . ")";
+    $r = mysqli_query($conn, "SELECT claim_description, actual_amount, vat_amount, total_amount FROM claim_cert_items WHERE " . implode(' AND ', $w));
+    while ($r && ($x = mysqli_fetch_assoc($r))) {
+        $d = (string)$x['claim_description']; [$no] = sl_scheme_fm($d); $no = sl_norm($no);
+        if ($no === '' || substr(ltrim($d), 0, 1) === '-') continue;          // no scheme no = not a scheme certificate
+        if (isset($known[$no])) continue;                                      // tallies with a scheme of the report
+        $out['n']++; $out['actual'] += (float)$x['actual_amount']; $out['vat'] += (float)$x['vat_amount']; $out['total'] += (float)$x['total_amount'];
+    }
+    foreach (['actual', 'vat', 'total'] as $k) $out[$k] = round($out[$k], 2);
+    return $out;
 }
 }

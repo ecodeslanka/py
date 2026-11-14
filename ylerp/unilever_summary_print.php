@@ -11,7 +11,7 @@ require_once __DIR__ . '/unilever_summary_sheet.php';
 if (session_status() === PHP_SESSION_NONE) @session_start();
 if (empty($_SESSION['user_id'])) { while (ob_get_level()) ob_end_clean(); header('Location: login.php'); exit; }
 $F = ur_filters($_GET);
-$allowed = []; foreach (['purchase_return_summary_report', 'damaged_claim', 'scheme_ledger_report', 'debit_note', 'dal', 'promoters_salary_cl', 'sr_incentive_cc', 'sscl_vat', 'pi_other_adjustments'] as $pg) $allowed[$pg] = rbac_can('view', $pg);
+$allowed = []; foreach (['purchase_return_summary_report', 'damaged_claim', 'scheme_ledger_report', 'scheme_discount_daily_report', 'debit_note', 'dal', 'promoters_salary_cl', 'sr_incentive_cc', 'sscl_vat', 'pi_other_adjustments'] as $pg) $allowed[$pg] = rbac_can('view', $pg);
 $user = $_SESSION['username'] ?? 'user';
 session_write_close();                                              // the summary can take a few seconds: do not hold the session lock
 $d = ur_summary($conn, $F);

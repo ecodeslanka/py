@@ -11,7 +11,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'ur_summary') {
     require_once __DIR__ . '/unilever_receivable_lib.php';
     $F = ur_filters($_GET);
     /* what this role may open — worked out BEFORE the session is released */
-    $allowed = []; foreach (['purchase_return_summary_report', 'damaged_claim', 'scheme_ledger_report', 'debit_note', 'dal', 'promoters_salary_cl', 'sr_incentive_cc', 'sscl_vat', 'pi_other_adjustments'] as $pg) $allowed[$pg] = rbac_can('view', $pg);
+    $allowed = []; foreach (['purchase_return_summary_report', 'damaged_claim', 'scheme_ledger_report', 'scheme_discount_daily_report', 'debit_note', 'dal', 'promoters_salary_cl', 'sr_incentive_cc', 'sscl_vat', 'pi_other_adjustments'] as $pg) $allowed[$pg] = rbac_can('view', $pg);
     /* the summary can take a few seconds: let go of the session file lock first, otherwise every other page / request of this user waits for it */
     session_write_close();
     /* short cache (90 s) per filter set — the Refresh button skips it */
