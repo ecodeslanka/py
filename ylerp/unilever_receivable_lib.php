@@ -50,6 +50,7 @@ function ur_summary($conn, $F = null) {
     /* every line = the closing figures of its own LEDGER (debit / credit / closing balance), and the line opens that ledger */
     if (!function_exists('ul_compute')) $warn[] = 'unilever_ledger_lib.php is not uploaded on the server — only the Scheme line can be shown until it is.';
     $SRC = function_exists('ul_sources') ? ul_sources() : [];
+    foreach (['dn', 'sscl'] as $__g) if (isset($SRC[$__g])) $SRC[$__g]['group'] = 'paid';      // Muthupalasa BP Claims + SSCL & VAT sit in the lower table (paid out first, claimed back) — dashboard only
     $line = function ($key) use ($conn, $SRC, $opt, $lp, $add, &$debit_notes) {
         if (!isset($SRC[$key]) || !ul_tbl($conn, $SRC[$key]['tbl'])) return;
         $L = ul_compute($conn, $key, $opt);
