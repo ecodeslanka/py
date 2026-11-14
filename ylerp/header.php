@@ -1902,6 +1902,12 @@ if (isset($conn) && $conn) {
                     <a href="scheme_status_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_status_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-file-import"></i><span>Current Scheme Status Import</span>
                     </a>
+                    <a href="scheme_master_hul.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_master_hul.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-file-import"></i><span>HUL Scheme Master Import</span>
+                    </a>
+                    <a href="scheme_master_tot.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_master_tot.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-file-import"></i><span>TOT Scheme Master Import</span>
+                    </a>
                 
                     </div>
                     
