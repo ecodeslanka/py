@@ -242,6 +242,7 @@ if ($ccT && mysqli_num_rows($ccT)) {
     $r = mysqli_query($conn, "SELECT ci.*, cu.file_name, cu.upload_date FROM claim_cert_items ci LEFT JOIN claim_cert_uploads cu ON cu.id = ci.upload_id WHERE " . implode(' AND ', $ew) . " ORDER BY ci.banking_date DESC, ci.id DESC", MYSQLI_USE_RESULT);
     while ($r && ($x = mysqli_fetch_assoc($r))) {
         $d = (string)$x['claim_description']; [$no, $fm] = sd_scheme_fm($d); $no = sd_norm($no);
+        if ($no === '' || substr(ltrim($d), 0, 1) === '-') continue;   // no scheme no at all (e.g. "-B431090926-M'palasa potal - M8035592605080046") = not a scheme certificate → not listed
         $hit = ($no !== '' && isset($knownS[$no]));            // F / M rule: the scheme no of the certificate must be a scheme no of this report
         if ($hit) continue;
         $x['sch_no'] = $no; $x['sch_fm'] = $fm; $unrec[] = $x; $unrec_tot['n']++; $unrec_tot['act'] += (float)$x['actual_amount']; $unrec_tot['vat'] += (float)$x['vat_amount']; $unrec_tot['tot'] += (float)$x['total_amount'];
