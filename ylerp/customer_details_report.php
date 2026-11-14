@@ -12,7 +12,9 @@ ob_start();
 include 'config.php';
 include_once __DIR__ . '/report_extras_lib.php';
 rx_ensure($conn);
-if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+if ((isset($_GET['ajax']) || isset($_GET['export'])) && session_status() === PHP_SESSION_ACTIVE) session_write_close();   // long data requests do not block the user's other tabs
+/** query that never throws (a missing table / column gives false, not an HTTP 500) */
+function cd_q($conn, $sql) { try { return mysqli_query($conn, $sql); } catch (Throwable $e) { $GLOBALS['CD_ERR'] = $e->getMessage(); return false; } }
 function cd_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
 /** Build the report for the customers matching $o (t_code = one customer, pm, channel, q, cwd, issues). $detail adds the row lists. */
@@ -21,7 +23,7 @@ function cd_build($conn, array $o, $detail = false) {
     $e = fn($v) => mysqli_real_escape_string($conn, (string)$v);
     $hasCwd = rx_has_col($conn, 'customers', 'cheques_will_delay');
     $hasCh  = rx_has_col($conn, 'customers', 'channel');
-    $btgTbl = @mysqli_query($conn, "SHOW TABLES LIKE 'customer_btg'"); $hasBtg = $btgTbl && mysqli_num_rows($btgTbl) > 0;
+    $btgTbl = cd_q($conn, "SHOW TABLES LIKE 'customer_btg'"); $hasBtg = $btgTbl && mysqli_num_rows($btgTbl) > 0;
     $chExpr = $hasBtg ? ($hasCh ? "COALESCE(NULLIF(b.channel,''), NULLIF(c.channel,''), '')" : "COALESCE(b.channel,'')") : ($hasCh ? "COALESCE(c.channel,'')" : "''");
     $w = ['1=1'];
     if (($o['t_code'] ?? '') !== '') $w[] = "c.t_code = '{$e($o['t_code'])}'";
@@ -30,7 +32,7 @@ function cd_build($conn, array $o, $detail = false) {
     if ($hasCwd && ($o['cwd'] ?? '') === 'yes') $w[] = "COALESCE(c.cheques_will_delay,0) = 1";
     if ($hasCwd && ($o['cwd'] ?? '') === 'no')  $w[] = "COALESCE(c.cheques_will_delay,0) = 0";
     $cust = [];
-    $q = mysqli_query($conn, "SELECT c.t_code, c.shop_name, LOWER(TRIM(COALESCE(c.payment_mode,''))) AS pm, COALESCE(c.credit_days,0) AS credit_days,
+    $q = cd_q($conn, "SELECT c.t_code, c.shop_name, LOWER(TRIM(COALESCE(c.payment_mode,''))) AS pm, COALESCE(c.credit_days,0) AS credit_days,
                 " . ($hasCwd ? "COALESCE(c.cheques_will_delay,0)" : "0") . " AS cwd, $chExpr AS channel
               FROM customers c " . ($hasBtg ? "LEFT JOIN customer_btg b ON b.t_code = c.t_code " : "") . "WHERE " . implode(' AND ', $w) . " ORDER BY c.t_code LIMIT 20000");
     while ($q && ($x = mysqli_fetch_assoc($q))) { if (($o['channel'] ?? '') !== '' && strcasecmp($x['channel'], $o['channel']) !== 0) continue; $cust[$x['t_code']] = $x; }
@@ -40,7 +42,7 @@ function cd_build($conn, array $o, $detail = false) {
     /* bills: balance today + last payment date */
     $P = rx_inv_parts($conn, $today);
     $bills = [];
-    $q = mysqli_query($conn, "
+    $q = cd_q($conn, "
         SELECT fsd.t_code, fsd.invoice_num, fs.delivery_date, {$P['net']} AS net, {$P['balance']} AS balance, lpd.lp AS last_paid
         FROM field_summary_details fsd INNER JOIN field_summary fs ON fs.id = fsd.field_summary_id {$P['joins']}
         LEFT JOIN (SELECT field_summary_detail_id AS did, MAX(payment_date) AS lp FROM invoice_payments WHERE is_reversed = 0 GROUP BY field_summary_detail_id) lpd ON lpd.did = fsd.id
@@ -49,7 +51,7 @@ function cd_build($conn, array $o, $detail = false) {
 
     /* returned / sent-back cheques */
     $chq = [];
-    $q = mysqli_query($conn, "SELECT ch.t_code, ch.cheque_no, ch.cheque_date, ch.bank_code, ch.status, COALESCE(ch.total_amount, ch.amount, 0) AS amount,
+    $q = cd_q($conn, "SELECT ch.t_code, ch.cheque_no, ch.cheque_date, ch.bank_code, ch.status, COALESCE(ch.total_amount, ch.amount, 0) AS amount,
                 COALESCE(ch.return_settled,0) AS ret_settled, COALESCE(ch.sb_settled,0) AS sb_settled
               FROM cheques ch WHERE ch.t_code IN ($tlist) AND ch.status IN ('returned','sent_back') ORDER BY ch.cheque_date DESC");
     while ($q && ($c = mysqli_fetch_assoc($q))) $chq[$c['t_code']][] = $c;
@@ -57,7 +59,7 @@ function cd_build($conn, array $o, $detail = false) {
     /* cancelled bills */
     $canc = [];
     if (rx_has_col($conn, 'field_summary_details', 'cancel_value')) {
-        $q = mysqli_query($conn, "SELECT fsd.t_code, fsd.invoice_num, fs.delivery_date, COALESCE(fsd.cancel_value,0) AS v FROM field_summary_details fsd
+        $q = cd_q($conn, "SELECT fsd.t_code, fsd.invoice_num, fs.delivery_date, COALESCE(fsd.cancel_value,0) AS v FROM field_summary_details fsd
                                   INNER JOIN field_summary fs ON fs.id = fsd.field_summary_id WHERE fsd.t_code IN ($tlist) AND COALESCE(fsd.cancel_value,0) > 0 ORDER BY fs.delivery_date DESC");
         while ($q && ($x = mysqli_fetch_assoc($q))) $canc[$x['t_code']][] = $x;
     }
@@ -65,7 +67,7 @@ function cd_build($conn, array $o, $detail = false) {
     /* bills per month: last 12 months; the average = last 6 COMPLETE months ÷ 6 */
     $months = []; for ($i = 12; $i >= 0; $i--) $months[] = date('Y-m', strtotime("first day of -$i month"));
     $m0 = $months[0] . '-01'; $month = [];
-    $q = mysqli_query($conn, "SELECT fsd.t_code, DATE_FORMAT(fs.delivery_date, '%Y-%m') AS ym, COUNT(*) AS n FROM field_summary_details fsd
+    $q = cd_q($conn, "SELECT fsd.t_code, DATE_FORMAT(fs.delivery_date, '%Y-%m') AS ym, COUNT(*) AS n FROM field_summary_details fsd
                               INNER JOIN field_summary fs ON fs.id = fsd.field_summary_id WHERE fsd.updated = 1 AND fsd.t_code IN ($tlist) AND fs.delivery_date >= '$m0' AND fs.delivery_date <= '$today' GROUP BY fsd.t_code, ym");
     while ($q && ($x = mysqli_fetch_assoc($q))) $month[$x['t_code']][$x['ym']] = (int)$x['n'];
     $last6 = array_slice($months, 6, 6);   // the 6 complete months before the current one
@@ -108,16 +110,16 @@ if (($_GET['ajax'] ?? '') === 'detail') {
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json; charset=utf-8');
     $t = trim($_GET['t_code'] ?? '');
-    $D = $t !== '' ? cd_build($conn, ['t_code' => $t], true) : null;
+    try { $D = $t !== '' ? cd_build($conn, ['t_code' => $t], true) : null; } catch (Throwable $ex) { echo json_encode(['success' => false, 'message' => 'Error: ' . $ex->getMessage()]); exit; }
     if (!$D || !$D['rows']) { echo json_encode(['success' => false, 'message' => 'Customer not found.']); exit; }
     echo json_encode(['success' => true, 'row' => $D['rows'][0], 'viol' => $D['viol'], 'chq' => $D['chq'], 'canc' => $D['canc'], 'months' => $D['months'], 'month' => $D['month'][$t] ?? []], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR); exit;
 }
 
 $F = ['pm' => trim($_GET['pm'] ?? ''), 'channel' => trim($_GET['channel'] ?? ''), 'q' => trim($_GET['q'] ?? ''), 'cwd' => in_array($_GET['cwd'] ?? '', ['yes', 'no'], true) ? $_GET['cwd'] : '',
       'issues' => in_array($_GET['issues'] ?? '', ['any', 'cwd', 'ret', 'viol', 'canc'], true) ? $_GET['issues'] : ''];
-$D = cd_build($conn, $F, isset($_GET['export']));
+try { $D = cd_build($conn, $F, isset($_GET['export'])); } catch (Throwable $ex) { $D = ['rows' => [], 'viol' => [], 'chq' => [], 'canc' => [], 'month' => [], 'months' => []]; $CD_ERR = $ex->getMessage(); }
 $rows = $D['rows'];
-$channels = []; $cr = @mysqli_query($conn, "SELECT DISTINCT channel FROM customer_btg WHERE channel IS NOT NULL AND channel <> '' ORDER BY channel"); while ($cr && ($x = mysqli_fetch_row($cr))) $channels[] = $x[0];
+$channels = []; $cr = cd_q($conn, "SELECT DISTINCT channel FROM customer_btg WHERE channel IS NOT NULL AND channel <> '' ORDER BY channel"); while ($cr && ($x = mysqli_fetch_row($cr))) $channels[] = $x[0];
 
 /* ═════════ Excel export ═════════ */
 if (isset($_GET['export']) && class_exists('ZipArchive')) {
@@ -190,6 +192,7 @@ $cnt = fn($f) => count(array_filter($rows, $f));
 <div class="cdr">
   <h2><i class="fa-solid fa-address-card" style="color:#1e3a8a"></i> Customer Details</h2>
   <p class="sub">Per T-Code: pay mode, channel, cheques-will-delay, returned and sent-back cheques, credit-policy violations, cancelled bills and the average bills per month. <b>Click a row</b> for the detailed report. Policy rule: a bill violates the policy when it is paid after, or still unpaid past, delivery date + the customer's credit days. <a href="customer_analysis_report.php">Open "Analyze the Customers" →</a></p>
+  <?php if (!empty($CD_ERR)): ?><div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:9px;padding:10px 14px;margin-bottom:12px;font-size:13px"><b>Some data could not be read:</b> <?= cd_h($CD_ERR) ?></div><?php endif; ?>
   <div class="card"><form method="get" class="row">
     <div class="fld"><label>Pay mode</label><select name="pm"><option value="">All</option><?php foreach (['cash' => 'Cash', 'credit' => 'Credit', 'cheque' => 'Cheque'] as $k => $l): ?><option value="<?= $k ?>" <?= $F['pm'] === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
     <div class="fld"><label>Channel</label><select name="channel"><option value="">All</option><?php foreach ($channels as $c): ?><option <?= $F['channel'] === $c ? 'selected' : '' ?>><?= cd_h($c) ?></option><?php endforeach; ?></select></div>
