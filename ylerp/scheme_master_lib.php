@@ -159,7 +159,7 @@ function sm_render(array $D, array $cfg) {
   <div class="card"><h3><i class="fa-solid fa-list-check"></i> Imported activity codes <span style="font-size:12px;font-weight:600;background:#eef2ff;color:#1e3a8a;border-radius:10px;padding:2px 10px"><?= number_format($total) ?> total</span><?php if ($can_del && $total): ?><button class="btn r smDelAll" type="button" style="margin-left:auto;padding:5px 12px" title="Delete every upload and every imported activity code of this master"><i class="fa-solid fa-trash-can"></i> Delete all uploaded</button><?php endif; ?></h3>
     <form method="get" class="row" style="margin-bottom:10px"><div class="fld"><label>MOC</label><select name="moc"><option value="">All</option><?php foreach ($mocs as $m): ?><option <?= $fm === $m ? 'selected' : '' ?>><?= sm_h($m) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Search</label><input type="search" name="q" value="<?= sm_h($q) ?>" placeholder="activity code or description"></div><button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Filter</button><a class="btn o" href="<?= sm_h($self) ?>">Clear</a></form>
-    <div class="tw"><table><thead><tr><th>#</th><th>Activity Code</th><th>Activity Desc.</th><th>Date From</th><th>Date To</th><th>MOC</th><th>File</th></tr></thead><tbody>
+    <div class="tw"><table><thead><tr><th>#</th><th><?= sm_h($cfg['lbl'][0]) ?></th><th><?= sm_h($cfg['lbl'][1]) ?></th><th><?= sm_h($cfg['lbl'][2]) ?></th><th><?= sm_h($cfg['lbl'][3]) ?></th><th>MOC</th><th>File</th></tr></thead><tbody>
     <?php foreach ($items as $n => $x): ?><tr><td><?= $n + 1 ?></td><td><b><?= sm_h($x['activity_code']) ?></b></td><td><?= sm_h($x['activity_desc']) ?></td><td style="white-space:nowrap"><?= $d($x['date_from']) ?></td><td style="white-space:nowrap"><?= $d($x['date_to']) ?></td><td><?= sm_h($x['moc_ref']) ?></td><td style="font-size:11.5px;color:#6b7280"><?= sm_h($x['file_name']) ?></td></tr>
     <?php endforeach; if (!$items) echo '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:18px">No activity codes' . ($total ? ' match the filter' : ' imported yet') . '.</td></tr>'; ?></tbody></table></div></div>
 </div>
@@ -177,13 +177,13 @@ function sm_render(array $D, array $cfg) {
   <div class="hd"><div style="font-weight:800;font-size:16px"><i class="fa-solid fa-table-list"></i> Preview — <?= sm_h($cfg['title']) ?></div><div id="smPrevFile" style="opacity:.8;font-size:12.5px"></div>
     <div style="margin-left:auto;display:flex;gap:8px"><button class="btn g" id="smImport" type="button" disabled>Import</button><button class="btn o" id="smCancel" type="button">Cancel</button></div></div>
   <div id="smSum" style="padding:10px 18px 0"></div>
-  <div style="padding:8px 18px 14px;flex:1;min-height:0"><div class="tw" style="max-height:none;height:100%"><table><thead><tr><th>#</th><th>File</th><th>Status</th><th>Activity Code</th><th>Activity Desc.</th><th>Date From</th><th>Date To</th><th>MOC</th></tr></thead><tbody id="smPrevBody"></tbody></table></div></div>
+  <div style="padding:8px 18px 14px;flex:1;min-height:0"><div class="tw" style="max-height:none;height:100%"><table><thead><tr><th>#</th><th>File</th><th>Status</th><th><?= sm_h($cfg['lbl'][0]) ?></th><th><?= sm_h($cfg['lbl'][1]) ?></th><th><?= sm_h($cfg['lbl'][2]) ?></th><th><?= sm_h($cfg['lbl'][3]) ?></th><th>MOC</th></tr></thead><tbody id="smPrevBody"></tbody></table></div></div>
 </div></div>
 <?php endif; ?>
 <div class="smm sm" id="smView"><div class="bx">
   <div class="hd"><div><div style="font-weight:800;font-size:16px"><i class="fa-solid fa-eye"></i> Imported activity codes</div><div id="vFile" style="opacity:.8;font-size:12.5px"></div></div><button class="btn o" id="vClose" type="button" style="margin-left:auto">Close</button></div>
   <div id="vSum" style="padding:10px 18px 0"></div>
-  <div style="padding:8px 18px 14px;flex:1;min-height:0"><div class="tw" style="max-height:none;height:100%"><table><thead><tr><th>#</th><th>Activity Code</th><th>Activity Desc.</th><th>Date From</th><th>Date To</th><th>MOC</th></tr></thead><tbody id="vBody"></tbody></table></div></div>
+  <div style="padding:8px 18px 14px;flex:1;min-height:0"><div class="tw" style="max-height:none;height:100%"><table><thead><tr><th>#</th><th><?= sm_h($cfg['lbl'][0]) ?></th><th><?= sm_h($cfg['lbl'][1]) ?></th><th><?= sm_h($cfg['lbl'][2]) ?></th><th><?= sm_h($cfg['lbl'][3]) ?></th><th>MOC</th></tr></thead><tbody id="vBody"></tbody></table></div></div>
 </div></div>
 <script>
 (function(){
@@ -199,15 +199,21 @@ function sm_render(array $D, array $cfg) {
   function txt(v){ if(v instanceof Date) return iso(v); var s=String(v==null?'':v).trim(); return s==='-'?'':s; }
   function nrm(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,''); }
   /* yellow columns: Activity Code · Activity Desc. · Date From · Date To  (matched by header name, any column order) */
-  var ALIAS={code:['activitycode','schemeactivitycode','schemecode'],desc:['activitydesc','activitydescription','schemeactivitydescription','description'],from:['datefrom','startdate','fromdate','actstartdate'],to:['dateto','enddate','todate','actenddate']};
+  var SM_TYPE=<?= json_encode($cfg['type']) ?>, SM_LBL=<?= json_encode($cfg['lbl']) ?>;
+  var ALIAS={code:['activitycode'],desc:['activitydesc','activitydescription'],
+    from:SM_TYPE==='TOT'?['actstartdate']:['datefrom'], to:SM_TYPE==='TOT'?['actenddate']:['dateto']};   // HUL: Activity Code · Activity Desc. · Date From · Date To   |   TOT: Activity Code · Activity Desc · ACT START DATE · ACT END DATE
   function parseBuf(buf){
     var wb=XLSX.read(buf,{type:'array',cellDates:true}), ws=wb.Sheets[wb.SheetNames[0]], a=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true}), hi=-1, C={}, MOC='';
     for(var i=0;i<Math.min(a.length,15);i++){ for(var j=0;j<a[i].length;j++){ if(/^moc(refrno|ref|)$/.test(nrm(a[i][j]))){ var m=txt(a[i][j+1]); if(m){ MOC=m; } } } }
+    var hdrMissing=false;
     for(i=0;i<Math.min(a.length,25);i++){ var hs=a[i].map(nrm); var jc=-1; hs.forEach(function(h,j){ if(jc<0&&ALIAS.code.indexOf(h)>-1) jc=j; }); if(jc<0) continue;
       var T={code:jc}; ['desc','from','to'].forEach(function(k){ hs.forEach(function(h,j){ if(T[k]==null&&ALIAS[k].indexOf(h)>-1) T[k]=j; }); });
-      if(T.desc==null&&T.from==null&&T.to==null) continue;      // e.g. the "Activity Code :" filter label above the table is not the header row
+      if(T.desc==null&&T.from==null&&T.to==null) continue;
+      if(T.from==null||T.to==null){ hdrMissing=true; continue; }      // wrong layout (e.g. the other master's file): needs this master's own date columns      // e.g. the "Activity Code :" filter label above the table is not the header row
       hi=i; C=T; break; }
-    if(hi<0) throw new Error('"Activity Code" column not found — is this the Scheme Master report?');
+    if(hi<0){ var other=SM_TYPE==='TOT'?['datefrom','dateto']:['actstartdate','actenddate'], hasOther=false;
+      for(i=0;i<Math.min(a.length,25);i++){ var h2=a[i].map(nrm); if(h2.indexOf(other[0])>-1&&h2.indexOf(other[1])>-1) hasOther=true; }
+      throw new Error(hasOther?('This looks like the '+(SM_TYPE==='TOT'?'HUL':'TOT')+' Scheme Master file — import it on the '+(SM_TYPE==='TOT'?'HUL':'TOT')+' Scheme Master page.'):('Expected the columns: '+SM_LBL.join(' · ')+' — not found in this file.')); }
     var rows=[], total=0;
     for(var r=hi+1;r<a.length;r++){ var x=a[r]; var code=txt(x[C.code]); if(!code) continue; total++;
       rows.push({activity_code:code,activity_desc:C.desc==null?'':txt(x[C.desc]),date_from:C.from==null?'':iso(x[C.from]),date_to:C.to==null?'':iso(x[C.to]),moc_ref:MOC}); }
