@@ -131,7 +131,7 @@ if ($ready) {
             if (isset($statusCodes[$k]) || isset($seenM[$k])) continue;        // already a status scheme / already listed → no duplicate code
             $seenM[$k] = true;
             $items[] = ['id' => 0, 'upload_id' => 0, 'activity_type' => $x['master_type'], 'activity_code' => $x['activity_code'], 'activity_desc' => $x['activity_desc'], 'moc_ref' => $x['moc_ref'],
-                        'start_date' => $x['date_from'], 'end_date' => $x['date_to'], 'claim_moc_ref' => null, 'claim_amount' => null];
+                        'start_date' => $x['date_from'], 'end_date' => $x['date_to'], 'claim_moc_ref' => null, 'claim_amount' => null, 'is_new' => 1];
         }
     }
     usort($items, fn($a, $b) => strcmp((string)$b['start_date'], (string)$a['start_date']) ?: strcmp((string)$b['moc_ref'], (string)$a['moc_ref']) ?: strcmp((string)$a['activity_type'], (string)$b['activity_type']) ?: strcmp($a['activity_code'], $b['activity_code']));
@@ -164,6 +164,7 @@ foreach ($items as &$__x) {
     $has_claim = $__x['claim_amount'] !== null;
     $__x['diff'] = ($has_claim || $b) ? sd_zero(round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($b ? $b['sd'] : 0), 2)) : null;     // Claim Amount − scheme discount as per invoice
     $__x['balance'] = ($has_claim || $c2) ? sd_zero(max(0, round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($c2 ? $c2['act'] : 0), 2))) : null;     // negative balance → 0; rounding crumbs (under Rs. 5, e.g. 0.01 or 1.70) → 0     // Claim Amount − claim certificate actual amount
+    if (!empty($__x['is_new'])) { $__x['diff'] = 0.0; $__x['balance'] = 0.0; }      // new scheme (HUL / TOT) with no claim amount: difference and balance are 0
 } unset($__x);
 $tot = array_sum(array_map(fn($x) => (float)$x['claim_amount'], $items));
 $tot_bws = array_sum(array_map(fn($x) => (float)$x['bws_sd'], $items));
