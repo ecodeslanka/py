@@ -278,7 +278,7 @@ include 'header.php';
 .f-field input,.f-field select{border:1.5px solid var(--bdr);border-radius:8px;padding:8px 10px;font-size:12.5px;font-family:inherit;outline:none;color:var(--ink);background:#fff;}
 .f-field input:focus,.f-field select:focus{border-color:var(--pri2);}
 .ms{position:relative}.ms-btn{width:100%;text-align:left;border:1.5px solid var(--bdr);border-radius:8px;padding:8px 10px;font-size:12.5px;font-family:inherit;background:#fff;color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ms-panel{display:none;position:absolute;z-index:50;top:100%;left:0;min-width:100%;max-height:260px;overflow:auto;background:#fff;border:1.5px solid var(--bdr);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:6px;margin-top:3px}.ms.open .ms-panel{display:block}
+.ms-panel{display:none;position:fixed;z-index:2147483000;max-height:300px;overflow:auto;background:#fff;border:1.5px solid var(--bdr);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:6px;margin-top:3px}.ms.open .ms-panel{display:block}
 .ms-panel label{display:flex;gap:7px;align-items:center;padding:5px 7px;border-radius:6px;font-size:12.5px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--ink);cursor:pointer;white-space:nowrap}.ms-panel label:hover{background:#eef2ff}.ms-panel .ms-clear{font-size:11px;color:#6366f1;cursor:pointer;padding:3px 7px;display:block}
 .filter-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 
@@ -486,7 +486,12 @@ async function loadFilterOptions(){
 
 function ctSelected(){ return [].slice.call(document.querySelectorAll('.ctChk:checked')).map(c=>c.value); }
 function ctUpdate(){ const s=ctSelected(); document.getElementById('ctBtn').textContent = !s.length ? 'All types ▾' : (s.length<=2 ? s.join(', ') : s.length+' types selected')+' ▾'; }
-document.getElementById('ctBtn').addEventListener('click', e=>{ e.stopPropagation(); document.getElementById('fClaimType').classList.toggle('open'); });
+function ctPlace(){ const b=document.getElementById('ctBtn').getBoundingClientRect(), p=document.getElementById('ctPanel');   // fixed → never clipped by the filter card
+  p.style.left=Math.max(8,Math.min(b.left,window.innerWidth-Math.max(b.width,240)-8))+'px'; p.style.minWidth=Math.max(b.width,240)+'px';
+  const below=window.innerHeight-b.bottom-12; if(below<180 && b.top>below){ p.style.top='auto'; p.style.bottom=(window.innerHeight-b.top+4)+'px'; p.style.maxHeight=Math.min(300,b.top-12)+'px'; } else { p.style.bottom='auto'; p.style.top=(b.bottom+4)+'px'; p.style.maxHeight=Math.min(300,below)+'px'; } }
+document.getElementById('ctBtn').addEventListener('click', e=>{ e.stopPropagation(); const w=document.getElementById('fClaimType'); w.classList.toggle('open'); if(w.classList.contains('open')) ctPlace(); });
+window.addEventListener('resize', ()=>document.getElementById('fClaimType').classList.remove('open'));
+window.addEventListener('scroll', e=>{ if(e.target && e.target.nodeType===1 && e.target.closest('#ctPanel')) return; document.getElementById('fClaimType').classList.remove('open'); }, true);
 document.addEventListener('click', e=>{ if(!e.target.closest('#fClaimType')) document.getElementById('fClaimType').classList.remove('open'); });
 function getFilterParams(){
   return {
