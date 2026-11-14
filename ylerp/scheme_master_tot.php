@@ -4,7 +4,7 @@ date_default_timezone_set('Asia/Colombo');
 ob_start();
 include 'config.php';
 require_once __DIR__ . '/scheme_master_lib.php';
-$CFG = ['type' => 'TOT', 'title' => 'TOT Scheme Master', 'file' => 'scheme_master_tot.php', 'example' => 'TOT_Scheme_Master_2025_05.xlsx'];
+$CFG = ['type' => 'TOT', 'title' => 'TOT Scheme Master', 'file' => 'scheme_master_tot.php', 'cols' => 'ACT START DATE, ACT END DATE', 'example' => 'TOT_Scheme_Master_2025_05.xlsx'];
 $D = sm_handle($conn, $CFG);
 ob_end_flush();
 include 'header.php';

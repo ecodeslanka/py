@@ -144,7 +144,7 @@ function sm_render(array $D, array $cfg) {
 </style>
 <div class="sm">
   <h2><i class="fa-solid fa-table-list" style="color:#1e3a8a"></i> <?= sm_h($cfg['title']) ?> Import</h2>
-  <p class="sub">Pick <b>one or several</b> Excel files (e.g. <?= sm_h($cfg['example']) ?>). Only the <b style="background:#fef08a;padding:0 5px;border-radius:4px">yellow highlighted columns</b> are imported — <b>Activity Code, Activity Desc., Date From, Date To</b>. The report repeats the same activity code on every SKU row; each <b>activity code is imported only once</b> (repeats and codes already imported are skipped).</p>
+  <p class="sub">Pick <b>one or several</b> Excel files (e.g. <?= sm_h($cfg['example']) ?>). Only the <b style="background:#fef08a;padding:0 5px;border-radius:4px">yellow highlighted columns</b> are imported — <b>Activity Code, Activity Desc., <?= sm_h($cfg['cols']) ?></b>. The report repeats the same activity code on every SKU row; each <b>activity code is imported only once</b> (repeats and codes already imported are skipped).</p>
 
   <?php if ($can_add): ?>
   <div class="card">
@@ -195,12 +195,14 @@ function sm_render(array $D, array $cfg) {
   function txt(v){ if(v instanceof Date) return iso(v); var s=String(v==null?'':v).trim(); return s==='-'?'':s; }
   function nrm(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,''); }
   /* yellow columns: Activity Code · Activity Desc. · Date From · Date To  (matched by header name, any column order) */
-  var ALIAS={code:['activitycode','schemeactivitycode','schemecode'],desc:['activitydesc','activitydescription','schemeactivitydescription','description'],from:['datefrom','startdate','fromdate'],to:['dateto','enddate','todate']};
+  var ALIAS={code:['activitycode','schemeactivitycode','schemecode'],desc:['activitydesc','activitydescription','schemeactivitydescription','description'],from:['datefrom','startdate','fromdate','actstartdate'],to:['dateto','enddate','todate','actenddate']};
   function parseBuf(buf){
     var wb=XLSX.read(buf,{type:'array',cellDates:true}), ws=wb.Sheets[wb.SheetNames[0]], a=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true}), hi=-1, C={}, MOC='';
-    for(var i=0;i<Math.min(a.length,15);i++){ for(var j=0;j<a[i].length;j++){ if(nrm(a[i][j])==='moc'){ var m=txt(a[i][j+1]); if(m){ MOC=m; } } } }
+    for(var i=0;i<Math.min(a.length,15);i++){ for(var j=0;j<a[i].length;j++){ if(/^moc(refrno|ref|)$/.test(nrm(a[i][j]))){ var m=txt(a[i][j+1]); if(m){ MOC=m; } } } }
     for(i=0;i<Math.min(a.length,25);i++){ var hs=a[i].map(nrm); var jc=-1; hs.forEach(function(h,j){ if(jc<0&&ALIAS.code.indexOf(h)>-1) jc=j; }); if(jc<0) continue;
-      hi=i; C.code=jc; ['desc','from','to'].forEach(function(k){ hs.forEach(function(h,j){ if(C[k]==null&&ALIAS[k].indexOf(h)>-1) C[k]=j; }); }); break; }
+      var T={code:jc}; ['desc','from','to'].forEach(function(k){ hs.forEach(function(h,j){ if(T[k]==null&&ALIAS[k].indexOf(h)>-1) T[k]=j; }); });
+      if(T.desc==null&&T.from==null&&T.to==null) continue;      // e.g. the "Activity Code :" filter label above the table is not the header row
+      hi=i; C=T; break; }
     if(hi<0) throw new Error('"Activity Code" column not found — is this the Scheme Master report?');
     var rows=[], total=0;
     for(var r=hi+1;r<a.length;r++){ var x=a[r]; var code=txt(x[C.code]); if(!code) continue; total++;
