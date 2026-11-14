@@ -210,6 +210,54 @@ foreach ($items as $x) {
 foreach ($monthly as &$__m) $__m['bal'] = $__m['claim'] - $__m['cc'] - $__m['vs']; unset($__m);      // month balance = claim − certificate (− VAT only where it is fully the same)
 uksort($monthly, fn($a, $b) => sd_moc_key($b) <=> sd_moc_key($a) ?: strcmp($b, $a));
 
+/* ═════════ Unreconciled claim certificates: certificate rows whose scheme no does not tally with ANY scheme of this report ═════════
+   known scheme nos = every Current Scheme Status code (not DAMAGE) + every HUL / TOT master code + the scheme nos written in their descriptions.
+   a certificate row tallies when the part of its description before the first "-", or any word / number of the description, is one of them. */
+$ub_from = sd_ok($_GET['ub_from'] ?? '') ? $_GET['ub_from'] : ''; $ub_to = sd_ok($_GET['ub_to'] ?? '') ? $_GET['ub_to'] : '';
+if ($ub_from && $ub_to && $ub_to < $ub_from) [$ub_from, $ub_to] = [$ub_to, $ub_from];
+$ub_q = trim($_GET['ub_q'] ?? '');
+$unrec = []; $unrec_tot = ['n' => 0, 'act' => 0.0, 'vat' => 0.0, 'tot' => 0.0];
+$ccT = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
+if ($ccT && mysqli_num_rows($ccT)) {
+    $knownS = [];
+    $r = mysqli_query($conn, "SELECT activity_code, activity_desc FROM scheme_status_items WHERE UPPER(TRIM(activity_type)) <> 'DAMAGE'");
+    while ($r && ($x = mysqli_fetch_row($r))) { $knownS[sd_norm($x[0])] = 1; foreach (sd_desc_keys($x[1]) as $a) $knownS[$a] = 1; }
+    $mT = mysqli_query($conn, "SHOW TABLES LIKE 'scheme_master_items'");
+    if ($mT && mysqli_num_rows($mT)) { $r = mysqli_query($conn, "SELECT activity_code, activity_desc FROM scheme_master_items"); while ($r && ($x = mysqli_fetch_row($r))) { $knownS[sd_norm($x[0])] = 1; foreach (sd_desc_keys($x[1]) as $a) $knownS[$a] = 1; } }
+    unset($knownS['']);
+    $ew = ["ci.claim_description IS NOT NULL", "ci.claim_description <> ''"];
+    if ($ub_from) $ew[] = "ci.banking_date >= '" . mysqli_real_escape_string($conn, $ub_from) . "'";
+    if ($ub_to)   $ew[] = "ci.banking_date <= '" . mysqli_real_escape_string($conn, $ub_to) . "'";
+    if ($ub_q !== '') { $qq = mysqli_real_escape_string($conn, $ub_q); $ew[] = "(ci.claim_description LIKE '%$qq%' OR ci.tax_invoice_no LIKE '%$qq%' OR ci.customer_name LIKE '%$qq%' OR ci.customer_code LIKE '%$qq%')"; }
+    $r = mysqli_query($conn, "SELECT ci.*, cu.file_name, cu.upload_date FROM claim_cert_items ci LEFT JOIN claim_cert_uploads cu ON cu.id = ci.upload_id WHERE " . implode(' AND ', $ew) . " ORDER BY ci.banking_date DESC, ci.id DESC", MYSQLI_USE_RESULT);
+    while ($r && ($x = mysqli_fetch_assoc($r))) {
+        $d = (string)$x['claim_description']; $hit = false;
+        $first = sd_norm(explode('-', $d, 2)[0]);
+        if ($first !== '' && isset($knownS[$first])) $hit = true;
+        else foreach (preg_split('/[^A-Za-z0-9]+/', $d, -1, PREG_SPLIT_NO_EMPTY) as $tk) { if (isset($knownS[sd_norm($tk)])) { $hit = true; break; } }
+        if ($hit) continue;
+        $unrec[] = $x; $unrec_tot['n']++; $unrec_tot['act'] += (float)$x['actual_amount']; $unrec_tot['vat'] += (float)$x['vat_amount']; $unrec_tot['tot'] += (float)$x['total_amount'];
+    }
+    if ($r instanceof mysqli_result) mysqli_free_result($r);
+}
+
+/* Excel unreconciled */
+if (isset($_GET['export']) && ($_GET['sheet'] ?? '') === 'unrec' && class_exists('ZipArchive')) {
+    require_once __DIR__ . '/rbac_xlsx.php';
+    while (ob_get_level()) ob_end_clean();
+    $X = new MiniXlsx(); $sh = $X->sheet('Unreconciled certificates');
+    $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '1E3A8A', 'h' => 'center', 'border' => 1, 'wrap' => 1];
+    $sh->set(1, 1, 'Unreconciled claim certificates — scheme no not found in the Scheme Discount Daily Report' . ($ub_from || $ub_to ? ' (banking date ' . ($ub_from ?: '…') . ' to ' . ($ub_to ?: '…') . ')' : ''), ['b' => 1, 'sz' => 14]);
+    foreach (['#', 'Customer Code', 'Customer Name', 'Upload File', 'Upload Date', 'Ledger Type', 'Status', 'Claim Type', 'Tax Invoice No', 'Invoice Date', 'Banking Date', 'Entity', 'Claim Description', 'Actual Amount', 'VAT Amount', 'Total Amount', 'Imported At'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
+    $r = 4; foreach ($unrec as $n => $x) { foreach ([$n + 1, $x['customer_code'], $x['customer_name'], $x['file_name'], $x['upload_date'], $x['ledger_type'], $x['status'], $x['claim_type'], $x['tax_invoice_no'], $x['invoice_date'], $x['banking_date'], $x['entity'], $x['claim_description'], (float)$x['actual_amount'], (float)$x['vat_amount'], (float)$x['total_amount'], $x['imported_at']] as $i => $v) $sh->set($r, $i + 1, $v === null ? '' : $v, ['border' => 1] + (in_array($i, [13, 14, 15], true) ? ['h' => 'right', 'nf' => 4] : [])); $r++; }
+    $sh->set($r, 13, 'TOTAL (' . number_format($unrec_tot['n']) . ' rows)', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); foreach ([[14, 'act'], [15, 'vat'], [16, 'tot']] as [$c, $k]) $sh->set($r, $c, round($unrec_tot[$k], 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]);
+    foreach ([5, 14, 26, 24, 12, 14, 12, 16, 18, 12, 13, 10, 46, 14, 12, 14, 18] as $i => $wd) $sh->widths[$i + 1] = $wd;
+    $sh->freeze = [3, 0]; $sh->filter = 'A3:Q' . max(4, $r - 1);
+    $tmp = tempnam(sys_get_temp_dir(), 'sdu'); $X->save($tmp);
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="unreconciled_claim_certificates_' . date('Ymd_His') . '.xlsx"');
+    header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
+}
+
 /* Excel */
 if (isset($_GET['export']) && class_exists('ZipArchive')) {
     require_once __DIR__ . '/rbac_xlsx.php';
@@ -250,7 +298,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
 .sdr .tw{overflow:auto;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-height:72vh}.sdr table{width:100%;border-collapse:collapse;font-size:13px}.sdr th{background:#1e3a8a;color:#fff;padding:9px 10px;text-align:left;position:sticky;top:0;white-space:nowrap}.sdr td{padding:8px 10px;border-bottom:1px solid #f1f5f9}.sdr .r{text-align:right;font-variant-numeric:tabular-nums}.sdr tr:hover td{background:#f8fafc}
 .sdr tfoot td{background:#fde68a;font-weight:800;position:sticky;bottom:0}.sdr .ty{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#ede9fe;color:#6d28d9}.sdr .ty.dmg{background:#fee2e2;color:#b91c1c}
 .sdr .bal{display:inline-block;min-width:92px;text-align:right;padding:3px 10px;border-radius:8px;font-weight:800}.sdr .bal.pos{background:#fee2e2;color:#b91c1c}.sdr .bal.neg{background:#dcfce7;color:#15803d}.sdr .bal.zero{background:#f1f5f9;color:#64748b}.sdr a.bwsl,.sdr a.ccl{color:#1d4ed8;text-decoration:none}.sdr a.ccl{color:#15803d}.sdr a:hover b{text-decoration:underline}.sdr small{color:#6b7280;font-weight:500}
-.sdr .sdtabs{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.sdr .sdtabs button{padding:8px 16px;border:1.5px solid #c7d2fe;background:#fff;color:#1e3a8a;border-radius:9px;font:600 13px inherit;cursor:pointer}.sdr .sdtabs button.on{background:#1e3a8a;color:#fff;border-color:#1e3a8a}.sdr tr.mocr{cursor:pointer}.sdr tr.mocr:hover td{background:#eef2ff}
+.sdr .sdtabs{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.sdr .sdtabs button{padding:8px 16px;border:1.5px solid #c7d2fe;background:#fff;color:#1e3a8a;border-radius:9px;font:600 13px inherit;cursor:pointer}.sdr .sdtabs button.on{background:#1e3a8a;color:#fff;border-color:#1e3a8a}.sdr .sdbadge{display:inline-block;min-width:20px;padding:0 7px;margin-left:4px;border-radius:99px;background:#fee2e2;color:#b91c1c;font-size:11px;font-weight:800}.sdr .sdtabs button.on .sdbadge{background:#fff}.sdr tr.mocr{cursor:pointer}.sdr tr.mocr:hover td{background:#eef2ff}
 .sdr .sdsrc{display:inline-block;padding:2px 9px;border-radius:99px;font-size:10.5px;font-weight:800}.sdr .sdsrc.status{background:#fef3c7;color:#92400e}.sdr .sdsrc.hul{background:#dbeafe;color:#1e40af}.sdr .sdsrc.tot{background:#ede9fe;color:#5b21b6}
 .sdr .fbody.collapsed{display:none}.sdr .ftog{cursor:pointer;display:flex;align-items:center;gap:10px;user-select:none}
 </style>
@@ -277,7 +325,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
   <div class="kp"><div class="k"><span>Schemes</span><b><?= number_format(count($items)) ?></b></div><div class="k"><span>Total claim amount</span><b style="color:#7c3aed">Rs. <?= number_format($tot, 2) ?></b></div>
     <div class="k"><span>Scheme discount as per invoice</span><b style="color:#1d4ed8">Rs. <?= number_format($tot_bws, 2) ?></b></div><div class="k"><span>Claim certificate (actual)</span><b style="color:#15803d">Rs. <?= number_format($tot_cc, 2) ?></b></div><div class="k"><span>Balance</span><b style="color:<?= $tot_bal > 0.5 ? '#b91c1c' : ($tot_bal < -0.5 ? '#15803d' : '#6b7280') ?>">Rs. <?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></b></div><div class="k"><span>With claim</span><b><?= number_format(count(array_filter($items, fn($x) => (float)$x['claim_amount'] > 0))) ?></b></div></div>
 
-  <div class="sdtabs"><button type="button" data-v="det" class="on"><i class="fa-solid fa-table-list"></i> Detailed</button><button type="button" data-v="sum"><i class="fa-solid fa-calendar-days"></i> Monthly summary (by MOC Ref)</button>
+  <div class="sdtabs"><button type="button" data-v="det" class="on"><i class="fa-solid fa-table-list"></i> Detailed</button><button type="button" data-v="sum"><i class="fa-solid fa-calendar-days"></i> Monthly summary (by MOC Ref)</button><button type="button" data-v="unr"><i class="fa-solid fa-triangle-exclamation"></i> Unreconciled claim certificates <span class="sdbadge"><?= number_format($unrec_tot['n']) ?></span></button>
     <a class="btn o" id="sdSumXls" data-no-loader href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1, 'sheet' => 'summary']))) ?>" style="display:none;padding:7px 14px;border:1.5px solid #c7d2fe;border-radius:9px;color:#1e3a8a;text-decoration:none;font:600 13px inherit;background:#fff"><i class="fa-solid fa-file-excel"></i> Export monthly summary</a>
     <span id="sdMocBar" style="display:none;margin-left:auto;font-size:12.5px"><span class="chip" style="margin:0">MOC <b id="sdMocTxt"></b></span> <a href="#" id="sdMocClr" style="color:#1e3a8a;font-weight:700">show all MOC refs ✕</a></span></div>
 
@@ -297,6 +345,21 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
     <td class="r"><?php if ($x['balance'] !== null): $bc = $x['balance'] > 0.5 ? 'pos' : ($x['balance'] < -0.5 ? 'neg' : 'zero'); ?><span class="bal <?= $bc ?>"<?= $x['balance'] < 0 ? ' title="EXCESS — the claim certificate amount is higher than the claim amount (over paid)"' : '' ?>><?= $x['balance'] < 0 ? '(' . number_format(abs($x['balance']), 2) . ')' : number_format($x['balance'], 2) ?></span><?php else: ?><span style="color:#cbd5e1">—</span><?php endif; ?></td><td style="white-space:nowrap"><span class="sdsrc <?= strtolower($x['src'] ?? 'status') ?>"><?= ($x['src'] ?? 'STATUS') === 'STATUS' ? 'Current Scheme Status' : sd_h($x['src']) . ' Scheme Master' ?></span></td></tr>
   <?php endforeach; if (!$items): ?><tr><td colspan="14" style="text-align:center;color:#9ca3af;padding:28px">No schemes for these filters.</td></tr><?php endif; ?></tbody>
   <?php if ($items): ?><tfoot><tr><td colspan="7" id="sdFN">TOTAL (<?= number_format(count($items)) ?> schemes)</td><td class="r" id="sdFC"><?= number_format($tot, 2) ?></td><td class="r" id="sdFB"><?= number_format($tot_bws, 2) ?></td><td class="r" id="sdFD"><?= $tot_diff < 0 ? '(' . number_format(abs($tot_diff), 2) . ')' : number_format($tot_diff, 2) ?></td><td class="r" id="sdFA"><?= number_format($tot_cc, 2) ?></td><td class="r" id="sdFV"><?= number_format($tot_vat, 2) ?></td><td class="r" id="sdFL"><?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></td></tr></tfoot><?php endif; ?></table></div></div>
+  <div id="sdUnr" style="display:none">
+    <form method="get" class="card" style="margin-bottom:10px"><div class="row">
+      <?php foreach ($_GET as $k => $v) { if (in_array($k, ['ub_from', 'ub_to', 'ub_q', 'tab', 'export', 'sheet'], true) || is_array($v)) continue; echo '<input type="hidden" name="' . sd_h($k) . '" value="' . sd_h($v) . '">'; } ?>
+      <input type="hidden" name="tab" value="unr">
+      <div class="fld"><label>Banking date from</label><input type="date" name="ub_from" value="<?= sd_h($ub_from) ?>"></div>
+      <div class="fld"><label>Banking date to</label><input type="date" name="ub_to" value="<?= sd_h($ub_to) ?>"></div>
+      <div class="fld"><label>Search</label><input type="search" name="ub_q" value="<?= sd_h($ub_q) ?>" placeholder="description, tax invoice, customer"></div>
+      <button class="btn" type="submit"><i class="fa-solid fa-filter"></i> Show</button><a class="btn o" href="?<?= sd_h(http_build_query(array_diff_key($_GET, array_flip(['ub_from', 'ub_to', 'ub_q', 'export', 'sheet'])) + ['tab' => 'unr'])) ?>">Reset</a>
+      <a class="btn o" data-no-loader href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1, 'sheet' => 'unrec']))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></form>
+    <div class="kp"><div class="k"><span>Unreconciled certificates</span><b><?= number_format($unrec_tot['n']) ?></b></div><div class="k"><span>Actual amount</span><b style="color:#b91c1c">Rs. <?= number_format($unrec_tot['act'], 2) ?></b></div><div class="k"><span>VAT amount</span><b>Rs. <?= number_format($unrec_tot['vat'], 2) ?></b></div><div class="k"><span>Total amount</span><b>Rs. <?= number_format($unrec_tot['tot'], 2) ?></b></div></div>
+    <div class="tw"><table><thead><tr><th>#</th><th>Customer</th><th>Upload File</th><th>Ledger Type</th><th>Status</th><th>Claim Type</th><th>Tax Invoice No</th><th>Invoice Date</th><th>Banking Date</th><th>Entity</th><th>Claim Description</th><th class="r">Actual Amount</th><th class="r">VAT Amount</th><th class="r">Total Amount</th><th>Imported At</th></tr></thead><tbody>
+    <?php foreach ($unrec as $n => $x): ?><tr><td><?= $n + 1 ?></td><td style="white-space:nowrap"><b><?= sd_h($x['customer_code']) ?></b> <span style="color:#6b7280;font-size:11.5px"><?= sd_h($x['customer_name']) ?></span></td><td style="font-size:11.5px"><?= sd_h($x['file_name']) ?><br><span style="color:#9ca3af"><?= sd_h($x['upload_date']) ?></span></td><td><?= sd_h($x['ledger_type']) ?></td><td><?= sd_h($x['status']) ?></td><td><?= sd_h($x['claim_type']) ?></td><td><b><?= sd_h($x['tax_invoice_no']) ?></b></td><td><?= sd_d($x['invoice_date']) ?></td><td><?= sd_d($x['banking_date']) ?></td><td><?= sd_h($x['entity']) ?></td><td style="white-space:normal;min-width:260px"><?= sd_h($x['claim_description']) ?></td><td class="r"><b><?= number_format((float)$x['actual_amount'], 2) ?></b></td><td class="r"><?= number_format((float)$x['vat_amount'], 2) ?></td><td class="r"><?= number_format((float)$x['total_amount'], 2) ?></td><td style="font-size:11px;color:#6b7280;white-space:nowrap"><?= sd_h($x['imported_at']) ?></td></tr>
+    <?php endforeach; if (!$unrec): ?><tr><td colspan="15" style="text-align:center;color:#9ca3af;padding:28px">Every claim certificate scheme no tallies with a scheme of this report<?= ($ub_from || $ub_to || $ub_q !== '') ? ' (for this banking date / search)' : '' ?>.</td></tr><?php endif; ?></tbody>
+    <?php if ($unrec): ?><tfoot><tr><td colspan="11">TOTAL (<?= number_format($unrec_tot['n']) ?> certificates)</td><td class="r"><?= number_format($unrec_tot['act'], 2) ?></td><td class="r"><?= number_format($unrec_tot['vat'], 2) ?></td><td class="r"><?= number_format($unrec_tot['tot'], 2) ?></td><td></td></tr></tfoot><?php endif; ?></table></div>
+  </div>
 </div>
 <div id="bwsM" style="position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px;font-family:'Inter',system-ui,sans-serif">
   <div style="background:#fff;border-radius:14px;width:100%;max-width:1400px;height:92vh;display:flex;flex-direction:column;overflow:hidden">
@@ -337,7 +400,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
 (function(){
   var $=function(i){ return document.getElementById(i); }, KEY='sd_view_v1', moc=null;
   var money=function(v){ return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }, neg=function(v){ return v<0?'('+money(Math.abs(v))+')':money(v); };
-  function view(v){ $('sdSumXls').style.display=v==='sum'?'inline-flex':'none'; $('sdSum').style.display=v==='sum'?'block':'none'; $('sdDetail').style.display=v==='det'?'block':'none'; [].forEach.call(document.querySelectorAll('.sdtabs button'),function(b){ b.classList.toggle('on',b.dataset.v===v); }); try{ localStorage.setItem(KEY,v); }catch(e){} }
+  function view(v){ $('sdSumXls').style.display=v==='sum'?'inline-flex':'none'; $('sdSum').style.display=v==='sum'?'block':'none'; $('sdDetail').style.display=v==='det'?'block':'none'; $('sdUnr').style.display=v==='unr'?'block':'none'; [].forEach.call(document.querySelectorAll('.sdtabs button'),function(b){ b.classList.toggle('on',b.dataset.v===v); }); try{ localStorage.setItem(KEY,v); }catch(e){} }
   function filt(m){ moc=m; var rows=document.querySelectorAll('#sdDetail tbody tr[data-moc]'), t={c:0,b:0,d:0,a:0,l:0,v:0,l1:0,vs:0}, n=0;
     [].forEach.call(rows,function(r){ var show=m===null||r.dataset.moc===m; r.style.display=show?'':'none'; if(show){ n++; r.querySelector('.sdn').textContent=n; t.c+=+r.dataset.claim; t.b+=+r.dataset.bws; t.d+=+r.dataset.diff; t.a+=+r.dataset.cc; t.v+=+r.dataset.vat; t.vs+=+r.dataset.vs; } });
     t.l1=t.c-t.a; t.l=t.l1-t.vs;
@@ -346,7 +409,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
   [].forEach.call(document.querySelectorAll('.sdtabs button'),function(b){ b.addEventListener('click',function(){ view(b.dataset.v); }); });
   document.querySelectorAll('tr.mocr').forEach(function(r){ r.addEventListener('click',function(){ filt(r.dataset.moc); view('det'); window.scrollTo({top:0,behavior:'smooth'}); }); });
   $('sdMocClr').addEventListener('click',function(e){ e.preventDefault(); filt(null); });
-  var v0='det'; try{ v0=localStorage.getItem(KEY)||'det'; }catch(e){} view(v0==='sum'?'sum':'det');
+  var v0='det'; try{ v0=localStorage.getItem(KEY)||'det'; }catch(e){} var tq=new URLSearchParams(location.search).get('tab'); if(tq==='unr') v0='unr'; view(v0==='sum'?'sum':(v0==='unr'?'unr':'det'));
 })();
 document.getElementById('sdTog').addEventListener('click',function(){ document.getElementById('sdBody').classList.toggle('collapsed'); });</script>
 <?php include 'footer.php'; ?>
