@@ -96,7 +96,6 @@ $f_type  = trim($_GET['type'] ?? '');
 $f_cmoc  = trim($_GET['claim_moc'] ?? '');
 $f_q     = trim($_GET['q'] ?? '');
 $f_claim = in_array($_GET['claim'] ?? '', ['', 'with', 'without'], true) ? ($_GET['claim'] ?? '') : '';
-$f_src   = in_array($_GET['src'] ?? '', ['STATUS', 'HUL', 'TOT'], true) ? $_GET['src'] : '';
 
 $items = []; $mocs = $types = $cmocs = [];
 if ($ready) {
@@ -117,17 +116,13 @@ if ($ready) {
     /* ── the 3 imports together: Current Scheme Status rows (claims) + the HUL / TOT Scheme Master codes that are NOT in the status (each code once) ── */
     $nc = fn($c) => strtoupper(preg_replace('/\.0+$/', '', trim((string)$c)));
     $mtbl = mysqli_query($conn, "SHOW TABLES LIKE 'scheme_master_items'"); $hasMaster = $mtbl && mysqli_num_rows($mtbl) > 0;
-    $masterOf = [];                                   // code => ['HUL','TOT'] (from the masters, whatever the filters)
-    if ($hasMaster) { $r = mysqli_query($conn, "SELECT activity_code, master_type FROM scheme_master_items"); while ($r && ($x = mysqli_fetch_row($r))) $masterOf[$nc($x[0])][$x[1]] = true; }
     $statusCodes = []; $r = mysqli_query($conn, "SELECT DISTINCT activity_code FROM scheme_status_items WHERE UPPER(TRIM(activity_type)) <> 'DAMAGE'"); while ($r && ($x = mysqli_fetch_row($r))) $statusCodes[$nc($x[0])] = true;
-    foreach ($items as &$__it) { $k = $nc($__it['activity_code']); $__it['src'] = array_merge(['STATUS'], array_keys($masterOf[$k] ?? [])); } unset($__it);
-    if ($hasMaster && $f_claim !== 'with' && $f_cmoc === '' && ($f_src === '' || $f_src === 'HUL' || $f_src === 'TOT')) {
+    if ($hasMaster && $f_claim !== 'with' && $f_cmoc === '') {      // new schemes have no claim yet
         $mw = ['1=1'];
         if ($f_to)   $mw[] = "(m.date_from IS NULL OR m.date_from <= '{$e($f_to)}')";
         if ($f_from) $mw[] = "(m.date_to IS NULL OR m.date_to >= '{$e($f_from)}')";
         if ($f_moc !== '')  $mw[] = "m.moc_ref = '{$e($f_moc)}'";
         if ($f_type !== '') $mw[] = "m.master_type = '{$e($f_type)}'";
-        if ($f_src !== '')  $mw[] = "m.master_type = '{$e($f_src)}'";
         if ($f_q !== '') { $q = $e($f_q); $mw[] = "(m.activity_code LIKE '%$q%' OR m.activity_desc LIKE '%$q%')"; }
         $r = mysqli_query($conn, "SELECT m.* FROM scheme_master_items m WHERE " . implode(' AND ', $mw) . " ORDER BY m.date_from DESC, m.id DESC");
         $seenM = [];
@@ -136,10 +131,9 @@ if ($ready) {
             if (isset($statusCodes[$k]) || isset($seenM[$k])) continue;        // already a status scheme / already listed → no duplicate code
             $seenM[$k] = true;
             $items[] = ['id' => 0, 'upload_id' => 0, 'activity_type' => $x['master_type'], 'activity_code' => $x['activity_code'], 'activity_desc' => $x['activity_desc'], 'moc_ref' => $x['moc_ref'],
-                        'start_date' => $x['date_from'], 'end_date' => $x['date_to'], 'claim_moc_ref' => null, 'claim_amount' => null, 'src' => array_keys($masterOf[$k] ?? [$x['master_type'] => 1])];
+                        'start_date' => $x['date_from'], 'end_date' => $x['date_to'], 'claim_moc_ref' => null, 'claim_amount' => null];
         }
     }
-    if ($f_src !== '') $items = array_values(array_filter($items, fn($it) => in_array($f_src, $it['src'], true)));
     usort($items, fn($a, $b) => strcmp((string)$b['start_date'], (string)$a['start_date']) ?: strcmp((string)$b['moc_ref'], (string)$a['moc_ref']) ?: strcmp((string)$a['activity_type'], (string)$b['activity_type']) ?: strcmp($a['activity_code'], $b['activity_code']));
     $dist = function ($col, $ord) use ($conn) { $o = []; $r = mysqli_query($conn, "SELECT DISTINCT $col AS v FROM scheme_status_items WHERE $col IS NOT NULL AND $col <> '' AND UPPER(TRIM(activity_type)) <> 'DAMAGE' ORDER BY $col $ord"); while ($r && ($x = mysqli_fetch_assoc($r))) $o[] = $x['v']; return $o; };
     $mocs = $dist('moc_ref', 'DESC'); $types = $dist('activity_type', 'ASC'); $cmocs = $dist('claim_moc_ref', 'DESC');
@@ -193,15 +187,15 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     while (ob_get_level()) ob_end_clean();
     $X = new MiniXlsx(); $sh = $X->sheet('Scheme Discount Daily');
     $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '1E3A8A', 'h' => 'center', 'border' => 1, 'wrap' => 1];
-    $sh->set(1, 1, 'Scheme Discount Daily Report (Status + HUL + TOT)' . ($f_from || $f_to ? ' — ' . ($f_from ?: '…') . ' to ' . ($f_to ?: '…') : ''), ['b' => 1, 'sz' => 15]);
-    foreach (['#', 'Activity Type', 'Scheme Activity Code', 'Scheme Activity Description', 'MOC Ref', 'Start Date', 'End Date', 'Claim MOC Ref', 'Claim Amount', 'Scheme Discount as per Invoice', 'Difference (Claim - Invoice)', 'Claim Certificate Actual Amount', 'Balance', 'Source'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
+    $sh->set(1, 1, 'Scheme Discount Daily Report' . ($f_from || $f_to ? ' — ' . ($f_from ?: '…') . ' to ' . ($f_to ?: '…') : ''), ['b' => 1, 'sz' => 15]);
+    foreach (['#', 'Activity Type', 'Scheme Activity Code', 'Scheme Activity Description', 'MOC Ref', 'Start Date', 'End Date', 'Claim MOC Ref', 'Claim Amount', 'Scheme Discount as per Invoice', 'Difference (Claim - Invoice)', 'Claim Certificate Actual Amount', 'Balance'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
     $r = 4; foreach ($items as $n => $x) {
-        foreach ([$n + 1, $x['activity_type'], $x['activity_code'], $x['activity_desc'], $x['moc_ref'], sd_d($x['start_date']) === '—' ? '' : sd_d($x['start_date']), sd_d($x['end_date']) === '—' ? '' : sd_d($x['end_date']), $x['claim_moc_ref'], $x['claim_amount'] === null ? '' : (float)$x['claim_amount'], $x['bws_sd'] === null ? '' : round((float)$x['bws_sd'], 2), $x['diff'] === null ? '' : $x['diff'], $x['cc_act'] === null ? '' : round((float)$x['cc_act'], 2), $x['balance'] === null ? '' : $x['balance'], implode(' + ', $x['src'])] as $i => $v)
+        foreach ([$n + 1, $x['activity_type'], $x['activity_code'], $x['activity_desc'], $x['moc_ref'], sd_d($x['start_date']) === '—' ? '' : sd_d($x['start_date']), sd_d($x['end_date']) === '—' ? '' : sd_d($x['end_date']), $x['claim_moc_ref'], $x['claim_amount'] === null ? '' : (float)$x['claim_amount'], $x['bws_sd'] === null ? '' : round((float)$x['bws_sd'], 2), $x['diff'] === null ? '' : $x['diff'], $x['cc_act'] === null ? '' : round((float)$x['cc_act'], 2), $x['balance'] === null ? '' : $x['balance']] as $i => $v)
             $sh->set($r, $i + 1, $v, ['border' => 1] + (in_array($i, [8, 9, 10, 11, 12], true) ? ['h' => 'right', 'nf' => 4] : []));
         $r++;
     }
     $sh->set($r, 8, 'TOTAL', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 9, round($tot, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 10, round($tot_bws, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 11, round($tot_diff, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 12, round($tot_cc, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]); $sh->set($r, 13, round($tot_bal, 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]);
-    foreach ([5, 14, 18, 40, 10, 13, 13, 13, 16, 20, 18, 20, 16, 18] as $i => $wd) $sh->widths[$i + 1] = $wd;
+    foreach ([5, 14, 18, 40, 10, 13, 13, 13, 16, 20, 18, 20, 16] as $i => $wd) $sh->widths[$i + 1] = $wd;
     $sh->freeze = [3, 0];
     $ms = $X->sheet('Monthly summary');
     $ms->set(1, 1, 'Scheme Discount — monthly summary by MOC Ref', ['b' => 1, 'sz' => 15]);
@@ -216,7 +210,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
 }
 ob_end_flush();
 include 'header.php';
-$active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) : '…') . ' → ' . ($f_to ? sd_d($f_to) : '…') : '', $f_moc !== '' ? 'MOC ' . $f_moc : '', $f_type !== '' ? $f_type : '', $f_cmoc !== '' ? 'Claim MOC ' . $f_cmoc : '', $f_src !== '' ? 'Source ' . $f_src : '', $f_claim === 'with' ? 'With claim' : ($f_claim === 'without' ? 'Without claim' : ''), $f_q !== '' ? '“' . $f_q . '”' : '']);
+$active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) : '…') . ' → ' . ($f_to ? sd_d($f_to) : '…') : '', $f_moc !== '' ? 'MOC ' . $f_moc : '', $f_type !== '' ? $f_type : '', $f_cmoc !== '' ? 'Claim MOC ' . $f_cmoc : '', $f_claim === 'with' ? 'With claim' : ($f_claim === 'without' ? 'Without claim' : ''), $f_q !== '' ? '“' . $f_q . '”' : '']);
 ?>
 <style>
 .sdr{max-width:none;width:100%;margin:0;padding:10px 12px;font-family:'Inter',system-ui,sans-serif;color:#111827}.sdr h2{margin:0 0 3px;font-size:22px}.sdr .sub{color:#6b7280;font-size:13px;margin:0 0 14px}
@@ -228,12 +222,11 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
 .sdr tfoot td{background:#fde68a;font-weight:800;position:sticky;bottom:0}.sdr .ty{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#ede9fe;color:#6d28d9}.sdr .ty.dmg{background:#fee2e2;color:#b91c1c}
 .sdr .bal{display:inline-block;min-width:92px;text-align:right;padding:3px 10px;border-radius:8px;font-weight:800}.sdr .bal.pos{background:#fee2e2;color:#b91c1c}.sdr .bal.neg{background:#dcfce7;color:#15803d}.sdr .bal.zero{background:#f1f5f9;color:#64748b}.sdr a.bwsl,.sdr a.ccl{color:#1d4ed8;text-decoration:none}.sdr a.ccl{color:#15803d}.sdr a:hover b{text-decoration:underline}.sdr small{color:#6b7280;font-weight:500}
 .sdr .sdtabs{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.sdr .sdtabs button{padding:8px 16px;border:1.5px solid #c7d2fe;background:#fff;color:#1e3a8a;border-radius:9px;font:600 13px inherit;cursor:pointer}.sdr .sdtabs button.on{background:#1e3a8a;color:#fff;border-color:#1e3a8a}.sdr tr.mocr{cursor:pointer}.sdr tr.mocr:hover td{background:#eef2ff}
-.sdr .sdsrc{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10.5px;font-weight:800}.sdr .sdsrc.status{background:#fef3c7;color:#92400e}.sdr .sdsrc.hul{background:#dbeafe;color:#1e40af}.sdr .sdsrc.tot{background:#ede9fe;color:#5b21b6}
 .sdr .fbody.collapsed{display:none}.sdr .ftog{cursor:pointer;display:flex;align-items:center;gap:10px;user-select:none}
 </style>
 <div class="sdr">
   <h2><i class="fa-solid fa-calendar-day" style="color:#1e3a8a"></i> Scheme Discount Daily Report</h2>
-  <p class="sub">Built from the 3 imports — the <b>Current Scheme Status</b> (claims) plus the <b>HUL</b> and <b>TOT Scheme Master</b> codes that are not in it (each scheme code once, no duplicates). Pick a day or a date range to see the schemes running in it.</p>
+  <p class="sub">From the uploaded <b>Current Scheme Status Report</b> (Vendor Ledger → Import). Schemes that are in the <b>HUL</b> or <b>TOT Scheme Master</b> but not yet in the status report are added as new rows (type HUL / TOT, each code once, no claim yet). Pick a day or a date range to see the schemes running in it.</p>
   <?php if (!$ready): ?><div class="card" style="color:#92400e;background:#fffbeb">No scheme status data yet — upload the Excel first in <a href="scheme_status_report.php">Current Scheme Status Import</a>.</div><?php endif; ?>
 
   <form class="card" method="get" id="sdForm">
@@ -244,7 +237,6 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
       <div class="fld"><label>MOC Ref</label><select name="moc"><option value="">All</option><?php foreach ($mocs as $m): ?><option <?= $f_moc === $m ? 'selected' : '' ?>><?= sd_h($m) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Activity type</label><select name="type"><option value="">All</option><?php foreach ($types as $t): ?><option <?= $f_type === $t ? 'selected' : '' ?>><?= sd_h($t) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Claim MOC Ref</label><select name="claim_moc"><option value="">All</option><?php foreach ($cmocs as $m): ?><option <?= $f_cmoc === $m ? 'selected' : '' ?>><?= sd_h($m) ?></option><?php endforeach; ?></select></div>
-      <div class="fld"><label>Source</label><select name="src"><option value="">HUL + TOT + Status</option><option value="STATUS" <?= $f_src === 'STATUS' ? 'selected' : '' ?>>Current Scheme Status</option><option value="HUL" <?= $f_src === 'HUL' ? 'selected' : '' ?>>HUL Scheme Master</option><option value="TOT" <?= $f_src === 'TOT' ? 'selected' : '' ?>>TOT Scheme Master</option></select></div>
       <div class="fld"><label>Claim</label><select name="claim"><option value="">All</option><option value="with" <?= $f_claim === 'with' ? 'selected' : '' ?>>With claim amount</option><option value="without" <?= $f_claim === 'without' ? 'selected' : '' ?>>Without claim</option></select></div>
       <div class="fld"><label>Search</label><input type="search" name="q" value="<?= sd_h($f_q) ?>" placeholder="activity code or description"></div>
       <button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Show</button><a class="btn o" href="scheme_discount_daily_report.php">Reset</a>
@@ -265,13 +257,13 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
   <?php endforeach; if (!$monthly): ?><tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:28px">No schemes for these filters.</td></tr><?php endif; ?></tbody>
   <?php if ($monthly): ?><tfoot><tr><td>TOTAL</td><td class="r"><?= number_format(array_sum(array_column($monthly, 'n'))) ?></td><td class="r"><?= number_format($tot, 2) ?></td><td class="r"><?= number_format($tot_bws, 2) ?></td><td class="r"><?= $tot_diff < 0 ? '(' . number_format(abs($tot_diff), 2) . ')' : number_format($tot_diff, 2) ?></td><td class="r"><?= number_format($tot_cc, 2) ?></td><td class="r"><?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></td></tr></tfoot><?php endif; ?></table></div></div>
 
-  <div id="sdDetail"><div class="tw"><table><thead><tr><th>#</th><th>Type</th><th>Scheme Activity Code</th><th>Scheme Activity Description</th><th>MOC Ref</th><th>Start Date</th><th>End Date</th><th class="r">Claim Amount</th><th class="r" title="Scheme discount + free value of every Bill Wise Scheme Analysis row with this scheme code — click to see the rows">Scheme Discount<br>as per Invoice<br><span style="font-weight:500;font-size:10px">click to open invoice rows</span></th><th class="r" title="Claim Amount minus Scheme Discount as per Invoice">Difference<br><span style="font-weight:500;font-size:10px">Claim Amount − invoice</span></th><th class="r" title="Actual amount (without VAT) of the Customer Claim Certificate rows whose claim description starts with this scheme no — click to see them">Claim Certificate<br>Actual Amount<br><span style="font-weight:500;font-size:10px">click to open claim rows</span></th><th class="r">Balance<br><span style="font-weight:500;font-size:10px">Claim Amount − actual amount</span></th><th>Source</th></tr></thead><tbody>
+  <div id="sdDetail"><div class="tw"><table><thead><tr><th>#</th><th>Type</th><th>Scheme Activity Code</th><th>Scheme Activity Description</th><th>MOC Ref</th><th>Start Date</th><th>End Date</th><th class="r">Claim Amount</th><th class="r" title="Scheme discount + free value of every Bill Wise Scheme Analysis row with this scheme code — click to see the rows">Scheme Discount<br>as per Invoice<br><span style="font-weight:500;font-size:10px">click to open invoice rows</span></th><th class="r" title="Claim Amount minus Scheme Discount as per Invoice">Difference<br><span style="font-weight:500;font-size:10px">Claim Amount − invoice</span></th><th class="r" title="Actual amount (without VAT) of the Customer Claim Certificate rows whose claim description starts with this scheme no — click to see them">Claim Certificate<br>Actual Amount<br><span style="font-weight:500;font-size:10px">click to open claim rows</span></th><th class="r">Balance<br><span style="font-weight:500;font-size:10px">Claim Amount − actual amount</span></th></tr></thead><tbody>
   <?php foreach ($items as $n => $x): ?><tr data-moc="<?= sd_h(trim((string)$x['moc_ref'])) ?>" data-claim="<?= (float)$x['claim_amount'] ?>" data-bws="<?= (float)$x['bws_sd'] ?>" data-diff="<?= (float)$x['diff'] ?>" data-cc="<?= (float)$x['cc_act'] ?>" data-bal="<?= (float)$x['balance'] ?>"><td class="sdn"><?= $n + 1 ?></td><td><span class="ty <?= $x['activity_type'] === 'DAMAGE' ? 'dmg' : '' ?>"><?= sd_h($x['activity_type']) ?></span></td><td><b><?= sd_h($x['activity_code']) ?></b></td><td><?= sd_h($x['activity_desc']) ?></td><td><?= sd_h($x['moc_ref']) ?></td><td><?= sd_d($x['start_date']) ?></td><td><?= sd_d($x['end_date']) ?></td><td class="r"><b><?= $x['claim_amount'] === null ? '—' : number_format((float)$x['claim_amount'], 2) ?></b></td>
     <td class="r"><?php if ($x['bws_sd'] !== null): ?><a href="#" class="bwsl" data-code="<?= sd_h(trim($x['activity_code'])) ?>" data-desc="<?= sd_h($x['activity_desc']) ?>" title="Show the <?= (int)$x['bws_n'] ?> bill wise rows"><b><?= number_format($x['bws_sd'], 2) ?></b></a><?php else: ?><span style="color:#cbd5e1" title="No Bill Wise Scheme Analysis rows for this code">—</span><?php endif; ?></td>
     <td class="r"><?php if ($x['diff'] !== null): $dc = $x['diff'] > 0.5 ? 'pos' : ($x['diff'] < -0.5 ? 'neg' : 'zero'); ?><span class="bal <?= $dc ?>"><?= $x['diff'] < 0 ? '(' . number_format(abs($x['diff']), 2) . ')' : number_format($x['diff'], 2) ?></span><?php else: ?><span style="color:#cbd5e1">—</span><?php endif; ?></td>
     <td class="r"><?php if ($x['cc_act'] !== null): ?><a href="#" class="ccl" data-code="<?= sd_h(trim($x['activity_code'])) ?>" data-desc="<?= sd_h($x['activity_desc']) ?>" title="Show the <?= (int)$x['cc_n'] ?> claim certificate rows"><b><?= number_format($x['cc_act'], 2) ?></b></a><?php else: ?><span style="color:#cbd5e1" title="No claim certificate rows with this scheme no in the description">—</span><?php endif; ?></td>
-    <td class="r"><?php if ($x['balance'] !== null): $bc = $x['balance'] > 0.5 ? 'pos' : ($x['balance'] < -0.5 ? 'neg' : 'zero'); ?><span class="bal <?= $bc ?>"><?= $x['balance'] < 0 ? '(' . number_format(abs($x['balance']), 2) . ')' : number_format($x['balance'], 2) ?></span><?php else: ?><span style="color:#cbd5e1">—</span><?php endif; ?></td><td style="white-space:nowrap"><?php foreach ($x['src'] as $sv): ?><span class="sdsrc <?= strtolower($sv) ?>"><?= sd_h($sv) ?></span> <?php endforeach; ?></td></tr>
-  <?php endforeach; if (!$items): ?><tr><td colspan="13" style="text-align:center;color:#9ca3af;padding:28px">No schemes for these filters.</td></tr><?php endif; ?></tbody>
+    <td class="r"><?php if ($x['balance'] !== null): $bc = $x['balance'] > 0.5 ? 'pos' : ($x['balance'] < -0.5 ? 'neg' : 'zero'); ?><span class="bal <?= $bc ?>"><?= $x['balance'] < 0 ? '(' . number_format(abs($x['balance']), 2) . ')' : number_format($x['balance'], 2) ?></span><?php else: ?><span style="color:#cbd5e1">—</span><?php endif; ?></td></tr>
+  <?php endforeach; if (!$items): ?><tr><td colspan="12" style="text-align:center;color:#9ca3af;padding:28px">No schemes for these filters.</td></tr><?php endif; ?></tbody>
   <?php if ($items): ?><tfoot><tr><td colspan="7" id="sdFN">TOTAL (<?= number_format(count($items)) ?> schemes)</td><td class="r" id="sdFC"><?= number_format($tot, 2) ?></td><td class="r" id="sdFB"><?= number_format($tot_bws, 2) ?></td><td class="r" id="sdFD"><?= $tot_diff < 0 ? '(' . number_format(abs($tot_diff), 2) . ')' : number_format($tot_diff, 2) ?></td><td class="r" id="sdFA"><?= number_format($tot_cc, 2) ?></td><td class="r" id="sdFL"><?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></td></tr></tfoot><?php endif; ?></table></div></div>
 </div>
 <div id="bwsM" style="position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px;font-family:'Inter',system-ui,sans-serif">
