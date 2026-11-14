@@ -300,7 +300,7 @@ body{background:radial-gradient(1200px 500px at 85% -10%,rgba(13,148,136,.10),tr
       </svg>
     </div>
     <div class="empty-title">Yelo<span>AI</span></div>
-    <div class="empty-sub">Your live business analyst — powered by Gemini. Ask about sales, routes, customers, or your system.</div>
+    <div class="empty-sub">Your business assistant. Ask about sales, customers, cheques, stock, schemes, staff or how a page of the system works — business questions only.</div>
     <div class="starter-grid">
       <div class="starter-card" onclick="starterSend(this)">
         <div class="starter-emoji">📊</div>
@@ -622,7 +622,7 @@ function clearChat(){
   es.innerHTML=`
     <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="#e8a020" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/></svg></div>
     <div class="empty-title">Yelo<span style="color:var(--brand)">AI</span></div>
-    <div class="empty-sub">Ask about sales, routes, customers, or how your system works.</div>
+    <div class="empty-sub">Business questions only — sales, customers, cheques, stock, schemes, staff, or how the system works.</div>
     <div class="starter-grid">
       <div class="starter-card" onclick="starterSend(this)"><div class="starter-emoji">📊</div><div class="starter-label">Today's sales summary</div></div>
       <div class="starter-card" onclick="starterSend(this)"><div class="starter-emoji">🏆</div><div class="starter-label">Top 5 routes by revenue</div></div>
