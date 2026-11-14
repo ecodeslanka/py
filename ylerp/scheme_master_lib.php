@@ -147,11 +147,7 @@ function sm_render(array $D, array $cfg) {
   <p class="sub">Pick <b>one or several</b> Excel files (e.g. <?= sm_h($cfg['example']) ?>). Only the <b style="background:#fef08a;padding:0 5px;border-radius:4px">yellow highlighted columns</b> are imported — <b>Activity Code, Activity Desc., <?= sm_h($cfg['cols']) ?></b>. The report repeats the same activity code on every SKU row; each <b>activity code is imported only once</b> (repeats and codes already imported are skipped).</p>
 
   <?php if ($can_add): ?>
-  <div class="card">
-    <h3><i class="fa-solid fa-file-arrow-up"></i> Upload Excel</h3>
-    <div class="row"><div class="fld"><label>Excel file(s) (.xlsx)</label><input type="file" id="smFile" accept=".xlsx,.xls" multiple></div><div style="font-size:12px;color:#6b7280;max-width:520px;align-self:center">Several files can be picked at once; each file is saved as its own upload.</div></div>
-    <div id="smMsg"></div>
-  </div>
+  <div style="margin-bottom:14px"><button class="btn" type="button" id="smOpenUp" style="padding:10px 20px;font-size:14px"><i class="fa-solid fa-file-arrow-up"></i> Import Excel</button></div>
   <?php endif; ?>
 
   <div class="card"><h3><i class="fa-solid fa-clock-rotate-left"></i> Uploads <?php if ($can_del && $uploads): ?><button class="btn r smDelAll" type="button" style="margin-left:auto;padding:5px 12px"><i class="fa-solid fa-trash-can"></i> Delete all uploaded</button><?php endif; ?></h3>
@@ -169,6 +165,14 @@ function sm_render(array $D, array $cfg) {
 </div>
 
 <?php if ($can_add): ?>
+<div class="smm sm" id="smUp"><div class="bx" style="max-width:640px;height:auto;max-height:90vh">
+  <div class="hd"><div style="font-weight:800;font-size:16px"><i class="fa-solid fa-file-arrow-up"></i> Import <?= sm_h($cfg['title']) ?> Excel</div><button class="btn o" id="smUpClose" type="button" style="margin-left:auto">Close</button></div>
+  <div style="padding:18px;overflow:auto">
+    <div class="fld"><label>Excel file(s) (.xlsx) — one or several</label><input type="file" id="smFile" accept=".xlsx,.xls" multiple></div>
+    <p style="font-size:12.5px;color:#6b7280;margin:10px 0 0">After you choose the file(s) a large preview opens. Only the yellow columns are read, each activity code once. Every file is saved as its own upload.</p>
+    <div id="smMsg"></div>
+  </div>
+</div></div>
 <div class="smm sm" id="smPrev"><div class="bx">
   <div class="hd"><div style="font-weight:800;font-size:16px"><i class="fa-solid fa-table-list"></i> Preview — <?= sm_h($cfg['title']) ?></div><div id="smPrevFile" style="opacity:.8;font-size:12.5px"></div>
     <div style="margin-left:auto;display:flex;gap:8px"><button class="btn g" id="smImport" type="button" disabled>Import</button><button class="btn o" id="smCancel" type="button">Cancel</button></div></div>
@@ -185,7 +189,7 @@ function sm_render(array $D, array $cfg) {
 (function(){
   var SELF=<?= json_encode($self) ?>;
   var $=function(i){ return document.getElementById(i); }, esc=function(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
-  document.body.appendChild($('smView')); if($('smPrev')) document.body.appendChild($('smPrev'));
+  document.body.appendChild($('smView')); if($('smPrev')) document.body.appendChild($('smPrev')); if($('smUp')) document.body.appendChild($('smUp'));
   function post(action,data){ var fd=new FormData(); fd.append('action',action); Object.keys(data||{}).forEach(function(k){ fd.append(k,data[k]); });
     return fetch(SELF,{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){ return r.json().catch(function(){ return {success:false,message:'Server error (blocked or invalid response).'}; }); }); }
   function pad(n){ return ('0'+n).slice(-2); }
@@ -212,6 +216,10 @@ function sm_render(array $D, array $cfg) {
     var seen={}, uniq=[]; rows.forEach(function(q){ var k=q.activity_code.toUpperCase().replace(/\.0+$/,''); if(!seen[k]){ seen[k]=1; uniq.push(q); } });
     return {rows:uniq,fileRows:total,moc:MOC};
   }
+  function openUp(){ $('smMsg').innerHTML=''; if($('smFile')) $('smFile').value=''; $('smUp').classList.add('open'); document.body.style.overflow='hidden'; }
+  function closeUp(){ $('smUp').classList.remove('open'); document.body.style.overflow=''; }
+  $('smOpenUp')&&$('smOpenUp').addEventListener('click',openUp); $('smUpClose')&&$('smUpClose').addEventListener('click',closeUp);
+  $('smUp')&&$('smUp').addEventListener('click',function(e){ if(e.target===this) closeUp(); });
   var FILES=[], ROWS=[];
   function readFile(f){ return new Promise(function(res){ var rd=new FileReader(); rd.onload=function(e){ try{ var o=parseBuf(e.target.result); o.name=f.name; res(o); }catch(err){ res({name:f.name,error:err.message,rows:[]}); } }; rd.onerror=function(){ res({name:f.name,error:'could not read the file',rows:[]}); }; rd.readAsArrayBuffer(f); }); }
   var fileEl=$('smFile'); if(fileEl) fileEl.addEventListener('change',function(){
@@ -228,7 +236,7 @@ function sm_render(array $D, array $cfg) {
       var b=s==='new'?'<span class="b new">NEW</span>':(s==='invalid'?'<span class="b bad">INVALID</span>':'<span class="b dup">'+(s==='dup_file'?'REPEAT IN UPLOAD':'ALREADY IMPORTED')+'</span>');
       h+='<tr class="'+(s==='new'?'':(s==='invalid'?'badr':'dupr'))+'"><td>'+(i+1)+'</td><td style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis">'+esc(FILES[r.__f].name)+'</td><td>'+b+'</td><td><b>'+esc(r.activity_code)+'</b></td><td>'+esc(r.activity_desc)+'</td><td>'+esc(r.date_from)+'</td><td>'+esc(r.date_to)+'</td><td>'+esc(r.moc_ref)+'</td></tr>'; });
     $('smPrevBody').innerHTML=h; $('smPrevFile').textContent=FILES.length+' file'+(FILES.length>1?'s':'')+' · each saved as its own upload'; $('smMsg').innerHTML=(errs.length?'<div class="al er">Skipped: '+errs.join('<br>')+'</div>':'');
-    $('smPrev').classList.add('open'); document.body.style.overflow='hidden';
+    $('smUp').classList.remove('open'); $('smPrev').classList.add('open'); document.body.style.overflow='hidden';
     $('smSum').innerHTML='<div class="al '+(cnt.new?'ok':'er')+'"><b>'+ROWS.length+'</b> unique activity codes in the files · <b>'+cnt.new+'</b> new · <b>'+(cnt.dup_file+cnt.dup_db)+'</b> already imported / repeated (skipped)'+(cnt.invalid?' · <b>'+cnt.invalid+'</b> invalid':'')+'</div>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'+FILES.map(function(o,fi){ return '<span class="b new" style="background:#eef2ff;color:#1e3a8a">'+esc(o.name)+' — '+o.fileRows+' rows → '+o.rows.length+' codes · '+per[fi].n+' new</span>'; }).join('')+'</div>';
     $('smImport').disabled=!cnt.new; $('smImport').innerHTML='<i class="fa-solid fa-check"></i> Import '+cnt.new+' new activity codes'; }
@@ -245,7 +253,7 @@ function sm_render(array $D, array $cfg) {
     }
     next(); });
   $('vClose')&&$('vClose').addEventListener('click',function(){ $('smView').classList.remove('open'); document.body.style.overflow=''; });
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ if($('smPrev')&&$('smPrev').classList.contains('open')) closePrev(); if($('smView').classList.contains('open')) $('vClose').click(); } });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ if($('smPrev')&&$('smPrev').classList.contains('open')) closePrev(); if($('smUp')&&$('smUp').classList.contains('open')) closeUp(); if($('smView').classList.contains('open')) $('vClose').click(); } });
   document.addEventListener('click',function(e){ var v=e.target.closest('[data-view]'); if(!v) return;
     $('vFile').textContent='Loading…'; $('vBody').innerHTML=''; $('vSum').innerHTML=''; $('smView').classList.add('open'); document.body.style.overflow='hidden';
     fetch(SELF+'?ajax=upload_rows&id='+encodeURIComponent(v.dataset.view),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
