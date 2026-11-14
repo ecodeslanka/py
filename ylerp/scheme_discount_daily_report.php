@@ -70,8 +70,13 @@ function sd_cc_tally($conn, array $codes, $withRows = false) {
                               FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' ORDER BY invoice_date, tax_invoice_no");
     while ($q && ($x = mysqli_fetch_assoc($q))) {
         $d = (string)$x['claim_description'];
-        [$no] = sd_scheme_fm($d); $no = sd_norm($no);
-        $hit = ($no !== '' && isset($set[$no])) ? $no : null;      // scheme no by the F / M rule must be one of the report's scheme nos
+        $hit = null;
+        $first = sd_norm(explode('-', $d, 2)[0]);
+        if ($first !== '' && isset($set[$first])) $hit = $first;          // the part before the first "-" is the scheme no …
+        else foreach (preg_split('/[^A-Za-z0-9]+/', $d, -1, PREG_SPLIT_NO_EMPTY) as $t) {   // … else any scheme no written anywhere in the description
+            $t = sd_norm($t);
+            if (isset($set[$t])) { $hit = $t; break; }
+        }
         if ($hit === null) continue;
         if (!isset($out[$hit])) $out[$hit] = ['n' => 0, 'act' => 0.0, 'vat' => 0.0, 'rows' => []];
         $out[$hit]['n']++; $out[$hit]['act'] += (float)$x['actual_amount']; $out[$hit]['vat'] += (float)$x['vat_amount'];
