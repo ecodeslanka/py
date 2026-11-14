@@ -96,6 +96,8 @@ $f_type  = trim($_GET['type'] ?? '');
 $f_cmoc  = trim($_GET['claim_moc'] ?? '');
 $f_q     = trim($_GET['q'] ?? '');
 $f_claim = in_array($_GET['claim'] ?? '', ['', 'with', 'without'], true) ? ($_GET['claim'] ?? '') : '';
+$AMT = ['cc_same' => 'Claim = certificate (balance 0)', 'cc_diff' => 'Claim ≠ certificate (balance to pay)', 'cc_excess' => 'Certificate higher (excess)', 'cc_none' => 'No certificate yet', 'inv_same' => 'Claim = invoice discount (difference 0)', 'inv_diff' => 'Claim ≠ invoice discount'];
+$f_amt   = isset($AMT[$_GET['amt'] ?? '']) ? $_GET['amt'] : '';
 
 $items = []; $mocs = $types = $cmocs = [];
 if ($ready) {
@@ -166,6 +168,20 @@ foreach ($items as &$__x) {
     $__x['balance'] = ($has_claim || $c2) ? sd_zero(round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($c2 ? $c2['act'] : 0) - ($c2 ? (float)$c2['vat'] : 0), 2)) : null;     // Claim Amount − claim certificate actual amount − the certificate's VAT amount;     // Claim Amount − claim certificate actual amount. Under Rs. 5 either way (0.01, 1.70) → 0; a certificate HIGHER than the claim by more than Rs. 5 = EXCESS (over paid) → shown as a negative (bracket) balance
     if (!empty($__x['is_new'])) { $__x['diff'] = 0.0; $__x['balance'] = 0.0; }      // new scheme (HUL / TOT) with no claim amount: difference and balance are 0
 } unset($__x);
+/* amount filter — rows whose amounts are the same / different (works on the final, calculated figures) */
+if ($f_amt !== '') $items = array_values(array_filter($items, function ($x) use ($f_amt) {
+    $z = fn($v) => $v === null || abs((float)$v) < 0.005;
+    $hasClaim = $x['claim_amount'] !== null && (float)$x['claim_amount'] > 0;
+    switch ($f_amt) {
+        case 'cc_same':   return $hasClaim && $x['cc_act'] !== null && $z($x['balance']);
+        case 'cc_diff':   return $x['cc_act'] !== null && $x['balance'] !== null && (float)$x['balance'] > 0.005;
+        case 'cc_excess': return $x['balance'] !== null && (float)$x['balance'] < -0.005;
+        case 'cc_none':   return $hasClaim && $x['cc_act'] === null;
+        case 'inv_same':  return $hasClaim && $x['bws_sd'] !== null && $z($x['diff']);
+        case 'inv_diff':  return $x['diff'] !== null && !$z($x['diff']);
+    }
+    return true;
+}));
 $tot = array_sum(array_map(fn($x) => (float)$x['claim_amount'], $items));
 $tot_bws = array_sum(array_map(fn($x) => (float)$x['bws_sd'], $items));
 $tot_cc  = array_sum(array_map(fn($x) => (float)$x['cc_act'], $items));
@@ -212,7 +228,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
 }
 ob_end_flush();
 include 'header.php';
-$active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) : '…') . ' → ' . ($f_to ? sd_d($f_to) : '…') : '', $f_moc !== '' ? 'MOC ' . $f_moc : '', $f_type !== '' ? $f_type : '', $f_cmoc !== '' ? 'Claim MOC ' . $f_cmoc : '', $f_claim === 'with' ? 'With claim' : ($f_claim === 'without' ? 'Without claim' : ''), $f_q !== '' ? '“' . $f_q . '”' : '']);
+$active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) : '…') . ' → ' . ($f_to ? sd_d($f_to) : '…') : '', $f_moc !== '' ? 'MOC ' . $f_moc : '', $f_type !== '' ? $f_type : '', $f_cmoc !== '' ? 'Claim MOC ' . $f_cmoc : '', $f_amt !== '' ? $AMT[$f_amt] : '', $f_claim === 'with' ? 'With claim' : ($f_claim === 'without' ? 'Without claim' : ''), $f_q !== '' ? '“' . $f_q . '”' : '']);
 ?>
 <style>
 .sdr{max-width:none;width:100%;margin:0;padding:10px 12px;font-family:'Inter',system-ui,sans-serif;color:#111827}.sdr h2{margin:0 0 3px;font-size:22px}.sdr .sub{color:#6b7280;font-size:13px;margin:0 0 14px}
@@ -240,6 +256,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
       <div class="fld"><label>MOC Ref</label><select name="moc"><option value="">All</option><?php foreach ($mocs as $m): ?><option <?= $f_moc === $m ? 'selected' : '' ?>><?= sd_h($m) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Activity type</label><select name="type"><option value="">All</option><?php foreach ($types as $t): ?><option <?= $f_type === $t ? 'selected' : '' ?>><?= sd_h($t) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Claim MOC Ref</label><select name="claim_moc"><option value="">All</option><?php foreach ($cmocs as $m): ?><option <?= $f_cmoc === $m ? 'selected' : '' ?>><?= sd_h($m) ?></option><?php endforeach; ?></select></div>
+      <div class="fld"><label>Amounts</label><select name="amt"><option value="">All rows</option><?php foreach ($AMT as $k => $l): ?><option value="<?= $k ?>" <?= $f_amt === $k ? 'selected' : '' ?>><?= sd_h($l) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Claim</label><select name="claim"><option value="">All</option><option value="with" <?= $f_claim === 'with' ? 'selected' : '' ?>>With claim amount</option><option value="without" <?= $f_claim === 'without' ? 'selected' : '' ?>>Without claim</option></select></div>
       <div class="fld"><label>Search</label><input type="search" name="q" value="<?= sd_h($f_q) ?>" placeholder="activity code or description"></div>
       <button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Show</button><a class="btn o" href="scheme_discount_daily_report.php">Reset</a>
