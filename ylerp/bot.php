@@ -160,6 +160,23 @@ body{background:radial-gradient(1200px 500px at 85% -10%,rgba(13,148,136,.10),tr
 .think-box{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink1)}.think-box b{color:var(--brand)}
 .checked{margin-top:10px;font-size:11.5px;color:var(--ink2);border:1px dashed var(--line);border-radius:10px;padding:6px 10px;background:var(--bg1)}
 .checked summary{cursor:pointer;font-weight:600;color:var(--ink1)}.checked div{margin-top:5px;line-height:1.55}.checked code{font-size:10.5px}
+/* ── history + training ── */
+.hist-new{width:100%;padding:9px 12px;border-radius:10px;border:1.5px dashed var(--brand);background:transparent;color:var(--brand);font:700 13px var(--fn);cursor:pointer;margin-bottom:8px}.hist-new:hover{background:var(--brand);color:#fff}
+.hist-item{display:flex;align-items:center;gap:6px;padding:8px 9px;border-radius:9px;cursor:pointer;margin-bottom:2px;border:1px solid transparent}.hist-item:hover{background:var(--bg2);border-color:var(--line)}.hist-item.cur{background:var(--bg2);border-color:var(--brand)}
+.hist-item .t{flex:1;min-width:0;font-size:12.5px;color:var(--ink0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hist-item .d{font-size:10px;color:var(--ink2);font-family:var(--mono);display:block}
+.hist-item button{border:none;background:none;color:var(--ink2);cursor:pointer;font-size:14px;padding:2px 5px;border-radius:6px}.hist-item button:hover{background:rgba(220,38,38,.12);color:#dc2626}
+.hist-all{border:none;background:none;color:var(--ink2);font:600 11px var(--mono);cursor:pointer;padding:4px 2px}.hist-all:hover{color:#dc2626}
+.fb{display:inline-flex;gap:4px;margin-left:auto}.fb button{border:1px solid var(--line);background:var(--bg1);border-radius:99px;padding:3px 9px;cursor:pointer;font-size:13px}.fb button:hover,.fb button.on{background:var(--brand);border-color:var(--brand)}
+.tr-overlay{position:fixed;inset:0;background:rgba(10,18,36,.65);z-index:2147483000;display:none;align-items:center;justify-content:center;padding:12px}.tr-overlay.open{display:flex}
+.tr-box{background:var(--bg0);color:var(--ink0);border-radius:16px;width:100%;max-width:820px;max-height:94vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.tr-head{padding:14px 16px;background:linear-gradient(120deg,#0f1b33,#16306b 60%,#0d9488);color:#fff;display:flex;align-items:center;gap:10px}.tr-head b{font-size:15px}.tr-head button{margin-left:auto;border:none;background:rgba(255,255,255,.15);color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:700}
+.tr-tabs{display:flex;gap:6px;padding:10px 14px 0}.tr-tabs button{border:1px solid var(--line);background:var(--bg1);color:var(--ink1);padding:6px 14px;border-radius:99px;font:600 12px var(--fn);cursor:pointer}.tr-tabs button.on{background:var(--ink0);color:var(--bg0)}
+.tr-body{padding:12px 14px 16px;overflow:auto;flex:1}.tr-form{display:grid;gap:8px;background:var(--bg1);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+.tr-form select,.tr-form input,.tr-form textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--ai-bg);color:var(--ink0);font:13px var(--fn);outline:none}.tr-form textarea{min-height:90px;resize:vertical}
+.tr-form .row{display:flex;gap:8px;flex-wrap:wrap}.tr-btn{padding:8px 16px;border:none;border-radius:9px;background:linear-gradient(135deg,#1d4ed8,#0d9488);color:#fff;font:700 12.5px var(--fn);cursor:pointer}.tr-btn.o{background:var(--bg2);color:var(--ink0)}
+.kb-item{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:8px;background:var(--ai-bg)}.kb-item.off{opacity:.5}.kb-item .q{font-weight:700;font-size:13px}.kb-item .a{font-size:12.5px;color:var(--ink1);margin-top:3px;white-space:pre-wrap}
+.kb-item .m{display:flex;gap:6px;align-items:center;margin-top:7px;font-size:10.5px;color:var(--ink2);font-family:var(--mono);flex-wrap:wrap}.kb-item .m button{border:1px solid var(--line);background:var(--bg1);border-radius:7px;padding:2px 9px;cursor:pointer;color:var(--ink1);font-size:11px}
+.cat{font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;background:rgba(13,148,136,.15);color:var(--brand);text-transform:uppercase;letter-spacing:.06em}
 /* ── responsive: centred reading column on tablets / desktops, comfortable touch targets on phones ── */
 .bubble{overflow-wrap:anywhere}
 .bubble .tbl-scroll{overflow-x:auto;margin:8px 0;-webkit-overflow-scrolling:touch}
@@ -200,6 +217,15 @@ body{background:radial-gradient(1200px 500px at 85% -10%,rgba(13,148,136,.10),tr
   </div>
   <div class="drawer-body">
     <div class="drawer-section">
+      <div class="drawer-section-title">🕘 Chat history <button class="hist-all" id="histAll" type="button" onclick="deleteAllHistory()" style="float:right">delete all</button></div>
+      <button class="hist-new" type="button" onclick="newChat()">＋ New chat</button>
+      <div id="histList"><div class="drawer-item" style="color:var(--ink2)">Loading…</div></div>
+    </div>
+    <div class="drawer-section" id="trainSec" style="display:none">
+      <div class="drawer-section-title">🎓 Training</div>
+      <div class="drawer-item" onclick="openTrain()">Train the bot with company Q&amp;A, rules and terms</div>
+    </div>
+    <div class="drawer-section">
       <div class="drawer-section-title">📊 Sales Data</div>
       <div class="drawer-item" onclick="drawerSend(this)">Total imports today with status</div>
       <div class="drawer-item" onclick="drawerSend(this)">Top 5 routes by gross sales</div>
@@ -215,7 +241,7 @@ body{background:radial-gradient(1200px 500px at 85% -10%,rgba(13,148,136,.10),tr
       <div class="drawer-item" onclick="drawerSend(this)">List all PHP pages in this project</div>
       <div class="drawer-item" onclick="drawerSend(this)">How does the invoice import work</div>
       <div class="drawer-item" onclick="drawerSend(this)">How does AI chatbot system work</div>
-      <div class="drawer-item" onclick="drawerSend(this)">How is Gemini API key managed</div>
+      <div class="drawer-item" onclick="drawerSend(this)">How is the AI key managed</div>
     </div>
     <div class="drawer-section">
       <div class="drawer-section-title">🧭 System menu (pages you can open)</div>
@@ -361,9 +387,26 @@ body{background:radial-gradient(1200px 500px at 85% -10%,rgba(13,148,136,.10),tr
       </button>
     </div>
   </div>
-  <div class="disclaimer-sm">Yelo AI · Gemini 2.5 Flash · checks the database, menu and project files · Verify critical figures</div>
+  <div class="disclaimer-sm">Powered by <b>ECODES AI</b> · checks the database, menu and project files · Verify critical figures</div>
 </div>
 
+<div class="tr-overlay" id="trainM"><div class="tr-box">
+  <div class="tr-head"><b>🎓 Train the bot — company knowledge</b><button type="button" onclick="closeTrain()">Close</button></div>
+  <div class="tr-tabs"><button class="on" id="trTab1" onclick="trTab(1)">Knowledge</button><button id="trTab2" onclick="trTab(2)">Needs review <span id="fbCount"></span></button></div>
+  <div class="tr-body">
+    <div id="trPane1">
+      <div class="tr-form">
+        <input type="hidden" id="kbId"><input type="hidden" id="kbFb">
+        <select id="kbCat"><option value="faq">FAQ — a fixed answer to a common question</option><option value="rule">Rule — how the bot must always work / calculate</option><option value="glossary">Term — what a company word means</option><option value="report">Report hint — which page / report to use for what</option></select>
+        <input id="kbQ" placeholder="Question / topic  (e.g. What is a policy violation?)" maxlength="600">
+        <textarea id="kbA" placeholder="The correct answer, rule or meaning — exactly how you want the bot to answer" maxlength="4000"></textarea>
+        <div class="row"><button class="tr-btn" type="button" onclick="saveKb()">💾 Save</button><button class="tr-btn o" type="button" onclick="resetKb()">Clear form</button><span id="kbMsg" style="font-size:12px;color:var(--ink2);align-self:center"></span></div>
+      </div>
+      <div id="kbList"></div>
+    </div>
+    <div id="trPane2" style="display:none"><div id="fbList"></div></div>
+  </div>
+</div></div>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 <script>
@@ -377,6 +420,8 @@ let chartInstances = {};
 let chartCounter = 0;
 let micRecog = null;
 let micActive = false;
+let convId = 0, canTrain = false, lastQ = '';
+try{ convId = parseInt(localStorage.getItem('yelo-conv')||'0',10)||0; }catch(e){}
 
 /* ── THEME ────────────────────────────────────────── */
 (function(){ if(localStorage.getItem('yelo-dark')==='1') document.documentElement.setAttribute('data-dark',''); })();
@@ -470,6 +515,10 @@ function appendAiMsg(data){
   tbs.forEach((t,ti)=>{ if(!t.rows||!t.rows.length) return; const nm=(tbs.length>1?' '+(ti+1):'');
     const b1=document.createElement('button'); b1.className='act-btn'; b1.type='button'; b1.title=t.title||''; b1.textContent='⬇ Excel'+nm; b1.onclick=()=>exportRows(t,'xlsx'); acts.appendChild(b1);
     const b2=document.createElement('button'); b2.className='act-btn'; b2.type='button'; b2.title=t.title||''; b2.textContent='⬇ CSV'+nm; b2.onclick=()=>exportRows(t,'csv'); acts.appendChild(b2); });
+  if(data.message_id){ const fb=document.createElement('span'); fb.className='fb';
+    const up=document.createElement('button'); up.type='button'; up.title='Good answer'; up.textContent='👍'; up.onclick=()=>sendFeedback(data.message_id,1,data._q||lastQ,up);
+    const dn=document.createElement('button'); dn.type='button'; dn.title='Wrong / not helpful'; dn.textContent='👎'; dn.onclick=()=>sendFeedback(data.message_id,-1,data._q||lastQ,dn);
+    fb.appendChild(up); fb.appendChild(dn); acts.appendChild(fb); }
   if(acts.children.length) bubble.appendChild(acts);
 
   // how it was checked (no SQL is ever shown)
@@ -611,7 +660,8 @@ function toggleMic(){
 }
 
 /* ── CLEAR ────────────────────────────────────────── */
-function clearChat(){
+function clearChat(){ newChat(); }
+function resetChatView(){
   chatHistory=[];
   Object.values(chartInstances).forEach(c=>{try{c.destroy();}catch(e){}});
   chartInstances={};
@@ -641,6 +691,68 @@ function clearChat(){
      { success:bool, answer:string, sql:string, explanation:string,
        row_count:int, code_context:bool, message?:string }
 ─────────────────────────────────────────────────────────────────────────────── */
+/* ── CHAT HISTORY (saved per user on the server) ── */
+function api(action,data){ return fetch(API_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(Object.assign({action},data||{}))}).then(r=>r.text()).then(t=>{ try{ return JSON.parse(t); }catch(e){ return {success:false,message:'Server did not return JSON (are you logged in?)'}; } }); }
+function setConv(id){ convId=id||0; try{ localStorage.setItem('yelo-conv',String(convId)); }catch(e){} }
+function newChat(){ setConv(0); resetChatView(); closeDrawer(); loadHistory(); }
+function loadHistory(){
+  api('conv_list').then(d=>{
+    const box=document.getElementById('histList'); if(!d.success){ box.innerHTML='<div class="drawer-item" style="color:var(--ink2)">'+escHtml(d.message||'History not available')+'</div>'; return; }
+    canTrain=!!d.can_train; document.getElementById('trainSec').style.display=canTrain?'block':'none';
+    box.innerHTML=(d.items||[]).map(c=>`<div class="hist-item${c.id==convId?' cur':''}" onclick="openConv(${c.id})"><div class="t">${escHtml(c.title)}<span class="d">${escHtml(c.updated_at||'')} · ${c.n} msgs</span></div><button type="button" title="Delete" onclick="event.stopPropagation();deleteConv(${c.id})">🗑</button></div>`).join('')||'<div class="drawer-item" style="color:var(--ink2)">No saved chats yet</div>';
+  });
+}
+function openConv(id){
+  api('conv_load',{id}).then(d=>{
+    if(!d.success){ appendSys(d.message||'Could not open the chat'); if(id==convId) setConv(0); return; }
+    setConv(id); resetChatView(); removeEmptyState(); chatHistory=[]; let q='';
+    (d.messages||[]).forEach(m=>{
+      if(m.role==='user'){ q=m.text; appendUserMsg(m.text); chatHistory.push({role:'user',text:m.text}); }
+      else { const meta=m.meta||{}; appendAiMsg(Object.assign({},meta,{answer:m.text,message_id:m.id,_q:q})); chatHistory.push({role:'model',text:m.text}); }
+    });
+    closeDrawer(); loadHistory(); setTimeout(()=>{ const m=document.getElementById('messages'); m.scrollTop=m.scrollHeight; },60);
+  });
+}
+function deleteConv(id){ if(!confirm('Delete this chat from your history?')) return; api('conv_delete',{id}).then(()=>{ if(id==convId) newChat(); else loadHistory(); }); }
+function deleteAllHistory(){ if(!confirm('Delete ALL your saved chats? This cannot be undone.')) return; api('conv_clear').then(()=>newChat()); }
+
+/* ── FEEDBACK on answers ── */
+function sendFeedback(mid,rating,q,btn){
+  let comment=''; if(rating<0){ const c=prompt('What was wrong? (optional — helps the company teach the bot)',''); if(c===null) return; comment=c; }
+  api('feedback',{message_id:mid,rating,comment}).then(d=>{
+    if(!d.success){ appendSys(d.message||'Could not save feedback'); return; }
+    btn.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on')); btn.classList.add('on'); appendSys(rating>0?'Thanks — noted.':'Thanks — saved for the company to review.');
+    if(rating<0&&canTrain&&confirm('Teach the bot the correct answer now?')) openTrain(q||'');
+  });
+}
+
+/* ── TRAINING (company knowledge) — only for users who may edit AI Settings ── */
+let KB=[], FB=[];
+function openTrain(prefillQ){ document.getElementById('trainM').classList.add('open'); closeDrawer(); loadKb(); resetKb(); if(prefillQ){ trTab(1); document.getElementById('kbQ').value=prefillQ; document.getElementById('kbA').focus(); } }
+function closeTrain(){ document.getElementById('trainM').classList.remove('open'); }
+function trTab(n){ document.getElementById('trPane1').style.display=n===1?'block':'none'; document.getElementById('trPane2').style.display=n===2?'block':'none'; document.getElementById('trTab1').classList.toggle('on',n===1); document.getElementById('trTab2').classList.toggle('on',n===2); }
+function loadKb(){ api('kb_list').then(d=>{ if(!d.success){ document.getElementById('kbList').innerHTML='<p style="color:#dc2626">'+escHtml(d.message||'Not allowed')+'</p>'; return; } KB=d.items||[]; FB=d.feedback||[]; renderKb(); renderFb(); }); }
+const CATN={faq:'FAQ',rule:'Rule',glossary:'Term',report:'Report hint'};
+function renderKb(){
+  document.getElementById('kbList').innerHTML=KB.map(k=>`<div class="kb-item${k.active==1?'':' off'}"><span class="cat">${CATN[k.category]||k.category}</span> <span class="q">${escHtml(k.question)}</span><div class="a">${escHtml(k.answer)}</div>
+    <div class="m"><span>${escHtml(k.created_by||'')} · ${escHtml(k.updated_at||'')}</span><button onclick="editKb(${k.id})">Edit</button><button onclick="toggleKb(${k.id})">${k.active==1?'Turn off':'Turn on'}</button><button onclick="delKb(${k.id})" style="color:#dc2626">Delete</button></div></div>`).join('')||'<p style="color:var(--ink2)">Nothing taught yet. Add the first question and answer above — the bot will use it from the next message.</p>';
+}
+function renderFb(){
+  document.getElementById('fbCount').textContent=FB.length?'('+FB.length+')':'';
+  document.getElementById('fbList').innerHTML=FB.map(f=>`<div class="kb-item"><span class="cat" style="${f.rating>0?'':'background:rgba(220,38,38,.15);color:#dc2626'}">${f.rating>0?'👍':'👎'}</span> <span class="q">${escHtml(f.question||'')}</span><div class="a"><b>Bot answered:</b> ${escHtml((f.answer||'').slice(0,500))}${f.comment?'\n<b>'+escHtml(f.username||'user')+' said:</b> '+escHtml(f.comment):''}</div>
+    <div class="m"><span>${escHtml(f.username||'')} · ${escHtml(f.created_at||'')}</span><button onclick="teachFrom(${f.id})">Teach the correct answer</button><button onclick="fbDone(${f.id})">Dismiss</button></div></div>`).join('')||'<p style="color:var(--ink2)">No answers waiting for review.</p>';
+}
+function teachFrom(id){ const f=FB.find(x=>x.id==id); if(!f) return; trTab(1); resetKb(); document.getElementById('kbQ').value=f.question||''; document.getElementById('kbFb').value=id; document.getElementById('kbA').focus(); }
+function fbDone(id){ api('kb_feedback_done',{id}).then(loadKb); }
+function resetKb(){ ['kbId','kbFb','kbQ','kbA'].forEach(i=>document.getElementById(i).value=''); document.getElementById('kbCat').value='faq'; document.getElementById('kbMsg').textContent=''; }
+function editKb(id){ const k=KB.find(x=>x.id==id); if(!k) return; trTab(1); document.getElementById('kbId').value=k.id; document.getElementById('kbCat').value=k.category; document.getElementById('kbQ').value=k.question; document.getElementById('kbA').value=k.answer; document.getElementById('kbQ').focus(); }
+function saveKb(){
+  const body={id:document.getElementById('kbId').value,category:document.getElementById('kbCat').value,question:document.getElementById('kbQ').value,answer:document.getElementById('kbA').value,feedback_id:document.getElementById('kbFb').value};
+  api('kb_save',body).then(d=>{ if(d.success){ resetKb(); document.getElementById('kbMsg').textContent='Saved ✔'; loadKb(); } else document.getElementById('kbMsg').textContent=d.message||'Could not save'; });
+}
+function toggleKb(id){ api('kb_toggle',{id}).then(loadKb); }
+function delKb(id){ if(confirm('Delete this knowledge entry?')) api('kb_delete',{id}).then(loadKb); }
+
 /* ── IMAGES: attach · camera · paste · drag-drop → resized in the browser (max 1600 px, JPEG) → scanned by the backend ── */
 let attachments=[]; let scanMode='auto';
 function openPicker(mode){ if(mode) setMode(mode); closeDrawer(); document.getElementById('fileGallery').click(); }
@@ -699,6 +811,8 @@ function renderMenu(){
     +(!q&&MENU.length>25?`<div class="drawer-item" style="color:var(--ink2)">… ${MENU.length-25} more — type to search</div>`:'')||'<div class="drawer-item" style="color:var(--ink2)">No page found</div>';
 }
 loadMenu();
+loadHistory();
+if(convId>0) openConv(convId);
 
 /* ── SEND MESSAGE ─────────────────────────────────────────────────────────────
    POST JSON: { message, history:[{role,text}], images:[{mime,data(base64)}], mode:'auto|cheque|invoice|document' }
@@ -728,7 +842,7 @@ async function sendMessage(){
     const res=await fetch(API_ENDPOINT,{
       method:'POST', credentials:'same-origin',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ message:text, history:chatHistory.slice(0,-1).slice(-10), images:imgs.map(a=>({mime:a.mime,data:a.data})), mode:scanMode, deep:deepOn })
+      body:JSON.stringify({ message:text, conv_id:convId, history:chatHistory.slice(0,-1).slice(-10), images:imgs.map(a=>({mime:a.mime,data:a.data})), mode:scanMode, deep:deepOn })
     });
     let data; const raw=await res.text();
     try{ data=JSON.parse(raw); }catch(e){ throw new Error(res.ok?'The server did not return JSON (you may have been logged out — reload the page).':'Server returned HTTP '+res.status); }
@@ -736,6 +850,7 @@ async function sendMessage(){
       appendErrMsg('⚠️ '+(data.message||'Unknown error from server.'));
       chatHistory.pop();
     } else {
+      lastQ=text; data._q=text; if(data.conv_id){ setConv(data.conv_id); loadHistory(); }
       appendAiMsg(data);
       chatHistory.push({role:'model', text: data.answer||''});
     }

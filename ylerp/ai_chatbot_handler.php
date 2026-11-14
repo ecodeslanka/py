@@ -369,7 +369,7 @@ function gemini_call(array $messages, string $system, string $endpoint, array $o
     }
     if ($err) throw new RuntimeException("cURL error: $err");
     $resp = json_decode($raw, true);
-    if (isset($resp['error'])) throw new RuntimeException('Gemini API error: ' . ($resp['error']['message'] ?? json_encode($resp['error'])));
+    if (isset($resp['error'])) throw new RuntimeException('AI service error: ' . brand_clean($resp['error']['message'] ?? json_encode($resp['error'])));
     $txt = '';
     foreach (($resp['candidates'][0]['content']['parts'] ?? []) as $p) $txt .= $p['text'] ?? '';
     return $txt;
@@ -549,6 +549,72 @@ function scope_check(string $message, array $history, string $endpoint): array {
     return ['ok' => true];
 }
 
+// ── Chat history, company knowledge ("training") and feedback — stored in the database ─────────
+function bot_ensure(mysqli $conn): void {
+    static $done = false; if ($done) return; $done = true;
+    $flag = rtrim(sys_get_temp_dir(), '/\\') . '/yms_bot_tables_v2_' . md5(__DIR__) . '.flag';
+    if (is_file($flag)) return;
+    foreach ([
+        "CREATE TABLE IF NOT EXISTS bot_conversations (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, title VARCHAR(160) NOT NULL DEFAULT 'New chat', deleted TINYINT(1) NOT NULL DEFAULT 0, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, INDEX idx_user (user_id, deleted, updated_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        "CREATE TABLE IF NOT EXISTS bot_messages (id INT AUTO_INCREMENT PRIMARY KEY, conv_id INT NOT NULL, role VARCHAR(8) NOT NULL, text MEDIUMTEXT NOT NULL, meta MEDIUMTEXT NULL, created_at DATETIME NOT NULL, INDEX idx_conv (conv_id, id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        "CREATE TABLE IF NOT EXISTS bot_knowledge (id INT AUTO_INCREMENT PRIMARY KEY, category VARCHAR(12) NOT NULL DEFAULT 'faq', question VARCHAR(600) NOT NULL, answer TEXT NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1, created_by VARCHAR(100) NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, INDEX idx_active (active, category)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        "CREATE TABLE IF NOT EXISTS bot_feedback (id INT AUTO_INCREMENT PRIMARY KEY, message_id INT NOT NULL, user_id INT NOT NULL, username VARCHAR(100) NULL, rating TINYINT NOT NULL, comment VARCHAR(500) NULL, question TEXT NULL, answer MEDIUMTEXT NULL, handled TINYINT(1) NOT NULL DEFAULT 0, created_at DATETIME NOT NULL, UNIQUE KEY uq_msg_user (message_id, user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    ] as $sql) mysqli_query($conn, $sql);
+    @file_put_contents($flag, '1');
+}
+function bot_can_train(): bool { return function_exists('rbac_can') ? (bool)rbac_can('edit', 'ai_settings') : true; }
+/** the company's own name for the assistant — the underlying AI model is never named to users */
+function brand_clean(string $t): string { return preg_replace(['/google\s+gemini/i', '/\bgemini(?:-[\w.\-]+)?\b/i', '/\bgoogle\s+ai\b/i'], 'ECODES AI', $t); }
+function kb_tokens(string $s): array {
+    static $stop = ['the','and','for','with','from','what','how','are','was','were','this','that','show','tell','give','can','you','please','about','have','has','does','did','all','any','our','your','who','which','when','where','why','list','get'];
+    $w = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($s), -1, PREG_SPLIT_NO_EMPTY); $o = [];
+    foreach ($w as $x) if (mb_strlen($x) > 2 && !in_array($x, $stop, true)) $o[$x] = true;
+    return array_keys($o);
+}
+/** company knowledge relevant to the question; 'direct' = a stored FAQ answer that matches the question almost word for word */
+function kb_context(mysqli $conn, string $message): array {
+    $out = ['text' => '', 'direct' => null, 'used' => 0];
+    $r = mysqli_query($conn, "SELECT id, category, question, answer FROM bot_knowledge WHERE active = 1 ORDER BY id DESC LIMIT 800");
+    if (!$r) return $out;
+    $qt = kb_tokens($message); $rules = []; $scored = []; $best = null; $bestJ = 0;
+    while ($x = mysqli_fetch_assoc($r)) {
+        $kt = kb_tokens($x['question']); $inter = count(array_intersect($qt, $kt)); $union = max(1, count(array_unique(array_merge($qt, $kt)))); $j = $inter / $union;
+        if ($x['category'] === 'faq' && $j > $bestJ) { $bestJ = $j; $best = $x; }
+        if ($x['category'] === 'rule') { $rules[] = $x; continue; }
+        if ($inter >= 1 && ($inter / max(1, count($qt)) >= 0.34 || $j >= 0.25)) $scored[] = [$j + $inter * 0.01, $x];
+    }
+    if ($best && $bestJ >= 0.72 && count($qt) >= 2) $out['direct'] = $best;
+    usort($scored, fn($a, $b) => $b[0] <=> $a[0]);
+    $pick = array_merge(array_slice($rules, 0, 15), array_map(fn($p) => $p[1], array_slice($scored, 0, 10)));
+    if (!$pick) return $out;
+    $t = "=== COMPANY KNOWLEDGE (set by the company owners — AUTHORITATIVE: follow it over any assumption; still verify numbers with the data) ===\n";
+    foreach ($pick as $k) $t .= ($k['category'] === 'rule' ? '[RULE] ' : ($k['category'] === 'glossary' ? '[TERM] ' : '[Q&A] ')) . trim($k['question']) . ' → ' . trim($k['answer']) . "\n";
+    $out['text'] = $t; $out['used'] = count($pick);
+    return $out;
+}
+function conv_owner(mysqli $conn, int $id, int $uid): bool {
+    if ($id <= 0) return false; $r = mysqli_query($conn, "SELECT id FROM bot_conversations WHERE id = $id AND user_id = $uid AND deleted = 0"); return $r && mysqli_num_rows($r) > 0;
+}
+function conv_history(mysqli $conn, int $convId, int $limit = 10): array {
+    $h = []; $r = mysqli_query($conn, "SELECT role, text FROM bot_messages WHERE conv_id = $convId ORDER BY id DESC LIMIT $limit");
+    while ($r && ($x = mysqli_fetch_assoc($r))) array_unshift($h, ['role' => $x['role'], 'text' => mb_substr($x['text'], 0, 1500)]);
+    return $h;
+}
+/** save the user's message + the answer, then send the JSON reply and stop */
+function bot_finish(mysqli $conn, int $uid, int &$convId, string $userText, array $payload): void {
+    $now = date('Y-m-d H:i:s'); $e = fn($v) => mysqli_real_escape_string($conn, (string)$v);
+    if (isset($payload['answer'])) $payload['answer'] = brand_clean((string)$payload['answer']);
+    if ($uid > 0) {
+        if (!conv_owner($conn, $convId, $uid)) { $title = $e(mb_substr(trim(preg_replace('/\s+/', ' ', $userText)), 0, 70) ?: 'New chat'); mysqli_query($conn, "INSERT INTO bot_conversations (user_id, title, created_at, updated_at) VALUES ($uid, '$title', '$now', '$now')"); $convId = (int)mysqli_insert_id($conn); }
+        else mysqli_query($conn, "UPDATE bot_conversations SET updated_at = '$now' WHERE id = $convId");
+        mysqli_query($conn, "INSERT INTO bot_messages (conv_id, role, text, created_at) VALUES ($convId, 'user', '{$e($userText)}', '$now')");
+        $meta = $payload; unset($meta['answer'], $meta['success'], $meta['sql']);
+        mysqli_query($conn, "INSERT INTO bot_messages (conv_id, role, text, meta, created_at) VALUES ($convId, 'model', '{$e($payload['answer'] ?? '')}', '{$e(json_encode($meta, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR))}', '$now')");
+        $payload['message_id'] = (int)mysqli_insert_id($conn); $payload['conv_id'] = $convId;
+    }
+    echo json_encode($payload, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR); exit;
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 try {
     $body = json_decode(file_get_contents('php://input'), true) ?: [];
@@ -572,19 +638,74 @@ try {
         readfile($tmp); @unlink($tmp); exit;
     }
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') die(json_encode(['success' => false, 'message' => 'POST only']));
+    if (!$conn) die(json_encode(['success' => false, 'message' => 'DB connection failed']));
+    if (session_status() === PHP_SESSION_NONE) @session_start();
+    if (empty($_SESSION['user_id'])) { http_response_code(401); die(json_encode(['success' => false, 'message' => 'Your session has expired — please log in again.'])); }
+    $uid = (int)$_SESSION['user_id']; $uname = (string)($_SESSION['username'] ?? ''); $canTrain = bot_can_train();
+    bot_ensure($conn);
+    $e = fn($v) => mysqli_real_escape_string($conn, (string)$v);
+    $rowsOf = function ($sql) use ($conn) { $o = []; $r = mysqli_query($conn, $sql); while ($r && ($x = mysqli_fetch_assoc($r))) $o[] = $x; return $o; };
+    $no = fn($m) => die(json_encode(['success' => false, 'message' => $m]));
+
+    /* ── conversations (every user sees only their own) ── */
+    if ($action === 'conv_list') {
+        echo json_encode(['success' => true, 'can_train' => $canTrain, 'items' => $rowsOf("SELECT c.id, c.title, c.updated_at, (SELECT COUNT(*) FROM bot_messages m WHERE m.conv_id = c.id) AS n FROM bot_conversations c WHERE c.user_id = $uid AND c.deleted = 0 ORDER BY c.updated_at DESC LIMIT 120")]); exit;
+    }
+    if ($action === 'conv_load') {
+        $id = (int)($body['id'] ?? 0); if (!conv_owner($conn, $id, $uid)) $no('Conversation not found.');
+        $msgs = $rowsOf("SELECT id, role, text, meta, created_at FROM bot_messages WHERE conv_id = $id ORDER BY id ASC LIMIT 400");
+        foreach ($msgs as &$m) { $m['meta'] = $m['meta'] ? json_decode($m['meta'], true) : null; } unset($m);
+        echo json_encode(['success' => true, 'messages' => $msgs], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR); exit;
+    }
+    if ($action === 'conv_delete') { $id = (int)($body['id'] ?? 0); mysqli_query($conn, "UPDATE bot_conversations SET deleted = 1 WHERE id = $id AND user_id = $uid"); echo json_encode(['success' => true]); exit; }
+    if ($action === 'conv_clear')  { mysqli_query($conn, "UPDATE bot_conversations SET deleted = 1 WHERE user_id = $uid"); echo json_encode(['success' => true]); exit; }
+    if ($action === 'conv_rename') { $id = (int)($body['id'] ?? 0); $t = $e(mb_substr(trim((string)($body['title'] ?? '')), 0, 120)); if ($t !== '') mysqli_query($conn, "UPDATE bot_conversations SET title = '$t' WHERE id = $id AND user_id = $uid"); echo json_encode(['success' => true]); exit; }
+
+    /* ── feedback on an answer (👍 / 👎) ── */
+    if ($action === 'feedback') {
+        $mid = (int)($body['message_id'] ?? 0); $rating = ((int)($body['rating'] ?? 0)) > 0 ? 1 : -1; $cm = $e(mb_substr(trim((string)($body['comment'] ?? '')), 0, 500));
+        $m = $rowsOf("SELECT m.text, m.conv_id FROM bot_messages m INNER JOIN bot_conversations c ON c.id = m.conv_id WHERE m.id = $mid AND c.user_id = $uid AND m.role = 'model'")[0] ?? null;
+        if (!$m) $no('Answer not found.');
+        $q = $rowsOf("SELECT text FROM bot_messages WHERE conv_id = " . (int)$m['conv_id'] . " AND role = 'user' AND id < $mid ORDER BY id DESC LIMIT 1")[0]['text'] ?? '';
+        mysqli_query($conn, "INSERT INTO bot_feedback (message_id, user_id, username, rating, comment, question, answer, created_at) VALUES ($mid, $uid, '{$e($uname)}', $rating, '$cm', '{$e($q)}', '{$e(mb_substr($m['text'], 0, 6000))}', '" . date('Y-m-d H:i:s') . "') ON DUPLICATE KEY UPDATE rating = VALUES(rating), comment = VALUES(comment), handled = 0");
+        echo json_encode(['success' => true]); exit;
+    }
+
+    /* ── company knowledge = the bot's training (only users who may edit AI Settings) ── */
+    if (in_array($action, ['kb_list', 'kb_save', 'kb_delete', 'kb_toggle', 'kb_feedback_done'], true)) {
+        if (!$canTrain) { http_response_code(403); $no('You are not allowed to train the assistant (needs Edit on AI Settings).'); }
+        if ($action === 'kb_list') {
+            echo json_encode(['success' => true, 'items' => $rowsOf("SELECT id, category, question, answer, active, created_by, updated_at FROM bot_knowledge ORDER BY id DESC LIMIT 1000"),
+                'feedback' => $rowsOf("SELECT id, message_id, username, rating, comment, question, SUBSTRING(answer, 1, 700) AS answer, created_at FROM bot_feedback WHERE handled = 0 ORDER BY id DESC LIMIT 60")]); exit;
+        }
+        if ($action === 'kb_save') {
+            $id = (int)($body['id'] ?? 0); $cat = in_array(($body['category'] ?? 'faq'), ['faq', 'rule', 'glossary', 'report'], true) ? $body['category'] : 'faq';
+            $q = trim((string)($body['question'] ?? '')); $a = trim((string)($body['answer'] ?? ''));
+            if ($q === '' || $a === '') $no('Both the question / topic and the answer are needed.');
+            $q = $e(mb_substr($q, 0, 600)); $a = $e(mb_substr($a, 0, 4000)); $now = date('Y-m-d H:i:s');
+            if ($id > 0) mysqli_query($conn, "UPDATE bot_knowledge SET category = '$cat', question = '$q', answer = '$a', updated_at = '$now' WHERE id = $id");
+            else mysqli_query($conn, "INSERT INTO bot_knowledge (category, question, answer, created_by, created_at, updated_at) VALUES ('$cat', '$q', '$a', '{$e($uname)}', '$now', '$now')");
+            if (!empty($body['feedback_id'])) mysqli_query($conn, "UPDATE bot_feedback SET handled = 1 WHERE id = " . (int)$body['feedback_id']);
+            echo json_encode(['success' => true]); exit;
+        }
+        if ($action === 'kb_delete') { mysqli_query($conn, "DELETE FROM bot_knowledge WHERE id = " . (int)($body['id'] ?? 0)); echo json_encode(['success' => true]); exit; }
+        if ($action === 'kb_toggle') { mysqli_query($conn, "UPDATE bot_knowledge SET active = 1 - active WHERE id = " . (int)($body['id'] ?? 0)); echo json_encode(['success' => true]); exit; }
+        if ($action === 'kb_feedback_done') { mysqli_query($conn, "UPDATE bot_feedback SET handled = 1 WHERE id = " . (int)($body['id'] ?? 0)); echo json_encode(['success' => true]); exit; }
+    }
 
     $message = trim($body['message'] ?? '');
     $history = array_values(array_filter((array)($body['history'] ?? []), fn($h) => is_array($h) && isset($h['role'], $h['text']) && in_array($h['role'], ['user', 'model'], true)));
     $images  = clean_images($body['images'] ?? []);
+    $userText = $message . ($images ? ' [📷 ' . count($images) . ' image' . (count($images) > 1 ? 's' : '') . ']' : '');
     $mode    = in_array(($body['mode'] ?? 'auto'), ['auto', 'cheque', 'invoice', 'document'], true) ? $body['mode'] : 'auto';
     if ($message === '' && !$images) die(json_encode(['success' => false, 'message' => 'Empty message']));
-    if (!$conn) die(json_encode(['success' => false, 'message' => 'DB connection failed']));
-    if (session_status() === PHP_SESSION_NONE) @session_start();
-    if (empty($_SESSION['user_id'])) { http_response_code(401); die(json_encode(['success' => false, 'message' => 'Your session has expired — please log in again.'])); }
     if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+    $convId = (int)($body['conv_id'] ?? 0);
+    $uidSave = array_key_exists('conv_id', $body) ? $uid : 0;   // only the Yelo AI page (bot.php) keeps history; the old chat page does not
+    if ($convId > 0 && conv_owner($conn, $convId, $uid)) { $dbh = conv_history($conn, $convId, 10); if ($dbh) $history = $dbh; } else $convId = 0;   // the saved conversation is the memory
 
     $api_key = get_api_key($conn);
-    if (empty($api_key)) die(json_encode(['success' => false, 'message' => 'Gemini API key not configured. Please add it in AI Settings → ai_settings.php']));
+    if (empty($api_key)) die(json_encode(['success' => false, 'message' => 'The AI key is not configured. Please add it in AI Settings.']));
     $endpoint = gemini_endpoint($api_key);
     $menu = menu_items();
 
@@ -593,19 +714,26 @@ try {
     if ($images) {
         $raw = gemini_call([['role' => 'user', 'text' => 'Extract everything from the attached image(s). Return the JSON only.', 'images' => $images]], scan_prompt($mode), $endpoint, ['json' => true, 'temperature' => 0.0, 'tokens' => 6000]);
         $S = json_decode(trim(preg_replace('/^```(?:json)?|```$/mi', '', trim($raw))), true);
-        if (!is_array($S)) { echo json_encode(['success' => true, 'answer' => "I could not read that image clearly. Try a sharper, well-lit photo with the whole document in frame.\n\n```\n" . mb_substr($raw, 0, 600) . "\n```", 'sql' => '', 'row_count' => 0, 'mode' => 'scan']); exit; }
+        if (!is_array($S)) { bot_finish($conn, $uidSave, $convId, $userText, ['success' => true, 'answer' => "I could not read that image clearly. Try a sharper, well-lit photo with the whole document in frame.\n\n```\n" . mb_substr($raw, 0, 600) . "\n```", 'sql' => '', 'row_count' => 0, 'mode' => 'scan']);  }
         $notes = []; $found = scan_crosscheck($conn, $S, $notes); $scanData = $S; $scanMd = scan_markdown($S, $found, $notes);
         $generic = '/^(scan|read|extract|ocr|check|what|this|details?|analy[sz]e|verify|ok|please|image|photo|cheque|invoice|bill|document)?[\s\.\!\?]*$/i';
         if ($message === '' || preg_match($generic, $message) || mb_strlen($message) < 12) {
-            echo json_encode(['success' => true, 'answer' => $scanMd, 'sql' => '', 'explanation' => '', 'row_count' => 0, 'mode' => 'scan', 'scan' => $scanData]); exit;
+            bot_finish($conn, $uidSave, $convId, $userText, ['success' => true, 'answer' => $scanMd, 'sql' => '', 'explanation' => '', 'row_count' => 0, 'mode' => 'scan', 'scan' => $scanData]); 
         }
     }
 
     // ── Business questions only (photos of documents are always in scope) ──────
     if (!$images) {
         $sc = scope_check($message, $history, $endpoint);
-        if (!$sc['ok']) { echo json_encode(['success' => true, 'answer' => $sc['reply'], 'sql' => '', 'explanation' => '', 'row_count' => 0, 'links' => [], 'mode' => 'scope', 'tables' => [], 'checked' => null]); exit; }
+        if (!$sc['ok']) { bot_finish($conn, $uidSave, $convId, $userText, ['success' => true, 'answer' => $sc['reply'], 'sql' => '', 'explanation' => '', 'row_count' => 0, 'links' => [], 'mode' => 'scope', 'tables' => [], 'checked' => null]);  }
     }
+
+    // ── Company knowledge (the bot's training): a stored FAQ answer is used directly, rules / terms guide every answer ──
+    $kb = kb_context($conn, $message);
+    if ($kb['direct'] && !$images) {
+        bot_finish($conn, $uidSave, $convId, $userText, ['success' => true, 'answer' => $kb['direct']['answer'], 'sql' => '', 'explanation' => '', 'row_count' => 0, 'links' => [], 'mode' => 'kb', 'tables' => [], 'checked' => null, 'kb' => true]);
+    }
+    $kbText = $kb['text'];
 
     // ── Context: schema + live schema + sidebar menu + the project files that matter ─────────────
     $deep         = !isset($body['deep']) || !empty($body['deep']);
@@ -628,6 +756,8 @@ $schema
 $liveSchema
 
 $menuCtx
+
+$kbText
 
 SOURCE CODE OF THE MOST RELEVANT FILES:
 $code_context
@@ -673,6 +803,9 @@ SYS;
 You are a senior business analyst and PHP system analyst for a Sales/Distribution ERP in Sri Lanka. Today is $today. Currency LKR.
 Your plan was: $approach
 
+IDENTITY: you are ECODES AI, the company's own business assistant. Never mention Gemini, Google or which AI model / vendor you run on; if asked, say you are ECODES AI.
+$kbText
+
 ACCURACY RULES (most important)
 - Use ONLY numbers that appear in DATA FROM THE DATABASE or the scan result. Never estimate or invent. Re-add the figures you quote and make sure totals, percentages and counts are consistent; if two sources disagree, say so.
 - If part of the data could not be read, say exactly which part and why; do not fill the gap.
@@ -692,6 +825,7 @@ SYS;
     $h2 = array_slice($history, -MAX_HISTORY);
     $h2[] = ['role' => 'user', 'text' => "User question: $message$dataSection" . ($scanMd ? "\n\nSCANNED IMAGE RESULT (verified against the system):\n$scanMd" : '') . "\n\nSYSTEM MENU:\n$menuCtx\n\nSOURCE CODE CONTEXT:\n" . mb_substr($code_context, 0, $deep ? 60000 : 20000) . "\n\nPlease answer."];
     $finalAnswer = gemini_call($h2, $answerPrompt, $endpoint, ['temperature' => 0.2, 'think' => $deep ? 4096 : 0, 'tokens' => $deep ? 9000 : 3500]);
+    $finalAnswer = brand_clean($finalAnswer);
     if ($scanMd && stripos($finalAnswer, 'Scanned:') === false) $finalAnswer = $scanMd . "\n\n---\n\n" . $finalAnswer;
 
     // links: PAGES line + any menu file named in the answer
@@ -704,12 +838,12 @@ SYS;
 
     $outTables = array_map(fn($t) => ['title' => $t['title'], 'columns' => $t['columns'], 'rows' => array_slice($t['rows'], 0, 200)], array_filter($tables, fn($t) => $t['rows']));
     $first = $outTables ? reset($outTables) : null;
-    echo json_encode([
+    bot_finish($conn, $uidSave, $convId, $userText, [
         'success' => true, 'answer' => $finalAnswer, 'sql' => '', 'explanation' => $first['title'] ?? '', 'row_count' => array_sum(array_map(fn($t) => count($t['rows']), $tables)),
         'code_context' => true, 'links' => array_values($links), 'scan' => $scanData, 'deep' => $deep,
         'columns' => $first['columns'] ?? [], 'rows' => $first['rows'] ?? [], 'tables' => array_values($outTables),
-        'checked' => ['queries' => count($tables), 'failed' => count($errors), 'sources' => array_keys($usedTables), 'files' => array_slice($filesRead, 0, 14), 'menu_pages' => count($menu), 'approach' => $approach],
-    ], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        'checked' => ['queries' => count($tables), 'failed' => count($errors), 'sources' => array_keys($usedTables), 'files' => array_slice($filesRead, 0, 14), 'menu_pages' => count($menu), 'approach' => brand_clean($approach), 'knowledge' => $kb['used']],
+    ]);
 
 } catch (Throwable $e) {
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
