@@ -174,19 +174,39 @@ if ($items && $cq && mysqli_num_rows($cq)) {
     foreach ($items as $x) { $allk[sd_norm($x['activity_code'])] = 1; foreach (sd_desc_keys($x['activity_desc']) as $a) $allk[$a] = 1; }
     $cct = sd_cc_tally($conn, array_keys($allk));     // claim certificate rows per scheme no (first part of the description, else anywhere in it)
 }
-foreach ($items as &$__x) {
+/* A scheme code can have several rows (different MOC / claim). Its claim certificates belong to the CODE, so they are counted ONCE: the certificate amount is shared over the rows
+   oldest claim first (each row takes what its claim needs, the last row keeps any rest = excess). The VAT rule is judged on the whole code. → totals = the Scheme Ledger / dashboard. */
+$alloc = []; $byCode = [];
+foreach ($items as $__i => $__x) $byCode[sd_norm($__x['activity_code'])][] = $__i;
+foreach ($byCode as $__code => $__idx) {
+    $__f = $items[$__idx[0]]; $__c = $cct ? sd_cc_pick($cct, $__f['activity_code'], $__f['activity_desc']) : null;
+    if (!$__c) continue;
+    usort($__idx, fn($a, $b) => strcmp((string)$items[$a]['start_date'], (string)$items[$b]['start_date']) ?: $a <=> $b);
+    $__claimSum = 0.0; foreach ($__idx as $__i) $__claimSum += max(0, (float)$items[$__i]['claim_amount']);
+    $__vat = round((float)$__c['vat'], 2); $__diff = round($__claimSum - (float)$__c['act'], 2);
+    $__vs = ($__vat > 0 && $__diff > 0 && abs($__diff - $__vat) <= 0.01);
+    $__remA = (float)$__c['act']; $__remV = $__vs ? $__vat : 0.0; $__last = count($__idx) - 1;
+    foreach ($__idx as $__p => $__i) {
+        $__cl = max(0, (float)$items[$__i]['claim_amount']);
+        $__a = $__p === $__last ? $__remA : min($__remA, $__cl); $__remA -= $__a;
+        $__un = max(0, $__cl - $__a); $__v = $__vs ? ($__p === $__last ? $__remV : min($__remV, $__un)) : 0.0; $__remV -= $__v;
+        $alloc[$__i] = ['act' => round($__a, 2), 'vat' => round($__v, 2), 'vs' => $__vs, 'n' => $__c['n'], 'vat_all' => $__vat, 'last' => $__p === $__last];
+    }
+}
+foreach ($items as $__i => &$__x) {
     $k = sd_norm($__x['activity_code']); $b = $bws ? sd_cc_pick($bws, $__x['activity_code'], $__x['activity_desc']) : null; $c2 = $cct ? sd_cc_pick($cct, $__x['activity_code'], $__x['activity_desc']) : null;   // scheme code not on the certificate -> the number written in the scheme description
     $__x['bws_n'] = $b ? $b['n'] : 0; $__x['bws_sd'] = $b ? $b['sd'] : null;
-    $__x['cc_n'] = $c2 ? $c2['n'] : 0; $__x['cc_act'] = $c2 ? $c2['act'] : null; $__x['cc_vat'] = $c2 ? round((float)$c2['vat'], 2) : null;      // VAT amount of the matched claim certificate rows (claim_cert_items.vat_amount)
+    $al = $alloc[$__i] ?? null;     // this row's share of the code's claim certificates
+    $__x['cc_n'] = $al ? $al['n'] : 0; $__x['cc_act'] = $al ? $al['act'] : null; $__x['cc_vat'] = $al ? ($al['vs'] ? $al['vat'] : ($al['last'] ? $al['vat_all'] : 0.0)) : null;      // VAT amount of the matched claim certificate rows (claim_cert_items.vat_amount)
     $has_claim = $__x['claim_amount'] !== null;
     $__x['diff'] = ($has_claim || $b) ? sd_zero(round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($b ? $b['sd'] : 0), 2)) : null;     // Claim Amount − scheme discount as per invoice
-    $rawb = ($has_claim || $c2) ? round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($c2 ? $c2['act'] : 0), 2) : null;     // Claim Amount − claim certificate actual amount
+    $rawb = ($has_claim || $al) ? round(($has_claim ? (float)$__x['claim_amount'] : 0) - ($al ? $al['act'] : 0), 2) : null;     // Claim Amount − claim certificate actual amount
     /* VAT: only when the difference is FULLY the same as the VAT amount of the claim certificate it is taken off the balance (→ 0). Any other difference is NOT reduced by the VAT.
        A certificate HIGHER than the claim (over paid) by more than Rs. 5 = EXCESS: shown as a negative (bracket) balance. Under Rs. 5 either way → 0. */
-    $vsame = ($rawb !== null && $c2 && (float)$c2['vat'] > 0 && $rawb > 0 && abs($rawb - round((float)$c2['vat'], 2)) <= 0.01);
+    $vsame = ($rawb !== null && $al && $al['vs'] && $al['vat'] > 0);      // judged on the whole scheme code (see above)
     $__x['vat_same'] = $vsame ? 1 : 0;
     $__x['balance1'] = $rawb;                     // Balance 1 = Claim Amount − claim certificate amount (exact)
-    $__x['balance'] = $rawb === null ? null : ($vsame ? sd_zero(round($rawb - (float)$c2['vat'], 2)) : sd_zero($rawb));
+    $__x['balance'] = $rawb === null ? null : ($vsame ? sd_zero(round($rawb - $al['vat'], 2)) : sd_zero($rawb));
     if (!empty($__x['is_new'])) { $__x['diff'] = 0.0; $__x['balance'] = 0.0; $__x['balance1'] = 0.0; }      // new scheme (HUL / TOT) with no claim amount: difference and balance are 0
 } unset($__x);
 /* amount filter — rows whose amounts are the same / different (works on the final, calculated figures) */
@@ -338,6 +358,11 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
 
   <div class="kp"><div class="k"><span>Schemes</span><b><?= number_format(count($items)) ?></b></div><div class="k"><span>Total claim amount</span><b style="color:#7c3aed">Rs. <?= number_format($tot, 2) ?></b></div>
     <div class="k"><span>Scheme discount as per invoice</span><b style="color:#1d4ed8">Rs. <?= number_format($tot_bws, 2) ?></b></div><div class="k"><span>Claim certificate (actual)</span><b style="color:#15803d">Rs. <?= number_format($tot_cc, 2) ?></b></div><div class="k"><span>Balance</span><b style="color:<?= $tot_bal > 0.5 ? '#b91c1c' : ($tot_bal < -0.5 ? '#15803d' : '#6b7280') ?>">Rs. <?= $tot_bal < 0 ? '(' . number_format(abs($tot_bal), 2) . ')' : number_format($tot_bal, 2) ?></b></div><div class="k"><span>With claim</span><b><?= number_format(count(array_filter($items, fn($x) => (float)$x['claim_amount'] > 0))) ?></b></div></div>
+  <?php /* check against the Scheme Ledger / dashboard line (all dates) — only meaningful without filters */
+  if (!$active && is_file(__DIR__ . '/scheme_ledger_lib.php')) { require_once __DIR__ . '/scheme_ledger_lib.php'; if (function_exists('sl_compute')) { $__L = sl_compute($conn, []); $__d = round($tot_bal - $__L['closing'], 2); ?>
+  <div style="margin:-2px 0 12px;font-size:12.5px;padding:8px 12px;border-radius:9px;border:1px solid <?= abs($__d) < 0.5 ? '#bbf7d0' : '#fde68a' ?>;background:<?= abs($__d) < 0.5 ? '#f0fdf4' : '#fffbeb' ?>;color:<?= abs($__d) < 0.5 ? '#166534' : '#92400e' ?>">
+    <?php if (abs($__d) < 0.5): ?>✓ The total Balance tallies with the Scheme Ledger / dashboard line (Rs. <?= number_format($__L['closing'], 2) ?>).<?php else: ?>Scheme Ledger / dashboard closing balance (all dates): <b>Rs. <?= number_format($__L['closing'], 2) ?></b> — this report's total Balance is Rs. <?= number_format($tot_bal, 2) ?> (difference Rs. <?= number_format($__d, 2) ?>). Differences come from claim certificates without a date or of other schemes.<?php endif; ?></div>
+  <?php } } ?>
 
   <div class="sdtabs"><button type="button" data-v="det" class="on"><i class="fa-solid fa-table-list"></i> Detailed</button><button type="button" data-v="sum"><i class="fa-solid fa-calendar-days"></i> Monthly summary (by MOC Ref)</button><button type="button" data-v="unr"><i class="fa-solid fa-triangle-exclamation"></i> Unreconciled claim certificates <span class="sdbadge"><?= number_format($unrec_tot['n']) ?></span></button>
     <a class="btn o" id="sdSumXls" data-no-loader href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1, 'sheet' => 'summary']))) ?>" style="display:none;padding:7px 14px;border:1.5px solid #c7d2fe;border-radius:9px;color:#1e3a8a;text-decoration:none;font:600 13px inherit;background:#fff"><i class="fa-solid fa-file-excel"></i> Export monthly summary</a>

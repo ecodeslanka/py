@@ -31,6 +31,11 @@ function sl_compute($conn, $o) {
         $r = mysqli_query($conn, "SELECT * FROM scheme_status_items WHERE " . implode(' AND ', $w));
         while ($r && ($x = mysqli_fetch_assoc($r))) { $k = sl_norm($x['activity_code']); $schemes[$k]['rows'][] = $x; if (!isset($schemes[$k]['desc'])) $schemes[$k]['desc'] = $x['activity_desc']; }
     }
+    /* schemes that exist only in the HUL / TOT Scheme Master (no claim yet) are part of the Scheme Discount Daily Report, so the certificates paid against them belong to this ledger too (credit, no debit) */
+    if (sl_tbl($conn, 'scheme_master_items') && !$moc && $q === '') {
+        $r = mysqli_query($conn, "SELECT activity_code, activity_desc FROM scheme_master_items ORDER BY id DESC");
+        while ($r && ($x = mysqli_fetch_assoc($r))) { $k = sl_norm($x['activity_code']); if ($k === '' || isset($schemes[$k])) continue; $schemes[$k] = ['rows' => [], 'desc' => $x['activity_desc'], 'master_only' => 1]; }
+    }
     $entries = [];
     foreach ($schemes as $k => $sc) foreach ($sc['rows'] as $x) {
         if ($x['claim_amount'] === null || (float)$x['claim_amount'] <= 0) continue;
