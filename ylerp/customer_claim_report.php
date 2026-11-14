@@ -109,8 +109,8 @@ function cc_build_where($conn) {
     $status = trim($_REQUEST['status'] ?? '');
     if ($status !== '') { $st_e = mysqli_real_escape_string($conn, $status); $w[] = "ci.status='$st_e'"; }
 
-    $claimType = trim($_REQUEST['claim_type'] ?? '');
-    if ($claimType !== '') { $ct_e = mysqli_real_escape_string($conn, $claimType); $w[] = "ci.claim_type='$ct_e'"; }
+    $claimTypes = array_values(array_filter(array_map('trim', explode('||', (string)($_REQUEST['claim_type'] ?? ''))), fn($v) => $v !== ''));
+    if ($claimTypes) $w[] = "ci.claim_type IN ('" . implode("','", array_map(fn($v) => mysqli_real_escape_string($conn, $v), $claimTypes)) . "')";
 
     $uploadId = trim($_REQUEST['upload_id'] ?? '');
     if ($uploadId !== '' && ctype_digit($uploadId)) { $w[] = "ci.upload_id=" . intval($uploadId); }
@@ -174,11 +174,15 @@ if (isset($_GET['export_xlsx'])) {
     $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '312E81', 'h' => 'center', 'border' => 1, 'wrap' => 1];
     $heads = ['#', 'Customer Code', 'Customer Name', 'Upload File', 'Upload Date', 'Ledger Type', 'Status', 'Claim Type', 'Tax Invoice No', 'Invoice Date', 'Banking Date', 'Entity', 'Claim Description', 'Actual Amount', 'VAT Amount', 'Total Amount', 'Imported At', 'Imported By', 'Scheme No Source (F = first no · M = middle / normal)', 'Scheme No'];
     $sh->set(1, 1, 'Customer Claim Report — all rows of the table' . ((trim($_REQUEST['date_from'] ?? '') . trim($_REQUEST['date_to'] ?? '')) !== '' ? ' (' . trim($_REQUEST['date_from'] ?? '…') . ' to ' . trim($_REQUEST['date_to'] ?? '…') . ')' : ''), ['b' => 1, 'sz' => 14]);
+    $fl = [];
+    foreach (['claim_type' => 'Claim type', 'entity' => 'Entity', 'status' => 'Status', 'customer_code' => 'Customer', 'search' => 'Search'] as $k => $lab) { $v = trim((string)($_REQUEST[$k] ?? '')); if ($v !== '') $fl[] = $lab . ': ' . str_replace('||', ', ', $v); }
+    $sh->set(2, 1, $fl ? 'Filters — ' . implode(' · ', $fl) : 'No filters — all rows', ['i' => 1, 'color' => '6B7280']);
     foreach ($heads as $i => $h) $sh->set(3, $i + 1, $h, $H);
-    $r = 4; $n = 0; $ta = $tv = $tt = 0.0;
+    $r = 4; $n = 0; $ta = $tv = $tt = 0.0; $byType = [];
     if ($res) while ($x = mysqli_fetch_assoc($res)) {
         $n++; $desc = (string)$x['claim_description']; [$sn, $src] = cc_scheme_of($desc);
         $a = (float)$x['actual_amount']; $v = (float)$x['vat_amount']; $t = (float)$x['total_amount']; $ta += $a; $tv += $v; $tt += $t;
+        $tk = trim((string)$x['claim_type']) ?: '(no type)'; if (!isset($byType[$tk])) $byType[$tk] = [0, 0.0, 0.0, 0.0]; $byType[$tk][0]++; $byType[$tk][1] += $a; $byType[$tk][2] += $v; $byType[$tk][3] += $t;
         $vals = [$n, $x['customer_code'], $x['customer_name'], $x['file_name'], $x['upload_date'], $x['ledger_type'], $x['status'], $x['claim_type'], $x['tax_invoice_no'], $x['invoice_date'], $x['banking_date'], $x['entity'], $desc, $a, $v, $t, $x['imported_at'], $x['imported_by'], $src, $sn];
         foreach ($vals as $i => $val) $sh->set($r, $i + 1, $val === null ? '' : $val, ['border' => 1] + (in_array($i, [13, 14, 15], true) ? ['h' => 'right', 'nf' => 4] : []) + ($i === 17 ? ['b' => 1, 'color' => '312E81'] : []) + ($i === 16 ? ['h' => 'center', 'b' => 1, 'color' => $src === 'F' ? 'B45309' : '15803D'] : []));
         $r++;
@@ -188,6 +192,12 @@ if (isset($_GET['export_xlsx'])) {
     $sh->set($r, 13, 'TOTAL (' . number_format($n) . ' rows)', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 14, round($ta, 2), $tb); $sh->set($r, 15, round($tv, 2), $tb); $sh->set($r, 16, round($tt, 2), $tb);
     foreach ([5, 14, 24, 24, 12, 14, 12, 16, 18, 12, 12, 10, 44, 14, 12, 14, 18, 14, 18, 16] as $i => $w) $sh->widths[$i + 1] = $w;
     $sh->freeze = [3, 0]; $sh->filter = 'A3:' . MiniXlsx::col(count($heads)) . max(4, $r - 1);
+    /* second sheet: totals per claim type (of the filtered rows) */
+    $s2 = $X->sheet('By Claim Type'); $s2->set(1, 1, 'Totals by claim type' . ($fl ? ' — ' . implode(' · ', $fl) : ''), ['b' => 1, 'sz' => 14]);
+    foreach (['Claim Type', 'Rows', 'Actual Amount', 'VAT Amount', 'Total Amount'] as $i => $h) $s2->set(3, $i + 1, $h, $H);
+    ksort($byType); $r2 = 4; foreach ($byType as $tk => $v) { $s2->set($r2, 1, $tk, ['border' => 1]); $s2->set($r2, 2, $v[0], ['border' => 1, 'h' => 'right']); foreach ([1, 2, 3] as $q) $s2->set($r2, $q + 2, round($v[$q], 2), ['border' => 1, 'h' => 'right', 'nf' => 4]); $r2++; }
+    $s2->set($r2, 1, 'TOTAL', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $s2->set($r2, 2, $n, ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right']); foreach ([[3, $ta], [4, $tv], [5, $tt]] as [$q, $val]) $s2->set($r2, $q, round($val, 2), $tb);
+    foreach ([30, 10, 18, 16, 18] as $i => $w) $s2->widths[$i + 1] = $w; $s2->freeze = [3, 0];
     $tmp = tempnam(sys_get_temp_dir(), 'cc'); $X->save($tmp);
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="CC_Report_' . date('Ymd_His') . '.xlsx"');
@@ -267,6 +277,9 @@ include 'header.php';
 .f-field label{font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
 .f-field input,.f-field select{border:1.5px solid var(--bdr);border-radius:8px;padding:8px 10px;font-size:12.5px;font-family:inherit;outline:none;color:var(--ink);background:#fff;}
 .f-field input:focus,.f-field select:focus{border-color:var(--pri2);}
+.ms{position:relative}.ms-btn{width:100%;text-align:left;border:1.5px solid var(--bdr);border-radius:8px;padding:8px 10px;font-size:12.5px;font-family:inherit;background:#fff;color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms-panel{display:none;position:absolute;z-index:50;top:100%;left:0;min-width:100%;max-height:260px;overflow:auto;background:#fff;border:1.5px solid var(--bdr);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:6px;margin-top:3px}.ms.open .ms-panel{display:block}
+.ms-panel label{display:flex;gap:7px;align-items:center;padding:5px 7px;border-radius:6px;font-size:12.5px;text-transform:none;letter-spacing:0;font-weight:500;color:var(--ink);cursor:pointer;white-space:nowrap}.ms-panel label:hover{background:#eef2ff}.ms-panel .ms-clear{font-size:11px;color:#6366f1;cursor:pointer;padding:3px 7px;display:block}
 .filter-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 
 .btn-primary{display:inline-flex;align-items:center;gap:7px;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border:none;border-radius:9px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit;box-shadow:0 4px 14px rgba(99,102,241,.3);}
@@ -370,7 +383,7 @@ include 'header.php';
         </div>
         <div class="f-field">
           <label>Claim Type</label>
-          <select id="fClaimType"><option value="">All Types</option></select>
+          <div class="ms" id="fClaimType"><button type="button" class="ms-btn" id="ctBtn">All types ▾</button><div class="ms-panel" id="ctPanel"></div></div>
         </div>
       </div>
     </div>
@@ -465,13 +478,16 @@ async function loadFilterOptions(){
     d.statuses.forEach(s=>{
       const opt = document.createElement('option'); opt.value = s; opt.textContent = s; stSel.appendChild(opt);
     });
-    const ctSel = document.getElementById('fClaimType');
-    d.claim_types.forEach(t=>{
-      const opt = document.createElement('option'); opt.value = t; opt.textContent = t; ctSel.appendChild(opt);
-    });
+    document.getElementById('ctPanel').innerHTML = '<a class="ms-clear" id="ctClear">Clear selection</a>' + d.claim_types.map(t=>'<label><input type="checkbox" class="ctChk" value="'+esc(t)+'"> '+esc(t)+'</label>').join('');
+    document.getElementById('ctClear').addEventListener('click', ()=>{ document.querySelectorAll('.ctChk').forEach(c=>c.checked=false); ctUpdate(); loadReport(1); });
+    document.querySelectorAll('.ctChk').forEach(c=>c.addEventListener('change', ()=>{ ctUpdate(); loadReport(1); }));
   }catch(e){ /* silent */ }
 }
 
+function ctSelected(){ return [].slice.call(document.querySelectorAll('.ctChk:checked')).map(c=>c.value); }
+function ctUpdate(){ const s=ctSelected(); document.getElementById('ctBtn').textContent = !s.length ? 'All types ▾' : (s.length<=2 ? s.join(', ') : s.length+' types selected')+' ▾'; }
+document.getElementById('ctBtn').addEventListener('click', e=>{ e.stopPropagation(); document.getElementById('fClaimType').classList.toggle('open'); });
+document.addEventListener('click', e=>{ if(!e.target.closest('#fClaimType')) document.getElementById('fClaimType').classList.remove('open'); });
 function getFilterParams(){
   return {
     date_field: document.getElementById('fDateField').value,
@@ -481,7 +497,7 @@ function getFilterParams(){
     customer_code: document.getElementById('fCustomer').value,
     entity:     document.getElementById('fEntity').value,
     status:     document.getElementById('fStatus').value,
-    claim_type: document.getElementById('fClaimType').value,
+    claim_type: ctSelected().join('||'),
   };
 }
 
@@ -493,7 +509,7 @@ function clearFilters(){
   document.getElementById('fCustomer').value = '';
   document.getElementById('fEntity').value = '';
   document.getElementById('fStatus').value = '';
-  document.getElementById('fClaimType').value = '';
+  document.querySelectorAll('.ctChk').forEach(c=>c.checked=false); ctUpdate();
   loadReport(1);
 }
 
@@ -594,7 +610,7 @@ document.getElementById('fSearch').addEventListener('input', function(){
   clearTimeout(_searchDebounce);
   _searchDebounce = setTimeout(()=>loadReport(1), 450);
 });
-['fCustomer','fEntity','fStatus','fClaimType','fDateField'].forEach(id=>{
+['fCustomer','fEntity','fStatus','fDateField'].forEach(id=>{
   document.getElementById(id).addEventListener('change', ()=>loadReport(1));
 });
 

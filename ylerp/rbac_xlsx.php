@@ -50,7 +50,13 @@ class MiniXlsx {
         $x .= '<sheetViews><sheetView workbookViewId="0" showGridLines="0"' . ($sh === $this->sheets[0] ? ' tabSelected="1"' : '') . '>';
         if ($sh->freeze) { [$fr, $fc] = $sh->freeze;
             $x .= '<pane' . ($fc ? ' xSplit="' . $fc . '"' : '') . ($fr ? ' ySplit="' . $fr . '"' : '') . ' topLeftCell="' . self::col($fc + 1) . ($fr + 1) . '" state="frozen" activePane="'
-                . ($fr && $fc ? 'bottomRight' : ($fr ? 'bottomLeft' : 'topRight')) . '"/>'; }
+                . ($fr && $fc ? 'bottomRight' : ($fr ? 'bottomLeft' : 'topRight')) . '"/>';
+            // one selection per pane, exactly one active cell — without these Excel can report "cannot be used on multiple selections" when copying
+            $tl = self::col($fc + 1) . ($fr + 1);
+            if ($fr && $fc) $x .= '<selection pane="topRight" activeCell="' . self::col($fc + 1) . '1" sqref="' . self::col($fc + 1) . '1"/><selection pane="bottomLeft" activeCell="A' . ($fr + 1) . '" sqref="A' . ($fr + 1) . '"/><selection pane="bottomRight" activeCell="' . $tl . '" sqref="' . $tl . '"/>';
+            elseif ($fr) $x .= '<selection pane="bottomLeft" activeCell="' . $tl . '" sqref="' . $tl . '"/>';
+            else $x .= '<selection pane="topRight" activeCell="' . $tl . '" sqref="' . $tl . '"/>';
+        } else $x .= '<selection activeCell="A1" sqref="A1"/>';
         $x .= '</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>';
         if ($sh->widths) { $x .= '<cols>'; ksort($sh->widths); foreach ($sh->widths as $c => $w) $x .= '<col min="' . $c . '" max="' . $c . '" width="' . $w . '" customWidth="1"/>'; $x .= '</cols>'; }
         $x .= '<sheetData>'; ksort($sh->cells);
@@ -86,7 +92,11 @@ class MiniXlsx {
         $rel .= '<Relationship Id="rId' . $sn . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
         $z->addFromString('[Content_Types].xml', $ct . '</Types>');
         $z->addFromString('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
-        $z->addFromString('xl/workbook.xml', $wb . '</sheets></workbook>');
+        // hidden _FilterDatabase name per sheet that has an auto-filter (what Excel itself writes)
+        $dn = '';
+        foreach ($this->sheets as $i => $sh) if ($sh->filter && preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $sh->filter, $fm))
+            $dn .= '<definedName name="_xlnm._FilterDatabase" localSheetId="' . $i . '" hidden="1">\'' . str_replace("'", "''", self::esc($sh->name)) . '\'!$' . $fm[1] . '$' . $fm[2] . ':$' . $fm[3] . '$' . $fm[4] . '</definedName>';
+        $z->addFromString('xl/workbook.xml', $wb . '</sheets>' . ($dn !== '' ? '<definedNames>' . $dn . '</definedNames>' : '') . '</workbook>');
         $z->addFromString('xl/_rels/workbook.xml.rels', $rel);
         $z->addFromString('xl/styles.xml', $this->stylesXml());
         $z->close();
