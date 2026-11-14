@@ -84,18 +84,19 @@ function cd_build($conn, array $o, $detail = false) {
             if ($policy !== 'none' && $over > 0) { $nv++; if ($over > $maxo) $maxo = $over;
                 if ($detail) $viol[] = ['t_code' => $t, 'shop' => $c['shop_name'], 'inv' => (string)$b['invoice_num'], 'del' => $b['delivery_date'], 'due' => date('Y-m-d', $due), 'paid' => $open ? '' : (string)$b['last_paid'], 'net' => round((float)$b['net'], 2), 'bal' => round($bal, 2), 'over' => $over, 'open' => $open ? 'Open' : 'Paid late', 'policy' => $policy, 'days' => $days]; }
         }
-        $rt = 0; $sb = 0;
+        $rt = 0; $sb = 0; $rto = 0; $sbo = 0;   // totals and how many are still NOT settled
         foreach ($chq[$t] ?? [] as $k) {
-            if ($k['status'] === 'sent_back') $sb++; else $rt++;
+            $isSet = ($k['status'] === 'sent_back') ? (int)$k['sb_settled'] : (int)$k['ret_settled'];
+            if ($k['status'] === 'sent_back') { $sb++; if (!$isSet) $sbo++; } else { $rt++; if (!$isSet) $rto++; }
             if ($detail) $chqL[] = ['t_code' => $t, 'shop' => $c['shop_name'], 'no' => (string)$k['cheque_no'], 'date' => $k['cheque_date'], 'bank' => (string)$k['bank_code'], 'status' => $k['status'] === 'sent_back' ? 'Sent back' : 'Returned', 'amt' => round((float)$k['amount'], 2), 'settled' => ($k['status'] === 'sent_back' ? (int)$k['sb_settled'] : (int)$k['ret_settled']) ? 'Settled' : 'Open'];
         }
         $cn = 0; $cv = 0.0;
         foreach ($canc[$t] ?? [] as $k) { $cn++; $cv += (float)$k['v']; if ($detail) $cancL[] = ['t_code' => $t, 'shop' => $c['shop_name'], 'inv' => (string)$k['invoice_num'], 'del' => $k['delivery_date'], 'v' => round((float)$k['v'], 2)]; }
         $sum6 = 0; foreach ($last6 as $ym) $sum6 += $month[$t][$ym] ?? 0;
-        $row = ['t_code' => $t, 'shop' => $c['shop_name'], 'pm' => $pm === '' ? '—' : ucfirst($pm), 'channel' => $c['channel'], 'cwd' => (int)$c['cwd'] ? 'Yes' : 'No', 'rt' => $rt, 'sb' => $sb,
+        $row = ['t_code' => $t, 'shop' => $c['shop_name'], 'pm' => $pm === '' ? '—' : ucfirst($pm), 'channel' => $c['channel'], 'cwd' => (int)$c['cwd'] ? 'Yes' : 'No', 'rt' => $rt, 'rto' => $rto, 'sb' => $sb, 'sbo' => $sbo,
                 'viol' => $nv, 'policy' => $policy, 'max_over' => $maxo, 'cn' => $cn, 'cv' => round($cv, 2), 'avg' => round($sum6 / 6, 1), 'bills' => count($bills[$t] ?? [])];
         $iss = $o['issues'] ?? '';
-        if ($iss === 'cwd' && $row['cwd'] !== 'Yes') continue; if ($iss === 'ret' && ($rt + $sb) === 0) continue; if ($iss === 'viol' && $nv === 0) continue; if ($iss === 'canc' && $cn === 0) continue;
+        if ($iss === 'cwd' && $row['cwd'] !== 'Yes') continue; if ($iss === 'ret' && ($rt + $sb) === 0) continue; if ($iss === 'retopen' && ($rto + $sbo) === 0) continue; if ($iss === 'viol' && $nv === 0) continue; if ($iss === 'canc' && $cn === 0) continue;
         if ($iss === 'any' && $row['cwd'] !== 'Yes' && ($rt + $sb) === 0 && $nv === 0 && $cn === 0) continue;
         $rows[] = $row;
     }
@@ -116,7 +117,7 @@ if (($_GET['ajax'] ?? '') === 'detail') {
 }
 
 $F = ['pm' => trim($_GET['pm'] ?? ''), 'channel' => trim($_GET['channel'] ?? ''), 'q' => trim($_GET['q'] ?? ''), 'cwd' => in_array($_GET['cwd'] ?? '', ['yes', 'no'], true) ? $_GET['cwd'] : '',
-      'issues' => in_array($_GET['issues'] ?? '', ['any', 'cwd', 'ret', 'viol', 'canc'], true) ? $_GET['issues'] : ''];
+      'issues' => in_array($_GET['issues'] ?? '', ['any', 'cwd', 'ret', 'retopen', 'viol', 'canc'], true) ? $_GET['issues'] : ''];
 try { $D = cd_build($conn, $F, isset($_GET['export'])); } catch (Throwable $ex) { $D = ['rows' => [], 'viol' => [], 'chq' => [], 'canc' => [], 'month' => [], 'months' => []]; $CD_ERR = $ex->getMessage(); }
 $rows = $D['rows'];
 $channels = []; $cr = cd_q($conn, "SELECT DISTINCT channel FROM customer_btg WHERE channel IS NOT NULL AND channel <> '' ORDER BY channel"); while ($cr && ($x = mysqli_fetch_row($cr))) $channels[] = $x[0];
@@ -133,20 +134,22 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     $stamp = 'Generated ' . date('d M Y H:i') . ' · ' . ($act ? implode(' · ', $act) : 'all customers');
     /* 1. Summary */
     $sh = $X->sheet('Summary');
-    $sh->set(1, 1, 'Customer Details Report', $BAN); for ($c = 2; $c <= 10; $c++) $sh->set(1, $c, '', $BAN); $sh->merge(1, 1, 1, 10); $sh->set(2, 1, $stamp, $SUB);
+    $sh->set(1, 1, 'Customer Details Report', $BAN); for ($c = 2; $c <= 14; $c++) $sh->set(1, $c, '', $BAN); $sh->merge(1, 1, 1, 14); $sh->set(2, 1, $stamp, $SUB);
     $k = ['Customers' => count($rows), 'Cheques will delay' => count(array_filter($rows, fn($r) => $r['cwd'] === 'Yes')), 'Returned cheques' => array_sum(array_column($rows, 'rt')), 'Sent back cheques' => array_sum(array_column($rows, 'sb')),
           'Policy violations' => array_sum(array_column($rows, 'viol')), 'Cancelled bills' => array_sum(array_column($rows, 'cn')), 'Cancelled value (Rs.)' => round(array_sum(array_column($rows, 'cv')), 2)];
     $ci = 1; foreach ($k as $lab => $v) { $sh->set(4, $ci, $lab, ['b' => 1, 'sz' => 9, 'color' => '6B7280', 'bg' => 'EEF2FF', 'h' => 'center', 'wrap' => 1, 'border' => 1]); $sh->set(5, $ci, $v, ['b' => 1, 'sz' => 14, 'color' => '1E3A8A', 'h' => 'center', 'border' => 1] + (is_float($v) ? ['nf' => 4] : [])); $ci++; }
-    foreach (['T-Code', 'Shop', 'Customer Pay Mode', 'Channel', 'Chq Will Delay', 'Chq Returns', 'Chq Sent Back', 'No of Times of Credit Policy Violation', 'Bill Cancel — Amount (Count)', 'Average Bill Count Per Month'] as $i => $h) $sh->set(7, $i + 1, $h, $H);
+    foreach (['T-Code', 'Shop', 'Customer Pay Mode', 'Channel', 'Chq Will Delay', 'Chq Returns', 'Chq Sent Back', 'No of Times of Credit Policy Violation', 'Bill Cancel — Amount (Count)', 'Average Bill Count Per Month', 'Returns — Not Settled', 'Returns — Settled', 'Sent Back — Not Settled', 'Sent Back — Settled'] as $i => $h) $sh->set(7, $i + 1, $h, $H);
     $r = 8; foreach ($rows as $x) {
         $sh->set($r, 1, $x['t_code'], $B); $sh->set($r, 2, $x['shop'], $B); $sh->set($r, 3, $x['pm'], $BC); $sh->set($r, 4, $x['channel'], $BC);
         $sh->set($r, 5, $x['cwd'], $BC + ($x['cwd'] === 'Yes' ? ['b' => 1, 'color' => 'B45309', 'bg' => 'FEF3C7'] : []));
         $sh->set($r, 6, $x['rt'], $BC + ($x['rt'] ? ['b' => 1, 'color' => '6D28D9', 'bg' => 'EDE9FE'] : [])); $sh->set($r, 7, $x['sb'], $BC + ($x['sb'] ? ['b' => 1, 'color' => '1D4ED8', 'bg' => 'DBEAFE'] : []));
         $sh->set($r, 8, $x['policy'] === 'none' ? 'n/a' : $x['viol'], $BC + ($x['viol'] ? ['b' => 1, 'color' => 'B91C1C', 'bg' => 'FEE2E2'] : []));
-        $sh->set($r, 9, $x['cn'] ? number_format($x['cv'], 2) . ' (' . $x['cn'] . ')' : '—', $BC + ($x['cn'] ? ['color' => 'B91C1C'] : [])); $sh->set($r, 10, $x['avg'], $BC); $r++;
+        $sh->set($r, 9, $x['cn'] ? number_format($x['cv'], 2) . ' (' . $x['cn'] . ')' : '—', $BC + ($x['cn'] ? ['color' => 'B91C1C'] : [])); $sh->set($r, 10, $x['avg'], $BC);
+        $sh->set($r, 11, $x['rto'], $BC + ($x['rto'] ? ['b' => 1, 'color' => 'B91C1C', 'bg' => 'FEE2E2'] : [])); $sh->set($r, 12, $x['rt'] - $x['rto'], $BC + ($x['rt'] - $x['rto'] ? ['color' => '15803D'] : []));
+        $sh->set($r, 13, $x['sbo'], $BC + ($x['sbo'] ? ['b' => 1, 'color' => 'B91C1C', 'bg' => 'FEE2E2'] : [])); $sh->set($r, 14, $x['sb'] - $x['sbo'], $BC + ($x['sb'] - $x['sbo'] ? ['color' => '15803D'] : [])); $r++;
     }
-    foreach ([14, 34, 16, 18, 12, 12, 12, 20, 24, 16] as $i => $wd) $sh->widths[$i + 1] = $wd;
-    $sh->freeze = [7, 1]; $sh->filter = 'A7:J' . max(8, $r - 1);
+    foreach ([14, 34, 16, 18, 12, 12, 12, 20, 24, 16, 13, 13, 13, 13] as $i => $wd) $sh->widths[$i + 1] = $wd;
+    $sh->freeze = [7, 1]; $sh->filter = 'A7:N' . max(8, $r - 1);
     /* 2. Policy violations */
     $s2 = $X->sheet('Policy Violations'); $s2->set(1, 1, 'Credit / Cheque policy violations — one row per bill', ['b' => 1, 'sz' => 14]);
     foreach (['T-Code', 'Shop', 'Invoice', 'Policy', 'Credit days', 'Delivery date', 'Due date', 'Paid date', 'Bill value', 'Balance', 'Days over', 'Status'] as $i => $h) $s2->set(3, $i + 1, $h, $H);
@@ -185,6 +188,7 @@ $cnt = fn($f) => count(array_filter($rows, $f));
 .cdr .tw{overflow:auto;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-height:72vh}.cdr table{width:100%;border-collapse:collapse;font-size:12.5px}.cdr th{background:#1e3a8a;color:#fff;padding:9px 9px;text-align:center;position:sticky;top:0;white-space:nowrap}
 .cdr td{padding:7px 9px;border-bottom:1px solid #f1f5f9;text-align:center}.cdr td.l,.cdr th.l{text-align:left}.cdr tbody tr{cursor:pointer}.cdr tr:hover td{background:#eef2ff}
 .cdr .b{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700}.cdr .b.y{background:#fef3c7;color:#92400e}.cdr .b.n{background:#f3f4f6;color:#6b7280}.cdr .b.rt{background:#ede9fe;color:#6d28d9}.cdr .b.sb{background:#dbeafe;color:#1d4ed8}.cdr .b.v{background:#fee2e2;color:#b91c1c}.cdr .b.c{background:#fff1f2;color:#be123c}
+.cdr .st{font-size:10.5px;line-height:1.3;margin-top:2px}.cdr .st .o{display:block;color:#b91c1c;font-weight:700}.cdr .st .s{display:block;color:#15803d}
 .cdm.cdr{max-width:none;margin:0;padding:14px}.cdm{position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px}.cdm.open{display:flex}
 .cdm .bx{background:#fff;border-radius:14px;width:100%;max-width:1200px;height:92vh;display:flex;flex-direction:column;overflow:hidden}.cdm .hd{padding:14px 18px;background:linear-gradient(120deg,#0f172a,#1e3a8a);color:#fff;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .cdm .bd{padding:14px 18px;overflow:auto;flex:1}.cdm h4{margin:16px 0 6px;font-size:14px}.cdm .tw{max-height:300px}
@@ -197,16 +201,16 @@ $cnt = fn($f) => count(array_filter($rows, $f));
     <div class="fld"><label>Pay mode</label><select name="pm"><option value="">All</option><?php foreach (['cash' => 'Cash', 'credit' => 'Credit', 'cheque' => 'Cheque'] as $k => $l): ?><option value="<?= $k ?>" <?= $F['pm'] === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
     <div class="fld"><label>Channel</label><select name="channel"><option value="">All</option><?php foreach ($channels as $c): ?><option <?= $F['channel'] === $c ? 'selected' : '' ?>><?= cd_h($c) ?></option><?php endforeach; ?></select></div>
     <div class="fld"><label>Chq will delay</label><select name="cwd"><option value="">All</option><option value="yes" <?= $F['cwd'] === 'yes' ? 'selected' : '' ?>>Yes</option><option value="no" <?= $F['cwd'] === 'no' ? 'selected' : '' ?>>No</option></select></div>
-    <div class="fld"><label>Show only</label><select name="issues"><option value="">All customers</option><?php foreach (['any' => 'Any issue', 'cwd' => 'Cheques will delay', 'ret' => 'Returned / sent-back cheques', 'viol' => 'Policy violated', 'canc' => 'With cancelled bills'] as $k => $l): ?><option value="<?= $k ?>" <?= $F['issues'] === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
+    <div class="fld"><label>Show only</label><select name="issues"><option value="">All customers</option><?php foreach (['any' => 'Any issue', 'cwd' => 'Cheques will delay', 'ret' => 'Returned / sent-back cheques', 'retopen' => 'Returned / sent-back NOT settled', 'viol' => 'Policy violated', 'canc' => 'With cancelled bills'] as $k => $l): ?><option value="<?= $k ?>" <?= $F['issues'] === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
     <div class="fld"><label>Search</label><input type="search" name="q" value="<?= cd_h($F['q']) ?>" placeholder="T-Code or shop name"></div>
     <button class="btn" type="submit"><i class="fa-solid fa-filter"></i> Filter</button><a class="btn o" href="customer_details_report.php">Clear</a>
     <a class="btn g" href="?<?= cd_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></form></div>
-  <div class="kp"><div class="k"><span>Customers</span><b><?= number_format(count($rows)) ?></b></div><div class="k"><span>Cheques will delay</span><b style="color:#b45309"><?= $cnt(fn($r) => $r['cwd'] === 'Yes') ?></b></div><div class="k"><span>Returned cheques</span><b style="color:#6d28d9"><?= number_format(array_sum(array_column($rows, 'rt'))) ?></b></div><div class="k"><span>Sent back cheques</span><b style="color:#1d4ed8"><?= number_format(array_sum(array_column($rows, 'sb'))) ?></b></div><div class="k"><span>Policy violations</span><b style="color:#b91c1c"><?= number_format(array_sum(array_column($rows, 'viol'))) ?></b></div><div class="k"><span>Cancelled value</span><b style="color:#be123c">Rs. <?= number_format(array_sum(array_column($rows, 'cv')), 2) ?></b></div></div>
+  <div class="kp"><div class="k"><span>Customers</span><b><?= number_format(count($rows)) ?></b></div><div class="k"><span>Cheques will delay</span><b style="color:#b45309"><?= $cnt(fn($r) => $r['cwd'] === 'Yes') ?></b></div><div class="k"><span>Returned cheques</span><b style="color:#6d28d9"><?= number_format(array_sum(array_column($rows, 'rt'))) ?></b><small style="display:block;color:#b91c1c;font-weight:700"><?= number_format(array_sum(array_column($rows, 'rto'))) ?> not settled</small></div><div class="k"><span>Sent back cheques</span><b style="color:#1d4ed8"><?= number_format(array_sum(array_column($rows, 'sb'))) ?></b><small style="display:block;color:#b91c1c;font-weight:700"><?= number_format(array_sum(array_column($rows, 'sbo'))) ?> not settled</small></div><div class="k"><span>Policy violations</span><b style="color:#b91c1c"><?= number_format(array_sum(array_column($rows, 'viol'))) ?></b></div><div class="k"><span>Cancelled value</span><b style="color:#be123c">Rs. <?= number_format(array_sum(array_column($rows, 'cv')), 2) ?></b></div></div>
   <div class="tw"><table><thead><tr><th class="l">T-Code</th><th class="l">Shop</th><th>Customer Pay Mode</th><th>Channel</th><th>Chq Will Delay</th><th>Chq Returns</th><th>Chq Sent Back</th><th>No of Times of Credit Policy Violation</th><th>Bill Cancel<br><small style="font-weight:500">amount (count)</small></th><th>Average Bill Count Per Month</th></tr></thead><tbody>
   <?php foreach ($rows as $x): ?>
     <tr data-t="<?= cd_h($x['t_code']) ?>"><td class="l"><b><?= cd_h($x['t_code']) ?></b></td><td class="l"><?= cd_h($x['shop']) ?></td><td><?= cd_h($x['pm']) ?></td><td><?= cd_h($x['channel'] ?: '—') ?></td>
       <td><span class="b <?= $x['cwd'] === 'Yes' ? 'y' : 'n' ?>"><?= $x['cwd'] ?></span></td>
-      <td><?= $x['rt'] ? '<span class="b rt">' . $x['rt'] . '</span>' : '<span style="color:#d1d5db">0</span>' ?></td><td><?= $x['sb'] ? '<span class="b sb">' . $x['sb'] . '</span>' : '<span style="color:#d1d5db">0</span>' ?></td>
+      <td><?= $x['rt'] ? '<span class="b rt">' . $x['rt'] . '</span><div class="st">' . ($x['rto'] ? '<span class="o">' . $x['rto'] . ' not settled</span>' : '') . ($x['rt'] - $x['rto'] ? '<span class="s">' . ($x['rt'] - $x['rto']) . ' settled</span>' : '') . '</div>' : '<span style="color:#d1d5db">0</span>' ?></td><td><?= $x['sb'] ? '<span class="b sb">' . $x['sb'] . '</span><div class="st">' . ($x['sbo'] ? '<span class="o">' . $x['sbo'] . ' not settled</span>' : '') . ($x['sb'] - $x['sbo'] ? '<span class="s">' . ($x['sb'] - $x['sbo']) . ' settled</span>' : '') . '</div>' : '<span style="color:#d1d5db">0</span>' ?></td>
       <td><?= $x['policy'] === 'none' ? '<span style="color:#d1d5db">n/a</span>' : ($x['viol'] ? '<span class="b v">' . $x['viol'] . ' time' . ($x['viol'] > 1 ? 's' : '') . '</span>' : '<span style="color:#d1d5db">0</span>') ?></td>
       <td><?= $x['cn'] ? '<span class="b c">' . number_format($x['cv'], 2) . ' (' . $x['cn'] . ')</span>' : '<span style="color:#d1d5db">—</span>' ?></td><td><b><?= $x['avg'] ?></b></td></tr>
   <?php endforeach; if (!$rows) echo '<tr><td colspan="10" style="padding:22px;color:#9ca3af">No customers match.</td></tr>'; ?></tbody></table></div>
@@ -224,7 +228,7 @@ $cnt = fn($f) => count(array_filter($rows, $f));
     fetch('customer_details_report.php?ajax=detail&t_code='+encodeURIComponent(t),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
       if(!d.success){ $('cdS').textContent=''; $('cdB').innerHTML='<p style="color:#b91c1c">'+esc(d.message||'Could not load')+'</p>'; return; }
       var r=d.row; $('cdT').textContent=r.t_code+' — '+r.shop; $('cdS').textContent='Pay mode '+r.pm+' · Channel '+(r.channel||'—')+' · Cheques will delay: '+r.cwd+' · Policy '+r.policy;
-      var h='<div class="kp" style="margin-top:0"><div class="k"><span>Returned cheques</span><b style="color:#6d28d9">'+r.rt+'</b></div><div class="k"><span>Sent back</span><b style="color:#1d4ed8">'+r.sb+'</b></div><div class="k"><span>Policy violations</span><b style="color:#b91c1c">'+(r.policy==='none'?'n/a':r.viol)+'</b></div><div class="k"><span>Worst delay</span><b>'+(r.max_over?'+'+r.max_over+' d':'—')+'</b></div><div class="k"><span>Cancelled</span><b style="color:#be123c">'+m2(r.cv)+' ('+r.cn+')</b></div><div class="k"><span>Avg bills / month</span><b>'+r.avg+'</b></div></div>';
+      var h='<div class="kp" style="margin-top:0"><div class="k"><span>Returned cheques</span><b style="color:#6d28d9">'+r.rt+'</b><small style="display:block;font-weight:700"><span style="color:#b91c1c">'+r.rto+' not settled</span> · <span style="color:#15803d">'+(r.rt-r.rto)+' settled</span></small></div><div class="k"><span>Sent back</span><b style="color:#1d4ed8">'+r.sb+'</b><small style="display:block;font-weight:700"><span style="color:#b91c1c">'+r.sbo+' not settled</span> · <span style="color:#15803d">'+(r.sb-r.sbo)+' settled</span></small></div><div class="k"><span>Policy violations</span><b style="color:#b91c1c">'+(r.policy==='none'?'n/a':r.viol)+'</b></div><div class="k"><span>Worst delay</span><b>'+(r.max_over?'+'+r.max_over+' d':'—')+'</b></div><div class="k"><span>Cancelled</span><b style="color:#be123c">'+m2(r.cv)+' ('+r.cn+')</b></div><div class="k"><span>Avg bills / month</span><b>'+r.avg+'</b></div></div>';
       h+='<h4>Policy violations — bills</h4>'+tbl(['Invoice','Delivery','Due','Paid','Bill value','Balance','Days over','Status'],d.viol.map(function(x){ return '<tr><td>'+esc(x.inv)+'</td><td>'+esc(x.del)+'</td><td>'+esc(x.due)+'</td><td>'+esc(x.paid||'—')+'</td><td>'+m2(x.net)+'</td><td>'+m2(x.bal)+'</td><td><b style="color:#b91c1c">+'+x.over+'</b></td><td>'+esc(x.open)+'</td></tr>'; }));
       h+='<h4>Returned / sent-back cheques</h4>'+tbl(['Cheque no','Date','Bank','Type','Amount','Settlement'],d.chq.map(function(x){ return '<tr><td>'+esc(x.no)+'</td><td>'+esc(x.date)+'</td><td>'+esc(x.bank)+'</td><td>'+esc(x.status)+'</td><td>'+m2(x.amt)+'</td><td>'+esc(x.settled)+'</td></tr>'; }));
       h+='<h4>Cancelled bills</h4>'+tbl(['Invoice','Delivery','Cancelled value'],d.canc.map(function(x){ return '<tr><td>'+esc(x.inv)+'</td><td>'+esc(x.del)+'</td><td>'+m2(x.v)+'</td></tr>'; }));
