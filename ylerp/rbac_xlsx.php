@@ -47,6 +47,7 @@ class MiniXlsx {
     }
     private function sheetXml(MiniSheet $sh) {
         $x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+        $x .= '<dimension ref="A1:' . self::col(max(1, $sh->maxC)) . max(1, $sh->maxR) . '"/>';
         $x .= '<sheetViews><sheetView workbookViewId="0" showGridLines="0"' . ($sh === $this->sheets[0] ? ' tabSelected="1"' : '') . '>';
         if ($sh->freeze) { [$fr, $fc] = $sh->freeze;
             $x .= '<pane' . ($fc ? ' xSplit="' . $fc . '"' : '') . ($fr ? ' ySplit="' . $fr . '"' : '') . ' topLeftCell="' . self::col($fc + 1) . ($fr + 1) . '" state="frozen" activePane="'
@@ -81,7 +82,7 @@ class MiniXlsx {
         $sheetsX = []; foreach ($this->sheets as $i => $sh) $sheetsX[$i] = $this->sheetXml($sh);   // builds style table first
         $z = new ZipArchive(); $z->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
         $ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
-        $wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>';
+        $wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="0" firstSheet="0"/></bookViews><sheets>';
         $rel = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
         foreach ($this->sheets as $i => $sh) { $n = $i + 1;
             $ct .= '<Override PartName="/xl/worksheets/sheet' . $n . '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
