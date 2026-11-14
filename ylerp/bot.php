@@ -5,24 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Yelo AI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg0:#f5f2ee;--bg1:#ede9e3;--bg2:#e3ddd6;
-  --ink0:#1a1714;--ink1:#4a4540;--ink2:#8c8580;
-  --user-bg:#1a1714;--user-ink:#f5f2ee;
-  --ai-bg:#ffffff;--ai-ink:#1a1714;
-  --brand:#e8a020;--brand2:#f0c06a;
-  --line:rgba(26,23,20,.1);--shadow:0 2px 20px rgba(26,23,20,.08);
-  --r:18px;--fn:'DM Sans',sans-serif;--mono:'Space Mono',monospace;
+  --bg0:#f3f6fb;--bg1:#e8eef7;--bg2:#d9e3f1;
+  --ink0:#0f1b33;--ink1:#41506b;--ink2:#7b8aa5;
+  --user-bg:linear-gradient(135deg,#1d4ed8,#6366f1);--user-ink:#ffffff;
+  --ai-bg:#ffffff;--ai-ink:#0f1b33;
+  --brand:#0d9488;--brand2:#5eead4;
+  --line:rgba(15,27,51,.1);--shadow:0 4px 24px rgba(15,27,51,.07);
+  --r:16px;--fn:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',ui-monospace,monospace;
   --safe-bot:env(safe-area-inset-bottom,0px);
 }
 [data-dark]{
-  --bg0:#111010;--bg1:#191717;--bg2:#221f1f;
-  --ink0:#f2ede8;--ink1:#b5ada6;--ink2:#6b6560;
-  --user-bg:#e8a020;--user-ink:#ffffff;
-  --ai-bg:#221f1f;--ai-ink:#f2ede8;
-  --line:rgba(242,237,232,.08);--shadow:0 2px 20px rgba(0,0,0,.3);
+  --bg0:#0a1224;--bg1:#101a33;--bg2:#17254a;
+  --ink0:#e8eefc;--ink1:#a9b8d8;--ink2:#6a7ba0;
+  --user-bg:linear-gradient(135deg,#2563eb,#7c3aed);--user-ink:#ffffff;
+  --ai-bg:#111c38;--ai-ink:#e8eefc;
+  --brand:#2dd4bf;--brand2:#5eead4;
+  --line:rgba(232,238,252,.09);--shadow:0 4px 24px rgba(0,0,0,.35);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;overflow:hidden}
@@ -134,6 +135,31 @@ body{font-family:var(--fn);background:var(--bg0);color:var(--ink0);display:flex;
 .mic-btn svg,.send-btn-main svg{width:16px;height:16px}
 .disclaimer-sm{text-align:center;font-size:10px;color:var(--ink2);font-family:var(--mono);margin-top:6px}
 
+/* ── new look: midnight / teal ── */
+body{background:radial-gradient(1200px 500px at 85% -10%,rgba(13,148,136,.10),transparent 60%),radial-gradient(900px 500px at -10% 110%,rgba(99,102,241,.10),transparent 55%),var(--bg0)}
+.topbar{background:linear-gradient(120deg,#0f1b33,#16306b 60%,#0d9488);border-bottom:none;color:#fff}
+.topbar .tb-name,.topbar .tb-name span{color:#fff}.topbar .tb-name span{color:#5eead4}.topbar .tb-status{color:rgba(255,255,255,.7)}
+.topbar .icon-btn{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.18);color:#fff}.topbar .icon-btn:hover{background:rgba(255,255,255,.24)}
+.topbar .avatar{background:rgba(255,255,255,.15)}.topbar .avatar-dot{border-color:#16306b}
+.icon-btn.on{background:#5eead4 !important;color:#0f1b33 !important}
+.pills-bar{background:transparent;border-bottom:none}.pill{border-radius:10px;background:var(--ai-bg);box-shadow:var(--shadow)}
+.pill:hover,.pill:active{background:var(--brand);border-color:var(--brand);color:#fff}
+.msg-row.ai .bubble{border-radius:6px var(--r) var(--r) var(--r);border:1px solid var(--line);border-left:3px solid var(--brand)}
+.msg-row.user .bubble{background:var(--user-bg);border-radius:var(--r) 6px var(--r) var(--r)}
+.msg-avatar-sm{border-radius:50%;background:var(--bg2)}
+.bubble h2{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--brand);margin:14px 0 5px;padding-bottom:3px;border-bottom:1px solid var(--line)}
+.bubble h2:first-child{margin-top:2px}.bubble th{background:linear-gradient(120deg,#16306b,#0d9488);color:#fff}
+.bubble strong{color:var(--ink0)}.bubble li::marker{color:var(--brand)}
+.mode-badge.mixed{background:rgba(13,148,136,.12);color:var(--brand)}
+.starter-card{border-radius:14px}.starter-card:hover,.starter-card:active{border-color:var(--brand);box-shadow:0 0 0 3px rgba(13,148,136,.15)}
+.empty-icon{background:linear-gradient(135deg,#16306b,#0d9488)}.empty-title{font-size:26px}
+.input-area{background:transparent;border-top:none}.input-row{border-radius:18px;border-color:var(--line)}.input-row:focus-within{border-color:var(--brand);box-shadow:0 0 0 4px rgba(13,148,136,.14)}
+.send-btn-main{background:linear-gradient(135deg,#1d4ed8,#0d9488);color:#fff}.send-btn-main:hover,.send-btn-main:active{background:linear-gradient(135deg,#2563eb,#14b8a6)}
+.mic-btn.active{color:var(--brand);background:rgba(13,148,136,.12)}
+.drawer{background:var(--bg0)}.drawer-logo span{color:var(--brand)}.drawer-item:hover,.drawer-item:active{background:var(--bg2)}
+.think-box{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink1)}.think-box b{color:var(--brand)}
+.checked{margin-top:10px;font-size:11.5px;color:var(--ink2);border:1px dashed var(--line);border-radius:10px;padding:6px 10px;background:var(--bg1)}
+.checked summary{cursor:pointer;font-weight:600;color:var(--ink1)}.checked div{margin-top:5px;line-height:1.55}.checked code{font-size:10.5px}
 /* ── responsive: centred reading column on tablets / desktops, comfortable touch targets on phones ── */
 .bubble{overflow-wrap:anywhere}
 .bubble .tbl-scroll{overflow-x:auto;margin:8px 0;-webkit-overflow-scrolling:touch}
@@ -229,10 +255,13 @@ body{font-family:var(--fn);background:var(--bg0);color:var(--ink0);display:flex;
     </div>
     <div>
       <div class="tb-name">Yelo<span>AI</span></div>
-      <div class="tb-status" id="statusText">gemini-2.5-flash · live DB</div>
+      <div class="tb-status" id="statusText">deep thinking · live DB + system files</div>
     </div>
   </div>
   <div class="tb-actions">
+    <button class="icon-btn" id="deepBtn" onclick="toggleDeep()" title="Deep thinking (more checks, more detail)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A5.5 5.5 0 004 7.5c0 .8.2 1.6.5 2.3A4.5 4.5 0 006 18.5V19a3 3 0 006 0V4.5A2.5 2.5 0 009.5 2z"/><path d="M14.5 2A5.5 5.5 0 0120 7.5c0 .8-.2 1.6-.5 2.3A4.5 4.5 0 0118 18.5V19a3 3 0 01-6 0"/></svg>
+    </button>
     <button class="icon-btn" onclick="clearChat()" title="Clear">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <polyline points="1 4 1 10 7 10"/>
@@ -332,7 +361,7 @@ body{font-family:var(--fn);background:var(--bg0);color:var(--ink0);display:flex;
       </button>
     </div>
   </div>
-  <div class="disclaimer-sm">Yelo AI · Gemini 2.5 Flash · Live DB + system menu · Verify critical figures</div>
+  <div class="disclaimer-sm">Yelo AI · Gemini 2.5 Flash · checks the database, menu and project files · Verify critical figures</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -356,6 +385,12 @@ function toggleTheme(){
   if(d.hasAttribute('data-dark')){ d.removeAttribute('data-dark'); localStorage.removeItem('yelo-dark'); }
   else{ d.setAttribute('data-dark',''); localStorage.setItem('yelo-dark','1'); }
 }
+
+/* ── DEEP THINKING toggle ── */
+let deepOn=(function(){ try{ return localStorage.getItem('yelo-deep')!=='0'; }catch(e){ return true; } })();
+function statusLabel(){ document.getElementById('statusText').textContent=(deepOn?'deep thinking':'quick')+' · live DB + system files'; document.getElementById('deepBtn').classList.toggle('on',deepOn); }
+function toggleDeep(){ deepOn=!deepOn; try{ localStorage.setItem('yelo-deep',deepOn?'1':'0'); }catch(e){} statusLabel(); appendSys(deepOn?'Deep thinking ON — more checks, more detail (slower).':'Quick mode — faster, shorter answers.'); }
+window.addEventListener('DOMContentLoaded',statusLabel);
 
 /* ── DRAWER ───────────────────────────────────────── */
 function openDrawer(){ document.getElementById('drawer').classList.add('open'); document.getElementById('drawerOverlay').classList.add('open'); }
@@ -398,14 +433,19 @@ function appendUserMsg(text,thumbs){
 }
 function zoomImg(src){ document.getElementById('lightboxImg').src=src; document.getElementById('lightbox').classList.add('on'); }
 
-function showTyping(){
+let thinkTimer=null;
+function showTyping(scanning){
   const msgs=document.getElementById('messages');
   const row=document.createElement('div');
   row.className='msg-row ai'; row.id='typingRow';
-  row.innerHTML=`<div class="msg-avatar-sm">🤖</div><div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+  row.innerHTML=`<div class="msg-avatar-sm">🧠</div><div class="bubble"><div class="think-box"><div class="typing-dots"><span></span><span></span><span></span></div><span id="thinkTxt"></span></div></div>`;
   msgs.appendChild(row); scrollBottom();
+  const steps=scanning?['Reading the image…','Extracting every field…','Checking it against the system…','Writing the result…']
+            :(deepOn?['Understanding the question…','Checking the system menu…','Reading the project files…','Querying the data…','Cross-checking the numbers…','Writing a detailed answer…']:['Thinking…','Querying the data…','Writing the answer…']);
+  let k=0; const t=document.getElementById('thinkTxt'); t.innerHTML='<b>'+steps[0]+'</b>';
+  clearInterval(thinkTimer); thinkTimer=setInterval(()=>{ k=Math.min(k+1,steps.length-1); const e=document.getElementById('thinkTxt'); if(e) e.innerHTML='<b>'+steps[k]+'</b>'; },4200);
 }
-function hideTyping(){ const el=document.getElementById('typingRow'); if(el)el.remove(); }
+function hideTyping(){ clearInterval(thinkTimer); const el=document.getElementById('typingRow'); if(el)el.remove(); }
 
 function appendAiMsg(data){
   /* Backend JSON: { success, answer, sql, explanation, row_count, code_context } */
@@ -426,23 +466,26 @@ function appendAiMsg(data){
   // action buttons: open the page(s) mentioned · download the table
   const acts=document.createElement('div'); acts.className='act-row';
   (data.links||[]).forEach(l=>{ const a=document.createElement('a'); a.className='act-btn pg'; a.href=l.href; a.target='_blank'; a.rel='noopener'; a.textContent='↗ Open: '+l.label; acts.appendChild(a); });
-  if(data.rows&&data.rows.length&&data.columns&&data.columns.length){
-    const b1=document.createElement('button'); b1.className='act-btn'; b1.type='button'; b1.textContent='⬇ Excel'; b1.onclick=()=>exportRows(data,'xlsx'); acts.appendChild(b1);
-    const b2=document.createElement('button'); b2.className='act-btn'; b2.type='button'; b2.textContent='⬇ CSV'; b2.onclick=()=>exportRows(data,'csv'); acts.appendChild(b2);
-  }
+  const tbs=(data.tables&&data.tables.length)?data.tables:((data.rows&&data.rows.length)?[{title:data.explanation||'',columns:data.columns,rows:data.rows}]:[]);
+  tbs.forEach((t,ti)=>{ if(!t.rows||!t.rows.length) return; const nm=(tbs.length>1?' '+(ti+1):'');
+    const b1=document.createElement('button'); b1.className='act-btn'; b1.type='button'; b1.title=t.title||''; b1.textContent='⬇ Excel'+nm; b1.onclick=()=>exportRows(t,'xlsx'); acts.appendChild(b1);
+    const b2=document.createElement('button'); b2.className='act-btn'; b2.type='button'; b2.title=t.title||''; b2.textContent='⬇ CSV'+nm; b2.onclick=()=>exportRows(t,'csv'); acts.appendChild(b2); });
   if(acts.children.length) bubble.appendChild(acts);
 
-  // SQL strip inside bubble
-  if(data.sql){
-    const strip=document.createElement('div');
-    strip.className='sql-strip';
-    strip.innerHTML=`<span class="sql-label">SQL</span><code>${escHtml(data.sql)}</code>`;
-    bubble.appendChild(strip);
+  // how it was checked (no SQL is ever shown)
+  if(data.checked && (data.checked.queries||data.checked.files)){
+    const c=data.checked, d=document.createElement('details'); d.className='checked';
+    d.innerHTML='<summary>🔎 How I checked'+(data.deep?' · deep thinking':'')+' — '+c.queries+' data check'+(c.queries===1?'':'s')+', '+((c.files||[]).length)+' system files, '+(c.menu_pages||0)+' menu pages</summary>'
+      +(c.approach?'<div><b>Approach:</b> '+escHtml(c.approach)+'</div>':'')
+      +((c.sources||[]).length?'<div><b>Data read:</b> '+c.sources.map(x=>'<code>'+escHtml(x)+'</code>').join(' ')+'</div>':'')
+      +((c.files||[]).length?'<div><b>Files checked:</b> '+c.files.map(x=>'<code>'+escHtml(x)+'</code>').join(' ')+'</div>':'')
+      +(c.failed?'<div style="color:#dc2626">'+c.failed+' check(s) could not be read.</div>':'');
+    bubble.appendChild(d);
   }
 
   const meta=document.createElement('div');
   meta.className='msg-meta';
-  meta.textContent=ts()+(data.row_count?' · '+data.row_count+' rows':'');
+  meta.textContent=ts()+(data.row_count?' · '+data.row_count+' rows checked':'');
 
   const avatarSm=document.createElement('div');
   avatarSm.className='msg-avatar-sm';
@@ -588,7 +631,7 @@ function clearChat(){
     </div>`;
   msgs.appendChild(es);
   setDot('online');
-  document.getElementById('statusText').textContent='gemini-2.5-flash · live DB';
+  statusLabel();
 }
 
 /* ── SEND MESSAGE ─────────────────────────────────────────────────────────────
@@ -637,7 +680,7 @@ function exportRows(data,kind){
     const csv='﻿'+[data.columns.map(q).join(',')].concat(data.rows.map(r=>data.columns.map(c=>q(r[c])).join(','))).join('\r\n');
     dl(new Blob([csv],{type:'text/csv;charset=utf-8'}),'yelo_ai_report.csv'); return;
   }
-  fetch(API_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({action:'export',title:data.explanation||'Yelo AI report',columns:data.columns,rows:data.rows})})
+  fetch(API_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({action:'export',title:data.title||data.explanation||'Yelo AI report',columns:data.columns,rows:data.rows})})
     .then(r=>{ const ct=r.headers.get('content-type')||''; if(ct.indexOf('json')>-1) return r.json().then(j=>{ throw new Error(j.message||'Export failed'); }); return r.blob(); })
     .then(b=>dl(b,'yelo_ai_report.xlsx')).catch(e=>appendSys('Export failed: '+e.message));
 }
@@ -677,15 +720,15 @@ async function sendMessage(){
 
   loading=true;
   document.getElementById('sendBtn').disabled=true;
-  document.getElementById('statusText').textContent=imgs.length?'scanning…':'thinking…';
+  document.getElementById('statusText').textContent=imgs.length?'scanning…':(deepOn?'thinking deeply…':'thinking…');
   setDot('busy');
-  showTyping();
+  showTyping(imgs.length>0);
 
   try{
     const res=await fetch(API_ENDPOINT,{
       method:'POST', credentials:'same-origin',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ message:text, history:chatHistory.slice(0,-1).slice(-10), images:imgs.map(a=>({mime:a.mime,data:a.data})), mode:scanMode })
+      body:JSON.stringify({ message:text, history:chatHistory.slice(0,-1).slice(-10), images:imgs.map(a=>({mime:a.mime,data:a.data})), mode:scanMode, deep:deepOn })
     });
     let data; const raw=await res.text();
     try{ data=JSON.parse(raw); }catch(e){ throw new Error(res.ok?'The server did not return JSON (you may have been logged out — reload the page).':'Server returned HTTP '+res.status); }
@@ -703,7 +746,7 @@ async function sendMessage(){
 
   loading=false;
   document.getElementById('sendBtn').disabled=false;
-  document.getElementById('statusText').textContent='gemini-2.5-flash · live DB';
+  statusLabel();
   setDot('online');
   if(!attachments.length) setMode('auto');
 }

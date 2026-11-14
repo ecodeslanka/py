@@ -38,7 +38,7 @@ function gemini_endpoint(string $api_key): string {
 }
 
 // ── Scan project PHP files and build code context ───────────────────────────
-function get_project_context(string $question): string {
+function get_project_context(string $question, int $limit = 120000): string {
     $root  = PROJECT_ROOT;
     $files = [];
 
@@ -108,7 +108,7 @@ function get_project_context(string $question): string {
     // ── Read top-scored files (up to MAX_CODE_FILES) ──────────────────────────
     $included = [];
     $total_bytes = 0;
-    $limit_bytes = 120000; // ~120 KB total code context cap
+    $limit_bytes = $limit; // total code context cap
 
     foreach (array_keys($scored) as $path) {
         if (count($included) >= MAX_CODE_FILES) break;
@@ -129,6 +129,7 @@ function get_project_context(string $question): string {
         $included[$rel] = $chunk;
     }
 
+    $GLOBALS['BOT_FILES'] = array_keys($included);        // which files were actually read (shown as "how I checked")
     // Build the context string
     $ctx  = "=== PROJECT DIRECTORY (all PHP pages) ===\n$dir_listing\n\n";
     $ctx .= "=== SOURCE CODE (most relevant files for this question) ===\n";
@@ -354,6 +355,7 @@ function gemini_call(array $messages, string $system, string $endpoint, array $o
     $body = ['contents' => $contents];
     if ($system) $body['systemInstruction'] = ['parts' => [['text' => $system]]];
     $body['generationConfig'] = ['temperature' => $opt['temperature'] ?? 0.2, 'maxOutputTokens' => $opt['tokens'] ?? 4096];
+    if (isset($opt['think'])) $body['generationConfig']['thinkingConfig'] = ['thinkingBudget' => (int)$opt['think']];   // deep thinking: the model reasons before it answers
     if (!empty($opt['json'])) $body['generationConfig']['responseMimeType'] = 'application/json';
 
     $raw = ''; $err = '';
@@ -570,73 +572,89 @@ try {
         }
     }
 
-    // ── Decide context ────────────────────────────────────────────────────────
-    $use_code_context = needs_code_context($message);
+    // ── Context: schema + live schema + sidebar menu + the project files that matter ─────────────
+    $deep         = !isset($body['deep']) || !empty($body['deep']);
+    $use_code_context = true;                                       // always look at the directory / files — the logic of a page decides what its numbers mean
     $schema       = get_db_schema();
     $liveSchema   = get_live_schema($conn, $schema);
     $menuCtx      = menu_context($menu);
-    $code_context = $use_code_context ? get_project_context($message) : '';
+    $code_context = get_project_context($message, $deep ? 110000 : 45000);
+    $filesRead    = $GLOBALS['BOT_FILES'] ?? [];
     $today        = date('Y-m-d (l)');
+    $histText     = '';
+    foreach (array_slice($history, -6) as $hh) $histText .= strtoupper($hh['role'] === 'model' ? 'assistant' : 'user') . ': ' . mb_substr($hh['text'], 0, 700) . "\n";
 
-    $systemPrompt = <<<SYS
-You are the data + system assistant of a PHP Sales/Distribution ERP in Sri Lanka (Ratnapura region). Today is $today. Currency is LKR.
-Knowledge sources, in order of trust:
-1. DATABASE SCHEMA (exact table and column names — never invent a column):
+    $planPrompt = <<<SYS
+You are the planner of a data assistant for a PHP Sales/Distribution ERP in Sri Lanka (Ratnapura). Today is $today. Currency LKR.
+Think carefully about WHAT the user really needs and which data answers it. Use the schema, the menu and the source code (the code shows what statuses / flags / formulas the ERP itself uses — follow them so your numbers match the system's own reports).
+
+DATABASE SCHEMA (exact names — never invent a table or column):
 $schema
 $liveSchema
-2. SYSTEM MENU (what exists in the sidebar and which file opens it):
+
 $menuCtx
-3. PROJECT SOURCE CODE:
+
+SOURCE CODE OF THE MOST RELEVANT FILES:
 $code_context
 
-RULES
-- DATA question → reply with ONE line `SQL: <single SELECT>` then `EXPLANATION: <one sentence>`. SELECT only, no semicolon, no comments, use only tables/columns from the schema, qualify columns when joining, always LIMIT 200 unless aggregating.
-- Never read the users / password / token / API-key tables.
-- SYSTEM / MENU / "where is" question → reply `NO_QUERY` (the answer is built from the menu + code).
-- Date words: "today" = CURDATE(), "this month" = MONTH(x)=MONTH(CURDATE()) AND YEAR(x)=YEAR(CURDATE()), "yesterday" = CURDATE()-INTERVAL 1 DAY.
-- Valid sales rows normally have status='imported'; say so if you filter on it.
+Reply with JSON only:
+{"approach":"<2-3 sentences: how you will answer and which rules from the code you follow>",
+ "queries":[{"title":"<what this query shows>","sql":"<ONE SELECT, no semicolon, no comments>"}]}
+RULES: at most MAXQ queries — use several small precise queries (totals, breakdown, comparison with the previous period, exceptions) rather than one giant one. SELECT only. Qualify columns when joining. LIMIT 200 unless aggregating. Never touch users / passwords / tokens / API keys.
+Menu / "where is" / how-it-works questions need NO data: return "queries":[].
+Dates: today = CURDATE(); this month = MONTH(x)=MONTH(CURDATE()) AND YEAR(x)=YEAR(CURDATE()); yesterday = CURDATE() - INTERVAL 1 DAY.
 SYS;
+    $planPrompt = str_replace('MAXQ', $deep ? '5' : '2', $planPrompt);
+    $ask = ($histText ? "Conversation so far:\n$histText\n" : '') . "User question: $message" . ($scanMd ? "\n\nAn image was scanned. Scan result:\n" . mb_substr($scanMd, 0, 3000) : '');
+    $planRaw = gemini_call([['role' => 'user', 'text' => $ask]], $planPrompt, $endpoint, ['json' => true, 'temperature' => 0.0, 'think' => $deep ? 2048 : 0, 'tokens' => $deep ? 6000 : 2500]);
+    $plan = json_decode(trim(preg_replace('/^```(?:json)?|```$/mi', '', trim($planRaw))), true);
+    if (!is_array($plan)) $plan = ['approach' => '', 'queries' => []];
+    $approach = trim((string)($plan['approach'] ?? ''));
 
-    // ── Step 1: SQL (with up to 2 automatic repairs when the query fails) ────
-    $h = array_slice($history, -MAX_HISTORY);
-    $ask = "User question: $message" . ($scanMd ? "\n\nAn image was scanned. Scan result:\n" . mb_substr($scanMd, 0, 3000) : '') . "\n\nDo you need a SQL query? If yes write it starting with SQL:";
-    $queryRows = []; $queryText = ''; $explanation = ''; $sqlExecuted = ''; $sqlError = '';
-    $msgs = array_merge($h, [['role' => 'user', 'text' => $ask]]);
-    for ($attempt = 0; $attempt < 3; $attempt++) {
-        $step1 = gemini_call($msgs, $systemPrompt, $endpoint, ['temperature' => 0.0, 'tokens' => 1500]);
-        if (preg_match('/^\s*NO_QUERY/i', $step1)) { $sqlExecuted = ''; break; }
-        $sqlExecuted = '';
-        if (preg_match('/SQL:\s*([\s\S]+?)(?:EXPLANATION:|$)/i', $step1, $full)) $sqlExecuted = trim($full[1]);
-        if (preg_match('/EXPLANATION:\s*(.+)/i', $step1, $em)) $explanation = trim($em[1]);
-        if ($sqlExecuted === '') break;
-        try { $queryRows = safe_query($conn, $sqlExecuted); $queryText = rows_to_text($queryRows); $sqlError = ''; break; }
-        catch (RuntimeException $qe) {
-            $sqlError = $qe->getMessage(); $queryRows = []; $queryText = '';
-            $msgs[] = ['role' => 'model', 'text' => $step1];
-            $msgs[] = ['role' => 'user', 'text' => "That query failed: $sqlError\nFix it using ONLY the exact table and column names of the schema, and reply again with SQL: ..."];
+    // ── Run every query (a failing one is repaired by the model up to 2 times) ─────────────────
+    $tables = []; $errors = []; $usedTables = [];
+    foreach (array_slice((array)($plan['queries'] ?? []), 0, $deep ? 5 : 2) as $qi => $qd) {
+        $sql = trim((string)($qd['sql'] ?? '')); $title = trim((string)($qd['title'] ?? 'Result ' . ($qi + 1)));
+        if ($sql === '') continue;
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            try {
+                $rowsQ = safe_query($conn, $sql);
+                if (preg_match_all('/\b(?:from|join)\s+`?([a-z0-9_]+)`?/i', $sql, $tm)) foreach ($tm[1] as $t) $usedTables[strtolower($t)] = true;
+                $tables[] = ['title' => $title, 'columns' => $rowsQ ? array_keys($rowsQ[0]) : [], 'rows' => $rowsQ]; break;
+            } catch (RuntimeException $qe) {
+                if ($attempt >= 2) { $errors[] = "$title: " . $qe->getMessage(); break; }
+                $fixRaw = gemini_call([['role' => 'user', 'text' => "Question: $message\nThis query failed.\nSQL: $sql\nError: " . $qe->getMessage() . "\nReturn JSON {\"sql\":\"<corrected single SELECT>\"} using ONLY exact table/column names from the schema."]], $planPrompt, $endpoint, ['json' => true, 'temperature' => 0.0, 'tokens' => 2000]);
+                $fx = json_decode(trim(preg_replace('/^```(?:json)?|```$/mi', '', trim($fixRaw))), true); $sql = trim((string)($fx['sql'] ?? '')); if ($sql === '') { $errors[] = "$title: could not be repaired"; break; }
+            }
         }
     }
-    if ($sqlError) $queryText = "Query error (after retries): $sqlError";
+    $dataText = ''; $budget = 70000;
+    foreach ($tables as $t) { $chunk = "### " . $t['title'] . " (" . count($t['rows']) . " rows" . (count($t['rows']) >= MAX_ROWS ? ', capped' : '') . ")\n" . rows_to_text($t['rows']) . "\n\n"; $dataText .= mb_substr($chunk, 0, max(0, $budget)); $budget -= strlen($chunk); if ($budget <= 0) break; }
+    foreach ($errors as $er) $dataText .= "(data problem — $er)\n";
+    $dataSection = $dataText !== '' ? "\n\nDATA FROM THE DATABASE:\n$dataText" : "\n\n(No database query was needed.)";
 
-    // ── Step 2: the answer, built only from the real rows ───────────────────
-    $dataSection = $queryText ? "\n\nDATA FROM DATABASE (" . count($queryRows) . " rows" . (count($queryRows) >= MAX_ROWS ? ', capped' : '') . "):\n$queryText" : "\n\n(No database query was needed.)";
-    $codeSection = $code_context ? "\n\nPROJECT SOURCE CODE CONTEXT:\n$code_context" : '';
-    $scanSection = $scanMd ? "\n\nSCANNED IMAGE RESULT (already verified against the system):\n$scanMd" : '';
+    // ── Final answer: deep, structured, only from the real data ───────────────────────────────
     $answerPrompt = <<<SYS
-You are a precise business analyst and PHP system analyst for a Sales/Distribution ERP in Sri Lanka. Today is $today. Currency LKR.
-ACCURACY RULES
-- Use ONLY numbers that appear in DATA FROM DATABASE / the scan result. Never estimate, extrapolate or invent a figure. If the data does not answer the question say so and say which table/page would.
-- If a query error is shown, say the data could not be read and what to try.
-- Present rows as a markdown table; bold the key numbers; format amounts with thousands separators (e.g. 1,250,430.50).
-- Give a short insight (1–3 bullets) only when the data supports it.
-- For menu / "where is" questions: name the exact menu path (Section > Menu > Page) from the SYSTEM MENU and finish with a line `PAGES: file1.php, file2.php` listing the pages involved. Only list files that exist in the menu.
-- For code questions: name the files, the flow (form → handler → DB → output) and the key SQL / functions from the source.
-- Be concise.
+You are a senior business analyst and PHP system analyst for a Sales/Distribution ERP in Sri Lanka. Today is $today. Currency LKR.
+Your plan was: $approach
+
+ACCURACY RULES (most important)
+- Use ONLY numbers that appear in DATA FROM THE DATABASE or the scan result. Never estimate or invent. Re-add the figures you quote and make sure totals, percentages and counts are consistent; if two sources disagree, say so.
+- If part of the data could not be read, say exactly which part and why; do not fill the gap.
+- Do NOT show or quote SQL, table names or column names to the user. Speak in business terms.
+- Amounts with thousands separators (1,250,430.50); percentages to 1 decimal; dates like 14 Nov 2026.
+
+HOW TO ANSWER (when the question is about data) — use these headings, skip a heading that has nothing to say:
+## Answer  — the direct answer in 1-3 sentences with the key numbers in **bold**.
+## Details — markdown table(s) with the full breakdown (all useful rows/columns, sorted sensibly, with a total row when it makes sense).
+## What I found — 3-6 bullets: trends, biggest/smallest items, comparisons with the previous period, exceptions or odd records, risks. Each bullet must be backed by a number from the data.
+## Suggested next steps — 2-4 concrete actions, naming the ERP page (from the SYSTEM MENU) where the user can act.
+For menu / how-it-works questions: explain step by step using the real menu path (Section › Menu › Page) and the real flow in the source code (form → handler → table → report), and mention any formulas / rules the code applies.
+Finish with a line `PAGES: file1.php, file2.php` listing the menu pages involved (only files that exist in the SYSTEM MENU).
 SYS;
-    $menuForAnswer = $use_code_context ? "\n\n" . $menuCtx : '';
     $h2 = array_slice($history, -MAX_HISTORY);
-    $h2[] = ['role' => 'user', 'text' => "User question: $message$dataSection$scanSection$codeSection$menuForAnswer\n\nPlease answer."];
-    $finalAnswer = gemini_call($h2, $answerPrompt, $endpoint, ['temperature' => 0.2, 'tokens' => 3500]);
+    $h2[] = ['role' => 'user', 'text' => "User question: $message$dataSection" . ($scanMd ? "\n\nSCANNED IMAGE RESULT (verified against the system):\n$scanMd" : '') . "\n\nSYSTEM MENU:\n$menuCtx\n\nSOURCE CODE CONTEXT:\n" . mb_substr($code_context, 0, $deep ? 60000 : 20000) . "\n\nPlease answer."];
+    $finalAnswer = gemini_call($h2, $answerPrompt, $endpoint, ['temperature' => 0.2, 'think' => $deep ? 4096 : 0, 'tokens' => $deep ? 9000 : 3500]);
     if ($scanMd && stripos($finalAnswer, 'Scanned:') === false) $finalAnswer = $scanMd . "\n\n---\n\n" . $finalAnswer;
 
     // links: PAGES line + any menu file named in the answer
@@ -645,12 +663,15 @@ SYS;
         foreach (preg_split('/[,\s]+/', $pm[1], -1, PREG_SPLIT_NO_EMPTY) as $f) { $k = strtolower(trim($f, " .`*")); if (isset($byFile[$k])) $links[$k] = ['label' => $byFile[$k]['label'], 'href' => $byFile[$k]['file']]; }
         $finalAnswer = trim(preg_replace('/^PAGES:.*$/mi', '', $finalAnswer));
     }
-    if (!$links && $use_code_context) foreach ($byFile as $k => $m) { if (stripos($finalAnswer, $m['file']) !== false && count($links) < 6) $links[$k] = ['label' => $m['label'], 'href' => $m['file']]; }
+    if (!$links) foreach ($byFile as $k => $m) { if (stripos($finalAnswer, $m['file']) !== false && count($links) < 6) $links[$k] = ['label' => $m['label'], 'href' => $m['file']]; }
 
+    $outTables = array_map(fn($t) => ['title' => $t['title'], 'columns' => $t['columns'], 'rows' => array_slice($t['rows'], 0, 200)], array_filter($tables, fn($t) => $t['rows']));
+    $first = $outTables ? reset($outTables) : null;
     echo json_encode([
-        'success' => true, 'answer' => $finalAnswer, 'sql' => $sqlExecuted, 'explanation' => $explanation, 'row_count' => count($queryRows),
-        'code_context' => $use_code_context, 'links' => array_values($links), 'scan' => $scanData,
-        'columns' => $queryRows ? array_keys($queryRows[0]) : [], 'rows' => array_slice($queryRows, 0, 200),
+        'success' => true, 'answer' => $finalAnswer, 'sql' => '', 'explanation' => $first['title'] ?? '', 'row_count' => array_sum(array_map(fn($t) => count($t['rows']), $tables)),
+        'code_context' => true, 'links' => array_values($links), 'scan' => $scanData, 'deep' => $deep,
+        'columns' => $first['columns'] ?? [], 'rows' => $first['rows'] ?? [], 'tables' => array_values($outTables),
+        'checked' => ['queries' => count($tables), 'failed' => count($errors), 'sources' => array_keys($usedTables), 'files' => array_slice($filesRead, 0, 14), 'menu_pages' => count($menu), 'approach' => $approach],
     ], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
 
 } catch (Throwable $e) {
