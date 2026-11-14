@@ -231,7 +231,7 @@ uksort($monthly, fn($a, $b) => sd_moc_key($b) <=> sd_moc_key($a) ?: strcmp($b, $
 $ub_from = sd_ok($_GET['ub_from'] ?? '') ? $_GET['ub_from'] : ''; $ub_to = sd_ok($_GET['ub_to'] ?? '') ? $_GET['ub_to'] : '';
 if ($ub_from && $ub_to && $ub_to < $ub_from) [$ub_from, $ub_to] = [$ub_to, $ub_from];
 $ub_q = trim($_GET['ub_q'] ?? '');
-$unrec = []; $unrec_tot = ['n' => 0, 'act' => 0.0, 'vat' => 0.0, 'tot' => 0.0];
+$unrec = []; $unrec_by = []; $unrec_tot = ['n' => 0, 'act' => 0.0, 'vat' => 0.0, 'tot' => 0.0];
 $ccT = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
 if ($ccT && mysqli_num_rows($ccT)) {
     $knownS = [];
@@ -250,10 +250,15 @@ if ($ccT && mysqli_num_rows($ccT)) {
         if ($no === '' || substr(ltrim($d), 0, 1) === '-') continue;   // no scheme no at all (e.g. "-B431090926-M'palasa potal - M8035592605080046") = not a scheme certificate → not listed
         $hit = ($no !== '' && isset($knownS[$no]));            // F / M rule: the scheme no of the certificate must be a scheme no of this report
         if ($hit) continue;
-        $x['sch_no'] = $no; $x['sch_fm'] = $fm; $unrec[] = $x; $unrec_tot['n']++; $unrec_tot['act'] += (float)$x['actual_amount']; $unrec_tot['vat'] += (float)$x['vat_amount']; $unrec_tot['tot'] += (float)$x['total_amount'];
+        $x['sch_no'] = $no; $x['sch_fm'] = $fm; $unrec[] = $x;
+        $ymk = preg_match('/^(\d{4})-(\d{2})/', (string)$x['banking_date'], $ym) ? $ym[1] . '-' . $ym[2] : '0000-00';
+        if (!isset($unrec_by[$ymk])) $unrec_by[$ymk] = ['n' => 0, 'act' => 0.0, 'vat' => 0.0, 'tot' => 0.0];
+        $unrec_by[$ymk]['n']++; $unrec_by[$ymk]['act'] += (float)$x['actual_amount']; $unrec_by[$ymk]['vat'] += (float)$x['vat_amount']; $unrec_by[$ymk]['tot'] += (float)$x['total_amount']; $unrec_tot['n']++; $unrec_tot['act'] += (float)$x['actual_amount']; $unrec_tot['vat'] += (float)$x['vat_amount']; $unrec_tot['tot'] += (float)$x['total_amount'];
     }
     if ($r instanceof mysqli_result) mysqli_free_result($r);
 }
+krsort($unrec_by);
+function sd_ymlabel($k) { return $k === '0000-00' ? 'No banking date' : substr($k, 5, 2) . '/' . substr($k, 0, 4); }
 
 /* Excel unreconciled */
 if (isset($_GET['export']) && ($_GET['sheet'] ?? '') === 'unrec' && class_exists('ZipArchive')) {
@@ -267,6 +272,11 @@ if (isset($_GET['export']) && ($_GET['sheet'] ?? '') === 'unrec' && class_exists
     $sh->set($r, 13, 'TOTAL (' . number_format($unrec_tot['n']) . ' rows)', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); foreach ([[14, 'act'], [15, 'vat'], [16, 'tot']] as [$c, $k]) $sh->set($r, $c, round($unrec_tot[$k], 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]);
     foreach ([5, 14, 26, 24, 12, 14, 12, 16, 18, 12, 13, 10, 46, 14, 12, 14, 18, 22, 8] as $i => $wd) $sh->widths[$i + 1] = $wd;
     $sh->freeze = [3, 0]; $sh->filter = 'A3:S' . max(4, $r - 1);
+    $sm = $X->sheet('By year-month'); $sm->set(1, 1, 'Unreconciled claim certificates — by year / month (banking date)', ['b' => 1, 'sz' => 14]);
+    foreach (['Month (MM/YYYY)', 'Certificates', 'Actual Amount', 'VAT Amount', 'Total Amount'] as $i => $h) $sm->set(3, $i + 1, $h, $H);
+    $mr = 4; foreach ($unrec_by as $k => $g) { foreach ([sd_ymlabel($k), $g['n'], round($g['act'], 2), round($g['vat'], 2), round($g['tot'], 2)] as $i => $v) $sm->set($mr, $i + 1, $v, ['border' => 1] + ($i >= 1 ? ['h' => 'right'] : []) + ($i >= 2 ? ['nf' => 4] : [])); $mr++; }
+    $sm->set($mr, 1, 'TOTAL', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sm->set($mr, 2, $unrec_tot['n'], ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right']); foreach ([[3, 'act'], [4, 'vat'], [5, 'tot']] as [$c, $kk]) $sm->set($mr, $c, round($unrec_tot[$kk], 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]);
+    foreach ([18, 14, 18, 16, 18] as $i => $wd) $sm->widths[$i + 1] = $wd;
     $tmp = tempnam(sys_get_temp_dir(), 'sdu'); $X->save($tmp);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="unreconciled_claim_certificates_' . date('Ymd_His') . '.xlsx"');
     header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
@@ -375,10 +385,15 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
       <a class="btn o" data-no-loader href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1, 'sheet' => 'unrec']))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></form>
     <div style="margin:0 0 10px;font-size:12.5px;color:#6b7280">Claim type: <b style="color:#1e3a8a">Weekly Activities (TTS)</b> only.</div>
     <div class="kp"><div class="k"><span>Unreconciled certificates</span><b><?= number_format($unrec_tot['n']) ?></b></div><div class="k"><span>Actual amount</span><b style="color:#b91c1c">Rs. <?= number_format($unrec_tot['act'], 2) ?></b></div><div class="k"><span>VAT amount</span><b>Rs. <?= number_format($unrec_tot['vat'], 2) ?></b></div><div class="k"><span>Total amount</span><b>Rs. <?= number_format($unrec_tot['tot'], 2) ?></b></div></div>
-    <div class="tw"><table><thead><tr><th>#</th><th>Customer</th><th>Upload File</th><th>Ledger Type</th><th>Status</th><th>Claim Type</th><th>Tax Invoice No</th><th>Invoice Date</th><th>Banking Date</th><th>Entity</th><th>Claim Description</th><th class="r">Actual Amount</th><th class="r">VAT Amount</th><th class="r">Total Amount</th><th>Imported At</th><th>Scheme No (from description)</th><th>F / M</th></tr></thead><tbody>
-    <?php foreach ($unrec as $n => $x): ?><tr><td><?= $n + 1 ?></td><td style="white-space:nowrap"><b><?= sd_h($x['customer_code']) ?></b> <span style="color:#6b7280;font-size:11.5px"><?= sd_h($x['customer_name']) ?></span></td><td style="font-size:11.5px"><?= sd_h($x['file_name']) ?><br><span style="color:#9ca3af"><?= sd_h($x['upload_date']) ?></span></td><td><?= sd_h($x['ledger_type']) ?></td><td><?= sd_h($x['status']) ?></td><td><?= sd_h($x['claim_type']) ?></td><td><b><?= sd_h($x['tax_invoice_no']) ?></b></td><td><?= sd_d($x['invoice_date']) ?></td><td><?= sd_d($x['banking_date']) ?></td><td><?= sd_h($x['entity']) ?></td><td style="white-space:normal;min-width:260px"><?= sd_h($x['claim_description']) ?></td><td class="r"><b><?= number_format((float)$x['actual_amount'], 2) ?></b></td><td class="r"><?= number_format((float)$x['vat_amount'], 2) ?></td><td class="r"><?= number_format((float)$x['total_amount'], 2) ?></td><td style="font-size:11px;color:#6b7280;white-space:nowrap"><?= sd_h($x['imported_at']) ?></td><td style="font-family:monospace;font-weight:800;color:#312e81"><?= $x['sch_no'] !== '' ? sd_h($x['sch_no']) : '<span style="color:#d1d5db">no number</span>' ?></td><td style="text-align:center"><?= $x['sch_fm'] !== '' ? '<span class="sdsrc ' . ($x['sch_fm'] === 'F' ? 'status' : 'hul') . '">' . $x['sch_fm'] . '</span>' : '—' ?></td></tr>
+    <div class="tw" style="max-height:260px;margin-bottom:10px"><table id="ubSumT"><thead><tr><th>Year / Month (banking date)</th><th class="r">Certificates</th><th class="r">Actual Amount</th><th class="r">VAT Amount</th><th class="r">Total Amount</th></tr></thead><tbody>
+    <?php foreach ($unrec_by as $__k => $__g): ?><tr class="ubg" data-ym="<?= sd_h($__k) ?>" style="cursor:pointer" title="Click to see the certificates of this month"><td><b><?= sd_h(sd_ymlabel($__k)) ?></b> <i class="fa-solid fa-chevron-right" style="font-size:10px;color:#9ca3af"></i></td><td class="r"><?= number_format($__g['n']) ?></td><td class="r"><b><?= number_format($__g['act'], 2) ?></b></td><td class="r"><?= number_format($__g['vat'], 2) ?></td><td class="r"><?= number_format($__g['tot'], 2) ?></td></tr>
+    <?php endforeach; if (!$unrec_by): ?><tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:16px">Nothing to group.</td></tr><?php endif; ?></tbody>
+    <?php if ($unrec_by): ?><tfoot><tr><td>TOTAL</td><td class="r"><?= number_format($unrec_tot['n']) ?></td><td class="r"><?= number_format($unrec_tot['act'], 2) ?></td><td class="r"><?= number_format($unrec_tot['vat'], 2) ?></td><td class="r"><?= number_format($unrec_tot['tot'], 2) ?></td></tr></tfoot><?php endif; ?></table></div>
+    <div id="ubBar" style="display:none;margin:0 0 8px;font-size:12.5px"><span class="chip" style="margin:0">Month <b id="ubTxt"></b></span> <a href="#" id="ubClr" style="color:#1e3a8a;font-weight:700">show all months ✕</a></div>
+    <div class="tw"><table id="ubDetT"><thead><tr><th>#</th><th>Customer</th><th>Upload File</th><th>Ledger Type</th><th>Status</th><th>Claim Type</th><th>Tax Invoice No</th><th>Invoice Date</th><th>Banking Date</th><th>Entity</th><th>Claim Description</th><th class="r">Actual Amount</th><th class="r">VAT Amount</th><th class="r">Total Amount</th><th>Imported At</th><th>Scheme No (from description)</th><th>F / M</th></tr></thead><tbody>
+    <?php foreach ($unrec as $n => $x): $__ym = preg_match('/^(\d{4})-(\d{2})/', (string)$x['banking_date'], $__m) ? $__m[1] . '-' . $__m[2] : '0000-00'; ?><tr data-ym="<?= $__ym ?>" data-a="<?= (float)$x['actual_amount'] ?>" data-v="<?= (float)$x['vat_amount'] ?>" data-t="<?= (float)$x['total_amount'] ?>"><td class="ubn"><?= $n + 1 ?></td><td style="white-space:nowrap"><b><?= sd_h($x['customer_code']) ?></b> <span style="color:#6b7280;font-size:11.5px"><?= sd_h($x['customer_name']) ?></span></td><td style="font-size:11.5px"><?= sd_h($x['file_name']) ?><br><span style="color:#9ca3af"><?= sd_h($x['upload_date']) ?></span></td><td><?= sd_h($x['ledger_type']) ?></td><td><?= sd_h($x['status']) ?></td><td><?= sd_h($x['claim_type']) ?></td><td><b><?= sd_h($x['tax_invoice_no']) ?></b></td><td><?= sd_d($x['invoice_date']) ?></td><td><?= sd_d($x['banking_date']) ?></td><td><?= sd_h($x['entity']) ?></td><td style="white-space:normal;min-width:260px"><?= sd_h($x['claim_description']) ?></td><td class="r"><b><?= number_format((float)$x['actual_amount'], 2) ?></b></td><td class="r"><?= number_format((float)$x['vat_amount'], 2) ?></td><td class="r"><?= number_format((float)$x['total_amount'], 2) ?></td><td style="font-size:11px;color:#6b7280;white-space:nowrap"><?= sd_h($x['imported_at']) ?></td><td style="font-family:monospace;font-weight:800;color:#312e81"><?= $x['sch_no'] !== '' ? sd_h($x['sch_no']) : '<span style="color:#d1d5db">no number</span>' ?></td><td style="text-align:center"><?= $x['sch_fm'] !== '' ? '<span class="sdsrc ' . ($x['sch_fm'] === 'F' ? 'status' : 'hul') . '">' . $x['sch_fm'] . '</span>' : '—' ?></td></tr>
     <?php endforeach; if (!$unrec): ?><tr><td colspan="17" style="text-align:center;color:#9ca3af;padding:28px">Every Weekly Activities (TTS) claim certificate tallies with a scheme of this report<?= ($ub_from || $ub_to || $ub_q !== '') ? ' (for this banking date / search)' : '' ?>.</td></tr><?php endif; ?></tbody>
-    <?php if ($unrec): ?><tfoot><tr><td colspan="11">TOTAL (<?= number_format($unrec_tot['n']) ?> certificates)</td><td class="r"><?= number_format($unrec_tot['act'], 2) ?></td><td class="r"><?= number_format($unrec_tot['vat'], 2) ?></td><td class="r"><?= number_format($unrec_tot['tot'], 2) ?></td><td></td><td></td><td></td></tr></tfoot><?php endif; ?></table></div>
+    <?php if ($unrec): ?><tfoot><tr><td colspan="11" id="ubFN">TOTAL (<?= number_format($unrec_tot['n']) ?> certificates)</td><td class="r" id="ubFA"><?= number_format($unrec_tot['act'], 2) ?></td><td class="r" id="ubFV"><?= number_format($unrec_tot['vat'], 2) ?></td><td class="r" id="ubFT"><?= number_format($unrec_tot['tot'], 2) ?></td><td></td><td></td><td></td></tr></tfoot><?php endif; ?></table></div>
   </div>
 </div>
 <div id="bwsM" style="position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px;font-family:'Inter',system-ui,sans-serif">
@@ -428,6 +443,13 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
     $('sdMocBar').style.display=m===null?'none':'inline'; if(m!==null) $('sdMocTxt').textContent=m||'—'; }
   [].forEach.call(document.querySelectorAll('.sdtabs button'),function(b){ b.addEventListener('click',function(){ view(b.dataset.v); }); });
   document.querySelectorAll('tr.mocr').forEach(function(r){ r.addEventListener('click',function(){ filt(r.dataset.moc); view('det'); window.scrollTo({top:0,behavior:'smooth'}); }); });
+  /* Unreconciled tab: click a year / month → only its certificates */
+  function ubFilt(ym){ var n=0,a=0,v=0,t=0; [].forEach.call(document.querySelectorAll('#ubDetT tbody tr[data-ym]'),function(r){ var show=ym===null||r.dataset.ym===ym; r.style.display=show?'':'none'; if(show){ n++; r.querySelector('.ubn').textContent=n; a+=+r.dataset.a; v+=+r.dataset.v; t+=+r.dataset.t; } });
+    if($('ubFN')){ $('ubFN').textContent='TOTAL ('+n+' certificate'+(n===1?'':'s')+')'; $('ubFA').textContent=money(a); $('ubFV').textContent=money(v); $('ubFT').textContent=money(t); }
+    [].forEach.call(document.querySelectorAll('#ubSumT tr.ubg'),function(r){ r.style.background=(ym!==null&&r.dataset.ym===ym)?'#eef2ff':''; });
+    $('ubBar').style.display=ym===null?'none':'block'; if(ym!==null){ var c=document.querySelector('#ubSumT tr.ubg[data-ym="'+ym+'"] b'); $('ubTxt').textContent=c?c.textContent:ym; } }
+  [].forEach.call(document.querySelectorAll('#ubSumT tr.ubg'),function(r){ r.addEventListener('click',function(){ ubFilt(r.dataset.ym); var d=$('ubDetT'); if(d) d.scrollIntoView({behavior:'smooth',block:'start'}); }); });
+  if($('ubClr')) $('ubClr').addEventListener('click',function(e){ e.preventDefault(); ubFilt(null); });
   $('sdMocClr').addEventListener('click',function(e){ e.preventDefault(); filt(null); });
   var v0='det'; try{ v0=localStorage.getItem(KEY)||'det'; }catch(e){} var tq=new URLSearchParams(location.search).get('tab'); if(tq==='unr') v0='unr'; view(v0==='sum'?'sum':(v0==='unr'?'unr':'det'));
 })();
