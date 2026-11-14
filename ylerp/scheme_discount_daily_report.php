@@ -46,6 +46,21 @@ if (($_GET['ajax'] ?? '') === 'bws_rows') {
  *    (e.g. "B27181224-41398595 BuyRexona80g&GetDis") that equals a scheme code is used.
  * $codes = normalised scheme codes wanted. Returns code => ['n'=>count,'act'=>sum,'rows'=>[...]] (rows only when $withRows).
  */
+/**
+ * Scheme no of a claim certificate description — the SAME rule as the Customer Claim Report:
+ *   only the first part has a number → that number (F) · a middle number (6+ digits after the first "-", not a batch code like B483131026) → the middle number (M),
+ *   also when it differs from the first number. Returns [scheme_no, 'F'|'M'|''].
+ */
+function sd_scheme_fm($desc) {
+    $desc = (string)$desc; $first = ''; $mid = '';
+    $dash = strpos($desc, '-'); $head = $dash === false ? $desc : substr($desc, 0, $dash);
+    if (preg_match('/^\s*(\d{6,})/', $head, $m)) $first = $m[1];
+    $rest = $dash === false ? '' : substr($desc, $dash + 1);
+    if ($rest !== '' && preg_match('/(?<![A-Za-z0-9])(\d{6,})/', $rest, $m)) $mid = $m[1];
+    if ($mid !== '') return [$mid, 'M'];
+    if ($first !== '') return [$first, 'F'];
+    return ['', ''];
+}
 function sd_cc_tally($conn, array $codes, $withRows = false) {
     $out = [];
     $chk = mysqli_query($conn, "SHOW TABLES LIKE 'claim_cert_items'");
@@ -55,13 +70,8 @@ function sd_cc_tally($conn, array $codes, $withRows = false) {
                               FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> '' ORDER BY invoice_date, tax_invoice_no");
     while ($q && ($x = mysqli_fetch_assoc($q))) {
         $d = (string)$x['claim_description'];
-        $hit = null;
-        $first = sd_norm(explode('-', $d, 2)[0]);
-        if ($first !== '' && isset($set[$first])) $hit = $first;
-        else foreach (preg_split('/[^A-Za-z0-9]+/', $d, -1, PREG_SPLIT_NO_EMPTY) as $t) {
-            $t = sd_norm($t);
-            if (isset($set[$t])) { $hit = $t; break; }
-        }
+        [$no] = sd_scheme_fm($d); $no = sd_norm($no);
+        $hit = ($no !== '' && isset($set[$no])) ? $no : null;      // scheme no by the F / M rule must be one of the report's scheme nos
         if ($hit === null) continue;
         if (!isset($out[$hit])) $out[$hit] = ['n' => 0, 'act' => 0.0, 'vat' => 0.0, 'rows' => []];
         $out[$hit]['n']++; $out[$hit]['act'] += (float)$x['actual_amount']; $out[$hit]['vat'] += (float)$x['vat_amount'];
@@ -212,7 +222,7 @@ uksort($monthly, fn($a, $b) => sd_moc_key($b) <=> sd_moc_key($a) ?: strcmp($b, $
 
 /* ═════════ Unreconciled claim certificates: certificate rows whose scheme no does not tally with ANY scheme of this report ═════════
    known scheme nos = every Current Scheme Status code (not DAMAGE) + every HUL / TOT master code + the scheme nos written in their descriptions.
-   a certificate row tallies when the part of its description before the first "-", or any word / number of the description, is one of them. */
+   a certificate row tallies when its scheme no — by the Customer Claim Report rule: the middle number if there is one (even when it differs from the first), else the first number — is one of them. */
 $ub_from = sd_ok($_GET['ub_from'] ?? '') ? $_GET['ub_from'] : ''; $ub_to = sd_ok($_GET['ub_to'] ?? '') ? $_GET['ub_to'] : '';
 if ($ub_from && $ub_to && $ub_to < $ub_from) [$ub_from, $ub_to] = [$ub_to, $ub_from];
 $ub_q = trim($_GET['ub_q'] ?? '');
@@ -231,12 +241,10 @@ if ($ccT && mysqli_num_rows($ccT)) {
     if ($ub_q !== '') { $qq = mysqli_real_escape_string($conn, $ub_q); $ew[] = "(ci.claim_description LIKE '%$qq%' OR ci.tax_invoice_no LIKE '%$qq%' OR ci.customer_name LIKE '%$qq%' OR ci.customer_code LIKE '%$qq%')"; }
     $r = mysqli_query($conn, "SELECT ci.*, cu.file_name, cu.upload_date FROM claim_cert_items ci LEFT JOIN claim_cert_uploads cu ON cu.id = ci.upload_id WHERE " . implode(' AND ', $ew) . " ORDER BY ci.banking_date DESC, ci.id DESC", MYSQLI_USE_RESULT);
     while ($r && ($x = mysqli_fetch_assoc($r))) {
-        $d = (string)$x['claim_description']; $hit = false;
-        $first = sd_norm(explode('-', $d, 2)[0]);
-        if ($first !== '' && isset($knownS[$first])) $hit = true;
-        else foreach (preg_split('/[^A-Za-z0-9]+/', $d, -1, PREG_SPLIT_NO_EMPTY) as $tk) { if (isset($knownS[sd_norm($tk)])) { $hit = true; break; } }
+        $d = (string)$x['claim_description']; [$no, $fm] = sd_scheme_fm($d); $no = sd_norm($no);
+        $hit = ($no !== '' && isset($knownS[$no]));            // F / M rule: the scheme no of the certificate must be a scheme no of this report
         if ($hit) continue;
-        $unrec[] = $x; $unrec_tot['n']++; $unrec_tot['act'] += (float)$x['actual_amount']; $unrec_tot['vat'] += (float)$x['vat_amount']; $unrec_tot['tot'] += (float)$x['total_amount'];
+        $x['sch_no'] = $no; $x['sch_fm'] = $fm; $unrec[] = $x; $unrec_tot['n']++; $unrec_tot['act'] += (float)$x['actual_amount']; $unrec_tot['vat'] += (float)$x['vat_amount']; $unrec_tot['tot'] += (float)$x['total_amount'];
     }
     if ($r instanceof mysqli_result) mysqli_free_result($r);
 }
@@ -248,11 +256,11 @@ if (isset($_GET['export']) && ($_GET['sheet'] ?? '') === 'unrec' && class_exists
     $X = new MiniXlsx(); $sh = $X->sheet('Unreconciled certificates');
     $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '1E3A8A', 'h' => 'center', 'border' => 1, 'wrap' => 1];
     $sh->set(1, 1, 'Unreconciled claim certificates — scheme no not found in the Scheme Discount Daily Report' . ($ub_from || $ub_to ? ' (banking date ' . ($ub_from ?: '…') . ' to ' . ($ub_to ?: '…') . ')' : ''), ['b' => 1, 'sz' => 14]);
-    foreach (['#', 'Customer Code', 'Customer Name', 'Upload File', 'Upload Date', 'Ledger Type', 'Status', 'Claim Type', 'Tax Invoice No', 'Invoice Date', 'Banking Date', 'Entity', 'Claim Description', 'Actual Amount', 'VAT Amount', 'Total Amount', 'Imported At'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
-    $r = 4; foreach ($unrec as $n => $x) { foreach ([$n + 1, $x['customer_code'], $x['customer_name'], $x['file_name'], $x['upload_date'], $x['ledger_type'], $x['status'], $x['claim_type'], $x['tax_invoice_no'], $x['invoice_date'], $x['banking_date'], $x['entity'], $x['claim_description'], (float)$x['actual_amount'], (float)$x['vat_amount'], (float)$x['total_amount'], $x['imported_at']] as $i => $v) $sh->set($r, $i + 1, $v === null ? '' : $v, ['border' => 1] + (in_array($i, [13, 14, 15], true) ? ['h' => 'right', 'nf' => 4] : [])); $r++; }
+    foreach (['#', 'Customer Code', 'Customer Name', 'Upload File', 'Upload Date', 'Ledger Type', 'Status', 'Claim Type', 'Tax Invoice No', 'Invoice Date', 'Banking Date', 'Entity', 'Claim Description', 'Actual Amount', 'VAT Amount', 'Total Amount', 'Imported At', 'Scheme No (from description)', 'F / M'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
+    $r = 4; foreach ($unrec as $n => $x) { foreach ([$n + 1, $x['customer_code'], $x['customer_name'], $x['file_name'], $x['upload_date'], $x['ledger_type'], $x['status'], $x['claim_type'], $x['tax_invoice_no'], $x['invoice_date'], $x['banking_date'], $x['entity'], $x['claim_description'], (float)$x['actual_amount'], (float)$x['vat_amount'], (float)$x['total_amount'], $x['imported_at'], $x['sch_no'], $x['sch_fm']] as $i => $v) $sh->set($r, $i + 1, $v === null ? '' : $v, ['border' => 1] + (in_array($i, [13, 14, 15], true) ? ['h' => 'right', 'nf' => 4] : [])); $r++; }
     $sh->set($r, 13, 'TOTAL (' . number_format($unrec_tot['n']) . ' rows)', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); foreach ([[14, 'act'], [15, 'vat'], [16, 'tot']] as [$c, $k]) $sh->set($r, $c, round($unrec_tot[$k], 2), ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4]);
-    foreach ([5, 14, 26, 24, 12, 14, 12, 16, 18, 12, 13, 10, 46, 14, 12, 14, 18] as $i => $wd) $sh->widths[$i + 1] = $wd;
-    $sh->freeze = [3, 0]; $sh->filter = 'A3:Q' . max(4, $r - 1);
+    foreach ([5, 14, 26, 24, 12, 14, 12, 16, 18, 12, 13, 10, 46, 14, 12, 14, 18, 22, 8] as $i => $wd) $sh->widths[$i + 1] = $wd;
+    $sh->freeze = [3, 0]; $sh->filter = 'A3:S' . max(4, $r - 1);
     $tmp = tempnam(sys_get_temp_dir(), 'sdu'); $X->save($tmp);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="unreconciled_claim_certificates_' . date('Ymd_His') . '.xlsx"');
     header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
@@ -355,10 +363,10 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
       <button class="btn" type="submit"><i class="fa-solid fa-filter"></i> Show</button><a class="btn o" href="?<?= sd_h(http_build_query(array_diff_key($_GET, array_flip(['ub_from', 'ub_to', 'ub_q', 'export', 'sheet'])) + ['tab' => 'unr'])) ?>">Reset</a>
       <a class="btn o" data-no-loader href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1, 'sheet' => 'unrec']))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></form>
     <div class="kp"><div class="k"><span>Unreconciled certificates</span><b><?= number_format($unrec_tot['n']) ?></b></div><div class="k"><span>Actual amount</span><b style="color:#b91c1c">Rs. <?= number_format($unrec_tot['act'], 2) ?></b></div><div class="k"><span>VAT amount</span><b>Rs. <?= number_format($unrec_tot['vat'], 2) ?></b></div><div class="k"><span>Total amount</span><b>Rs. <?= number_format($unrec_tot['tot'], 2) ?></b></div></div>
-    <div class="tw"><table><thead><tr><th>#</th><th>Customer</th><th>Upload File</th><th>Ledger Type</th><th>Status</th><th>Claim Type</th><th>Tax Invoice No</th><th>Invoice Date</th><th>Banking Date</th><th>Entity</th><th>Claim Description</th><th class="r">Actual Amount</th><th class="r">VAT Amount</th><th class="r">Total Amount</th><th>Imported At</th></tr></thead><tbody>
-    <?php foreach ($unrec as $n => $x): ?><tr><td><?= $n + 1 ?></td><td style="white-space:nowrap"><b><?= sd_h($x['customer_code']) ?></b> <span style="color:#6b7280;font-size:11.5px"><?= sd_h($x['customer_name']) ?></span></td><td style="font-size:11.5px"><?= sd_h($x['file_name']) ?><br><span style="color:#9ca3af"><?= sd_h($x['upload_date']) ?></span></td><td><?= sd_h($x['ledger_type']) ?></td><td><?= sd_h($x['status']) ?></td><td><?= sd_h($x['claim_type']) ?></td><td><b><?= sd_h($x['tax_invoice_no']) ?></b></td><td><?= sd_d($x['invoice_date']) ?></td><td><?= sd_d($x['banking_date']) ?></td><td><?= sd_h($x['entity']) ?></td><td style="white-space:normal;min-width:260px"><?= sd_h($x['claim_description']) ?></td><td class="r"><b><?= number_format((float)$x['actual_amount'], 2) ?></b></td><td class="r"><?= number_format((float)$x['vat_amount'], 2) ?></td><td class="r"><?= number_format((float)$x['total_amount'], 2) ?></td><td style="font-size:11px;color:#6b7280;white-space:nowrap"><?= sd_h($x['imported_at']) ?></td></tr>
-    <?php endforeach; if (!$unrec): ?><tr><td colspan="15" style="text-align:center;color:#9ca3af;padding:28px">Every claim certificate scheme no tallies with a scheme of this report<?= ($ub_from || $ub_to || $ub_q !== '') ? ' (for this banking date / search)' : '' ?>.</td></tr><?php endif; ?></tbody>
-    <?php if ($unrec): ?><tfoot><tr><td colspan="11">TOTAL (<?= number_format($unrec_tot['n']) ?> certificates)</td><td class="r"><?= number_format($unrec_tot['act'], 2) ?></td><td class="r"><?= number_format($unrec_tot['vat'], 2) ?></td><td class="r"><?= number_format($unrec_tot['tot'], 2) ?></td><td></td></tr></tfoot><?php endif; ?></table></div>
+    <div class="tw"><table><thead><tr><th>#</th><th>Customer</th><th>Upload File</th><th>Ledger Type</th><th>Status</th><th>Claim Type</th><th>Tax Invoice No</th><th>Invoice Date</th><th>Banking Date</th><th>Entity</th><th>Claim Description</th><th class="r">Actual Amount</th><th class="r">VAT Amount</th><th class="r">Total Amount</th><th>Imported At</th><th>Scheme No (from description)</th><th>F / M</th></tr></thead><tbody>
+    <?php foreach ($unrec as $n => $x): ?><tr><td><?= $n + 1 ?></td><td style="white-space:nowrap"><b><?= sd_h($x['customer_code']) ?></b> <span style="color:#6b7280;font-size:11.5px"><?= sd_h($x['customer_name']) ?></span></td><td style="font-size:11.5px"><?= sd_h($x['file_name']) ?><br><span style="color:#9ca3af"><?= sd_h($x['upload_date']) ?></span></td><td><?= sd_h($x['ledger_type']) ?></td><td><?= sd_h($x['status']) ?></td><td><?= sd_h($x['claim_type']) ?></td><td><b><?= sd_h($x['tax_invoice_no']) ?></b></td><td><?= sd_d($x['invoice_date']) ?></td><td><?= sd_d($x['banking_date']) ?></td><td><?= sd_h($x['entity']) ?></td><td style="white-space:normal;min-width:260px"><?= sd_h($x['claim_description']) ?></td><td class="r"><b><?= number_format((float)$x['actual_amount'], 2) ?></b></td><td class="r"><?= number_format((float)$x['vat_amount'], 2) ?></td><td class="r"><?= number_format((float)$x['total_amount'], 2) ?></td><td style="font-size:11px;color:#6b7280;white-space:nowrap"><?= sd_h($x['imported_at']) ?></td><td style="font-family:monospace;font-weight:800;color:#312e81"><?= $x['sch_no'] !== '' ? sd_h($x['sch_no']) : '<span style="color:#d1d5db">no number</span>' ?></td><td style="text-align:center"><?= $x['sch_fm'] !== '' ? '<span class="sdsrc ' . ($x['sch_fm'] === 'F' ? 'status' : 'hul') . '">' . $x['sch_fm'] . '</span>' : '—' ?></td></tr>
+    <?php endforeach; if (!$unrec): ?><tr><td colspan="17" style="text-align:center;color:#9ca3af;padding:28px">Every claim certificate scheme no tallies with a scheme of this report<?= ($ub_from || $ub_to || $ub_q !== '') ? ' (for this banking date / search)' : '' ?>.</td></tr><?php endif; ?></tbody>
+    <?php if ($unrec): ?><tfoot><tr><td colspan="11">TOTAL (<?= number_format($unrec_tot['n']) ?> certificates)</td><td class="r"><?= number_format($unrec_tot['act'], 2) ?></td><td class="r"><?= number_format($unrec_tot['vat'], 2) ?></td><td class="r"><?= number_format($unrec_tot['tot'], 2) ?></td><td></td><td></td><td></td></tr></tfoot><?php endif; ?></table></div>
   </div>
 </div>
 <div id="bwsM" style="position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px;font-family:'Inter',system-ui,sans-serif">
