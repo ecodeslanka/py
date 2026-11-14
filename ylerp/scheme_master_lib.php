@@ -154,13 +154,13 @@ function sm_render(array $D, array $cfg) {
   </div>
   <?php endif; ?>
 
-  <div class="card"><h3><i class="fa-solid fa-clock-rotate-left"></i> Uploads <?php if ($can_del && $uploads): ?><button class="btn r" type="button" id="smDelAll" style="margin-left:auto;padding:5px 12px"><i class="fa-solid fa-trash-can"></i> Delete all</button><?php endif; ?></h3>
+  <div class="card"><h3><i class="fa-solid fa-clock-rotate-left"></i> Uploads <?php if ($can_del && $uploads): ?><button class="btn r smDelAll" type="button" style="margin-left:auto;padding:5px 12px"><i class="fa-solid fa-trash-can"></i> Delete all uploaded</button><?php endif; ?></h3>
     <div class="tw" style="max-height:220px"><table><thead><tr><th>#</th><th>File</th><th>MOC</th><th class="r">Rows in file</th><th class="r">Activity codes imported</th><th class="r">Skipped (repeat / existing)</th><th class="r">Now</th><th>By</th><th>When</th><th></th></tr></thead><tbody>
     <?php foreach ($uploads as $u): ?><tr><td><?= (int)$u['id'] ?></td><td><?= sm_h($u['file_name']) ?></td><td><?= sm_h($u['moc_ref']) ?></td><td class="r"><?= (int)$u['total_rows'] ?></td><td class="r"><b><?= (int)$u['imported_rows'] ?></b></td><td class="r"><?= (int)$u['duplicate_rows'] ?></td><td class="r"><?= (int)$u['live_rows'] ?></td><td><?= sm_h($u['imported_by']) ?></td><td style="white-space:nowrap"><?= sm_h($u['created_at']) ?></td>
       <td style="white-space:nowrap"><button class="btn" type="button" style="padding:3px 12px" data-view="<?= (int)$u['id'] ?>"><i class="fa-solid fa-eye"></i> View</button> <?php if ($can_del): ?><button class="ic" type="button" data-delup="<?= (int)$u['id'] ?>" data-nm="<?= sm_h($u['file_name']) ?>" title="Delete this upload"><i class="fa-solid fa-trash"></i></button><?php endif; ?></td></tr>
     <?php endforeach; if (!$uploads) echo '<tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:18px">Nothing uploaded yet.</td></tr>'; ?></tbody></table></div></div>
 
-  <div class="card"><h3><i class="fa-solid fa-list-check"></i> Imported activity codes <span style="font-size:12px;font-weight:600;background:#eef2ff;color:#1e3a8a;border-radius:10px;padding:2px 10px"><?= number_format($total) ?> total</span></h3>
+  <div class="card"><h3><i class="fa-solid fa-list-check"></i> Imported activity codes <span style="font-size:12px;font-weight:600;background:#eef2ff;color:#1e3a8a;border-radius:10px;padding:2px 10px"><?= number_format($total) ?> total</span><?php if ($can_del && $total): ?><button class="btn r smDelAll" type="button" style="margin-left:auto;padding:5px 12px" title="Delete every upload and every imported activity code of this master"><i class="fa-solid fa-trash-can"></i> Delete all uploaded</button><?php endif; ?></h3>
     <form method="get" class="row" style="margin-bottom:10px"><div class="fld"><label>MOC</label><select name="moc"><option value="">All</option><?php foreach ($mocs as $m): ?><option <?= $fm === $m ? 'selected' : '' ?>><?= sm_h($m) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Search</label><input type="search" name="q" value="<?= sm_h($q) ?>" placeholder="activity code or description"></div><button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Filter</button><a class="btn o" href="<?= sm_h($self) ?>">Clear</a></form>
     <div class="tw"><table><thead><tr><th>#</th><th>Activity Code</th><th>Activity Desc.</th><th>Date From</th><th>Date To</th><th>MOC</th><th>File</th></tr></thead><tbody>
@@ -253,9 +253,9 @@ function sm_render(array $D, array $cfg) {
       $('vBody').innerHTML=d.rows.map(function(r,i){ return '<tr><td>'+(i+1)+'</td><td><b>'+esc(r.activity_code)+'</b></td><td>'+esc(r.activity_desc)+'</td><td>'+esc(r.date_from||'')+'</td><td>'+esc(r.date_to||'')+'</td><td>'+esc(r.moc_ref||'')+'</td></tr>'; }).join('');
     }).catch(function(){ $('vSum').innerHTML='<div class="al er">Could not load the rows.</div>'; }); });
   document.addEventListener('click',function(e){
-    var du=e.target.closest('[data-delup]'), da=e.target.closest('#smDelAll');
+    var du=e.target.closest('[data-delup]'), da=e.target.closest('.smDelAll');
     if(du){ if(!confirm('Delete the WHOLE upload "'+du.dataset.nm+'" with all its activity codes?')) return; post('delete_upload',{id:du.dataset.delup}).then(function(r){ if(r.success) location.href=SELF; else alert(r.message||'Could not delete.'); }); }
-    if(da){ if(!confirm('Delete ALL uploads and ALL imported activity codes of this master?')) return; if(prompt('Type DELETE to confirm:')!=='DELETE') return; da.disabled=true; post('delete_all_uploads',{}).then(function(r){ if(r.success) location.href=SELF; else { da.disabled=false; alert(r.message||'Could not delete.'); } }); }
+    if(da){ if(!confirm('Delete ALL uploaded files and ALL imported activity codes of this master in one go?\nThis cannot be undone.')) return; if(prompt('Type DELETE to confirm:')!=='DELETE') return; da.disabled=true; post('delete_all_uploads',{}).then(function(r){ if(r.success) location.href=SELF; else { da.disabled=false; alert(r.message||'Could not delete.'); } }); }
   });
 })();
 </script>
