@@ -126,8 +126,8 @@ function sl_unreconciled($conn, $o) {
 /**
  * TOTALS OF THE SCHEME DISCOUNT DAILY REPORT (the dashboard line "Scheme Discount & Free Issues" uses these, so it always equals the report's totals).
  * Same rows as the report: Current Scheme Status schemes (not DAMAGE) + the HUL / TOT Scheme Master codes that are not in the status; same date rule
- * (schemes running in the range: start <= to AND end >= from). Claim certificates are counted ONCE per scheme code.
- * Balance = total claim − total claim certificate amount − the VAT of those schemes whose unpaid difference is FULLY the same as the certificates' VAT.
+ * (schemes running in the range: start <= to AND end >= from). Row by row, exactly like the report.
+ * Balance = total claim − total claim certificate amount − the VAT of those schemes whose row difference (claim − certificate) is FULLY the same as the certificates' VAT.
  * Returns claim, cert, vat_same, balance, schemes.
  */
 function sl_report_totals($conn, $from = '', $to = '') {
@@ -163,12 +163,13 @@ function sl_report_totals($conn, $from = '', $to = '') {
         }
         if ($r instanceof mysqli_result) mysqli_free_result($r);
     }
-    foreach ($byCode as $k => $rows) {
-        $claim = 0.0; foreach ($rows as $it) $claim += max(0, $it['claim']);
-        $c = $tally[$k] ?? null; if (!$c) foreach ($dk($rows[0]['desc']) as $a) if (isset($tally[$a])) { $c = $tally[$a]; break; }     // scheme code not on the certificate → the number written in the scheme description
-        $act = $c ? $c['act'] : 0.0; $vat = $c ? round($c['vat'], 2) : 0.0; $diff = round($claim - $act, 2);
+    /* per ROW, exactly like the report: every row takes the certificates matched to its scheme code (own code, else the number in its description) */
+    foreach ($items as $it) {
+        $k = sl_norm($it['code']); $claim = (float)$it['claim'];
+        $c = $tally[$k] ?? null; if (!$c) foreach ($dk($it['desc']) as $a) if (isset($tally[$a])) { $c = $tally[$a]; break; }
+        $act = $c ? $c['act'] : 0.0; $vat = $c ? round($c['vat'], 2) : 0.0; $raw = round($claim - $act, 2);
         $out['claim'] += $claim; $out['cert'] += $act;
-        if ($vat > 0 && $diff > 0 && abs($diff - $vat) <= 0.01) $out['vat_same'] += $vat;
+        if ($c && $vat > 0 && $raw > 0 && abs($raw - $vat) <= 0.01) $out['vat_same'] += $vat;
         $out['schemes']++;
     }
     foreach (['claim', 'cert', 'vat_same'] as $kk) $out[$kk] = round($out[$kk], 2);
