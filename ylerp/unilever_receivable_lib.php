@@ -58,11 +58,13 @@ function ur_summary($conn, $F = null) {
         $add($SRC[$key], $L, 'unilever_ledger_report.php?' . http_build_query(['src' => $key] + $lp));
     };
     $line('prr'); $line('damaged');
-    /* Scheme Discount & Free Issues = the SCHEME LEDGER */
-    if (!function_exists('sl_compute')) $warn[] = 'scheme_ledger_lib.php is not uploaded on the server — the Scheme Discount & Free Issues line is left out until it is.';
+    /* Scheme Discount & Free Issues = the TOTALS OF THE SCHEME DISCOUNT DAILY REPORT (not the ledger): receivable = total claim, received = claim certificates (+ the VAT that settles a fully-same difference), balance = the report's Balance */
+    if (!function_exists('sl_report_totals')) $warn[] = 'scheme_ledger_lib.php is not uploaded on the server — the Scheme Discount & Free Issues line is left out until it is.';
     elseif (ur_has_table($conn, 'scheme_status_items')) {
-        $L = sl_compute($conn, $opt);
-        $add(['source' => 'Customer Certificate', 'label' => 'Scheme Discount & Free Issues', 'page' => 'scheme_ledger_report', 'icon' => 'fa-tags', 'group' => 'rec'], $L, 'scheme_ledger_report.php?' . http_build_query($lp));
+        $RT = sl_report_totals($conn, $F['mode'] === 'range' ? $F['from'] : '', $to);
+        $rl = ['date_to' => $to]; if ($F['mode'] === 'range' && $F['from']) $rl['date_from'] = $F['from'];
+        $rows[] = ['source' => 'Customer Certificate', 'label' => 'Scheme Discount & Free Issues', 'page' => 'scheme_discount_daily_report', 'icon' => 'fa-tags', 'group' => 'rec', 'ledger' => 'scheme_discount_daily_report.php?' . http_build_query($rl),
+                   'open' => 0.0, 'receivable' => $RT['claim'], 'received' => round($RT['cert'] + $RT['vat_same'], 2), 'paid' => null, 'balance' => $RT['balance']];
     }
     /* Unreconciled claim certificates (Weekly Activities (TTS) certificates whose scheme no is not in the Scheme Discount Daily Report) — the ACTUAL amount of the report's "Unreconciled" tab */
     if (function_exists('sl_unreconciled') && ur_has_table($conn, 'claim_cert_items')) {

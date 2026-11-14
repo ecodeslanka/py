@@ -122,4 +122,57 @@ function sl_unreconciled($conn, $o) {
     foreach (['actual', 'vat', 'total'] as $k) $out[$k] = round($out[$k], 2);
     return $out;
 }
+
+/**
+ * TOTALS OF THE SCHEME DISCOUNT DAILY REPORT (the dashboard line "Scheme Discount & Free Issues" uses these, so it always equals the report's totals).
+ * Same rows as the report: Current Scheme Status schemes (not DAMAGE) + the HUL / TOT Scheme Master codes that are not in the status; same date rule
+ * (schemes running in the range: start <= to AND end >= from). Claim certificates are counted ONCE per scheme code.
+ * Balance = total claim − total claim certificate amount − the VAT of those schemes whose unpaid difference is FULLY the same as the certificates' VAT.
+ * Returns claim, cert, vat_same, balance, schemes.
+ */
+function sl_report_totals($conn, $from = '', $to = '') {
+    $out = ['claim' => 0.0, 'cert' => 0.0, 'vat_same' => 0.0, 'balance' => 0.0, 'schemes' => 0];
+    if (!sl_tbl($conn, 'scheme_status_items')) return $out;
+    $e = fn($v) => mysqli_real_escape_string($conn, (string)$v);
+    $dk = function ($d) { preg_match_all('/\d{6,}/', (string)$d, $m); return array_values(array_unique(array_map('sl_norm', $m[0]))); };
+    $dw = function ($a, $b) use ($from, $to, $e) { $w = []; if ($to) $w[] = "($a IS NULL OR $a <= '{$e($to)}')"; if ($from) $w[] = "($b IS NULL OR $b >= '{$e($from)}')"; return $w; };
+    $items = [];                      // rows: code, desc, claim
+    $w = array_merge(["UPPER(TRIM(activity_type)) <> 'DAMAGE'"], $dw('start_date', 'end_date'));
+    $r = mysqli_query($conn, "SELECT activity_code, activity_desc, claim_amount FROM scheme_status_items WHERE " . implode(' AND ', $w));
+    while ($r && ($x = mysqli_fetch_assoc($r))) $items[] = ['code' => $x['activity_code'], 'desc' => $x['activity_desc'], 'claim' => $x['claim_amount'] === null ? 0.0 : (float)$x['claim_amount']];
+    if (sl_tbl($conn, 'scheme_master_items')) {
+        $sc = []; $r = mysqli_query($conn, "SELECT DISTINCT activity_code FROM scheme_status_items WHERE UPPER(TRIM(activity_type)) <> 'DAMAGE'"); while ($r && ($x = mysqli_fetch_row($r))) $sc[sl_norm($x[0])] = 1;
+        $w = array_merge(['1=1'], $dw('date_from', 'date_to'));
+        $r = mysqli_query($conn, "SELECT activity_code, activity_desc FROM scheme_master_items WHERE " . implode(' AND ', $w) . " ORDER BY date_from DESC, id DESC"); $seen = [];
+        while ($r && ($x = mysqli_fetch_assoc($r))) { $k = sl_norm($x['activity_code']); if (isset($sc[$k]) || isset($seen[$k])) continue; $seen[$k] = 1; $items[] = ['code' => $x['activity_code'], 'desc' => $x['activity_desc'], 'claim' => 0.0]; }
+    }
+    if (!$items) return $out;
+    $byCode = []; $set = [];
+    foreach ($items as $it) { $k = sl_norm($it['code']); $byCode[$k][] = $it; $set[$k] = 1; foreach ($dk($it['desc']) as $a) $set[$a] = 1; }
+    unset($set['']);
+    $tally = [];
+    if (sl_tbl($conn, 'claim_cert_items')) {
+        $r = mysqli_query($conn, "SELECT claim_description, actual_amount, vat_amount FROM claim_cert_items WHERE claim_description IS NOT NULL AND claim_description <> ''", MYSQLI_USE_RESULT);
+        while ($r && ($x = mysqli_fetch_assoc($r))) {
+            $d = (string)$x['claim_description']; $hit = null; $first = sl_norm(explode('-', $d, 2)[0]);
+            if ($first !== '' && isset($set[$first])) $hit = $first;
+            else foreach (preg_split('/[^A-Za-z0-9]+/', $d, -1, PREG_SPLIT_NO_EMPTY) as $t) { $t = sl_norm($t); if (isset($set[$t])) { $hit = $t; break; } }
+            if ($hit === null) continue;
+            if (!isset($tally[$hit])) $tally[$hit] = ['act' => 0.0, 'vat' => 0.0];
+            $tally[$hit]['act'] += (float)$x['actual_amount']; $tally[$hit]['vat'] += (float)$x['vat_amount'];
+        }
+        if ($r instanceof mysqli_result) mysqli_free_result($r);
+    }
+    foreach ($byCode as $k => $rows) {
+        $claim = 0.0; foreach ($rows as $it) $claim += max(0, $it['claim']);
+        $c = $tally[$k] ?? null; if (!$c) foreach ($dk($rows[0]['desc']) as $a) if (isset($tally[$a])) { $c = $tally[$a]; break; }     // scheme code not on the certificate → the number written in the scheme description
+        $act = $c ? $c['act'] : 0.0; $vat = $c ? round($c['vat'], 2) : 0.0; $diff = round($claim - $act, 2);
+        $out['claim'] += $claim; $out['cert'] += $act;
+        if ($vat > 0 && $diff > 0 && abs($diff - $vat) <= 0.01) $out['vat_same'] += $vat;
+        $out['schemes']++;
+    }
+    foreach (['claim', 'cert', 'vat_same'] as $kk) $out[$kk] = round($out[$kk], 2);
+    $out['balance'] = round($out['claim'] - $out['cert'] - $out['vat_same'], 2);
+    return $out;
+}
 }
