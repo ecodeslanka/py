@@ -51,6 +51,28 @@ function ensure_claim_tables_r($conn) {
 }
 
 /* Build WHERE clause shared by report + export */
+/**
+ * Scheme no of a claim description, e.g.
+ *   "41429551-B483131026-SR Advane - Sep 26"            → 41429551 (only the first part has a number)          → source F
+ *   "41448039-B505221026-41444095Vim Dishwash Bar 3 Ban" → 41444095 (the middle number differs from the first)   → source M
+ *   first and middle number the same                     → that number                                         → source M
+ * The "middle" number = a 6+ digit number after the first "-" that is not part of a batch code (B483131026).
+ * Returns [scheme_no, 'F'|'M'|''].
+ */
+function cc_scheme_of($desc) {
+    $desc = (string)$desc; $first = ''; $mid = '';
+    $dash = strpos($desc, '-');
+    $head = $dash === false ? $desc : substr($desc, 0, $dash);
+    if (preg_match('/^\s*(\d{6,})\s*$/', $head, $m)) $first = $m[1];
+    elseif (preg_match('/^\s*(\d{6,})/', $head, $m)) $first = $m[1];
+    $rest = $dash === false ? '' : substr($desc, $dash + 1);
+    if ($rest !== '' && preg_match('/(?<![A-Za-z0-9])(\d{6,})/', $rest, $m)) $mid = $m[1];
+    if ($first !== '' && $mid !== '') return [$mid, 'M'];          // different → the middle one; same → "normal" → M
+    if ($first !== '') return [$first, 'F'];                       // only the first part has a number
+    if ($mid !== '') return [$mid, 'M'];
+    return ['', ''];
+}
+
 function cc_build_where($conn) {
     $w = [];
 
@@ -125,7 +147,7 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'get_report_
                                      ORDER BY ci.$sortField $sortDir
                                      LIMIT $per OFFSET $off");
     $rows = [];
-    if ($dataRes) while ($r = mysqli_fetch_assoc($dataRes)) $rows[] = $r;
+    if ($dataRes) while ($r = mysqli_fetch_assoc($dataRes)) { [$r['scheme_no'], $r['scheme_src']] = cc_scheme_of($r['claim_description']); $rows[] = $r; }
 
     ob_end_clean();
     echo json_encode([
@@ -150,28 +172,21 @@ if (isset($_GET['export_xlsx'])) {
     $res = mysqli_query($conn, "SELECT ci.*, cu.file_name, cu.upload_date FROM claim_cert_items ci LEFT JOIN claim_cert_uploads cu ON ci.upload_id = cu.id $where ORDER BY ci.imported_at DESC, ci.id DESC", MYSQLI_USE_RESULT);
     $X = new MiniXlsx(); $sh = $X->sheet('CC Report');
     $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '312E81', 'h' => 'center', 'border' => 1, 'wrap' => 1];
-    $heads = ['#', 'Customer Code', 'Customer Name', 'Upload File', 'Upload Date', 'Ledger Type', 'Status', 'Claim Type', 'Tax Invoice No', 'Invoice Date', 'Banking Date', 'Entity', 'Scheme No', 'Claim Description', 'Actual Amount', 'VAT Amount', 'Total Amount', 'Imported At', 'Imported By'];
+    $heads = ['#', 'Customer Code', 'Customer Name', 'Upload File', 'Upload Date', 'Ledger Type', 'Status', 'Claim Type', 'Tax Invoice No', 'Invoice Date', 'Banking Date', 'Entity', 'Claim Description', 'Actual Amount', 'VAT Amount', 'Total Amount', 'Imported At', 'Imported By', 'Scheme No Source (F = first no · M = middle / normal)', 'Scheme No'];
     $sh->set(1, 1, 'Customer Claim Report — all rows of the table' . ((trim($_REQUEST['date_from'] ?? '') . trim($_REQUEST['date_to'] ?? '')) !== '' ? ' (' . trim($_REQUEST['date_from'] ?? '…') . ' to ' . trim($_REQUEST['date_to'] ?? '…') . ')' : ''), ['b' => 1, 'sz' => 14]);
     foreach ($heads as $i => $h) $sh->set(3, $i + 1, $h, $H);
     $r = 4; $n = 0; $ta = $tv = $tt = 0.0;
-    $known = [];   // known scheme codes (Scheme Status import) for the description search
-    $kq = @mysqli_query($conn, "SELECT DISTINCT activity_code FROM scheme_status_items WHERE activity_code <> ''");
-    while ($kq && ($kr = mysqli_fetch_row($kq))) $known[strtoupper(preg_replace('/\.0+$/', '', trim($kr[0])))] = 1;
     if ($res) while ($x = mysqli_fetch_assoc($res)) {
-        $n++; $desc = (string)$x['claim_description']; $sn = (strpos($desc, '-') !== false) ? trim(substr($desc, 0, strpos($desc, '-'))) : '';
-        $nk = strtoupper(preg_replace('/\.0+$/', '', $sn));
-        if ($known && ($nk === '' || !isset($known[$nk]))) {   // first part is not a scheme no → look for a scheme no anywhere in the description line
-            foreach (preg_split('/[^A-Za-z0-9]+/', $desc, -1, PREG_SPLIT_NO_EMPTY) as $tk) { $tk = strtoupper(preg_replace('/\.0+$/', '', $tk)); if (isset($known[$tk])) { $sn = $tk; break; } }
-        }
+        $n++; $desc = (string)$x['claim_description']; [$sn, $src] = cc_scheme_of($desc);
         $a = (float)$x['actual_amount']; $v = (float)$x['vat_amount']; $t = (float)$x['total_amount']; $ta += $a; $tv += $v; $tt += $t;
-        $vals = [$n, $x['customer_code'], $x['customer_name'], $x['file_name'], $x['upload_date'], $x['ledger_type'], $x['status'], $x['claim_type'], $x['tax_invoice_no'], $x['invoice_date'], $x['banking_date'], $x['entity'], $sn, $desc, $a, $v, $t, $x['imported_at'], $x['imported_by']];
-        foreach ($vals as $i => $val) $sh->set($r, $i + 1, $val === null ? '' : $val, ['border' => 1] + (in_array($i, [14, 15, 16], true) ? ['h' => 'right', 'nf' => 4] : []));
+        $vals = [$n, $x['customer_code'], $x['customer_name'], $x['file_name'], $x['upload_date'], $x['ledger_type'], $x['status'], $x['claim_type'], $x['tax_invoice_no'], $x['invoice_date'], $x['banking_date'], $x['entity'], $desc, $a, $v, $t, $x['imported_at'], $x['imported_by'], $src, $sn];
+        foreach ($vals as $i => $val) $sh->set($r, $i + 1, $val === null ? '' : $val, ['border' => 1] + (in_array($i, [13, 14, 15], true) ? ['h' => 'right', 'nf' => 4] : []) + ($i === 17 ? ['b' => 1, 'color' => '312E81'] : []) + ($i === 16 ? ['h' => 'center', 'b' => 1, 'color' => $src === 'F' ? 'B45309' : '15803D'] : []));
         $r++;
     }
     if ($res instanceof mysqli_result) mysqli_free_result($res);
     $tb = ['b' => 1, 'border' => 1, 'bg' => 'FDE68A', 'h' => 'right', 'nf' => 4];
-    $sh->set($r, 14, 'TOTAL (' . number_format($n) . ' rows)', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 15, round($ta, 2), $tb); $sh->set($r, 16, round($tv, 2), $tb); $sh->set($r, 17, round($tt, 2), $tb);
-    foreach ([5, 14, 24, 24, 12, 14, 12, 16, 18, 12, 12, 10, 12, 44, 14, 12, 14, 18, 14] as $i => $w) $sh->widths[$i + 1] = $w;
+    $sh->set($r, 13, 'TOTAL (' . number_format($n) . ' rows)', ['b' => 1, 'border' => 1, 'bg' => 'FDE68A']); $sh->set($r, 14, round($ta, 2), $tb); $sh->set($r, 15, round($tv, 2), $tb); $sh->set($r, 16, round($tt, 2), $tb);
+    foreach ([5, 14, 24, 24, 12, 14, 12, 16, 18, 12, 12, 10, 44, 14, 12, 14, 18, 14, 18, 16] as $i => $w) $sh->widths[$i + 1] = $w;
     $sh->freeze = [3, 0]; $sh->filter = 'A3:' . MiniXlsx::col(count($heads)) . max(4, $r - 1);
     $tmp = tempnam(sys_get_temp_dir(), 'cc'); $X->save($tmp);
     while (ob_get_level()) ob_end_clean();
@@ -188,7 +203,7 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'export_repo
                                  FROM claim_cert_items ci LEFT JOIN claim_cert_uploads cu ON ci.upload_id = cu.id
                                  $where ORDER BY ci.imported_at DESC LIMIT 50000");
     $rows = [];
-    if ($res) while ($r = mysqli_fetch_assoc($res)) $rows[] = $r;
+    if ($res) while ($r = mysqli_fetch_assoc($res)) { [$r['scheme_no'], $r['scheme_src']] = cc_scheme_of($r['claim_description']); $rows[] = $r; }
     ob_end_clean();
     echo json_encode(['success'=>true,'rows'=>$rows]);
     exit;
@@ -384,10 +399,12 @@ include 'header.php';
               <th class="tr" onclick="setSort('vat_amount')">VAT Amt <span class="sort-ic" id="si-vat_amount"></span></th>
               <th class="tr" onclick="setSort('total_amount')">Total <span class="sort-ic" id="si-total_amount"></span></th>
               <th onclick="setSort('imported_at')">Imported At <span class="sort-ic" id="si-imported_at"></span></th>
+              <th title="F = only the first number of the description · M = middle number / normal" style="text-align:center">F / M</th>
+              <th>Scheme No</th>
             </tr>
           </thead>
           <tbody id="repBody">
-            <tr><td colspan="15" style="padding:40px;text-align:center;color:var(--muted);"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;display:block;margin-bottom:8px;"></i>Loading…</td></tr>
+            <tr><td colspan="16" style="padding:40px;text-align:center;color:var(--muted);"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;display:block;margin-bottom:8px;"></i>Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -506,7 +523,7 @@ async function loadReport(page){
   page = Math.max(1, page || 1);
   _curPage = page;
   document.getElementById('repBody').innerHTML =
-    '<tr><td colspan="15" style="padding:40px;text-align:center;color:var(--muted);"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;display:block;margin-bottom:8px;"></i>Loading…</td></tr>';
+    '<tr><td colspan="16" style="padding:40px;text-align:center;color:var(--muted);"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;display:block;margin-bottom:8px;"></i>Loading…</td></tr>';
 
   const params = getFilterParams();
   const per = document.getElementById('perPageSel').value;
@@ -539,7 +556,7 @@ async function loadReport(page){
 
     if(!d.rows.length){
       document.getElementById('repBody').innerHTML =
-        '<tr><td colspan="15" style="padding:34px;text-align:center;color:var(--muted);">No records match the current filters.</td></tr>';
+        '<tr><td colspan="16" style="padding:34px;text-align:center;color:var(--muted);">No records match the current filters.</td></tr>';
       return;
     }
 
@@ -561,12 +578,14 @@ async function loadReport(page){
         '<td class="tr" style="color:var(--muted);">' + fmtN(r.vat_amount) + '</td>' +
         '<td class="tr" style="font-weight:800;color:#312e81;">' + fmtN(r.total_amount) + '</td>' +
         '<td style="font-size:10.5px;color:var(--muted);">' + esc(r.imported_at||'—') + '</td>' +
+        '<td style="text-align:center;">' + (r.scheme_src ? '<span class="pill ' + (r.scheme_src==='F' ? 'p-amber' : 'p-green') + '" title="' + (r.scheme_src==='F' ? 'Only the first number of the description' : 'Middle number / normal') + '">' + esc(r.scheme_src) + '</span>' : '<span style="color:#d1d5db">—</span>') + '</td>' +
+        '<td style="font-family:monospace;font-weight:800;color:#312e81;">' + esc(r.scheme_no||'—') + '</td>' +
         '</tr>';
     });
     document.getElementById('repBody').innerHTML = h;
   }catch(e){
     document.getElementById('repBody').innerHTML =
-      '<tr><td colspan="15" style="padding:34px;text-align:center;color:#dc2626;">Failed to load report data.</td></tr>';
+      '<tr><td colspan="16" style="padding:34px;text-align:center;color:#dc2626;">Failed to load report data.</td></tr>';
   }
 }
 
