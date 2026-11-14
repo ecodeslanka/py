@@ -34,7 +34,7 @@ function cd_build($conn, array $o, $detail = false) {
     $cust = [];
     $q = cd_q($conn, "SELECT c.t_code, c.shop_name, LOWER(TRIM(COALESCE(c.payment_mode,''))) AS pm, COALESCE(c.credit_days,0) AS credit_days,
                 " . ($hasCwd ? "COALESCE(c.cheques_will_delay,0)" : "0") . " AS cwd, $chExpr AS channel
-              FROM customers c " . ($hasBtg ? "LEFT JOIN customer_btg b ON b.t_code = c.t_code " : "") . "WHERE " . implode(' AND ', $w) . " ORDER BY c.t_code LIMIT 20000");
+              FROM customers c " . ($hasBtg ? "LEFT JOIN customer_btg b ON CONVERT(b.t_code USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(c.t_code USING utf8mb4) COLLATE utf8mb4_general_ci " : "") . "WHERE " . implode(' AND ', $w) . " ORDER BY c.t_code LIMIT 20000");
     while ($q && ($x = mysqli_fetch_assoc($q))) { if (($o['channel'] ?? '') !== '' && strcasecmp($x['channel'], $o['channel']) !== 0) continue; $cust[$x['t_code']] = $x; }
     if (!$cust) return ['rows' => [], 'viol' => [], 'chq' => [], 'canc' => [], 'month' => [], 'months' => []];
     $tlist = "'" . implode("','", array_map($e, array_keys($cust))) . "'";
