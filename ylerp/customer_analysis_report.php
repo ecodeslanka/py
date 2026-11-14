@@ -494,6 +494,7 @@ include 'header.php';
 
 <div class="ca" id="ca">
     <h1><span class="ic"><i class="fa-solid fa-magnifying-glass-chart"></i></span> Analyze the Customers</h1>
+    <p style="margin:-6px 0 10px"><a href="customer_details_report.php" style="font-weight:700;color:#0f766e;text-decoration:none"><i class="fa-solid fa-address-card"></i> Customer Details report — every customer by T-Code (pay mode, cheque returns / sent back, policy violations, cancelled bills, average bills per month) →</a></p>
     <p class="sub">Upload the Excel (<b>NEW SR · Outlet code · Outlet Name</b>). Every outlet is checked against the system: <b>blacklisted</b>, <b>pay mode</b>, <b>cheques will delay</b>, <b>total outstanding</b>, <b>returned cheques</b>, and whether the <b>credit / cheque policy</b> was violated — and how many times. Open a row for its history. Save the analysis to open it again later.</p>
 
     <div class="card">
