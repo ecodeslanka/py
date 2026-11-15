@@ -846,6 +846,9 @@ function commitImport($conn, $p, $rows, $skipped_parse, $skipped_dups) {
     $extra = [];
     if ($skipped_parse) $extra[] = "$skipped_parse non-data rows skipped";
     if ($skipped_dups)  $extra[] = "$skipped_dups duplicates skipped";
+    $sd = date('d M Y', strtotime($p['statement_date']));
+    $per = !empty($p['period_from']) ? ' · statement period ' . date('d M Y', strtotime($p['period_from'])) . ' – ' . date('d M Y', strtotime($p['period_to'])) : '';
+    $extra[] = 'statement date ' . $sd . (!empty($p['auto_date']) ? ' (from the statement' . $per . ')' : '');
     return ['ok' => true, 'msg' => "Successfully imported $inserted transactions" . ($extra ? ' (' . implode(', ', $extra) . ')' : '') . ". $label"];
 }
 
@@ -890,7 +893,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
     if (!in_array($bank_type, ['BOC','NDB','SAMPATH'])) $bank_type = 'BOC';
 
     if (!$account_id) { echo json_encode(['ok'=>false,'msg'=>'Please select a bank account.']); exit; }
-    if (!$statement_date || !strtotime($statement_date)) { echo json_encode(['ok'=>false,'msg'=>'Please select a valid statement date.']); exit; }
+    if ($statement_date !== '' && !strtotime($statement_date)) { echo json_encode(['ok'=>false,'msg'=>'The statement date is not valid.']); exit; }
+    // empty = take it from the statement itself (the last transaction date of its date range)
     if (!isset($_FILES['statement_file']) || $_FILES['statement_file']['error'] !== UPLOAD_ERR_OK) {
         echo json_encode(['ok'=>false,'msg'=>'File upload failed. Please try again.']); exit;
     }
@@ -927,9 +931,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
     $meta = $parsed['meta'];
     if ($selected_account_no !== '') $meta['account_number'] = $selected_account_no;
 
+    /* the statement's own period = first … last transaction (value) date of the file */
+    $pd = [];
+    foreach ($rows as $__r) { foreach (['td', 'vd'] as $__c) { $__d = (string)($__r[$__c] ?? ''); if ($__d !== '' && strtotime($__d)) $pd[] = date('Y-m-d', strtotime($__d)); } }
+    $period_from = $pd ? min($pd) : ''; $period_to = $pd ? max($pd) : '';
+    $auto_date = false;
+    if ($statement_date === '') { $statement_date = $period_to !== '' ? $period_to : date('Y-m-d'); $auto_date = true; }
+
     $payload = [
         'account_id'     => $account_id,
         'statement_date' => $statement_date,
+        'period_from'    => $period_from,
+        'period_to'      => $period_to,
+        'auto_date'      => $auto_date,
         'bank_type'      => $bank_type,
         'filename'       => $file['name'],
         'meta'           => $meta,
@@ -1410,8 +1424,8 @@ $is_sampath_view  = $view_bank_type === 'SAMPATH';
         </div>
 
         <div class="form-group">
-            <label>Statement Date <span style="color:#dc2626">*</span></label>
-            <input type="date" id="statementDate" class="form-control" value="<?= date('Y-m-d') ?>" max="<?= date('Y-m-d') ?>">
+            <label>Statement Date <span style="font-weight:500;color:#6b7280">(optional — empty = taken from the statement's own date range)</span></label>
+            <input type="date" id="statementDate" class="form-control" value="" max="<?= date('Y-m-d') ?>" title="Empty = taken from the statement's own date range">
         </div>
 
         <div class="form-group">
@@ -1818,7 +1832,7 @@ function addFiles(list) {
         }
         if (f.size > 10 * 1024 * 1024) { showToast(f.name + ': file too large (max 10 MB).', 'err'); return; }
         if (selectedFiles.some(x => x.file.name === f.name && x.file.size === f.size)) return;      // same file twice
-        selectedFiles.push({ file: f, date: document.getElementById('statementDate')?.value || '', state: 'wait', msg: '' });
+        selectedFiles.push({ file: f, date: document.getElementById('statementDate')?.value || '', state: 'wait', msg: '' });      // empty date = taken from the statement
     });
     selectedFile = selectedFiles[0] ? selectedFiles[0].file : null;
     renderQueue();
@@ -1833,14 +1847,14 @@ function renderQueue() {
     if (!q) return;
     if (!selectedFiles.length) { q.innerHTML = ''; return; }
     const st = { wait: ['Waiting', '#6b7280'], run: ['Uploading…', '#1d4ed8'], ok: ['Imported', '#15803d'], err: ['Failed', '#b91c1c'], skip: ['Skipped', '#b45309'] };
-    q.innerHTML = '<div style="font-size:12px;color:#6b7280;margin-bottom:4px"><b>' + selectedFiles.length + '</b> file' + (selectedFiles.length > 1 ? 's' : '') + ' — each is saved as its own upload; set the statement date of each file:</div>' +
+    q.innerHTML = '<div style="font-size:12px;color:#6b7280;margin-bottom:4px"><b>' + selectedFiles.length + '</b> file' + (selectedFiles.length > 1 ? 's' : '') + ' — each is saved as its own upload. Statement date: <b>empty = taken from the statement itself</b> (the last date of its date range) — or set it per file:</div>' +
         selectedFiles.map((x, i) => {
             const s2 = st[x.state] || st.wait;
             return '<div style="display:flex;gap:8px;align-items:center;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;margin-bottom:5px;background:#fff">' +
                 '<i class="fa-solid fa-file-excel" style="color:#166534"></i>' +
                 '<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(x.file.name) + '</div>' +
                 '<div style="font-size:11px;color:#6b7280">' + (x.file.size / 1024 / 1024).toFixed(2) + ' MB' + (x.msg ? ' · <span style="color:' + s2[1] + '">' + escHtml(x.msg) + '</span>' : '') + '</div></div>' +
-                '<input type="date" value="' + escHtml(x.date) + '" max="<?= date('Y-m-d') ?>" ' + (x.state === 'wait' ? '' : 'disabled') + ' onchange="selectedFiles[' + i + '].date=this.value" style="padding:5px 7px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">' +
+                '<input type="date" title="Statement date — empty = taken from the statement" value="' + escHtml(x.date) + '" max="<?= date('Y-m-d') ?>" ' + (x.state === 'wait' ? '' : 'disabled') + ' onchange="selectedFiles[' + i + '].date=this.value" style="padding:5px 7px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">' +
                 '<span style="font-size:11px;font-weight:700;color:' + s2[1] + ';min-width:70px;text-align:right">' + s2[0] + '</span>' +
                 (x.state === 'wait' ? '<button type="button" onclick="removeFile(' + i + ')" style="background:#f5f5f5;border:1px solid #e5e5e5;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:12px">✕</button>' : '') + '</div>';
         }).join('');
@@ -1931,8 +1945,8 @@ async function doUpload() {
     const bank_type  = document.getElementById('bankType')?.value;
     if (!account_id)           { showToast('Please select a bank account.','err'); return; }
     if (!selectedFiles.length) { showToast('Please choose at least one file.','err'); return; }
-    const formDate = document.getElementById('statementDate')?.value;
-    for (const x of selectedFiles) { if (!x.date) x.date = formDate; if (!x.date || !isFinite(new Date(x.date))) { showToast('Please set a valid statement date for ' + x.file.name + '.','err'); return; } }
+    const formDate = document.getElementById('statementDate')?.value || '';
+    for (const x of selectedFiles) { if (x.state !== 'ok' && !x.date) x.date = formDate; if (x.date && !isFinite(new Date(x.date))) { showToast('The statement date of ' + x.file.name + ' is not valid.','err'); return; } }     // empty stays empty → the server takes the date from the statement
 
     document.getElementById('progressWrap').style.display = 'block';
     document.getElementById('uploadBtn').disabled = true;
