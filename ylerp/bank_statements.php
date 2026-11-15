@@ -913,6 +913,19 @@ function pendingPath($token) {
 /* ══════════════════════════════════════════════════════════
    HANDLE DELETE
 ══════════════════════════════════════════════════════════ */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'bulk_delete') {
+    $ids = array_values(array_unique(array_filter(array_map('intval', (array)($_POST['ids'] ?? [])))));
+    $n = 0;
+    if ($ids) {
+        $in = implode(',', $ids);
+        $cr = mysqli_query($conn, "SELECT COUNT(*) FROM bank_statement_uploads WHERE id IN ($in)");
+        $n = $cr ? (int)mysqli_fetch_row($cr)[0] : 0;
+        mysqli_query($conn, "DELETE FROM bank_statement_transactions WHERE upload_id IN ($in)");
+        mysqli_query($conn, "DELETE FROM bank_statement_uploads WHERE id IN ($in)");
+    }
+    header('Location: bank_statements.php?deleted=1&n=' . $n);
+    exit;
+}
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $del_id = intval($_GET['delete']);
     mysqli_query($conn, "DELETE FROM bank_statement_transactions WHERE upload_id = $del_id");
@@ -1204,7 +1217,7 @@ include 'header.php';
 </div>
 
 <?php if (isset($_GET['deleted'])): ?>
-<div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> Statement deleted successfully.</div>
+<div class="alert alert-success"><i class="fa-solid fa-circle-check"></i> <?= isset($_GET['n']) && (int)$_GET['n'] > 1 ? (int)$_GET['n'] . ' statements deleted successfully.' : 'Statement deleted successfully.' ?></div>
 <?php endif; ?>
 
 
@@ -1582,11 +1595,17 @@ $is_sampath_view  = $view_bank_type === 'SAMPATH';
 <div class="table-card">
     <div class="table-toolbar">
         <div class="tbl-title">Uploaded Statements</div>
+        <form method="post" id="bulkForm" style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <input type="hidden" name="action" value="bulk_delete">
+            <span id="bulkInfo" style="font-size:12px;color:#6b7280;"></span>
+            <button type="button" class="btn btn-danger" id="bulkDelBtn" disabled onclick="bulkDelete()"><i class="fa-solid fa-trash"></i> Delete selected</button>
+        </form>
     </div>
     <div class="dt-wrap">
     <table class="data-table">
         <thead>
             <tr>
+                <th class="tc" style="width:34px;"><input type="checkbox" id="bulkAll" title="Select all" onchange="bulkAllToggle(this)"></th>
                 <th>#</th>
                 <th>Type</th>
                 <th>Customer / Company</th>
@@ -1619,6 +1638,7 @@ $is_sampath_view  = $view_bank_type === 'SAMPATH';
             $bt_color_up = bankTypeColor($bt_up);
         ?>
         <tr>
+            <td class="tc"><input type="checkbox" class="bulk-cb" value="<?= (int)$u['id'] ?>" data-rows="<?= (int)($upload_rc[(int)$u['id']]['n'] ?? $u['total_rows']) ?>" data-rc="<?= (int)($upload_rc[(int)$u['id']]['rc'] ?? 0) ?>" onchange="bulkUpd()"></td>
             <td style="color:#9ca3af;font-size:11px;"><?= $i++ ?></td>
             <td>
                 <span class="badge" style="background:<?= $bt_color_up ?>;color:#fff;font-size:10px;padding:2px 9px;">
@@ -1661,7 +1681,7 @@ $is_sampath_view  = $view_bank_type === 'SAMPATH';
         </tr>
         <?php endwhile; ?>
         <?php if ($i===1): ?>
-        <tr><td colspan="13" style="text-align:center;padding:40px;color:#9ca3af;"><i class="fa-solid fa-file-arrow-up" style="font-size:32px;margin-bottom:12px;display:block;color:#ddd;"></i>No bank statements uploaded yet.</td></tr>
+        <tr><td colspan="14" style="text-align:center;padding:40px;color:#9ca3af;"><i class="fa-solid fa-file-arrow-up" style="font-size:32px;margin-bottom:12px;display:block;color:#ddd;"></i>No bank statements uploaded yet.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>
@@ -1877,6 +1897,23 @@ if (fileInput) {
     fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
 }
 
+function bulkSel() { return Array.from(document.querySelectorAll('.bulk-cb:checked')); }
+function bulkUpd() {
+    const sel = bulkSel(), all = document.querySelectorAll('.bulk-cb');
+    const rows = sel.reduce((a, c) => a + (+c.dataset.rows || 0), 0), rc = sel.reduce((a, c) => a + (+c.dataset.rc || 0), 0);
+    document.getElementById('bulkDelBtn').disabled = !sel.length;
+    document.getElementById('bulkInfo').textContent = sel.length ? sel.length + ' statement(s) · ' + rows.toLocaleString() + ' rows' + (rc ? ' · ' + rc.toLocaleString() + ' reconciled' : '') : '';
+    const a = document.getElementById('bulkAll'); if (a) { a.checked = all.length > 0 && sel.length === all.length; a.indeterminate = sel.length > 0 && sel.length < all.length; }
+}
+function bulkAllToggle(cb) { document.querySelectorAll('.bulk-cb').forEach(c => c.checked = cb.checked); bulkUpd(); }
+function bulkDelete() {
+    const sel = bulkSel(); if (!sel.length) return;
+    const rows = sel.reduce((a, c) => a + (+c.dataset.rows || 0), 0), rc = sel.reduce((a, c) => a + (+c.dataset.rc || 0), 0);
+    if (!confirm('Delete ' + sel.length + ' statement(s) and all their ' + rows.toLocaleString() + ' transactions?' + (rc ? '\n\n⚠ ' + rc.toLocaleString() + ' of these rows are already reconciled.' : '') + '\n\nThis cannot be undone.')) return;
+    const f = document.getElementById('bulkForm');
+    sel.forEach(c => { const h = document.createElement('input'); h.type = 'hidden'; h.name = 'ids[]'; h.value = c.value; f.appendChild(h); });
+    f.submit();
+}
 function allowedExts() { return currentBankType === 'NDB' ? ['csv'] : (currentBankType === 'SAMPATH' ? ['xls','html','htm'] : ['xls','xlsx','csv']); }
 
 function addFiles(list) {
