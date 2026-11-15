@@ -1377,6 +1377,22 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);}
 .btn-cancel-sm{padding:9px 20px;border:1.5px solid var(--border2);border-radius:8px;background:#fff;font-family:var(--font);font-size:12px;font-weight:700;cursor:pointer;color:var(--ink3);}
 .btn-cancel-sm:hover{background:var(--surface2);}
 .btn-cancel-sm.dirty{border-color:#f59e0b;background:#fffbeb;color:#92400e;}
+
+/* AI reconcile — result modal */
+.aim-ov{position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:2147483000;display:none;align-items:center;justify-content:center;padding:14px}.aim-ov.open{display:flex}
+.aim-box{background:#fff;border-radius:16px;width:100%;max-width:1180px;height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.aim-head{padding:16px 22px;background:linear-gradient(135deg,#4c1d95,#7c3aed 60%,#a855f7);color:#fff;display:flex;align-items:center;gap:14px;flex-wrap:wrap}.aim-head h3{margin:0;font-size:17px}.aim-head small{opacity:.85;display:block;font-size:12px;margin-top:2px}
+.aim-x{margin-left:auto;background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer}
+.aim-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 22px;border-bottom:1px solid #ede9fe;background:#faf5ff;font-size:12.5px}.aim-tools button{border:1px solid #c4b5fd;background:#fff;color:#5b21b6;border-radius:8px;padding:5px 12px;font-weight:700;cursor:pointer}
+.aim-list{flex:1;overflow:auto;padding:14px 22px;display:flex;flex-direction:column;gap:12px;background:#fcfaff}
+.aim-card{border:1.5px solid #ddd6fe;border-radius:12px;background:#fff;overflow:hidden}.aim-card.off{opacity:.55}
+.aim-ch{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#f5f3ff;border-bottom:1px solid #ddd6fe;flex-wrap:wrap}.aim-ch input{width:18px;height:18px;accent-color:#7c3aed;cursor:pointer}
+.aim-b{display:flex;gap:16px;padding:12px 16px;flex-wrap:wrap}.aim-col{flex:1;min-width:260px}.aim-lbl{font-size:10.5px;font-weight:800;text-transform:uppercase;color:#7c3aed;margin-bottom:6px}
+.aim-cl{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border:1.5px solid #ede9fe;border-radius:8px;margin-bottom:5px;font-size:12.5px}.aim-cl b{font-family:var(--mono);color:#4c1d95}
+.aim-bank{border:1.5px solid #86efac;background:#f0fdf4;border-radius:10px;padding:10px 14px}.aim-bank .amt{font-family:var(--mono);font-size:18px;font-weight:900;color:#0d7a4e;display:block}
+.aim-foot{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:14px 22px;border-top:1px solid #ede9fe;background:#fff}.aim-foot input{flex:1;min-width:220px;padding:9px 12px;border:1.5px solid #ddd6fe;border-radius:9px;font:inherit;font-size:13px}
+.aim-foot .btn-aim{background:linear-gradient(135deg,#059669,#10b981);color:#fff;border:none;border-radius:10px;padding:11px 22px;font-weight:800;cursor:pointer;font-size:13.5px}.aim-foot .btn-aim:disabled{opacity:.5;cursor:not-allowed}
+.aim-foot .btn-ghost{background:#fff;border:1.5px solid #d1d5db;border-radius:10px;padding:10px 18px;font-weight:700;cursor:pointer}
 </style>
 
 <div class="recon-wrap">
@@ -1425,6 +1441,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);}
       <span class="srb-title">Save Reconciliation</span>
       <input type="text" class="srb-desc-input" id="saveDesc" placeholder="Description / Notes (optional)…">
       <span class="srb-count" id="saveCountLabel"></span>
+      <button class="btn-ai" type="button" style="padding:9px 16px;font-size:12.5px" onclick="openAiModal()"><i class="fa-solid fa-wand-magic-sparkles"></i> View AI matches</button>
       <button class="btn-save" id="saveFinalBtn" onclick="openSaveModal()">
         <i class="fa-solid fa-circle-check"></i> Save Reconcile
       </button>
@@ -1470,6 +1487,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);}
         <div class="ai-head-sub">Claims that combine (2 or 3) to match a single bank row</div>
       </div>
       <div id="aiComboCount" style="margin-left:auto;font-size:12px;font-weight:700;color:#7c3aed;"></div>
+      <button type="button" class="btn-ai" style="padding:7px 14px;font-size:12px" onclick="openAiModal()"><i class="fa-solid fa-up-right-from-square"></i> Open in large window</button>
     </div>
     <div class="ai-combo-grid" id="aiComboGrid"></div>
   </div>
@@ -1587,6 +1605,16 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);}
         <i class="fa-solid fa-circle-check"></i> Save Reconcile
       </button>
     </div>
+  </div>
+</div>
+
+<!-- AI reconcile result modal -->
+<div class="aim-ov" id="aiModal" onclick="if(event.target===this)closeAiModal()">
+  <div class="aim-box">
+    <div class="aim-head"><i class="fa-solid fa-wand-magic-sparkles" style="font-size:22px"></i><div><h3 id="aiModalTitle">AI Reconcile</h3><small id="aiModalSub"></small></div><button class="aim-x" type="button" onclick="closeAiModal()" title="Close">✕</button></div>
+    <div class="aim-tools"><button type="button" onclick="aiSelAll(true)">Select all</button><button type="button" onclick="aiSelAll(false)">Select none</button><span id="aiModalCount" style="margin-left:auto;font-weight:700;color:#4c1d95"></span></div>
+    <div class="aim-list" id="aiModalList"></div>
+    <div class="aim-foot"><input type="text" id="aiModalDesc" placeholder="Description / notes for this reconcile (optional)…"><button type="button" class="btn-ghost" onclick="closeAiModal()">Close — decide later</button><button type="button" class="btn-aim" id="aiModalSave" onclick="saveAiModal()"><i class="fa-solid fa-circle-check"></i> Save selected</button></div>
   </div>
 </div>
 
@@ -1849,6 +1877,7 @@ async function runAiVerify(){
       document.getElementById('aiSection').style.display='';
       document.getElementById('fltAiBtn').style.display='';
       showToast('AI found '+_aiCombos.length+' combination match(es)!','ai');
+      openAiModal();
     }else{
       showToast('No exact combination of unmatched claims equals any unused bank row.','err');
     }
@@ -1864,6 +1893,68 @@ async function runAiVerify(){
     document.getElementById('aiLoadingSpinner').style.display='none';
   }
 }
+
+/* ── AI reconcile result modal: review every combination, untick what is wrong, save the rest ── */
+let _aiSel=new Set();
+function aiComboLive(){ return _aiCombos.map((c,i)=>({c,i})).filter(o=>(o.c.claim_indices||[]).every(ix=>_claims[ix]&&_claims[ix].match_status==='ai-matched')); }
+function openAiModal(){
+  const live=aiComboLive();
+  if(!live.length){ showToast('There are no AI matches waiting to be saved.','info'); return; }
+  _aiSel=new Set(live.map(o=>o.i));
+  renderAiModal();
+  document.getElementById('aiModal').classList.add('open'); document.body.style.overflow='hidden';
+}
+function closeAiModal(){ document.getElementById('aiModal').classList.remove('open'); document.body.style.overflow=''; }
+function aiSelAll(on){ _aiSel=new Set(on?aiComboLive().map(o=>o.i):[]); renderAiModal(); }
+function aiToggle(i,on){ if(on)_aiSel.add(i); else _aiSel.delete(i); renderAiModal(true); }
+function renderAiModal(keepScroll){
+  const live=aiComboLive(), list=document.getElementById('aiModalList'), sc=list.scrollTop;
+  document.getElementById('aiModalTitle').textContent='AI Reconcile — '+live.length+' combination'+(live.length===1?'':'s')+' found';
+  document.getElementById('aiModalSub').textContent='Each combination: unmatched claim groups whose remaining amounts add up exactly to one bank row. Nothing is saved until you press Save selected.';
+  let h='';
+  live.forEach(({c,i},k)=>{
+    const on=_aiSel.has(i), fl=(c.bank_field||'credit').toUpperCase(), n=(c.claim_indices||[]).length;
+    const claims=(c.claim_indices||[]).map((ix,j)=>{ const cl=_claims[ix]||{}; return '<div class="aim-cl"><span><strong>'+esc(((c.claim_entities||[])[j])||cl.entity||'—')+'</strong> · '+esc(fmtDate(((c.claim_dates||[])[j])||cl.bdate))+'</span><b>LKR '+fmtN(((c.claim_totals||[])[j])??cl.claim_total??0)+'</b></div>'; }).join('');
+    h+='<div class="aim-card'+(on?'':' off')+'"><div class="aim-ch"><input type="checkbox" '+(on?'checked':'')+' onchange="aiToggle('+i+',this.checked)"><span class="ai-combo-badge"><i class="fa-solid fa-wand-magic-sparkles"></i> '+n+'-claim combination #'+(k+1)+'</span>'+
+      (c.alternatives?'<span style="font-size:11px;color:#92400e;background:#fef3c7;border-radius:99px;padding:2px 10px">'+c.alternatives+' other possible combination'+(c.alternatives>1?'s':'')+' for this bank row</span>':'')+
+      '<span style="margin-left:auto;font-family:var(--mono);font-weight:900;color:#4c1d95">Total LKR '+fmtN(c.combined_total)+'</span></div>'+
+      '<div class="aim-b"><div class="aim-col"><div class="aim-lbl"><i class="fa-solid fa-file-invoice"></i> Claim groups ('+n+')</div>'+claims+'</div>'+
+      '<div class="aim-col"><div class="aim-lbl"><i class="fa-solid fa-building-columns"></i> Bank statement row</div><div class="aim-bank"><span class="ai-bank-field-badge ai-bank-field-'+(c.bank_field||'credit')+'">'+fl+'</span><span class="amt">LKR '+fmtN(c.bank_amount)+'</span>'+
+      '<div style="font-size:12px;color:#374151">'+esc(c.bank_description||'')+'</div><div style="font-size:11.5px;color:#6b7280;margin-top:3px">'+esc(fmtDate(c.bank_transaction_date))+'</div></div></div></div></div>';
+  });
+  list.innerHTML=h||'<div class="ai-empty">No AI matches waiting.</div>';
+  if(keepScroll) list.scrollTop=sc;
+  const tot=live.filter(o=>_aiSel.has(o.i)).reduce((a,o)=>a+(+o.c.combined_total||0),0);
+  document.getElementById('aiModalCount').textContent=_aiSel.size+' of '+live.length+' selected · LKR '+fmtN(tot);
+  document.getElementById('aiModalSave').disabled=!_aiSel.size;
+  document.getElementById('aiModalSave').innerHTML='<i class="fa-solid fa-circle-check"></i> Save '+_aiSel.size+' selected';
+}
+async function saveAiModal(){
+  const live=aiComboLive().filter(o=>_aiSel.has(o.i));
+  if(!live.length) return;
+  const btn=document.getElementById('aiModalSave'); btn.disabled=true; btn.innerHTML='<span class="spinner-sm"></span> Saving…';
+  const reconcile=live.map(({c})=>({
+    bank_txn_id:c.bank_row_id, bank_field:c.bank_field, bank_amount:c.bank_amount, claim_total:c.combined_total, is_ai_combo:1, combo_claim_count:c.claim_indices.length,
+    lines:c.claim_indices.map(ix=>({ bdate:_claims[ix].bdate, entity:_claims[ix].entity, claim_total:parseFloat(_claims[ix].claim_total||0), claim_count:parseInt(_claims[ix].claim_count||1),
+      claim_types:_claims[ix].claim_types||'', customers:_claims[ix].customers||'', cert_amount:parseFloat(_claims[ix].remaining_balance??_claims[ix].claim_total??0), bank_ref:(c.bank_description||'').slice(0,100) }))
+  }));
+  try{
+    const res=await fetch(_page+'?ajax=save_reconcile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:_accountId,reconcile,description:document.getElementById('aiModalDesc').value.trim()})});
+    const data=await res.json(); if(!data.ok) throw new Error(data.msg||'Save failed');
+    /* the saved combinations become "saved"; the unticked ones go back to unmatched */
+    const savedIdx=new Set(), liveAll=aiComboLive();
+    live.forEach(({c})=>c.claim_indices.forEach(ix=>savedIdx.add(ix)));
+    liveAll.filter(o=>!_aiSel.has(o.i)).forEach(o=>o.c.claim_indices.forEach(ix=>{ if(_claims[ix]) _claims[ix].match_status='unmatched'; }));
+    savedIdx.forEach(ix=>{ if(_claims[ix]) _claims[ix].match_status='saved'; });
+    _aiCombos=_aiCombos.filter(c=>!c.claim_indices.some(ix=>savedIdx.has(ix))&&c.claim_indices.every(ix=>_claims[ix]&&_claims[ix].match_status==='ai-matched'));
+    closeAiModal(); renderAiCombos(); renderTable(_claims); updateSaveBar();
+    document.getElementById('kAiCombos').textContent=_aiCombos.length; document.getElementById('kUnmatched').textContent=_claims.filter(c=>c.match_status==='unmatched').length;
+    if(!_aiCombos.length) document.getElementById('aiSection').style.display='none';
+    showToast('Saved '+data.saved+' AI reconciliation(s) — status updated to Reconciled.','');
+    if(typeof refreshReconciledKpi==='function') refreshReconciledKpi();
+  }catch(e){ showToast('Save failed: '+e.message,'err'); btn.disabled=false; renderAiModal(true); }
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('aiModal').classList.contains('open')) closeAiModal(); });
 
 function openSaveModal(){
   const toSave=_claims.filter(c=>c.match_status==='ai-matched');
