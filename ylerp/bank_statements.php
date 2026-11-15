@@ -674,8 +674,10 @@ function matrixToRows($matrix, $bank_type) {
             $amt = function($v) { $v = trim(str_replace([',', ' '], '', (string)$v)); return $v === '' || is_numeric($v); };
             if ($n >= 8 && $amt($cells[$n-3]) && $amt($cells[$n-2]) && $amt($cells[$n-1])) {
                 $raw_debit  = safeAmount($cells[$n-3]); $raw_credit = safeAmount($cells[$n-2]); $bal = safeAmount($cells[$n-1]);
-                $extra = []; for ($k = 4; $k <= $n - 4; $k++) { $t = trim((string)$cells[$k]); if ($t !== '') $extra[] = $t; }
-                $desc = safeStr(trim((string)($cells[2] ?? '') . ' ' . implode(' ', $extra)), 500);
+                /* the description itself contained comma(s) → cells 2 … n-5 are its pieces, cell n-4 is the real reference (e.g. KEG262930FCCBM0K) */
+                $parts = []; for ($k = 2; $k <= $n - 5; $k++) { $t = trim((string)$cells[$k]); if ($t !== '') $parts[] = $t; }
+                $nref = trim((string)$cells[$n-4]);
+                $desc = safeStr(trim(implode(', ', $parts) . ($nref !== '' ? ' ' . $nref : '')), 500);
                 /* how the OLD import read this row (wrong columns) — used to find and correct rows that were already imported */
                 $o_d = safeAmount($row[4] ?? ''); $o_c = safeAmount($row[5] ?? '');
                 $legacy = ['desc' => safeStr($row[2] ?? '', 500), 'ref' => safeStr($row[3] ?? '', 255),
@@ -699,7 +701,7 @@ function matrixToRows($matrix, $bank_type) {
                 'br'     => null,
                 'ch'     => null,
                 'sr'     => null,
-                'ref'    => safeStr($row[3] ?? '', 255),
+                'ref'    => $legacy ? safeStr($nref, 255) : safeStr($row[3] ?? '', 255),
                 'legacy' => $legacy,
             ];
         }
