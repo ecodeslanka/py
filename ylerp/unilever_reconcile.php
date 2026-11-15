@@ -1380,12 +1380,15 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);}
 
 /* AI reconcile — result modal */
 .aim-ov{position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:2147483000;display:none;align-items:center;justify-content:center;padding:14px}.aim-ov.open{display:flex}
-.aim-box{background:#fff;border-radius:16px;width:100%;max-width:1180px;height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.aim-box{background:#fff;border-radius:16px;width:100%;max-width:1240px;height:calc(100vh - 28px);height:calc(100dvh - 28px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.35)}
 .aim-head{padding:16px 22px;background:linear-gradient(135deg,#4c1d95,#7c3aed 60%,#a855f7);color:#fff;display:flex;align-items:center;gap:14px;flex-wrap:wrap}.aim-head h3{margin:0;font-size:17px}.aim-head small{opacity:.85;display:block;font-size:12px;margin-top:2px}
 .aim-x{margin-left:auto;background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:8px;width:34px;height:34px;font-size:16px;cursor:pointer}
 .aim-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 22px;border-bottom:1px solid #ede9fe;background:#faf5ff;font-size:12.5px}.aim-tools button{border:1px solid #c4b5fd;background:#fff;color:#5b21b6;border-radius:8px;padding:5px 12px;font-weight:700;cursor:pointer}
 .aim-list{flex:1;overflow:auto;padding:14px 22px;display:flex;flex-direction:column;gap:12px;background:#fcfaff}
-.aim-card{border:1.5px solid #ddd6fe;border-radius:12px;background:#fff;overflow:hidden}.aim-card.off{opacity:.55}
+.aim-card{border:1.5px solid #ddd6fe;border-radius:12px;background:#fff;flex-shrink:0}.aim-card.off{opacity:.55}
+.aim-kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:11.5px;color:#4b5563;margin-top:6px}.aim-kv span:nth-child(odd){color:#7c3aed;font-weight:700;white-space:nowrap}.aim-kv span:nth-child(even){word-break:break-word;overflow-wrap:anywhere}
+.aim-chk{margin:0 16px 12px;padding:8px 12px;border-radius:9px;font-size:12.5px;font-weight:700}.aim-chk.ok{background:#ecfdf5;color:#065f46;border:1px solid #6ee7b7}.aim-chk.bad{background:#fef2f2;color:#991b1b;border:1px solid #fca5a5}
+@media(max-width:700px){.aim-ov{padding:0}.aim-box{height:100dvh;max-width:100%;border-radius:0}.aim-head,.aim-tools,.aim-list,.aim-foot{padding-left:12px;padding-right:12px}}
 .aim-ch{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#f5f3ff;border-bottom:1px solid #ddd6fe;flex-wrap:wrap}.aim-ch input{width:18px;height:18px;accent-color:#7c3aed;cursor:pointer}
 .aim-b{display:flex;gap:16px;padding:12px 16px;flex-wrap:wrap}.aim-col{flex:1;min-width:260px}.aim-lbl{font-size:10.5px;font-weight:800;text-transform:uppercase;color:#7c3aed;margin-bottom:6px}
 .aim-cl{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border:1.5px solid #ede9fe;border-radius:8px;margin-bottom:5px;font-size:12.5px}.aim-cl b{font-family:var(--mono);color:#4c1d95}
@@ -1914,13 +1917,29 @@ function renderAiModal(keepScroll){
   let h='';
   live.forEach(({c,i},k)=>{
     const on=_aiSel.has(i), fl=(c.bank_field||'credit').toUpperCase(), n=(c.claim_indices||[]).length;
-    const claims=(c.claim_indices||[]).map((ix,j)=>{ const cl=_claims[ix]||{}; return '<div class="aim-cl"><span><strong>'+esc(((c.claim_entities||[])[j])||cl.entity||'—')+'</strong> · '+esc(fmtDate(((c.claim_dates||[])[j])||cl.bdate))+'</span><b>LKR '+fmtN(((c.claim_totals||[])[j])??cl.claim_total??0)+'</b></div>'; }).join('');
+    const bk=(_allBankRows||[]).find(x=>String(x.id)===String(c.bank_row_id))||{};
+    let sumRem=0;
+    const claims=(c.claim_indices||[]).map((ix,j)=>{
+      const cl=_claims[ix]||{}, rem=parseFloat(cl.remaining_balance??cl.claim_total??0); sumRem+=rem;
+      const cust=String(cl.customers||''), ctype=String(cl.claim_types||'');
+      return '<div class="aim-cl" style="flex-direction:column"><div style="display:flex;justify-content:space-between;gap:10px"><span><strong>'+esc(cl.entity||((c.claim_entities||[])[j])||'—')+'</strong> · banking date '+esc(fmtDate(cl.bdate||((c.claim_dates||[])[j])))+'</span><b>LKR '+fmtN(rem)+'</b></div>'+
+        '<div class="aim-kv"><span>Claim certificates</span><span>'+(parseInt(cl.claim_count||0)||'—')+'</span>'+
+        (ctype?'<span>Claim types</span><span>'+esc(ctype)+'</span>':'')+
+        (cust?'<span>Customers</span><span>'+esc(cust.length>260?cust.slice(0,260)+'… (+'+(cust.split(',').length)+' in all)':cust)+'</span>':'')+
+        (parseFloat(cl.reconciled_total||0)>0?'<span>Already reconciled</span><span>LKR '+fmtN(cl.reconciled_total)+' of LKR '+fmtN(cl.claim_total)+'</span>':'<span>Claim total</span><span>LKR '+fmtN(cl.claim_total)+'</span>')+'</div></div>';
+    }).join('');
+    const diff=Math.round((sumRem-parseFloat(c.bank_amount||0))*100)/100;
     h+='<div class="aim-card'+(on?'':' off')+'"><div class="aim-ch"><input type="checkbox" '+(on?'checked':'')+' onchange="aiToggle('+i+',this.checked)"><span class="ai-combo-badge"><i class="fa-solid fa-wand-magic-sparkles"></i> '+n+'-claim combination #'+(k+1)+'</span>'+
       (c.alternatives?'<span style="font-size:11px;color:#92400e;background:#fef3c7;border-radius:99px;padding:2px 10px">'+c.alternatives+' other possible combination'+(c.alternatives>1?'s':'')+' for this bank row</span>':'')+
       '<span style="margin-left:auto;font-family:var(--mono);font-weight:900;color:#4c1d95">Total LKR '+fmtN(c.combined_total)+'</span></div>'+
-      '<div class="aim-b"><div class="aim-col"><div class="aim-lbl"><i class="fa-solid fa-file-invoice"></i> Claim groups ('+n+')</div>'+claims+'</div>'+
-      '<div class="aim-col"><div class="aim-lbl"><i class="fa-solid fa-building-columns"></i> Bank statement row</div><div class="aim-bank"><span class="ai-bank-field-badge ai-bank-field-'+(c.bank_field||'credit')+'">'+fl+'</span><span class="amt">LKR '+fmtN(c.bank_amount)+'</span>'+
-      '<div style="font-size:12px;color:#374151">'+esc(c.bank_description||'')+'</div><div style="font-size:11.5px;color:#6b7280;margin-top:3px">'+esc(fmtDate(c.bank_transaction_date))+'</div></div></div></div></div>';
+      '<div class="aim-b"><div class="aim-col"><div class="aim-lbl"><i class="fa-solid fa-file-invoice"></i> What is reconciled — '+n+' claim group'+(n>1?'s':'')+'</div>'+claims+'</div>'+
+      '<div class="aim-col"><div class="aim-lbl"><i class="fa-solid fa-building-columns"></i> Matched to this bank statement row</div><div class="aim-bank"><span class="ai-bank-field-badge ai-bank-field-'+(c.bank_field||'credit')+'">'+fl+'</span><span class="amt">LKR '+fmtN(c.bank_amount)+'</span>'+
+      '<div class="aim-kv"><span>Bank date</span><span>'+esc(fmtDate(bk.transaction_date||c.bank_transaction_date))+(bk.value_date?' (value '+esc(fmtDate(bk.value_date))+')':'')+'</span>'+
+      '<span>Description</span><span>'+esc(bk.description||c.bank_description||'—')+'</span>'+
+      ((bk.reference||bk.cheque_no)?'<span>Reference</span><span>'+esc((bk.reference||'')+(bk.cheque_no?' · cheque '+bk.cheque_no:''))+'</span>':'')+
+      '<span>Credit / Debit</span><span>'+fmtN(bk.credit||0)+' / '+fmtN(bk.debit||0)+'</span>'+
+      (bk.balance!==undefined&&bk.balance!==null?'<span>Balance after</span><span>'+fmtN(bk.balance)+'</span>':'')+'</div></div></div></div>'+
+      '<div class="aim-chk '+(Math.abs(diff)<0.005?'ok':'bad')+'">'+(Math.abs(diff)<0.005?'✔ Claims LKR '+fmtN(sumRem)+' = bank LKR '+fmtN(c.bank_amount)+' — difference 0.00':'✖ Claims LKR '+fmtN(sumRem)+' vs bank LKR '+fmtN(c.bank_amount)+' — difference '+fmtN(diff))+'</div></div>';
   });
   list.innerHTML=h||'<div class="ai-empty">No AI matches waiting.</div>';
   if(keepScroll) list.scrollTop=sc;
