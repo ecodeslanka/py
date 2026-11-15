@@ -1961,6 +1961,12 @@ if (isset($conn) && $conn) {
                        <a href="unilever_reconcile.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'unilever_reconcile.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-handshake"></i><span>Reimbursment Reconcilation</span>
                     </a>
+                    <a href="ccc_bank_reconciliation_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'ccc_bank_reconciliation_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-building-columns"></i><span>CCC vs Bank Reconciliation</span>
+                    </a>
+                    <a href="ccc_bank_reconciliation_report.php#p2" class="submenu-item">
+                        <i class="fa-solid fa-hourglass-half"></i><span>Rest of the Bank Not Reconciled</span>
+                    </a>
                 
                     
                     <a href="ca_issued_cheque_bank_recon.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'ca_issued_cheque_bank_recon.php') ? 'active' : ''; ?>">
@@ -2139,12 +2145,6 @@ if (isset($conn) && $conn) {
                 <div class="submenu" style="display:block !important; max-height:none !important; overflow:visible !important; opacity:1 !important; visibility:visible !important;">
                     <a href="cc_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cc_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Full Cash Collection (DP)</span>
-                    </a>
-                    <a href="ccc_bank_reconciliation_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'ccc_bank_reconciliation_report.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-building-columns"></i><span>CCC vs Bank Reconciliation</span>
-                    </a>
-                    <a href="ccc_bank_reconciliation_report.php#p2" class="submenu-item">
-                        <i class="fa-solid fa-hourglass-half"></i><span>Rest of the Bank Not Reconciled</span>
                     </a>
                     <a href="cash_shortage_employee_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cash_shortage_employee_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Cash Shortage Report (SR)</span>
