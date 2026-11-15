@@ -18,6 +18,7 @@ function cb_has($conn, $t) { $r = cb_q($conn, "SHOW TABLES LIKE '" . mysqli_real
 $e = fn($v) => mysqli_real_escape_string($GLOBALS['conn'], (string)$v);
 $hasCC = cb_has($conn, 'claim_cert_items');
 $hasRec = cb_has($conn, 'unilever_reconcile_log') && cb_has($conn, 'unilever_reconcile_claim_lines');
+$canRemove = function_exists('rbac_can') ? (bool)rbac_can('delete', 'unilever_reconcile') : true;   // removing a reconciled payment = a delete on Unilever Reconcile
 
 /* ═════════ detail of one banking date + entity ═════════ */
 if (($_GET['ajax'] ?? '') === 'detail') {
@@ -28,7 +29,7 @@ if (($_GET['ajax'] ?? '') === 'detail') {
     while ($r && ($x = mysqli_fetch_assoc($r))) $certs[] = $x;
     $recs = [];
     if ($hasRec) {
-        $r = cb_q($conn, "SELECT l.id, l.bank_field, l.bank_amount, cl.cert_amount, cl.bank_ref, l.reconciled_at, l.reconciled_by, l.description AS note, t.transaction_date, t.description AS bank_desc, t.credit, t.debit
+        $r = cb_q($conn, "SELECT l.id, l.id AS log_id, (SELECT COUNT(*) FROM unilever_reconcile_claim_lines c2 WHERE c2.log_id = l.id) AS lines, l.bank_field, l.bank_amount, cl.cert_amount, cl.bank_ref, l.reconciled_at, l.reconciled_by, l.description AS note, t.transaction_date, t.description AS bank_desc, t.credit, t.debit
                           FROM unilever_reconcile_claim_lines cl JOIN unilever_reconcile_log l ON l.id = cl.log_id LEFT JOIN bank_statement_transactions t ON t.id = l.bank_txn_id
                           WHERE DATE(cl.banking_date) = '{$e($d)}' AND COALESCE(cl.entity,'') = '{$e($en)}' ORDER BY l.reconciled_at, l.id");
         while ($r && ($x = mysqli_fetch_assoc($r))) $recs[] = $x;
@@ -113,7 +114,7 @@ include 'header.php';
 .cb tbody tr.g{cursor:pointer}.cb tbody tr.g:hover td{background:#eef2ff}.cb tfoot td{background:#fde68a;font-weight:800;position:sticky;bottom:0}
 .cb .st{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11.5px;font-weight:700}.cb .st.ok{background:#dcfce7;color:#166534}.cb .st.pt{background:#fef3c7;color:#92400e}.cb .st.no{background:#fee2e2;color:#991b1b}.cb .st.ov{background:#ede9fe;color:#5b21b6}
 .cbm{position:fixed;inset:0;background:rgba(15,23,42,.6);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px}.cbm.open{display:flex}.cbm .bx{background:#fff;border-radius:14px;width:100%;max-width:1200px;height:92vh;display:flex;flex-direction:column;overflow:hidden;font-family:'Inter',system-ui,sans-serif}
-.cbm .hd{padding:14px 18px;background:linear-gradient(120deg,#0f172a,#1e3a8a);color:#fff;display:flex;gap:12px;align-items:center}.cbm .bd{padding:14px 18px;overflow:auto;flex:1}.cbm h4{margin:14px 0 6px}.cbm table{width:100%;border-collapse:collapse;font-size:12.5px}.cbm th{background:#eef2ff;color:#1e3a8a;padding:7px 9px;text-align:left;white-space:nowrap}.cbm td{padding:6px 9px;border-bottom:1px solid #f1f5f9}.cbm td.r,.cbm th.r{text-align:right}
+.cbm .hd{padding:14px 18px;background:linear-gradient(120deg,#0f172a,#1e3a8a);color:#fff;display:flex;gap:12px;align-items:center}.cbm .bd{padding:14px 18px;overflow:auto;flex:1}.cbm h4{margin:14px 0 6px}.cbm .rm{background:#fff;border:1.5px solid #fca5a5;color:#b91c1c;border-radius:8px;padding:4px 11px;font:700 12px inherit;cursor:pointer;white-space:nowrap}.cbm .rm:hover{background:#fee2e2}.cbm .rmbox{margin:8px 0;padding:12px 14px;border-radius:10px;background:#fef2f2;border:1.5px solid #fecaca;color:#7f1d1d;font-size:13px}.cbm .rmbox button{margin-right:8px;border-radius:8px;padding:7px 14px;font:700 12.5px inherit;cursor:pointer;border:1.5px solid #d1d5db;background:#fff}.cbm .rmbox button.danger{background:#dc2626;border-color:#dc2626;color:#fff}.cbm table{width:100%;border-collapse:collapse;font-size:12.5px}.cbm th{background:#eef2ff;color:#1e3a8a;padding:7px 9px;text-align:left;white-space:nowrap}.cbm td{padding:6px 9px;border-bottom:1px solid #f1f5f9}.cbm td.r,.cbm th.r{text-align:right}
 </style>
 <div class="cb">
   <h2><i class="fa-solid fa-building-columns" style="color:#1e3a8a"></i> CCC vs Bank Reconciliation</h2>
@@ -140,21 +141,38 @@ include 'header.php';
 <div class="cbm" id="cbM"><div class="bx"><div class="hd"><div><div style="font-weight:800;font-size:16px" id="cbT">Banking date</div><div id="cbS" style="opacity:.8;font-size:12.5px"></div></div><button class="btn o" id="cbX" type="button" style="margin-left:auto">Close</button></div><div class="bd" id="cbB"></div></div></div>
 <script>
 (function(){
+  var CAN_REMOVE=<?= $canRemove ? 'true' : 'false' ?>, DIRTY=false;
   var $=function(i){return document.getElementById(i);}, esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}, m2=function(v){return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};
   document.body.appendChild($('cbM'));
-  function close(){ $('cbM').classList.remove('open'); document.body.style.overflow=''; }
+  function close(){ $('cbM').classList.remove('open'); document.body.style.overflow=''; if(DIRTY) location.reload(); }
   $('cbX').addEventListener('click',close); $('cbM').addEventListener('click',function(e){ if(e.target===this) close(); }); document.addEventListener('keydown',function(e){ if(e.key==='Escape') close(); });
-  document.addEventListener('click',function(e){ var tr=e.target.closest('tr.g'); if(!tr) return; var d=tr.dataset.d, en=tr.dataset.e;
-    $('cbT').textContent=d+(en?' · '+en:''); $('cbS').textContent='Loading…'; $('cbB').innerHTML=''; $('cbM').classList.add('open'); document.body.style.overflow='hidden';
+  var CUR={d:'',e:''};
+  function load(d,en){
+    $('cbS').textContent='Loading…'; $('cbB').innerHTML='';
     fetch('ccc_bank_reconciliation_report.php?ajax=detail&d='+encodeURIComponent(d)+'&e='+encodeURIComponent(en),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(x){
       if(!x.success){ $('cbS').textContent=''; $('cbB').innerHTML='<p style="color:#b91c1c">'+esc(x.message||'Could not load')+'</p>'; return; }
       var tc=x.certs.reduce(function(a,c){return a+(+c.total_amount||0);},0), ta=x.recs.reduce(function(a,c){return a+(+c.cert_amount||0);},0);
       $('cbS').textContent=x.certs.length+' certificates · total '+m2(tc)+' · bank reconciled '+m2(ta)+' · difference '+m2(tc-ta);
-      var h='<h4>Bank matches (Unilever Reconcile)</h4><table><thead><tr><th>Bank date</th><th>Bank description</th><th>Field</th><th class="r">Bank amount</th><th class="r">Applied to this day</th><th>Bank ref</th><th>Reconciled</th></tr></thead><tbody>'
-        +(x.recs.length?x.recs.map(function(c){ return '<tr><td>'+esc(c.transaction_date||'')+'</td><td>'+esc(c.bank_desc||c.note||'')+'</td><td>'+esc(c.bank_field||'')+'</td><td class="r">'+m2(c.bank_amount)+'</td><td class="r"><b>'+m2(c.cert_amount)+'</b></td><td>'+esc(c.bank_ref||'')+'</td><td>'+esc((c.reconciled_at||'')+' '+(c.reconciled_by||''))+'</td></tr>'; }).join(''):'<tr><td colspan="7" style="color:#9ca3af;padding:12px">Not reconciled to any bank transaction yet.</td></tr>')+'</tbody></table>';
+      var h='<h4>Bank payments reconciled to this banking date (Unilever Reconcile)</h4><div id="cbRm"></div><table><thead><tr><th>Bank date</th><th>Bank description</th><th>Field</th><th class="r">Bank amount</th><th class="r">Applied to this day</th><th>Bank ref</th><th>Reconciled</th>'+(CAN_REMOVE?'<th></th>':'')+'</tr></thead><tbody>'
+        +(x.recs.length?x.recs.map(function(c){ return '<tr><td>'+esc(c.transaction_date||'')+'</td><td>'+esc(c.bank_desc||c.note||'')+'</td><td>'+esc(c.bank_field||'')+'</td><td class="r">'+m2(c.bank_amount)+'</td><td class="r"><b>'+m2(c.cert_amount)+'</b></td><td>'+esc(c.bank_ref||'')+'</td><td>'+esc((c.reconciled_at||'')+' '+(c.reconciled_by||''))+'</td>'+(CAN_REMOVE?'<td><button type="button" class="rm" data-log="'+(+c.log_id)+'" data-lines="'+(+c.lines||1)+'" data-amt="'+m2(c.cert_amount)+'" data-bank="'+m2(c.bank_amount)+'"><i class="fa-solid fa-trash-can"></i> Remove</button></td>':'')+'</tr>'; }).join(''):'<tr><td colspan="'+(CAN_REMOVE?8:7)+'" style="color:#9ca3af;padding:12px">Not reconciled to any bank transaction yet.</td></tr>')+'</tbody></table>';
       h+='<h4>Claim certificates</h4><table><thead><tr><th>Customer</th><th>Claim type</th><th>Tax invoice no</th><th>Invoice date</th><th>Description</th><th class="r">Actual</th><th class="r">VAT</th><th class="r">Total</th></tr></thead><tbody>'
         +x.certs.map(function(c){ return '<tr><td>'+esc(c.customer_code)+' <span style="color:#6b7280">'+esc(c.customer_name||'')+'</span></td><td>'+esc(c.claim_type||'')+'</td><td><b>'+esc(c.tax_invoice_no||'')+'</b></td><td>'+esc(c.invoice_date||'')+'</td><td style="white-space:normal;min-width:240px">'+esc(c.claim_description||'')+'</td><td class="r">'+m2(c.actual_amount)+'</td><td class="r">'+m2(c.vat_amount)+'</td><td class="r"><b>'+m2(c.total_amount)+'</b></td></tr>'; }).join('')+'</tbody></table>';
       $('cbB').innerHTML=h; }).catch(function(){ $('cbS').textContent=''; $('cbB').innerHTML='<p style="color:#b91c1c">Could not load the details.</p>'; });
+  }
+  document.addEventListener('click',function(e){ var tr=e.target.closest('tr.g'); if(!tr) return; CUR={d:tr.dataset.d,e:tr.dataset.e};
+    $('cbT').textContent=CUR.d+(CUR.e?' · '+CUR.e:''); $('cbM').classList.add('open'); document.body.style.overflow='hidden'; load(CUR.d,CUR.e);
+  });
+  /* remove a reconciled payment (the same undo as Unilever Reconcile): ask inside the modal first */
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('button.rm'); if(b){ var n=+b.dataset.lines||1;
+      $('cbRm').innerHTML='<div class="rmbox"><b>Remove this reconciled payment?</b><br>Bank amount '+b.dataset.bank+' · applied '+b.dataset.amt+' to this banking date.<br>'+(n>1?'<b>This payment is shared with '+(n-1)+' other banking date / entity group'+(n>2?'s':'')+' — removing it re-opens all '+n+' of them.</b><br>':'')+'The bank row becomes free to reconcile again.<div style="margin-top:10px"><button type="button" class="danger" id="cbRmYes" data-log="'+b.dataset.log+'"><i class="fa-solid fa-trash-can"></i> Yes, remove</button><button type="button" id="cbRmNo">Keep it</button></div></div>';
+      $('cbRm').scrollIntoView({block:'nearest'}); return; }
+    if(e.target.closest('#cbRmNo')){ $('cbRm').innerHTML=''; return; }
+    var y=e.target.closest('#cbRmYes'); if(y){ y.disabled=true; y.textContent='Removing…';
+      fetch('unilever_reconcile.php?ajax=delete_manual_reconcile',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({log_id:+y.dataset.log})}).then(function(r){return r.text();}).then(function(t){ var j; try{ j=JSON.parse(t); }catch(er){ throw new Error('Unexpected reply — you may not be allowed to delete on Unilever Reconcile.'); }
+        if(!j.ok) throw new Error(j.message||j.msg||'Could not remove'); DIRTY=true; load(CUR.d,CUR.e); setTimeout(function(){ var m=$('cbRm'); if(m) m.innerHTML='<div class="rmbox" style="background:#ecfdf5;border-color:#6ee7b7;color:#065f46">✔ Payment removed — the banking date is open again.</div>'; },400);
+      }).catch(function(er){ $('cbRm').innerHTML='<div class="rmbox"><b>Not removed:</b> '+esc(er.message)+'</div>'; });
+    }
   });
 })();
 </script>
