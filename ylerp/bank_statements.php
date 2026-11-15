@@ -1486,13 +1486,14 @@ $is_sampath_view  = $view_bank_type === 'SAMPATH';
     <div class="dup-box">
         <div class="dup-hdr">
             <div>
-                <h3><i class="fa-solid fa-triangle-exclamation" style="color:#d97706;margin-right:8px;"></i>Duplicate rows found</h3>
+                <h3><i class="fa-solid fa-triangle-exclamation" style="color:#d97706;margin-right:8px;"></i>Duplicate rows found — they will be skipped</h3>
                 <p id="dupSummary"></p>
             </div>
             <button type="button" class="dup-x" onclick="cancelDupImport()" title="Cancel">✕</button>
         </div>
+        <div class="dup-banner" id="dupBanner"></div>
         <div class="dup-tools">
-            <label class="dup-all"><input type="checkbox" id="dupCheckAll"> Import all duplicates</label>
+            <label class="dup-all"><input type="checkbox" id="dupCheckAll"> Import all duplicates anyway (tick a row to keep it)</label>
             <span class="dup-legend"><span class="dup-tag db">Already in DB</span> <span class="dup-tag file">Repeated in file</span></span>
         </div>
         <div class="dup-scroll">
@@ -1724,8 +1725,8 @@ $is_sampath_view  = $view_bank_type === 'SAMPATH';
 .btn-light{background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;}.btn-light:hover{background:#e5e7eb;}
 
 /* Duplicate review modal */
-.dup-overlay{position:fixed;inset:0;background:rgba(17,24,39,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px;}
-.dup-box{background:#fff;border-radius:12px;width:100%;max-width:1100px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+.dup-overlay{position:fixed;inset:0;background:rgba(17,24,39,.6);z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;}
+.dup-box{background:#fff;border-radius:14px;width:100%;max-width:97vw;height:94vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.25);}
 .dup-hdr{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:18px 22px;border-bottom:1px solid #f3f4f6;}
 .dup-hdr h3{margin:0 0 4px;font-size:16px;font-weight:700;color:#111827;}
 .dup-hdr p{margin:0;font-size:12px;color:#6b7280;line-height:1.5;}
@@ -1741,6 +1742,10 @@ $is_sampath_view  = $view_bank_type === 'SAMPATH';
 .dup-tag.db{background:#fee2e2;color:#991b1b;}.dup-tag.file{background:#fef3c7;color:#92400e;}
 .dup-where{font-size:11px;color:#6b7280;margin-top:3px;max-width:280px;white-space:normal;}
 .dup-legend{font-size:11px;color:#6b7280;}
+.dup-banner{margin:12px 22px 0;padding:14px 18px;border-radius:12px;background:#fffbeb;border:1.5px solid #fcd34d;color:#78350f;font-size:14px;line-height:1.5}
+.dup-banner b{font-size:15px}.dup-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.dup-stat{background:#fff;border:1px solid #fde68a;border-radius:10px;padding:8px 16px;min-width:130px}.dup-stat span{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;color:#92400e}.dup-stat strong{font-size:22px}
+.dup-stat.new strong{color:#15803d}.dup-stat.skip strong{color:#b91c1c}.dup-stat.any strong{color:#1d4ed8}
 .dup-foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 22px;border-top:1px solid #f3f4f6;}
 .dup-count{font-size:12px;color:#374151;}
 
@@ -2030,6 +2035,15 @@ function updateDupCount() {
 
     const toImport = pendingInfo.new_count + sel;
     const skip     = cbs.length - sel;
+    document.getElementById('dupBanner').innerHTML =
+        '<i class="fa-solid fa-circle-exclamation" style="color:#d97706"></i> <b>' + skip + ' duplicate row' + (skip === 1 ? '' : 's') + ' will be SKIPPED</b>' +
+        (pendingInfo.fileName ? ' from <b>' + escHtml(pendingInfo.fileName) + '</b>' : '') +
+        ' — they match transactions that are already in the database or are repeated inside the file (see the details below). ' +
+        (toImport > 0 ? 'Only the <b>' + toImport + '</b> remaining row' + (toImport === 1 ? '' : 's') + ' will be imported. Tick a duplicate only if you really want it imported again.' : '<b>Nothing is left to import.</b>') +
+        '<div class="dup-stats"><div class="dup-stat"><span>Rows in the file</span><strong>' + pendingInfo.total + '</strong></div>' +
+        '<div class="dup-stat new"><span>New — will import</span><strong>' + pendingInfo.new_count + '</strong></div>' +
+        '<div class="dup-stat skip"><span>Duplicates — skipped</span><strong>' + skip + '</strong></div>' +
+        '<div class="dup-stat any"><span>Duplicates kept (ticked)</span><strong>' + sel + '</strong></div></div>';
     document.getElementById('dupCountInfo').innerHTML =
         'Will import <strong>' + toImport + '</strong> rows (' + pendingInfo.new_count + ' new + ' + sel + ' duplicates) · ' +
         'skip <strong>' + skip + '</strong> duplicates';
