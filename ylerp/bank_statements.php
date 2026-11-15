@@ -664,22 +664,43 @@ function matrixToRows($matrix, $bank_type) {
             $td = safeDate($row[0] ?? '');
             if (!$td) { $skipped++; continue; }
 
-            $raw_debit  = safeAmount($row[4] ?? '');
-            $raw_credit = safeAmount($row[5] ?? '');
+            /* Normal row: 0 date | 1 value date | 2 description | 3 reference | 4 debit | 5 credit | 6 balance.
+               Some NDB rows carry an EXTRA text cell (e.g. "KEG262930FCCBM0K" after the reference) so every amount is pushed one
+               (or more) columns to the right. The last three cells are always debit / credit / balance, so read them from the END
+               of the row and join the extra text cells into the description. */
+            $cells = array_values($row);
+            while ($cells && trim((string)end($cells)) === '') array_pop($cells);
+            $n = count($cells); $legacy = null;
+            $amt = function($v) { $v = trim(str_replace([',', ' '], '', (string)$v)); return $v === '' || is_numeric($v); };
+            if ($n >= 8 && $amt($cells[$n-3]) && $amt($cells[$n-2]) && $amt($cells[$n-1])) {
+                $raw_debit  = safeAmount($cells[$n-3]); $raw_credit = safeAmount($cells[$n-2]); $bal = safeAmount($cells[$n-1]);
+                $extra = []; for ($k = 4; $k <= $n - 4; $k++) { $t = trim((string)$cells[$k]); if ($t !== '') $extra[] = $t; }
+                $desc = safeStr(trim((string)($cells[2] ?? '') . ' ' . implode(' ', $extra)), 500);
+                /* how the OLD import read this row (wrong columns) — used to find and correct rows that were already imported */
+                $o_d = safeAmount($row[4] ?? ''); $o_c = safeAmount($row[5] ?? '');
+                $legacy = ['desc' => safeStr($row[2] ?? '', 500), 'ref' => safeStr($row[3] ?? '', 255),
+                           'debit' => ($o_d !== null && $o_d != 0) ? abs($o_d) : null, 'credit' => ($o_c !== null && $o_c > 0) ? $o_c : null];
+            } else {
+                $raw_debit  = safeAmount($row[4] ?? '');
+                $raw_credit = safeAmount($row[5] ?? '');
+                $bal        = safeAmount($row[6] ?? '');
+                $desc       = safeStr($row[2] ?? '', 500);
+            }
             $debit  = ($raw_debit  !== null && $raw_debit  < 0) ? abs($raw_debit)  : (($raw_debit  !== null && $raw_debit  > 0) ? $raw_debit  : null);
-            $credit = ($raw_credit !== null && $raw_credit > 0) ? $raw_credit : null;
+            $credit = ($raw_credit !== null && $raw_credit > 0) ? $raw_credit : (($raw_credit !== null && $raw_credit < 0 && $legacy) ? abs($raw_credit) : null);
 
             $rows[] = [
                 'td'     => $td,
                 'vd'     => safeDate($row[1] ?? ''),
-                'desc'   => safeStr($row[2] ?? '', 500),
+                'desc'   => $desc,
                 'debit'  => $debit,
                 'credit' => $credit,
-                'bal'    => safeAmount($row[6] ?? ''),
+                'bal'    => $bal,
                 'br'     => null,
                 'ch'     => null,
                 'sr'     => null,
                 'ref'    => safeStr($row[3] ?? '', 255),
+                'legacy' => $legacy,
             ];
         }
     }
@@ -751,9 +772,10 @@ function findDuplicates($conn, $account_id, $rows) {
     $max = mysqli_real_escape_string($conn, max($dates));
 
     // Existing transactions for this account in the file's date range
+    $legacy_ex = []; $fix_ids = [];
     $existing = [];   // key => [info, info, …]  (one entry per stored row)
     $q = mysqli_query($conn, "
-        SELECT t.transaction_date, t.value_date, t.description, t.debit, t.credit, t.balance,
+        SELECT t.id AS txn_id, t.reconciled, t.transaction_date, t.value_date, t.description, t.debit, t.credit, t.balance,
                t.branch_code, t.cheque_no, t.reference, t.serial_no,
                u.id AS upload_id, u.statement_date, u.original_filename
         FROM bank_statement_transactions t
@@ -767,6 +789,7 @@ function findDuplicates($conn, $account_id, $rows) {
             'debit' => $e['debit'], 'credit' => $e['credit'], 'bal' => $e['balance'],
             'br' => $e['branch_code'], 'ch' => $e['cheque_no'], 'ref' => $e['reference'],
         ]);
+        $legacy_ex[$key][] = ['id' => (int)$e['txn_id'], 'rec' => (int)($e['reconciled'] ?? 0), 'bal' => $e['balance'], 'where' => 'upload #' . $e['upload_id'] . ' (' . $e['original_filename'] . ')'];
         $existing[$key][] = 'Already imported in upload #' . $e['upload_id']
             . ' (statement ' . date('d M Y', strtotime($e['statement_date'])) . ', '
             . $e['original_filename'] . ')'
@@ -776,8 +799,15 @@ function findDuplicates($conn, $account_id, $rows) {
     $seen_in_file = [];
     foreach ($rows as $i => $r) {
         $key = txnDupKey($r);
+        $lk = null;
+        if (!empty($r['legacy']) && empty($existing[$key])) {
+            $lk = txnDupKey(['td' => $r['td'], 'vd' => $r['vd'], 'desc' => $r['legacy']['desc'], 'debit' => $r['legacy']['debit'], 'credit' => $r['legacy']['credit'], 'br' => null, 'ch' => null, 'ref' => $r['legacy']['ref']]);
+        }
         if (!empty($existing[$key])) {
             $dups[$i] = ['kind' => 'db', 'where' => array_shift($existing[$key])];
+        } elseif ($lk !== null && !empty($legacy_ex[$lk]) && ($ex = array_shift($legacy_ex[$lk])) && !in_array($ex['id'], $fix_ids, true) && !$ex['rec']) {
+            $fix_ids[] = $ex['id'];
+            $dups[$i] = ['kind' => 'fix', 'fix_id' => $ex['id'], 'where' => 'Already imported in ' . $ex['where'] . ' with the amounts in the wrong columns (read from a shifted NDB row) — it will be CORRECTED, not added again'];
         } elseif (isset($seen_in_file[$key])) {
             $dups[$i] = ['kind' => 'file', 'where' => 'Same as row #' . ($seen_in_file[$key] + 1) . ' in this file'];
         } else {
@@ -961,6 +991,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
 
     /* Duplicates → keep parsed rows on the server and ask the user */
     $payload['dup_idx'] = array_keys($dups);
+    $payload['fix'] = []; foreach ($dups as $__i => $__d) if (($__d['kind'] ?? '') === 'fix') $payload['fix'][$__i] = (int)$__d['fix_id'];
     $token = bin2hex(random_bytes(16));
     file_put_contents(pendingPath($token), json_encode($payload));
 
@@ -1018,7 +1049,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'confi
         $final[] = $r;
     }
 
-    echo json_encode(commitImport($conn, $payload, $final, (int)($payload['skipped'] ?? 0), $skipped_dups));
+    /* rows that an older import stored with the amounts in the wrong columns are corrected in place */
+    $fixed = 0; $num2 = function($v) { return $v === null ? 'NULL' : (string)(float)$v; };
+    foreach ((array)($payload['fix'] ?? []) as $i => $tid) {
+        $r = $payload['rows'][(int)$i] ?? null; $tid = (int)$tid; if (!$r || !$tid) continue;
+        mysqli_query($conn, "UPDATE bank_statement_transactions SET description=" . dbEsc($conn, $r['desc']) . ", debit=" . $num2($r['debit']) . ", credit=" . $num2($r['credit']) . ", balance=" . $num2($r['bal']) . ", reference=" . dbEsc($conn, $r['ref']) . " WHERE id=$tid AND reconciled=0");
+        if (mysqli_affected_rows($conn) > 0) $fixed++;
+    }
+    $fixmsg = $fixed ? " $fixed previously mis-read NDB row(s) were corrected in place (debit / credit / balance / description)." : '';
+    if (!$final) { echo json_encode(['ok' => $fixed > 0, 'msg' => ($fixed ? 'Nothing new to import.' : 'Nothing imported — no rows left to import.') . $fixmsg]); exit; }
+    $res = commitImport($conn, $payload, $final, (int)($payload['skipped'] ?? 0), $skipped_dups);
+    if (!empty($res['ok'])) $res['msg'] .= $fixmsg;
+    echo json_encode($res);
     exit;
 }
 
@@ -2001,7 +2043,7 @@ function openDupModal(res) {
             <td class="tr">${escHtml(d.bal)}</td>
             <td style="font-size:11px;">${escHtml(d.serial || '—')}${d.ref ? '<div class="dup-where">' + escHtml(d.ref) + '</div>' : ''}</td>
             <td>
-                <span class="dup-tag ${d.kind === 'db' ? 'db' : 'file'}">${d.kind === 'db' ? 'Already in DB' : 'Repeated in file'}</span>
+                <span class="dup-tag ${d.kind === 'file' ? 'file' : 'db'}">${d.kind === 'db' ? 'Already in DB' : (d.kind === 'fix' ? 'Wrong columns — will be corrected' : 'Repeated in file')}</span>
                 <div class="dup-where">${escHtml(d.where)}</div>
             </td>
         </tr>`).join('');
