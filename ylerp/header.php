@@ -1967,6 +1967,9 @@ if (isset($conn) && $conn) {
                     <a href="ccc_bank_reconciliation_report.php#p2" class="submenu-item">
                         <i class="fa-solid fa-hourglass-half"></i><span>Rest of the Bank Not Reconciled</span>
                     </a>
+                    <a href="unilever_bank_transactions_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'unilever_bank_transactions_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-list-check"></i><span>Unilever Bank Transactions</span>
+                    </a>
                 
                     
                     <a href="ca_issued_cheque_bank_recon.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'ca_issued_cheque_bank_recon.php') ? 'active' : ''; ?>">
