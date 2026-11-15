@@ -2140,6 +2140,9 @@ if (isset($conn) && $conn) {
                     <a href="cc_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cc_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Full Cash Collection (DP)</span>
                     </a>
+                    <a href="ccc_bank_reconciliation_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'ccc_bank_reconciliation_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-building-columns"></i><span>CCC vs Bank Reconciliation</span>
+                    </a>
                     <a href="cash_shortage_employee_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cash_shortage_employee_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Cash Shortage Report (SR)</span>
                     </a>
