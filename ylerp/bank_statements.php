@@ -774,7 +774,7 @@ function findDuplicates($conn, $account_id, $rows) {
     $max = mysqli_real_escape_string($conn, max($dates));
 
     // Existing transactions for this account in the file's date range
-    $legacy_ex = []; $fix_ids = [];
+    $ex_all = [];
     $existing = [];   // key => [info, info, …]  (one entry per stored row)
     $q = mysqli_query($conn, "
         SELECT t.id AS txn_id, t.reconciled, t.transaction_date, t.value_date, t.description, t.debit, t.credit, t.balance,
@@ -791,7 +791,7 @@ function findDuplicates($conn, $account_id, $rows) {
             'debit' => $e['debit'], 'credit' => $e['credit'], 'bal' => $e['balance'],
             'br' => $e['branch_code'], 'ch' => $e['cheque_no'], 'ref' => $e['reference'],
         ]);
-        $legacy_ex[$key][] = ['id' => (int)$e['txn_id'], 'rec' => (int)($e['reconciled'] ?? 0), 'bal' => $e['balance'], 'where' => 'upload #' . $e['upload_id'] . ' (' . $e['original_filename'] . ')'];
+        $ex_all[] = ['id' => (int)$e['txn_id'], 'rec' => (int)($e['reconciled'] ?? 0), 'td' => (string)$e['transaction_date'], 'vd' => (string)$e['value_date'], 'desc' => strtoupper(trim((string)$e['description'])), 'ref' => strtoupper(trim((string)$e['reference'])), 'used' => false, 'where' => 'upload #' . $e['upload_id'] . ' (' . $e['original_filename'] . ')'];
         $existing[$key][] = 'Already imported in upload #' . $e['upload_id']
             . ' (statement ' . date('d M Y', strtotime($e['statement_date'])) . ', '
             . $e['original_filename'] . ')'
@@ -801,15 +801,25 @@ function findDuplicates($conn, $account_id, $rows) {
     $seen_in_file = [];
     foreach ($rows as $i => $r) {
         $key = txnDupKey($r);
-        $lk = null;
+        $hit = null;
         if (!empty($r['legacy']) && empty($existing[$key])) {
-            $lk = txnDupKey(['td' => $r['td'], 'vd' => $r['vd'], 'desc' => $r['legacy']['desc'], 'debit' => $r['legacy']['debit'], 'credit' => $r['legacy']['credit'], 'br' => null, 'ch' => null, 'ref' => $r['legacy']['ref']]);
+            /* a shifted NDB row: an older import stored it with the amounts in the wrong columns — find it by date + reference + description start */
+            $L = $r['legacy']; $refs = array_filter([strtoupper(trim((string)$L['ref'])), strtoupper(trim((string)$r['ref']))], 'strlen');
+            $ds = [strtoupper(trim((string)$L['desc'])), strtoupper(trim((string)$r['desc']))];
+            foreach ($ex_all as $xi => $x) {
+                if ($x['used'] || $x['td'] !== (string)$r['td'] || ($x['vd'] !== (string)$r['vd'] && $x['vd'] !== '' && (string)$r['vd'] !== '')) continue;
+                if ($refs && !in_array($x['ref'], $refs, true)) continue;
+                $okd = false; foreach ($ds as $d) if ($d !== '' && strpos($x['desc'], $d) === 0) { $okd = true; break; }
+                if (!$okd) continue;
+                $hit = $xi; break;
+            }
         }
         if (!empty($existing[$key])) {
             $dups[$i] = ['kind' => 'db', 'where' => array_shift($existing[$key])];
-        } elseif ($lk !== null && !empty($legacy_ex[$lk]) && ($ex = array_shift($legacy_ex[$lk])) && !in_array($ex['id'], $fix_ids, true) && !$ex['rec']) {
-            $fix_ids[] = $ex['id'];
-            $dups[$i] = ['kind' => 'fix', 'fix_id' => $ex['id'], 'where' => 'Already imported in ' . $ex['where'] . ' with the amounts in the wrong columns (read from a shifted NDB row) — it will be CORRECTED, not added again'];
+        } elseif ($hit !== null) {
+            $ex_all[$hit]['used'] = true; $x = $ex_all[$hit];
+            if ($x['rec']) $dups[$i] = ['kind' => 'db', 'where' => 'Already imported in ' . $x['where'] . ' but with the amounts in the WRONG columns, and it is already reconciled — remove that bank row from Unilever Reconcile, delete/re-import it to fix it'];
+            else $dups[$i] = ['kind' => 'fix', 'fix_id' => $x['id'], 'where' => 'Already imported in ' . $x['where'] . ' with the amounts in the wrong columns (a shifted NDB row) — it will be CORRECTED, not added again'];
         } elseif (isset($seen_in_file[$key])) {
             $dups[$i] = ['kind' => 'file', 'where' => 'Same as row #' . ($seen_in_file[$key] + 1) . ' in this file'];
         } else {
