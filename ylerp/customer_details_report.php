@@ -97,7 +97,7 @@ function cd_build($conn, array $o, $detail = false) {
         $cn = 0; $cv = 0.0;
         foreach ($canc[$t] ?? [] as $k) { $cn++; $cv += (float)$k['v']; if ($detail) $cancL[] = ['t_code' => $t, 'shop' => $c['shop_name'], 'inv' => (string)$k['invoice_num'], 'del' => $k['delivery_date'], 'v' => round((float)$k['v'], 2)]; }
         $sum6 = 0; foreach ($last6 as $ym) $sum6 += $month[$t][$ym] ?? 0;
-        $row = ['t_code' => $t, 'shop' => $c['shop_name'], 'pm' => $pm === '' ? '—' : ucfirst($pm), 'channel' => $c['channel'], 'cwd' => (int)$c['cwd'] ? 'Yes' : 'No', 'bl' => (int)$c['bl'] ? 'Yes' : 'No', 'bl_mode' => (int)$c['bl'] ? ($BLL[$c['bl_type']] ?? ($c['bl_type'] !== null && $c['bl_type'] !== '' ? ucfirst(str_replace('_', ' ', $c['bl_type'])) : 'Blacklisted')) : '', 'bl_reason' => (int)$c['bl'] ? (string)$c['bl_reason'] : '', 'rt' => $rt, 'sb' => $sb,
+        $row = ['t_code' => $t, 'shop' => $c['shop_name'], 'pm' => $pm === '' ? '—' : ucfirst($pm), 'days' => $days, 'channel' => $c['channel'], 'cwd' => (int)$c['cwd'] ? 'Yes' : 'No', 'bl' => (int)$c['bl'] ? 'Yes' : 'No', 'bl_mode' => (int)$c['bl'] ? ($BLL[$c['bl_type']] ?? ($c['bl_type'] !== null && $c['bl_type'] !== '' ? ucfirst(str_replace('_', ' ', $c['bl_type'])) : 'Blacklisted')) : '', 'bl_reason' => (int)$c['bl'] ? (string)$c['bl_reason'] : '', 'rt' => $rt, 'sb' => $sb,
                 'viol' => $nv, 'policy' => $policy, 'max_over' => $maxo, 'cn' => $cn, 'cv' => round($cv, 2), 'avg' => round($sum6 / 6, 1), 'bills' => count($bills[$t] ?? [])];
         $iss = $o['issues'] ?? '';
         if ($iss === 'cwd' && $row['cwd'] !== 'Yes') continue; if ($iss === 'bl' && $row['bl'] !== 'Yes') continue; if ($iss === 'ret' && ($rt + $sb) === 0) continue; if ($iss === 'viol' && $nv === 0) continue; if ($iss === 'canc' && $cn === 0) continue;
@@ -138,22 +138,22 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     $stamp = 'Generated ' . date('d M Y H:i') . ' · ' . ($act ? implode(' · ', $act) : 'all customers');
     /* 1. Summary */
     $sh = $X->sheet('Summary');
-    $sh->set(1, 1, 'Customer Details Report', $BAN); for ($c = 2; $c <= 12; $c++) $sh->set(1, $c, '', $BAN); $sh->merge(1, 1, 1, 12); $sh->set(2, 1, $stamp, $SUB);
+    $sh->set(1, 1, 'Customer Details Report', $BAN); for ($c = 2; $c <= 13; $c++) $sh->set(1, $c, '', $BAN); $sh->merge(1, 1, 1, 13); $sh->set(2, 1, $stamp, $SUB);
     $k = ['Customers' => count($rows), 'Blacklisted' => count(array_filter($rows, fn($r) => $r['bl'] === 'Yes')), 'Cheques will delay' => count(array_filter($rows, fn($r) => $r['cwd'] === 'Yes')), 'Returned cheques' => array_sum(array_column($rows, 'rt')), 'Sent back cheques' => array_sum(array_column($rows, 'sb')),
           'Policy violations' => array_sum(array_column($rows, 'viol')), 'Cancelled bills' => array_sum(array_column($rows, 'cn')), 'Cancelled value (Rs.)' => round(array_sum(array_column($rows, 'cv')), 2)];
     $ci = 1; foreach ($k as $lab => $v) { $sh->set(4, $ci, $lab, ['b' => 1, 'sz' => 9, 'color' => '6B7280', 'bg' => 'EEF2FF', 'h' => 'center', 'wrap' => 1, 'border' => 1]); $sh->set(5, $ci, $v, ['b' => 1, 'sz' => 14, 'color' => '1E3A8A', 'h' => 'center', 'border' => 1] + (is_float($v) ? ['nf' => 4] : [])); $ci++; }
-    foreach (['T-Code', 'Shop', 'Customer Pay Mode', 'Channel', 'Blacklisted', 'Blacklisted Mode', 'Chq Will Delay', 'Chq Returns', 'Chq Sent Back', 'No of Times of Credit Policy Violation', 'Bill Cancel — Amount (Count)', 'Average Bill Count Per Month'] as $i => $h) $sh->set(7, $i + 1, $h, $H);
+    foreach (['T-Code', 'Shop', 'Customer Pay Mode', 'Policy Days', 'Channel', 'Blacklisted', 'Blacklisted Mode', 'Chq Will Delay', 'Chq Returns', 'Chq Sent Back', 'No of Times of Credit Policy Violation', 'Bill Cancel — Amount (Count)', 'Average Bill Count Per Month'] as $i => $h) $sh->set(7, $i + 1, $h, $H);
     $r = 8; foreach ($rows as $x) {
         $isbl = $x['bl'] === 'Yes'; $RB = $isbl ? ['bg' => 'FFE4E6'] : [];
-        $sh->set($r, 1, $x['t_code'], $B + $RB); $sh->set($r, 2, $x['shop'], $B + $RB); $sh->set($r, 3, $x['pm'], $BC + $RB); $sh->set($r, 4, $x['channel'], $BC + $RB);
-        $sh->set($r, 5, $isbl ? 'BLACKLISTED' : 'No', $BC + ($isbl ? ['b' => 1, 'color' => 'FFFFFF', 'bg' => '9F1239'] : [])); $sh->set($r, 6, $isbl ? $x['bl_mode'] : '', $BC + ($isbl ? ['b' => 1, 'color' => '9F1239', 'bg' => 'FFE4E6'] : []));
-        $sh->set($r, 7, $x['cwd'], $BC + ($x['cwd'] === 'Yes' ? ['b' => 1, 'color' => 'B45309', 'bg' => 'FEF3C7'] : []));
-        $sh->set($r, 8, $x['rt'], $BC + ($x['rt'] ? ['b' => 1, 'color' => '6D28D9', 'bg' => 'EDE9FE'] : [])); $sh->set($r, 9, $x['sb'], $BC + ($x['sb'] ? ['b' => 1, 'color' => '1D4ED8', 'bg' => 'DBEAFE'] : []));
-        $sh->set($r, 10, $x['policy'] === 'none' ? 'n/a' : $x['viol'], $BC + ($x['viol'] ? ['b' => 1, 'color' => 'B91C1C', 'bg' => 'FEE2E2'] : []));
-        $sh->set($r, 11, $x['cn'] ? number_format($x['cv'], 2) . ' (' . $x['cn'] . ')' : '—', $BC + ($x['cn'] ? ['color' => 'B91C1C'] : [])); $sh->set($r, 12, $x['avg'], $BC); $r++;
+        $sh->set($r, 1, $x['t_code'], $B + $RB); $sh->set($r, 2, $x['shop'], $B + $RB); $sh->set($r, 3, $x['pm'], $BC + $RB); $sh->set($r, 4, $x['days'], $BC + $RB); $sh->set($r, 5, $x['channel'], $BC + $RB);
+        $sh->set($r, 6, $isbl ? 'BLACKLISTED' : 'No', $BC + ($isbl ? ['b' => 1, 'color' => 'FFFFFF', 'bg' => '9F1239'] : [])); $sh->set($r, 7, $isbl ? $x['bl_mode'] : '', $BC + ($isbl ? ['b' => 1, 'color' => '9F1239', 'bg' => 'FFE4E6'] : []));
+        $sh->set($r, 8, $x['cwd'], $BC + ($x['cwd'] === 'Yes' ? ['b' => 1, 'color' => 'B45309', 'bg' => 'FEF3C7'] : []));
+        $sh->set($r, 9, $x['rt'], $BC + ($x['rt'] ? ['b' => 1, 'color' => '6D28D9', 'bg' => 'EDE9FE'] : [])); $sh->set($r, 10, $x['sb'], $BC + ($x['sb'] ? ['b' => 1, 'color' => '1D4ED8', 'bg' => 'DBEAFE'] : []));
+        $sh->set($r, 11, $x['policy'] === 'none' ? 'n/a' : $x['viol'], $BC + ($x['viol'] ? ['b' => 1, 'color' => 'B91C1C', 'bg' => 'FEE2E2'] : []));
+        $sh->set($r, 12, $x['cn'] ? number_format($x['cv'], 2) . ' (' . $x['cn'] . ')' : '—', $BC + ($x['cn'] ? ['color' => 'B91C1C'] : [])); $sh->set($r, 13, $x['avg'], $BC); $r++;
     }
-    foreach ([14, 34, 16, 18, 14, 24, 12, 12, 12, 20, 24, 16] as $i => $wd) $sh->widths[$i + 1] = $wd;
-    $sh->freeze = [7, 1]; $sh->filter = 'A7:L' . max(8, $r - 1);
+    foreach ([14, 34, 16, 12, 18, 14, 24, 12, 12, 12, 20, 24, 16] as $i => $wd) $sh->widths[$i + 1] = $wd;
+    $sh->freeze = [7, 1]; $sh->filter = 'A7:M' . max(8, $r - 1);
     /* 2. Policy violations */
     $s2 = $X->sheet('Policy Violations'); $s2->set(1, 1, 'Credit / Cheque policy violations — one row per bill', ['b' => 1, 'sz' => 14]);
     foreach (['T-Code', 'Shop', 'Invoice', 'Policy', 'Credit days', 'Delivery date', 'Due date', 'Paid date', 'Bill value', 'Balance', 'Days over', 'Status'] as $i => $h) $s2->set(3, $i + 1, $h, $H);
@@ -210,15 +210,15 @@ $cnt = fn($f) => count(array_filter($rows, $f));
     <button class="btn" type="submit"><i class="fa-solid fa-filter"></i> Filter</button><a class="btn o" href="customer_details_report.php">Clear</a>
     <a class="btn g" href="?<?= cd_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></form></div>
   <div class="kp"><div class="k"><span>Customers</span><b><?= number_format(count($rows)) ?></b></div><div class="k"><span>Blacklisted customers</span><b style="color:#9f1239"><?= $cnt(fn($r) => $r['bl'] === 'Yes') ?></b></div><div class="k"><span>Cheques will delay</span><b style="color:#b45309"><?= $cnt(fn($r) => $r['cwd'] === 'Yes') ?></b></div><div class="k"><span>Returned cheques</span><b style="color:#6d28d9"><?= number_format(array_sum(array_column($rows, 'rt'))) ?></b></div><div class="k"><span>Sent back cheques</span><b style="color:#1d4ed8"><?= number_format(array_sum(array_column($rows, 'sb'))) ?></b></div><div class="k"><span>Policy violations</span><b style="color:#b91c1c"><?= number_format(array_sum(array_column($rows, 'viol'))) ?></b></div><div class="k"><span>Cancelled value</span><b style="color:#be123c">Rs. <?= number_format(array_sum(array_column($rows, 'cv')), 2) ?></b></div></div>
-  <div class="tw"><table><thead><tr><th class="l">T-Code</th><th class="l">Shop</th><th>Customer Pay Mode</th><th>Channel</th><th>Blacklisted</th><th>Blacklisted Mode</th><th>Chq Will Delay</th><th>Chq Returns</th><th>Chq Sent Back</th><th>No of Times of Credit Policy Violation</th><th>Bill Cancel<br><small style="font-weight:500">amount (count)</small></th><th>Average Bill Count Per Month</th></tr></thead><tbody>
+  <div class="tw"><table><thead><tr><th class="l">T-Code</th><th class="l">Shop</th><th>Customer Pay Mode</th><th>Policy Days</th><th>Channel</th><th>Blacklisted</th><th>Blacklisted Mode</th><th>Chq Will Delay</th><th>Chq Returns</th><th>Chq Sent Back</th><th>No of Times of Credit Policy Violation</th><th>Bill Cancel<br><small style="font-weight:500">amount (count)</small></th><th>Average Bill Count Per Month</th></tr></thead><tbody>
   <?php foreach ($rows as $x): ?>
-    <tr data-t="<?= cd_h($x['t_code']) ?>"<?= $x['bl'] === 'Yes' ? ' class="blr"' : '' ?>><td class="l"><b><?= cd_h($x['t_code']) ?></b></td><td class="l"><?= cd_h($x['shop']) ?></td><td><?= cd_h($x['pm']) ?></td><td><?= cd_h($x['channel'] ?: '—') ?></td>
+    <tr data-t="<?= cd_h($x['t_code']) ?>"<?= $x['bl'] === 'Yes' ? ' class="blr"' : '' ?>><td class="l"><b><?= cd_h($x['t_code']) ?></b></td><td class="l"><?= cd_h($x['shop']) ?></td><td><?= cd_h($x['pm']) ?></td><td><?= (int)$x['days'] > 0 ? '<b>' . (int)$x['days'] . '</b>' : '<span style="color:#d1d5db">—</span>' ?></td><td><?= cd_h($x['channel'] ?: '—') ?></td>
       <td><?= $x['bl'] === 'Yes' ? '<span class="b bl">BLACKLISTED</span>' : '<span style="color:#d1d5db">No</span>' ?></td><td><?= $x['bl'] === 'Yes' ? '<b style="color:#9f1239">' . cd_h($x['bl_mode']) . '</b>' . ($x['bl_reason'] !== '' ? '<div style="font-size:10.5px;color:#6b7280;max-width:220px;margin:auto" title="' . cd_h($x['bl_reason']) . '">' . cd_h(mb_strimwidth($x['bl_reason'], 0, 60, '…')) . '</div>' : '') : '<span style="color:#d1d5db">—</span>' ?></td>
       <td><span class="b <?= $x['cwd'] === 'Yes' ? 'y' : 'n' ?>"><?= $x['cwd'] ?></span></td>
       <td><?= $x['rt'] ? '<span class="b rt">' . $x['rt'] . '</span>' : '<span style="color:#d1d5db">0</span>' ?></td><td><?= $x['sb'] ? '<span class="b sb">' . $x['sb'] . '</span>' : '<span style="color:#d1d5db">0</span>' ?></td>
       <td><?= $x['policy'] === 'none' ? '<span style="color:#d1d5db">n/a</span>' : ($x['viol'] ? '<span class="b v">' . $x['viol'] . '</span>' : '<span style="color:#d1d5db">0</span>') ?></td>
       <td><?= $x['cn'] ? '<span class="b c">' . number_format($x['cv'], 2) . ' (' . $x['cn'] . ')</span>' : '<span style="color:#d1d5db">—</span>' ?></td><td><b><?= $x['avg'] ?></b></td></tr>
-  <?php endforeach; if (!$rows) echo '<tr><td colspan="12" style="padding:22px;color:#9ca3af">No customers match.</td></tr>'; ?></tbody></table></div>
+  <?php endforeach; if (!$rows) echo '<tr><td colspan="13" style="padding:22px;color:#9ca3af">No customers match.</td></tr>'; ?></tbody></table></div>
 </div>
 <div class="cdm cdr" id="cdM"><div class="bx"><div class="hd"><div><div style="font-weight:800;font-size:16px" id="cdT">Customer</div><div id="cdS" style="opacity:.8;font-size:12.5px"></div></div><button class="btn o" id="cdX" type="button" style="margin-left:auto">Close</button></div><div class="bd" id="cdB"></div></div></div>
 <script>
