@@ -68,6 +68,29 @@ foreach ($groups as $g) {
     if ($f_q !== '' && stripos($g['entity'] . ' ' . $g['refs'] . ' ' . $g['d'], $f_q) === false) continue;
     $rows[] = $g;
 }
+/* ═════════ rest of the bank: Unilever bank-statement credits (Unilever Reconcile Settings account / type) that are not fully reconciled ═════════ */
+$UL_DESC = ['UNILEVER LANKA CONSUMER LIMITED', 'UNILEVER SRI LANKA LIMITED', 'UNILEVER SRI LANKA LIMITED USLL', 'UNILEVER LANKA CONSUMER LIMITED ULCL', 'UNILEVER SRI LANKA LTD', 'UNILEVER LANKA CONSUMER LTD', 'UNILEVER LIPTON CEYLON LIMITED'];
+$bank = []; $bankTot = ['n' => 0, 'credit' => 0.0, 'applied' => 0.0, 'left' => 0.0]; $bankCfg = ''; $bankErr = '';
+if (cb_has($conn, 'bank_statement_transactions') && cb_has($conn, 'bank_statement_uploads') && cb_has($conn, 'unilever_recon_settings')) {
+    $sr = cb_q($conn, "SELECT bank_account_id, UPPER(bank_type) AS bt FROM unilever_recon_settings WHERE id = 1 LIMIT 1"); $sx = $sr ? mysqli_fetch_assoc($sr) : null;
+    $acc = (int)($sx['bank_account_id'] ?? 0); $bt = (string)($sx['bt'] ?? '');
+    if ($acc > 0) {
+        $dw = []; foreach ($UL_DESC as $d) $dw[] = "UPPER(t.description) LIKE '%" . $e($d) . "%'";
+        $w = ["u.account_id = $acc", "(t.recon_source IS NULL OR t.recon_source = '' OR t.recon_source = 'unilever_recon')", "(t.reconciled = 0 OR t.reconcile_balance > 0)", "t.credit > 0", '(' . implode(' OR ', $dw) . ')'];
+        if ($bt !== '') $w[] = "UPPER(u.bank_type) = '{$e($bt)}'";
+        if ($f_from) $w[] = "t.transaction_date >= '{$e($f_from)}'";
+        if ($f_to)   $w[] = "t.transaction_date <= '{$e($f_to)}'";
+        if ($f_q !== '') $w[] = "(t.description LIKE '%{$e($f_q)}%' OR t.reference LIKE '%{$e($f_q)}%' OR CAST(t.credit AS CHAR) LIKE '%{$e($f_q)}%')";
+        $r = cb_q($conn, "SELECT t.id, t.transaction_date, t.description, t.reference, t.credit, t.reconcile_balance, t.reconciled_amount FROM bank_statement_transactions t JOIN bank_statement_uploads u ON u.id = t.upload_id WHERE " . implode(' AND ', $w) . " ORDER BY t.transaction_date DESC, t.id DESC LIMIT 3000");
+        while ($r && ($x = mysqli_fetch_assoc($r))) {
+            $cr = round((float)$x['credit'], 2); $left = $x['reconcile_balance'] !== null ? round((float)$x['reconcile_balance'], 2) : $cr;
+            if ($left <= 0.009) continue;
+            $x['left'] = $left; $x['applied'] = round($cr - $left, 2); $x['credit'] = $cr; $bank[] = $x;
+            $bankTot['n']++; $bankTot['credit'] += $cr; $bankTot['applied'] += $x['applied']; $bankTot['left'] += $left;
+        }
+        $bankCfg = 'Account #' . $acc . ($bt !== '' ? ' · ' . $bt : '');
+    } else $bankErr = 'No bank account is saved in Unilever Reconcile settings yet.';
+} else $bankErr = 'No bank statements / Unilever Reconcile settings yet.';
 $ST = ['reconciled' => ['Reconciled', 'ok'], 'partial' => ['Partly reconciled', 'pt'], 'none' => ['Not reconciled', 'no'], 'over' => ['Over-applied', 'ov']];
 $tot = ['n' => 0, 'total' => 0.0, 'applied' => 0.0, 'diff' => 0.0]; $cnt = ['reconciled' => 0, 'partial' => 0, 'none' => 0, 'over' => 0];
 foreach ($rows as $g) { $tot['n'] += $g['n']; $tot['total'] += $g['total']; $tot['applied'] += $g['applied']; $tot['diff'] += $g['diff']; $cnt[$g['status']]++; }
@@ -109,7 +132,7 @@ include 'header.php';
 .cb{max-width:1500px;margin:0 auto;padding:16px;font-family:'Inter',system-ui,sans-serif;color:#111827}.cb h2{margin:0 0 3px;font-size:22px}.cb .sub{color:#6b7280;font-size:13px;margin:0 0 14px}
 .cb .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:14px}.cb .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}.cb .fld{display:flex;flex-direction:column;gap:3px}.cb .fld label{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase}
 .cb input,.cb select{padding:8px 10px;border:1.5px solid #d1d5db;border-radius:8px;font:inherit;font-size:13px}.cb .btn{padding:8px 16px;border:none;border-radius:8px;background:#1e3a8a;color:#fff;font:600 13px inherit;cursor:pointer;text-decoration:none;display:inline-flex;gap:6px;align-items:center}.cb .btn.o{background:#fff;color:#1e3a8a;border:1.5px solid #c7d2fe}.cb .btn.g{background:#16a34a}
-.cb .kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}.cb .k{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px}.cb .k span{font-size:11px;color:#6b7280;text-transform:uppercase;font-weight:700;display:block}.cb .k b{font-size:19px}
+.cb .kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:10px;margin-bottom:12px}.cb .k.wide{grid-column:span 2}@media(max-width:560px){.cb .k.wide{grid-column:1/-1}}.cb .k b{white-space:nowrap}.cb .k.wide b{font-size:clamp(17px,2.2vw,22px)}.cb .tabs{display:flex;gap:6px;margin:0 0 12px;border-bottom:2px solid #e5e7eb;flex-wrap:wrap}.cb .tabs button{padding:9px 16px;border:none;background:none;font:700 13.5px inherit;color:#6b7280;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px}.cb .tabs button.on{color:#1e3a8a;border-bottom-color:#1e3a8a}.cb .tabs .c{background:#e0e7ff;color:#1e3a8a;border-radius:99px;padding:1px 8px;font-size:11.5px;margin-left:5px}.cb .pane{display:none}.cb .pane.on{display:block}.cb .k{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px}.cb .k span{font-size:11px;color:#6b7280;text-transform:uppercase;font-weight:700;display:block}.cb .k b{font-size:19px}
 .cb .tw{overflow:auto;border:1px solid #e5e7eb;border-radius:10px;background:#fff;max-height:72vh}.cb table{width:100%;border-collapse:collapse;font-size:13px}.cb th{background:#1e3a8a;color:#fff;padding:9px 10px;text-align:left;position:sticky;top:0;white-space:nowrap}.cb td{padding:8px 10px;border-bottom:1px solid #f1f5f9}.cb td.r,.cb th.r{text-align:right;font-variant-numeric:tabular-nums}
 .cb tbody tr.g{cursor:pointer}.cb tbody tr.g:hover td{background:#eef2ff}.cb tfoot td{background:#fde68a;font-weight:800;position:sticky;bottom:0}
 .cb .st{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11.5px;font-weight:700}.cb .st.ok{background:#dcfce7;color:#166534}.cb .st.pt{background:#fef3c7;color:#92400e}.cb .st.no{background:#fee2e2;color:#991b1b}.cb .st.ov{background:#ede9fe;color:#5b21b6}
@@ -129,18 +152,31 @@ include 'header.php';
     <div class="fld"><label>Search</label><input type="search" name="q" value="<?= cb_h($f_q) ?>" placeholder="entity, bank ref, date"></div>
     <button class="btn" type="submit"><i class="fa-solid fa-filter"></i> Show</button><a class="btn o" href="ccc_bank_reconciliation_report.php">Reset</a>
     <a class="btn g" data-no-loader href="?<?= cb_h(http_build_query(array_merge($_GET, ['export' => 1]))) ?>"><i class="fa-solid fa-file-excel"></i> Export Excel</a></div></form>
+  <div class="tabs"><button type="button" class="on" data-p="p1">CCC vs Bank</button><button type="button" data-p="p2">Rest of the bank — not reconciled<span class="c"><?= number_format($bankTot['n']) ?></span></button></div>
+  <div class="pane on" id="p1">
   <div class="kp"><div class="k"><span>Banking dates × entity</span><b><?= number_format(count($rows)) ?></b></div><div class="k"><span>CCC total amount</span><b style="color:#1e3a8a">Rs. <?= number_format($tot['total'], 2) ?></b></div><div class="k"><span>Bank reconciled</span><b style="color:#15803d">Rs. <?= number_format($tot['applied'], 2) ?></b></div>
     <div class="k"><span>Difference</span><b style="color:<?= $tot['diff'] > 0.5 ? '#b91c1c' : ($tot['diff'] < -0.5 ? '#6d28d9' : '#15803d') ?>">Rs. <?= $tot['diff'] < 0 ? '(' . number_format(abs($tot['diff']), 2) . ')' : number_format($tot['diff'], 2) ?></b></div>
-    <div class="k"><span>Reconciled / partly / not</span><b><span style="color:#15803d"><?= $cnt['reconciled'] ?></span> / <span style="color:#b45309"><?= $cnt['partial'] ?></span> / <span style="color:#b91c1c"><?= $cnt['none'] ?></span><?php if ($cnt['over']): ?> / <span style="color:#6d28d9"><?= $cnt['over'] ?> over</span><?php endif; ?></b></div></div>
+    <div class="k wide"><span>Reconciled / partly / not</span><b><span style="color:#15803d"><?= $cnt['reconciled'] ?></span> / <span style="color:#b45309"><?= $cnt['partial'] ?></span> / <span style="color:#b91c1c"><?= $cnt['none'] ?></span><?php if ($cnt['over']): ?> / <span style="color:#6d28d9"><?= $cnt['over'] ?> over</span><?php endif; ?></b></div></div>
   <div class="tw"><table><thead><tr><th>#</th><th>Banking Date</th><th>Entity</th><th class="r">Certificates</th><th class="r">Total Amount (CCC)</th><th class="r">Bank Reconciled</th><th class="r">Difference</th><th>Status</th><th>Last Bank Date</th><th>Bank Ref</th></tr></thead><tbody>
   <?php foreach ($rows as $n => $g): ?><tr class="g" data-d="<?= cb_h($g['d']) ?>" data-e="<?= cb_h($g['entity']) ?>" data-t="<?= $g['total'] ?>"><td><?= $n + 1 ?></td><td style="white-space:nowrap"><b><?= cb_d($g['d']) ?></b></td><td><?= cb_h($g['entity'] ?: '—') ?></td><td class="r"><?= number_format($g['n']) ?></td><td class="r"><b><?= number_format($g['total'], 2) ?></b></td><td class="r"><?= $g['applied'] > 0 ? number_format($g['applied'], 2) : '<span style="color:#cbd5e1">—</span>' ?></td>
     <td class="r"><b style="color:<?= $g['diff'] > 0.5 ? '#b91c1c' : ($g['diff'] < -0.5 ? '#6d28d9' : '#15803d') ?>"><?= $g['diff'] < 0 ? '(' . number_format(abs($g['diff']), 2) . ')' : number_format($g['diff'], 2) ?></b></td><td><span class="st <?= $ST[$g['status']][1] ?>"><?= $ST[$g['status']][0] ?></span></td><td style="white-space:nowrap"><?= $g['last'] ? cb_d($g['last']) : '—' ?></td><td style="font-size:12px;color:#6b7280"><?= cb_h($g['refs']) ?></td></tr>
   <?php endforeach; if (!$rows): ?><tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:28px">No banking dates for these filters.</td></tr><?php endif; ?></tbody>
   <?php if ($rows): ?><tfoot><tr><td colspan="3">TOTAL</td><td class="r"><?= number_format($tot['n']) ?></td><td class="r"><?= number_format($tot['total'], 2) ?></td><td class="r"><?= number_format($tot['applied'], 2) ?></td><td class="r"><?= $tot['diff'] < 0 ? '(' . number_format(abs($tot['diff']), 2) . ')' : number_format($tot['diff'], 2) ?></td><td colspan="3"></td></tr></tfoot><?php endif; ?></table></div>
+  </div>
+  <div class="pane" id="p2">
+    <p class="sub" style="margin-top:0">Unilever credits on the bank statement (<?= cb_h($bankCfg ?: 'account not set') ?>, same rows as Unilever Reconcile) that are <b>not reconciled yet</b> or only <b>partly</b> applied. The date / search filters above apply (bank transaction date).</p>
+    <?php if ($bankErr): ?><div class="card" style="color:#92400e;background:#fffbeb"><?= cb_h($bankErr) ?></div><?php endif; ?>
+    <div class="kp"><div class="k"><span>Bank rows left</span><b><?= number_format($bankTot['n']) ?></b></div><div class="k"><span>Bank credit</span><b>Rs. <?= number_format($bankTot['credit'], 2) ?></b></div><div class="k"><span>Already applied</span><b style="color:#15803d">Rs. <?= number_format($bankTot['applied'], 2) ?></b></div><div class="k wide"><span>Still to reconcile</span><b style="color:#b91c1c">Rs. <?= number_format($bankTot['left'], 2) ?></b></div></div>
+    <div class="tw"><table><thead><tr><th>#</th><th>Bank Date</th><th>Description</th><th>Reference</th><th class="r">Credit</th><th class="r">Applied</th><th class="r">Left to reconcile</th><th>Status</th></tr></thead><tbody>
+    <?php foreach ($bank as $n => $b): ?><tr><td><?= $n + 1 ?></td><td style="white-space:nowrap"><b><?= cb_d($b['transaction_date']) ?></b></td><td><?= cb_h($b['description']) ?></td><td style="font-size:12px;color:#6b7280"><?= cb_h($b['reference']) ?></td><td class="r"><?= number_format($b['credit'], 2) ?></td><td class="r"><?= $b['applied'] > 0 ? number_format($b['applied'], 2) : '<span style="color:#cbd5e1">—</span>' ?></td><td class="r"><b style="color:#b91c1c"><?= number_format($b['left'], 2) ?></b></td><td><span class="st <?= $b['applied'] > 0 ? 'pt' : 'no' ?>"><?= $b['applied'] > 0 ? 'Partly reconciled' : 'Not reconciled' ?></span></td></tr>
+    <?php endforeach; if (!$bank): ?><tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:28px">Every Unilever bank credit is reconciled for these filters.</td></tr><?php endif; ?></tbody>
+    <?php if ($bank): ?><tfoot><tr><td colspan="4">TOTAL</td><td class="r"><?= number_format($bankTot['credit'], 2) ?></td><td class="r"><?= number_format($bankTot['applied'], 2) ?></td><td class="r"><?= number_format($bankTot['left'], 2) ?></td><td></td></tr></tfoot><?php endif; ?></table></div>
+  </div>
 </div>
 <div class="cbm" id="cbM"><div class="bx"><div class="hd"><div><div style="font-weight:800;font-size:16px" id="cbT">Banking date</div><div id="cbS" style="opacity:.8;font-size:12.5px"></div></div><button class="btn o" id="cbX" type="button" style="margin-left:auto">Close</button></div><div class="bd" id="cbB"></div></div></div>
 <script>
 (function(){
+  (function(){ var bs=document.querySelectorAll('.cb .tabs button'); function go(id){ bs.forEach(function(b){ b.classList.toggle('on',b.dataset.p===id); }); document.querySelectorAll('.cb .pane').forEach(function(p){ p.classList.toggle('on',p.id===id); }); try{ history.replaceState(null,'','#'+id); }catch(e){} } bs.forEach(function(b){ b.addEventListener('click',function(){ go(b.dataset.p); }); }); if(location.hash==='#p2') go('p2'); })();
   var CAN_REMOVE=<?= $canRemove ? 'true' : 'false' ?>, DIRTY=false;
   var $=function(i){return document.getElementById(i);}, esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}, m2=function(v){return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};
   document.body.appendChild($('cbM'));
