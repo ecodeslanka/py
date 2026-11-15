@@ -192,6 +192,45 @@ function ulr_check_bank_txn($conn, $bank_txn_id, $cfg) {
 }
 
 /**
+ * STOP OVER-APPLYING.
+ *  - a bank row can never carry more reconciled payments than its credit / debit (what is already applied + the new amount ≤ the bank amount)
+ *  - a claim group (banking date + entity) can never get more than its certificates' total (already applied + the new amount ≤ the total)
+ * Returns '' when fine, otherwise the message to show. Everything is read from the database (the browser's numbers are not trusted).
+ */
+function ulr_over_check($conn, $bank_txn_id, $bank_field, $apply_total, array $lines) {
+    $bank_txn_id = (int)$bank_txn_id; $tol = 0.005;
+    $field = in_array($bank_field, ['credit', 'debit', 'balance'], true) ? $bank_field : 'credit';
+    $bq = mysqli_query($conn, "SELECT `$field` AS amt, transaction_date FROM bank_statement_transactions WHERE id = $bank_txn_id");
+    $bk = $bq ? mysqli_fetch_assoc($bq) : null;
+    if ($bk) {
+        $aq = mysqli_query($conn, "SELECT COALESCE(SUM(claim_total),0) FROM unilever_reconcile_log WHERE bank_txn_id = $bank_txn_id");
+        $applied = $aq ? (float)mysqli_fetch_row($aq)[0] : 0.0;
+        $left = round((float)$bk['amt'] - $applied, 2);
+        if ((float)$apply_total > $left + $tol)
+            return 'Over-applied: bank row #' . $bank_txn_id . ' (' . $bk['transaction_date'] . ', ' . $field . ' LKR ' . number_format((float)$bk['amt'], 2) . ') has only LKR ' . number_format(max(0, $left), 2)
+                 . ' left (LKR ' . number_format($applied, 2) . ' already applied), but LKR ' . number_format((float)$apply_total, 2) . ' is being applied — over by LKR ' . number_format((float)$apply_total - $left, 2) . '.';
+    }
+    $seen = [];
+    foreach ($lines as $ln) {
+        $bd = trim((string)($ln['bdate'] ?? '')); $en = (string)($ln['entity'] ?? '');
+        if ($bd === '' || !strtotime($bd)) continue;
+        $bd = date('Y-m-d', strtotime($bd)); $key = $bd . '___' . $en;
+        $amt = (float)($ln['cert_amount'] ?? $ln['claim_total'] ?? 0);
+        $bde = mysqli_real_escape_string($conn, $bd); $ene = mysqli_real_escape_string($conn, $en);
+        $tq = mysqli_query($conn, "SELECT COALESCE(SUM(total_amount),0) FROM claim_cert_items WHERE DATE(banking_date) = '$bde' AND COALESCE(entity,'') = '$ene'");
+        $total = $tq ? round((float)mysqli_fetch_row($tq)[0], 2) : 0.0;
+        $pq = mysqli_query($conn, "SELECT COALESCE(SUM(cert_amount),0) FROM unilever_reconcile_claim_lines WHERE DATE(banking_date) = '$bde' AND COALESCE(entity,'') = '$ene'");
+        $paid = $pq ? round((float)mysqli_fetch_row($pq)[0], 2) : 0.0;
+        $seen[$key] = ($seen[$key] ?? 0) + $amt;                       // the same claim twice in one save
+        $left = round($total - $paid, 2);
+        if ($total > 0 && $seen[$key] > $left + $tol)
+            return 'Over-applied: ' . $bd . ($en !== '' ? ' · ' . $en : '') . ' — certificates total LKR ' . number_format($total, 2) . ', LKR ' . number_format($paid, 2) . ' already reconciled, only LKR '
+                 . number_format(max(0, $left), 2) . ' is left, but LKR ' . number_format($seen[$key], 2) . ' is being applied — over by LKR ' . number_format($seen[$key] - $left, 2) . '.';
+    }
+    return '';
+}
+
+/**
  * Rebuild recon status / category / remark of ONE bank row from every
  * reconcile saved against it. Several claim rows can share one bank row
  * (e.g. 3 claim balances paid in one bank credit) — all are listed.
@@ -608,6 +647,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'save_reconcile') {
             if (!ulr_check_bank_txn($conn, $bank_txn_id, $ulr_cfg)) {
                 throw new Exception('Bank row #' . $bank_txn_id . ' is not in the Settings account / statement type, or is reconciled by another page.');
             }
+            $__lines_total = 0.0; foreach ($lines as $__l) $__lines_total += (float)($__l['cert_amount'] ?? $__l['claim_total'] ?? 0);
+            $__over = ulr_over_check($conn, $bank_txn_id, $item['bank_field'] ?? 'credit', $__lines_total > 0 ? $__lines_total : $claim_total, $lines);
+            if ($__over !== '') throw new Exception($__over);          // nothing of this save is kept (transaction rolled back)
             $q_bk = mysqli_query($conn, "SELECT credit,debit,balance,reconcile_balance FROM bank_statement_transactions WHERE id=$bank_txn_id");
             $bk   = mysqli_fetch_assoc($q_bk);
             $field_val  = floatval($bk[$bank_field] ?? 0);
@@ -775,6 +817,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'manual_reconcile') {
         exit;
     }
 
+    $__over = ulr_over_check($conn, $bank_txn_id, $body['bank_field'] ?? 'credit', $cert_amount, [['bdate' => $line['bdate'] ?? '', 'entity' => $line['entity'] ?? '', 'cert_amount' => $cert_amount]]);
+    if ($__over !== '') { ob_end_clean(); echo json_encode(['ok'=>false,'msg'=>$__over]); exit; }
     $q_bk = mysqli_query($conn, "SELECT credit,debit,balance,reconcile_balance FROM bank_statement_transactions WHERE id=$bank_txn_id");
     $bk   = mysqli_fetch_assoc($q_bk);
     $field_val = floatval($bk[$bank_field] ?? $bk['credit'] ?? 0);
@@ -2149,6 +2193,16 @@ function updateBalance(){
   const fieldVal=_mrSelectedTxn.remBal!==null?_mrSelectedTxn.remBal:(_mrSelectedTxn[field]||0);
   const remaining=Math.round((fieldVal-certAmt)*100)/100;
   const pill=document.getElementById('balPill');
+  const cl=_claims[_mrClaimIdx]||{}, claimOut=parseFloat((cl.match_status==='partial-matched'?cl.remaining_balance:cl.claim_total)||0);
+  const overBank=remaining<-0.005, overClaim=certAmt>claimOut+0.005;
+  const sb=document.getElementById('mrSaveBtn'); if(sb) sb.disabled=(overBank||overClaim||!(certAmt>0));
+  if(overBank||overClaim){
+    pill.className='balance-pill negative';
+    pill.style.background='#fef2f2'; pill.style.color='#b91c1c'; pill.style.borderColor='#fca5a5';
+    pill.innerHTML='<i class="fa-solid fa-ban"></i> OVER-APPLIED — '+(overBank?'more than the bank row has left (over by LKR '+fmtN(-remaining)+')':'more than the claim still owes (LKR '+fmtN(claimOut)+' outstanding)')+'. Reduce the amount.';
+    return;
+  }
+  pill.style.background=''; pill.style.color=''; pill.style.borderColor='';
   if(remaining<=0){
     pill.className='balance-pill zero';
     pill.innerHTML='<i class="fa-solid fa-circle-check"></i> Bank Row Fully Applied';
@@ -2162,6 +2216,7 @@ async function saveManualReconcile(){
   if(!_mrSelectedTxn||_mrClaimIdx<0) return;
   const certAmt=parseFloat(document.getElementById('mrCertAmt').value||0);
   if(!certAmt||certAmt<=0){showToast('Enter a valid cert amount','err');return;}
+  { const cl0=_claims[_mrClaimIdx]||{}, out0=parseFloat((cl0.match_status==='partial-matched'?cl0.remaining_balance:cl0.claim_total)||0); if(certAmt>out0+0.005){ showToast('Over-applied: the claim only has LKR '+fmtN(out0)+' outstanding.','err'); return; } }
   const field=document.getElementById('mrField').value;
   const desc=document.getElementById('mrDesc').value.trim();
   const c=_claims[_mrClaimIdx];
