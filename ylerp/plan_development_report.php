@@ -4,10 +4,11 @@ date_default_timezone_set('Asia/Colombo');
 ob_start();
 include 'config.php';
 if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
-require_once __DIR__ . '/plan_lib.php'; pl_ensure($conn);
-$imp = pl_latest($conn); $bid = (int)($imp['id'] ?? 0);
-$rows = []; $r = pl_q($conn, "SELECT * FROM plan_dev_opportunities WHERE batch_id = $bid ORDER BY rank_no");
-while ($r && ($x = mysqli_fetch_assoc($r))) $rows[] = $x;
+require_once __DIR__ . '/plan_lib.php'; require_once __DIR__ . '/plan_model_lib.php';
+$M = pm_get($conn, isset($_GET['recalc'])); $imp = ['filename' => 'system data', 'imported_at' => $M['built_at']];
+$dev = array_values(array_filter($M['rows'], fn($x) => in_array($x['cat'][0], ['1', '2'], true) && $x['add'] > 0)); usort($dev, fn($a, $b) => $b['add'] <=> $a['add']); $rows = [];
+foreach ($dev as $i => $x) $rows[] = ['rank_no' => $i + 1, 'hul' => $x['c'], 'customer_name' => $x['n'], 'sales_rep' => $x['rep'], 'beat' => $x['b'], 'channel' => $x['ch'], 'category' => $x['cat'], 'risk_score' => $x['risk'], 'pay_mode' => $x['pay'],
+    'avg12' => $x['a12'], 'baseline' => $x['base'], 'target' => round($x['a12'] + $x['add'], 2), 'additional' => $x['add'], 'growth' => $x['gr']];
 /* same filters as the screen (used by the Excel export) */
 $F = ['q' => trim($_GET['q'] ?? ''), 'cat' => trim($_GET['cat'] ?? ''), 'ch' => trim($_GET['ch'] ?? ''), 'rep' => trim($_GET['rep'] ?? ''), 'beat' => trim($_GET['beat'] ?? ''), 'pay' => trim($_GET['pay'] ?? '')];
 
@@ -20,7 +21,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     $X = new MiniXlsx(); $sh = $X->sheet('Development Opportunities'); $sh->tab = '1F3864'; $sh->landscape = true;
     $FM = ['font' => 'Arial']; $NUM = '#,##0;\(#,##0\);"-"'; $NAVY = '1F3864'; $HS = $FM + ['b' => 1, 'color' => 'FFFFFF', 'bg' => $NAVY, 'h' => 'center', 'wrap' => 1, 'border' => 1];
     $sh->set(1, 1, 'Outlet Development Opportunities — ranked low-risk outlets with headroom', $FM + ['b' => 1, 'sz' => 14, 'color' => $NAVY]);
-    $sh->set(2, 1, 'Source: Sales & Credit Planning workbook imported ' . ($imp['imported_at'] ?? '') . ' (' . ($imp['filename'] ?? '') . '). Recommended target = Avg 12M + additional sales (confirmed).', $FM + ['sz' => 9, 'color' => '595959']);
+    $sh->set(2, 1, 'Calculated from the system data on ' . ($imp['imported_at'] ?? '') . '. Recommended target = Avg 12M + additional sales (confirmed).', $FM + ['sz' => 9, 'color' => '595959']);
     foreach (['Rank', 'HUL', 'Customer Name', 'Sales Rep', 'Beat', 'Secondary Channel', 'Category', 'Risk Score', 'Pay Mode', 'Avg 12M', 'Baseline', 'Recommended Target', 'Additional Sales (confirmed)', 'Growth %'] as $i => $h) $sh->set(4, $i + 1, $h, $HS);
     $sh->heights[4] = 36; $r = 5;
     foreach ($rows as $x) { foreach ([(int)$x['rank_no'], $x['hul'], $x['customer_name'], $x['sales_rep'], $x['beat'], $x['channel'], $x['category']] as $i => $v) $sh->set($r, $i + 1, $v, $FM);
@@ -43,8 +44,8 @@ echo pl_css();
 ?>
 <div class="pl">
   <div class="hero" style="background:linear-gradient(120deg,#052e16 0%,#047857 55%,#10b981 100%)"><h2><i class="fa-solid fa-seedling"></i> Development Opportunities</h2>
-    <p>Ranked low-risk outlets with headroom — the outlets where extra sales are confirmed possible. <b>Recommended target = Avg 12M + Additional sales.</b> Click a column title to sort. <?= $imp ? 'Data: <b>' . pl_h($imp['filename']) . '</b>, imported ' . pl_h($imp['imported_at']) . '.' : '' ?> <a href="plan_import.php"><i class="fa-solid fa-file-import"></i> Import planning data</a></p></div>
-  <?php if (!$rows): ?><div class="card" style="color:#92400e;background:#fffbeb">No planning data yet — <a href="plan_import.php">import the planning workbook</a> first.</div><?php endif; ?>
+    <p>Ranked low-risk outlets with headroom — the outlets where extra sales are confirmed possible. <b>Recommended target = Avg 12M + Additional sales.</b> Click a column title to sort. Calculated live from the system data (sales history, customers, bills, cheques) on <b><?= pl_h($M['built_at']) ?></b>. <a href="?recalc=1"><i class="fa-solid fa-rotate"></i> Recalculate now</a></p></div>
+  <?php if (!$rows): ?><div class="card" style="color:#92400e;background:#fffbeb">No sales history found yet — import the Invoice Wise Sales file (Analysis → Import Secondary Invoices) first.</div><?php endif; ?>
   <div class="card"><div class="row">
     <div class="fld"><label>Search</label><input id="fQ" type="search" placeholder="HUL, customer, rep, beat"></div>
     <div class="fld"><label>Category</label><select id="fCat"></select></div><div class="fld"><label>Secondary channel</label><select id="fCh"></select></div>

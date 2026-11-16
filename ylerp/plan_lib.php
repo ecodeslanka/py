@@ -1,21 +1,10 @@
 <?php
 /**
- * plan_lib.php — shared by the Planning reports (Development Opportunities · Restricted & High-Risk) and their import page.
- * Data = the Sales & Credit Planning workbook (tabs "Development Oppertunities" and "Restricted and High Risk"), stored in
- * plan_dev_opportunities / plan_restricted. The "Yelo Comment" column is NOT imported.
+ * plan_lib.php — shared by the Planning reports (Development Opportunities · Restricted & High-Risk).
+ * Look & feel + virtual-scroll table JS shared by the two planning reports (data comes from plan_model_lib.php).
  */
 function pl_q($conn, $sql) { try { return mysqli_query($conn, $sql); } catch (Throwable $e) { return false; } }
 function pl_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
-function pl_ensure($conn) {
-    pl_q($conn, "CREATE TABLE IF NOT EXISTS plan_imports (id INT AUTO_INCREMENT PRIMARY KEY, filename VARCHAR(255), dev_rows INT DEFAULT 0, restricted_rows INT DEFAULT 0, imported_by VARCHAR(100), imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    pl_q($conn, "CREATE TABLE IF NOT EXISTS plan_dev_opportunities (id INT AUTO_INCREMENT PRIMARY KEY, batch_id INT NOT NULL, rank_no INT, hul VARCHAR(60), customer_name VARCHAR(200), sales_rep VARCHAR(150), beat VARCHAR(150), channel VARCHAR(120), category VARCHAR(60),
-        risk_score DECIMAL(8,2), pay_mode VARCHAR(20), avg12 DECIMAL(16,2), baseline DECIMAL(16,2), target DECIMAL(16,2), additional DECIMAL(16,2), growth DECIMAL(8,4), KEY k_b (batch_id), KEY k_h (hul)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    pl_q($conn, "CREATE TABLE IF NOT EXISTS plan_restricted (id INT AUTO_INCREMENT PRIMARY KEY, batch_id INT NOT NULL, hul VARCHAR(60), customer_name VARCHAR(200), sales_rep VARCHAR(150), beat VARCHAR(150), category VARCHAR(60), credit_status VARCHAR(120), pay_mode VARCHAR(20),
-        risk_score DECIMAL(8,2), risk_band VARCHAR(30), priority VARCHAR(30), od_invoices INT, od_balance DECIMAL(16,2), od_max_days INT NULL, ret_chq DECIMAL(16,2), sent_chq DECIMAL(16,2), exposure DECIMAL(16,2), violations INT, avg_days_over DECIMAL(10,2) NULL,
-        returned_cheques INT, repeat_violator VARCHAR(10), baseline DECIMAL(16,2), target DECIMAL(16,2), restorable DECIMAL(16,2), status_conflict VARCHAR(255), approval VARCHAR(80), required_action TEXT, KEY k_b (batch_id), KEY k_h (hul)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-}
-function pl_latest($conn) { $r = pl_q($conn, "SELECT * FROM plan_imports ORDER BY id DESC LIMIT 1"); return $r ? mysqli_fetch_assoc($r) : null; }
-
 /** shared look (scoped to .pl) */
 function pl_css() { return <<<'CSS'
 <style>
