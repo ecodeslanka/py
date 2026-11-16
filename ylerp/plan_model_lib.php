@@ -31,26 +31,31 @@ function pm_risk(array $i) {
     return round(100 * $s, 1);
 }
 
-/** segmentation + growth + target (pure function). $o = outlet facts, $chMedian = median baseline of the outlet's channel */
+/** segmentation + growth + capacity + target — the workbook's formulas:
+ *  B. Growth potential = Baseline × Growth%        C. Credit-adj capacity = by category (below)
+ *  D. Recommended target = MAX(0, ROUND( IF(category 7 or 8, C, MIN(Baseline + B, C)), -2 )) */
 function pm_segment(array $o, $chMedian) {
     $risk = $o['risk']; $cod = in_array($o['bl_type'], ['no_cheque_cod', 'no_cash_cod'], true); $creditish = $o['policy'] !== 'none' || in_array($o['pay'], ['credit', 'cheque'], true);
-    $run = max(0, min($o['base'], $o['a3'])); $gr = 0.0; $restor = 0.0; $target = 0.0;
-    $obs = $o['obs']; $prior9 = $o['prior9']; $declining = $prior9 > 0 && $o['a3'] < 0.5 * $prior9;
+    $run = max(0, min($o['base'], $o['a3'])); $gr = 0.0; $restor = 0.0;
+    $prior9 = $o['prior9']; $declining = $prior9 > 0 && $o['a3'] < 0.5 * $prior9;
     $unsettled = $o['ret_unsettled'] > 0 || $o['sb_unsettled'] > 0; $repeat = $o['nv'] >= 6 && $o['avg_over'] >= 14;
-    if ($o['bl']) { $cat = '6 — Blocked / Recovery'; if ($cod) $target = $o['a3']; else { $target = 0; $restor = $o['a3']; } }
-    elseif ($risk > 60) { $cat = '5 — Restrict Credit'; $target = $creditish ? 0.75 * $run : $o['a3']; }
+    if ($o['bl']) { $cat = '6 — Blocked / Recovery'; $cap = $cod ? $run : 0; if (!$cod) $restor = $run; }
+    elseif ($risk > 60) { $cat = '5 — Restrict Credit'; $cap = $creditish ? 0.75 * $run : $o['a3']; }
     elseif ($o['r3'] <= 0 || $declining) { $cat = '7 — Dormant / Reactivation';
-        if ($o['r3'] <= 0) { $target = 0; if ($risk <= 40) $restor = 0.5 * $o['prior_active_avg']; } else { $target = $o['a3']; $restor = max(0, 0.75 * $prior9 - $o['a3']); } }
-    elseif ($risk > 40 || $o['od_max'] > 30 || $unsettled || $repeat) { $cat = '4 — Control & Collect'; $target = $run; }
-    elseif ($obs < 3 || $o['first_recent']) { $cat = '8 — New / Insufficient History'; $target = min($o['base'], $o['active_avg']); }
+        if ($o['r3'] <= 0) { $cap = 0; if ($risk <= 40) $restor = 0.5 * $o['prior_active_avg']; } else { $cap = $o['a3']; $restor = max(0, 0.75 * $prior9 - $o['a3']); } }
+    elseif ($risk > 40 || $o['od_max'] > 30 || $unsettled || $repeat) { $cat = '4 — Control & Collect'; $cap = $run; }
+    elseif ($o['obs'] < 3 || $o['first_recent']) { $cat = '8 — New / Insufficient History'; $cap = min($o['base'], $o['active_avg']); }
     else {
         $stable = $risk <= 40 && $o['last6_active'] >= 5 && $o['a3'] >= 0.9 * $o['a6'] && ($o['trend'] === null || $o['trend'] >= -0.05);
         $gap = $chMedian > 0 ? ($chMedian - $o['base']) / $chMedian : 0;
-        if ($stable && $risk <= 20 && $gap > 0.25) { $cat = '1 — Develop Aggressively'; $gr = max(0.10, min(0.20, 0.10 + 0.25 * $gap)); $target = $o['base'] * (1 + $gr); }
-        elseif ($stable) { $cat = '2 — Develop Moderately'; $gr = $risk <= 20 ? 0.075 : 0.05; $target = $o['base'] * (1 + $gr); }
-        else { $cat = '3 — Maintain Normal Sales'; $target = $o['base']; }
+        if ($stable && $risk <= 20 && $gap > 0.25) { $cat = '1 — Develop Aggressively'; $gr = max(0.10, min(0.20, 0.10 + 0.25 * $gap)); }
+        elseif ($stable) { $cat = '2 — Develop Moderately'; $gr = $risk <= 20 ? 0.075 : 0.05; }
+        else $cat = '3 — Maintain Normal Sales';
+        $cap = $o['base'] * (1 + $gr);
     }
-    return ['cat' => $cat, 'gr' => $gr, 'target' => $target, 'restor' => $restor, 'run' => $run];
+    $growthPot = $o['base'] * $gr; $c7 = in_array($cat[0], ['7', '8'], true);
+    $target = max(0, round($c7 ? $cap : min($o['base'] + $growthPot, $cap), -2));
+    return ['cat' => $cat, 'gr' => $gr, 'cap' => $cap, 'target' => $target, 'restor' => $restor, 'run' => $run, 'gpot' => $growthPot];
 }
 
 function pm_action(array $o, array $s) {
@@ -135,14 +140,18 @@ function pm_build($conn) {
               'base' => $x['base'], 'r3' => $x['r3'], 'obs' => count($obsV), 'prior9' => pm_mean($prior), 'prior_active_avg' => pm_mean($priorAct), 'first_recent' => $firstIdx !== null && $firstIdx >= $N - 3, 'active_avg' => pm_mean(array_filter($obsV, fn($v) => $v > 0)),
               'last6_active' => $l6a, 'trend' => $x['trend']];
         $o['risk'] = pm_risk($o); $seg = pm_segment($o, $med[$x['channel']] ?? 0); $mode = $o['bl'] ? ($BLL[$o['bl_type']] ?? 'Blacklisted') : '';
-        $crit = ($seg['cat'][0] === '6') || $o['od_max'] > 14 || $o['ret_unsettled'] > 0 || $o['sb_unsettled'] > 0;
-        $appr = $seg['cat'][0] === '6' ? 'YES — management review required' : ($seg['gr'] > 0.15 ? 'Recommended — growth >15%' : 'No');
+        $cashOnly = !in_array($pay, ['credit', 'cheque'], true) && $policy === 'none'; $uns = $o['ret_unsettled'] > 0 || $o['sb_unsettled'] > 0;
+        if ($cashOnly) $prio = '5 — None (cash)';
+        elseif ($o['bl']) $prio = ($uns || $o['od_n'] > 0) ? '1 — Critical' : ($o['nv'] > 0 ? '3 — Medium' : '4 — Routine');
+        else $prio = ($uns || $o['od_max'] >= 30) ? '1 — Critical' : ($o['od_n'] > 0 ? '2 — High' : (($o['nv'] > 0 && $o['risk'] > 20) ? '3 — Medium' : '4 — Routine'));
+        $notMaster = strpos($x['channel'], 'Unclassified') === 0;
+        $appr = $seg['cat'][0] === '6' ? 'YES — management review required' : ($notMaster ? 'YES — confirm master status' : ($seg['cat'][0] === '7' && $seg['restor'] > 0 && $o['r3'] <= 0 ? 'Sales Manager sign-off for reactivation' : ($seg['gr'] > 0.15 ? 'Recommended — growth >15%' : 'No')));
+        $medCh = $med[$x['channel']] ?? 0; $pgo = max(0, 0.25 * ($medCh - $seg['target']));
         $conf = ($o['bl_type'] === 'no_service' && $o['bl'] && $x['r3'] > 0) ? 'Billed in the last 3 cycles despite status "Not serviced (no delivery)"' : '';
-        $add = $seg['gr'] > 0 ? $o['base'] * $seg['gr'] : 0;
         $out[] = ['c' => $x['code'], 'n' => $x['name'], 'rep' => $x['sp'], 'b' => $x['beat'], 'ch' => $x['channel'], 'cat' => $seg['cat'], 'cs' => $o['bl'] ? 'BLOCKED (' . $mode . ')' : 'Active', 'pay' => $x['pm'], 'risk' => $o['risk'], 'band' => pm_band($o['risk']),
-            'prio' => $crit ? '1 — Critical' : '2 — High', 'odn' => $o['od_n'], 'odb' => round($o['od_bal'], 2), 'odd' => $o['od_n'] ? $o['od_max'] : null, 'ret' => round($o['ret_unsettled'], 2), 'sent' => round($o['sb_unsettled'], 2),
+            'prio' => $prio, 'odn' => $o['od_n'], 'odb' => round($o['od_bal'], 2), 'odd' => $o['od_n'] ? $o['od_max'] : null, 'ret' => round($o['ret_unsettled'], 2), 'sent' => round($o['sb_unsettled'], 2),
             'exp' => round(max(0, $o['od_bal']) + $o['ret_unsettled'] + $o['sb_unsettled'], 2), 'viol' => $o['nv'], 'avgd' => $o['nv'] ? round($o['avg_over'], 2) : null, 'rcq' => $o['ret_n'], 'repv' => ($o['nv'] >= 6 && $o['avg_over'] >= 14) ? 'Yes' : '',
-            'a12' => round($x['a12'], 2), 'base' => round($o['base'], 2), 'tgt' => round($seg['target'], 2), 'res' => round($seg['restor'], 2), 'gr' => $seg['gr'], 'add' => round($add, 2), 'conf' => $conf, 'appr' => $appr, 'act' => pm_action($o, $seg)];
+            'a12' => round($x['a12'], 2), 'base' => round($o['base'], 2), 'tgt' => round($seg['target'], 2), 'res' => round($seg['restor'], 2), 'gr' => $seg['gr'], 'add' => round(max(0, $seg['target'] - $o['base']), 2), 'med' => round($medCh, 2), 'pgo' => round($pgo, 2), 'a6m' => $o['last6_active'], 'conf' => $conf, 'appr' => $appr, 'act' => pm_action($o, $seg)];
     }
     return ['built_at' => date('Y-m-d H:i:s'), 'rows' => $out, 'stats' => ['outlets' => count($out), 'bills' => $bills, 'sales_to' => $H['last_date'], 'cutover' => $S['cutover']]];
 }
