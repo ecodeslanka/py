@@ -3,7 +3,7 @@
 if (class_exists('MiniXlsx')) return;
 class MiniSheet {
     public $name; public $cells = []; public $merges = []; public $widths = []; public $heights = [];
-    public $freeze = null; public $filter = null; public $maxR = 0; public $maxC = 0;
+    public $freeze = null; public $filter = null; public $maxR = 0; public $maxC = 0; public $condfmt = [];   // condfmt: [[sqref, minColor, maxColor, percentile]] 2-colour scales
     function __construct($n) { $this->name = $n; }
     function set($r, $c, $v, $st = []) { $this->cells[$r][$c] = [$v, $st]; $this->maxR = max($this->maxR, $r); $this->maxC = max($this->maxC, $c); }
     function style($r, $c, $st) { if (!isset($this->cells[$r][$c])) $this->set($r, $c, '', $st); else $this->cells[$r][$c][1] = $st; }
@@ -17,14 +17,14 @@ class MiniXlsx {
     private function sid($st) { ksort($st); $k = json_encode($st); if (!isset($this->xf[$k])) { $this->xf[$k] = count($this->xfList); $this->xfList[] = $st; } return $this->xf[$k]; }
     private function stylesXml() {
         $fonts = ['<font><sz val="10"/><name val="Calibri"/></font>']; $fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>'];
-        $fi = []; $fl = []; $xfs = [];
+        $fi = []; $fl = []; $xfs = []; $numfmts = [];
         foreach ($this->xfList as $st) {
             $f = 0; $fill = 0; $b = 0;
-            if (array_intersect_key($st, ['b' => 1, 'i' => 1, 'sz' => 1, 'color' => 1])) {
-                $k = json_encode([$st['b'] ?? 0, $st['i'] ?? 0, $st['sz'] ?? 10, $st['color'] ?? '']);
+            if (array_intersect_key($st, ['b' => 1, 'i' => 1, 'sz' => 1, 'color' => 1, 'font' => 1])) {
+                $k = json_encode([$st['b'] ?? 0, $st['i'] ?? 0, $st['sz'] ?? 10, $st['color'] ?? '', $st['font'] ?? '']);
                 if (!isset($fi[$k])) { $fi[$k] = count($fonts);
                     $fonts[] = '<font>' . (!empty($st['b']) ? '<b/>' : '') . (!empty($st['i']) ? '<i/>' : '') . '<sz val="' . ($st['sz'] ?? 10) . '"/>'
-                        . (!empty($st['color']) ? '<color rgb="FF' . $st['color'] . '"/>' : '') . '<name val="Calibri"/></font>'; }
+                        . (!empty($st['color']) ? '<color rgb="FF' . $st['color'] . '"/>' : '') . '<name val="' . ($st['font'] ?? 'Calibri') . '"/></font>'; }
                 $f = $fi[$k];
             }
             if (!empty($st['bg'])) { if (!isset($fl[$st['bg']])) { $fl[$st['bg']] = count($fills);
@@ -35,11 +35,13 @@ class MiniXlsx {
                 $al = '<alignment' . (isset($st['h']) ? ' horizontal="' . $st['h'] . '"' : '') . ' vertical="' . ($st['v'] ?? 'center') . '"'
                     . (!empty($st['wrap']) ? ' wrapText="1"' : '') . (!empty($st['indent']) ? ' indent="' . $st['indent'] . '"' : '') . '/>';
             $nf = isset($st['nf']) ? (int)$st['nf'] : (!empty($st['pct']) ? 9 : 0);      // nf: 3 = #,##0   4 = #,##0.00   9 = 0%
+            if (!empty($st['nfs'])) { if (!isset($numfmts[$st['nfs']])) $numfmts[$st['nfs']] = 164 + count($numfmts); $nf = $numfmts[$st['nfs']]; }   // nfs: custom number format text
             $xfs[] = '<xf numFmtId="' . $nf . '" fontId="' . $f . '" fillId="' . $fill . '" borderId="' . $b . '" xfId="0" applyFont="1" applyFill="1" applyBorder="1"'
                 . ($nf ? ' applyNumberFormat="1"' : '') . ($al ? ' applyAlignment="1">' . $al . '</xf>' : '/>');
         }
         $bd = '<left style="thin"><color rgb="FFE5E7EB"/></left><right style="thin"><color rgb="FFE5E7EB"/></right><top style="thin"><color rgb="FFE5E7EB"/></top><bottom style="thin"><color rgb="FFE5E7EB"/></bottom><diagonal/>';
-        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        $nfx = ''; if ($numfmts) { $nfx = '<numFmts count="' . count($numfmts) . '">'; foreach ($numfmts as $code => $id) $nfx .= '<numFmt numFmtId="' . $id . '" formatCode="' . self::esc($code) . '"/>'; $nfx .= '</numFmts>'; }
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' . $nfx
             . '<fonts count="' . count($fonts) . '">' . implode('', $fonts) . '</fonts><fills count="' . count($fills) . '">' . implode('', $fills) . '</fills>'
             . '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border>' . $bd . '</border></borders>'
             . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
@@ -66,7 +68,8 @@ class MiniXlsx {
             $x .= '<row r="' . $r . '"' . (isset($sh->heights[$r]) ? ' ht="' . $sh->heights[$r] . '" customHeight="1"' : '') . '>';
             foreach ($cols as $c => [$v, $st]) {
                 $ref = self::col($c) . $r; $sid = $this->sid($st);
-                if (is_int($v) || is_float($v)) $x .= '<c r="' . $ref . '" s="' . $sid . '"><v>' . $v . '</v></c>';
+                if (!empty($st['f'])) $x .= '<c r="' . $ref . '" s="' . $sid . '"' . (is_int($v) || is_float($v) ? '' : ' t="str"') . '><f>' . self::esc($st['f']) . '</f><v>' . (is_int($v) || is_float($v) ? $v : self::esc($v)) . '</v></c>';
+                elseif (is_int($v) || is_float($v)) $x .= '<c r="' . $ref . '" s="' . $sid . '"><v>' . $v . '</v></c>';
                 elseif ($v === '' || $v === null) $x .= '<c r="' . $ref . '" s="' . $sid . '"/>';
                 else $x .= '<c r="' . $ref . '" s="' . $sid . '" t="inlineStr"><is><t xml:space="preserve">' . self::esc($v) . '</t></is></c>';
             }
@@ -76,6 +79,7 @@ class MiniXlsx {
         if ($sh->filter) $x .= '<autoFilter ref="' . $sh->filter . '"/>';
         if ($sh->merges) { $x .= '<mergeCells count="' . count($sh->merges) . '">';
             foreach ($sh->merges as [$r1, $c1, $r2, $c2]) $x .= '<mergeCell ref="' . self::col($c1) . $r1 . ':' . self::col($c2) . $r2 . '"/>'; $x .= '</mergeCells>'; }
+        foreach ($sh->condfmt as $i => [$sq, $c1, $c2, $pc]) $x .= '<conditionalFormatting sqref="' . $sq . '"><cfRule type="colorScale" priority="' . ($i + 1) . '"><colorScale><cfvo type="num" val="0"/><cfvo type="percentile" val="' . (int)$pc . '"/><color rgb="FF' . $c1 . '"/><color rgb="FF' . $c2 . '"/></colorScale></cfRule></conditionalFormatting>';
         return $x . '</worksheet>';
     }
     function save($path) {
@@ -97,7 +101,7 @@ class MiniXlsx {
         $dn = '';
         foreach ($this->sheets as $i => $sh) if ($sh->filter && preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $sh->filter, $fm))
             $dn .= '<definedName name="_xlnm._FilterDatabase" localSheetId="' . $i . '" hidden="1">\'' . str_replace("'", "''", self::esc($sh->name)) . '\'!$' . $fm[1] . '$' . $fm[2] . ':$' . $fm[3] . '$' . $fm[4] . '</definedName>';
-        $z->addFromString('xl/workbook.xml', $wb . '</sheets>' . ($dn !== '' ? '<definedNames>' . $dn . '</definedNames>' : '') . '</workbook>');
+        $z->addFromString('xl/workbook.xml', $wb . '</sheets>' . ($dn !== '' ? '<definedNames>' . $dn . '</definedNames>' : '') . '<calcPr fullCalcOnLoad="1"/></workbook>');
         $z->addFromString('xl/_rels/workbook.xml.rels', $rel);
         $z->addFromString('xl/styles.xml', $this->stylesXml());
         $z->close();
