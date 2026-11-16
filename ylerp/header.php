@@ -2048,6 +2048,23 @@ if (isset($conn) && $conn) {
                 </div>
       
       <div class="menu-section">
+                <div class="menu-title"><i class="fa-solid fa-magnifying-glass-chart menu-title-icon mti-cyan"></i><span>Analysis</span></div>
+
+                <div class="menu-item has-submenu" data-tooltip="Secondary Sales Analysis" onclick="toggleSubmenu(this)">
+                    <div class="menu-item-content">
+                        <span class="menu-icon icon-green"><i class="fa-solid fa-chart-column"></i></span>
+                        <span>Secondary Sales Analysis</span>
+                    </div>
+                    <i class="fa-solid fa-chevron-down submenu-toggle"></i>
+                </div>
+                <div class="submenu">
+                    <a href="analysis_secondary_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'analysis_secondary_import.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-file-import"></i><span>Import Secondary Invoices</span>
+                    </a>
+                </div>
+      </div>
+
+      <div class="menu-section">
                 <div class="menu-title"><i class="fa-solid fa-chart-simple menu-title-icon mti-purple"></i><span>Reports</span></div>
 
                 <!-- ===================== CREDIT REPORTS ===================== -->
