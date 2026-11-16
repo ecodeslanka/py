@@ -12,16 +12,6 @@ if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
 require_once __DIR__ . '/plan_lib.php'; require_once __DIR__ . '/plan_model_lib.php';
 pl_q($conn, "CREATE TABLE IF NOT EXISTS plan_targets (ym CHAR(7) NOT NULL, rep VARCHAR(150) NOT NULL DEFAULT '', amount DECIMAL(16,2) NOT NULL DEFAULT 0, updated_by VARCHAR(100), updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (ym, rep)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
-if (($_POST['action'] ?? '') === 'save_targets') {
-    if (!pl_can_edit()) pl_json(['ok' => false, 'msg' => 'You do not have the Edit right on this page.']);
-    $ym = preg_match('/^\d{4}-\d{2}$/', $_POST['ym'] ?? '') ? $_POST['ym'] : ''; if (!$ym) pl_json(['ok' => false, 'msg' => 'Pick a month.']);
-    $e = fn($v) => mysqli_real_escape_string($conn, (string)$v); $u = $e(pl_user());
-    $all = ['' => $_POST['total'] ?? '']; foreach ((array)json_decode($_POST['reps'] ?? '{}', true) as $rep => $v) $all[(string)$rep] = $v;
-    foreach ($all as $rep => $v) { $v = str_replace(',', '', trim((string)$v));
-        if ($v === '' || !is_numeric($v) || (float)$v <= 0) pl_q($conn, "DELETE FROM plan_targets WHERE ym = '$ym' AND rep = '{$e($rep)}'");
-        else pl_q($conn, "REPLACE INTO plan_targets (ym, rep, amount, updated_by) VALUES ('$ym', '{$e($rep)}', " . round((float)$v, 2) . ", '$u')"); }
-    pl_json(['ok' => true, 'msg' => 'Targets saved for ' . date('M-y', strtotime($ym . '-01')) . '.']);
-}
 if (($_GET['ajax'] ?? '') === 'targets') {
     $ym = preg_match('/^\d{4}-\d{2}$/', $_GET['ym'] ?? '') ? $_GET['ym'] : ''; $t = ['total' => '', 'reps' => []];
     $r = pl_q($conn, "SELECT rep, amount FROM plan_targets WHERE ym = '$ym'"); while ($r && ($x = mysqli_fetch_assoc($r))) { if ($x['rep'] === '') $t['total'] = (float)$x['amount']; else $t['reps'][$x['rep']] = (float)$x['amount']; }
@@ -36,13 +26,13 @@ include 'header.php';
 echo pl_css();
 $mid = '<div class="card"><div class="row" style="align-items:flex-end">
   <div class="fld"><label>Target month (sales cycle)</label><select id="tYm">' . implode('', array_map(fn($m) => '<option value="' . $m . '"' . ($m === $openYm ? ' selected' : '') . '>' . hs_label($m) . ($m === $openYm ? ' (open cycle)' : '') . '</option>', $months)) . '</select></div>
-  <div class="fld"><label>Unilever monthly target — company total (LKR)</label><input id="tTot" class="ti" type="number" min="0" step="1000" style="width:220px" placeholder="e.g. 145000000"></div>
+  <div class="fld"><label>Unilever monthly target — company total</label><div id="tTotV" style="font-size:20px;font-weight:800;color:#1e3a8a;padding:4px 0">—</div></div>
   <div class="fld"><label>Scenario for the outlet split</label><select id="tSc"><option value="min">Minimum risk</option><option value="mod" selected>Moderate risk</option><option value="max">Maximum risk</option></select></div>
-  <button class="btn" id="tSave" type="button"' . (pl_can_edit() ? '' : ' disabled title="Edit right needed"') . '><i class="fa-solid fa-floppy-disk"></i> Save targets</button><span id="tMsg" style="font-size:12.5px"></span></div>
+  <a class="btn" id="tEdit" href="plan_target_entry.php"><i class="fa-solid fa-pen-to-square"></i> Enter / edit targets</a></div>
   <div class="grid3" style="margin:14px 0 0" id="scCards"></div>
-  <div class="tw" style="margin-top:6px"><table style="width:100%"><thead><tr><th class="l">Sales Rep</th><th>Outlets</th><th>Baseline</th><th>Sales to date</th><th>Min-risk</th><th>Moderate</th><th>Max-risk</th><th style="background:#92400e">Rep target (input)</th><th>Scenario forecast</th><th>Gap (target − forecast)</th><th>Coverage</th></tr></thead><tbody id="repB"></tbody><tfoot id="repF"></tfoot></table></div></div>';
+  <div class="tw" style="margin-top:6px"><table style="width:100%"><thead><tr><th class="l">Sales Rep</th><th>Outlets</th><th>Baseline</th><th>Sales to date</th><th>Min-risk</th><th>Moderate</th><th>Max-risk</th><th style="background:#92400e">Rep target</th><th>Scenario forecast</th><th>Gap (target − forecast)</th><th>Coverage</th></tr></thead><tbody id="repB"></tbody><tfoot id="repF"></tfoot></table></div></div>';
 echo pl_frame('Target Scenarios — Min · Moderate · Max risk', 'fa-bullseye', 'linear-gradient(120deg,#0f172a,#1e3a8a 55%,#6366f1)',
-    'Enter the Unilever <b>monthly target</b> and the <b>rep-wise targets</b> (yellow boxes). The model shows how much each outlet can deliver in three scenarios, then splits the target down to every <b>outlet code</b>. '
+    'The monthly and rep-wise targets are entered on <a href="plan_target_entry.php">Target Entry</a>. The model shows how much each outlet can deliver in three scenarios, then splits the target down to every <b>outlet code</b>. '
     . '<b>Minimum risk</b> = risk-adjusted target (no extra credit) · <b>Moderate</b> = minimum + half of the extra upside for outlets with risk ≤ 40 that are not blocked · <b>Maximum risk</b> = demand if restrictions are relaxed (block lifted, +10 %, peer gap, reactivation). '
     . 'Open cycle ' . hs_label($openYm) . ': ' . $openRg[0] . ' → ' . $openRg[1] . '. Data from the system on <b>' . pl_h($M['built_at']) . '</b>. <a href="?recalc=1"><i class="fa-solid fa-rotate"></i> Recalculate</a>', $mid);
 echo pl_js();
@@ -55,8 +45,8 @@ echo pl_js();
   /* scenario values for the chosen month: the open cycle counts sales to date, a future month starts from zero */
   function scen(x,ym){ if(ym===OPEN) return {min:x.min,mod:x.mod,max:x.max};
     var mn=Math.round(Math.max(x.tgt,0)/100)*100, mx=Math.max(x.mxr,mn), md=(x.cs.indexOf('BLOCKED')!==0&&x.risk<=40)?Math.round((mn+0.5*(mx-mn))/100)*100:mn; return {min:mn,mod:md,max:mx}; }
-  function compute(){ var ym=$('tYm').value, sc=$('tSc').value, T=parseFloat($('tTot').value)||0, rt={}, sumR=0, open=ym===OPEN;
-    repList.forEach(function(r){ var el=document.querySelector('input[data-rep="'+CSS.escape(r)+'"]'); var v=el?parseFloat(el.value)||0:0; if(v>0){ rt[r]=v; sumR+=v; } });
+  function compute(){ var ym=$('tYm').value, sc=$('tSc').value, T=parseFloat(TG.total)||0, rt={}, sumR=0, open=ym===OPEN;
+    repList.forEach(function(r){ var v=parseFloat(TG.reps[r])||0; if(v>0){ rt[r]=v; sumR+=v; } });
     var byRep={}, tot={min:0,mod:0,max:0,base:0,todate:0};
     ALL.forEach(function(x){ var s=scen(x,ym); x.smin=s.min; x.smod=s.mod; x.smax=s.max; x.sel=s[sc]; x.td=open?x.todate:0; var r=byRep[x.rep]=byRep[x.rep]||{n:0,min:0,mod:0,max:0,base:0,todate:0,sel:0};
       r.n++; r.min+=s.min; r.mod+=s.mod; r.max+=s.max; r.base+=x.base; r.todate+=x.td; r.sel+=x.sel; tot.min+=s.min; tot.mod+=s.mod; tot.max+=s.max; tot.base+=x.base; tot.todate+=x.td; });
@@ -79,8 +69,7 @@ echo pl_js();
       c[8].innerHTML='<b>'+plF0(sel)+'</b>'; c[9].innerHTML=t?'<b style="color:'+(t>sel?'#b91c1c':'#15803d')+'">'+plF0(t-sel)+'</b>':''; c[10].textContent=t?(sel/t*100).toFixed(1)+'%':''; });
     $('repF').innerHTML='<tr><td class="l">TOTAL</td><td>'+tr.n+'</td><td>'+plF0(tr.base)+'</td><td>'+plF0(tr.todate)+'</td><td>'+plF0(tr.min)+'</td><td>'+plF0(tr.mod)+'</td><td>'+plF0(tr.max)+'</td><td>'+plF0(tr.tg)+'</td><td>'+plF0(tr.sel)+'</td><td>'+(tr.tg?plF0(tr.tg-tr.sel):'')+'</td><td>'+(tr.tg?(tr.sel/tr.tg*100).toFixed(1)+'%':'')+'</td></tr>';
   }
-  function buildReps(){ $('repB').innerHTML=repList.map(function(r,i){ return '<tr data-i="'+i+'"><td class="l"><b>'+esc(r)+'</b></td><td></td><td></td><td></td><td></td><td></td><td></td><td><input class="ti" type="number" min="0" step="1000" data-rep="'+esc(r)+'" value="'+(TG.reps[r]!=null?TG.reps[r]:'')+'"></td><td></td><td></td><td></td></tr>'; }).join('');
-    document.querySelectorAll('#repB input[data-rep]').forEach(function(el){ el.oninput=function(){ TG.reps[el.dataset.rep]=el.value; clearTimeout(window.__tt); window.__tt=setTimeout(function(){ compute(); P.apply(); },300); }; }); }
+  function buildReps(){ $('repB').innerHTML=repList.map(function(r,i){ return '<tr data-i="'+i+'"><td class="l"><b>'+esc(r)+'</b></td><td></td><td></td><td></td><td></td><td></td><td></td><td style="background:#fffbeb;font-weight:700">'+(TG.reps[r]?plF0(TG.reps[r]):'<span class="z">—</span>')+'</td><td></td><td></td><td></td></tr>'; }).join(''); }
   var SC={min:'Min-risk',mod:'Moderate',max:'Max-risk'};
   P=plPage({data:ALL,exportTitle:'Target Scenarios — outlet split',exportName:'target_scenarios',exportSub:'Outlet targets split from the monthly target in proportion to the chosen scenario.',sort:{k:'req',dir:-1},
     filters:[{k:'rep',label:'Sales rep'},{k:'b',label:'Beat'},{k:'ch',label:'Channel'},{k:'cat',label:'Category'},{k:'pay',label:'Pay mode'}],
@@ -100,10 +89,10 @@ echo pl_js();
           +'<tr><td><b>Required (your target split)</b></td><td class="n" style="color:#1e3a8a"><b>'+plF0(x.req)+'</b></td><td>'+(x.stretch>0.005?'Asks '+(x.stretch*100).toFixed(1)+'% more than the chosen scenario — needs extra push or credit.':'Within the chosen scenario.')+' Balance to sell '+plF0(x.bal)+'.</td></tr></tbody></table></div>';
         $('dB').innerHTML=sc+plDetail(m); }).catch(function(e){ $('dB').textContent=e.message; }); }});
   var D=plModal('dm');
-  function loadTargets(){ fetch('plan_target_scenarios.php?ajax=targets&ym='+$('tYm').value,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){ TG={total:j.total,reps:j.reps||{}}; $('tTot').value=j.total||''; buildReps(); compute(); P.apply(); }).catch(function(){ buildReps(); compute(); P.apply(); }); }
-  $('tYm').onchange=loadTargets; $('tSc').onchange=function(){ compute(); P.apply(); }; $('tTot').oninput=function(){ clearTimeout(window.__t2); window.__t2=setTimeout(function(){ compute(); P.apply(); },300); };
-  $('tSave').onclick=function(){ var reps={}; document.querySelectorAll('#repB input[data-rep]').forEach(function(el){ reps[el.dataset.rep]=el.value; });
-    $('tMsg').style.color='#475569'; $('tMsg').textContent='Saving…'; plPost('plan_target_scenarios.php',{action:'save_targets',ym:$('tYm').value,total:$('tTot').value,reps:JSON.stringify(reps)}).then(function(j){ $('tMsg').style.color=j.ok?'#15803d':'#b91c1c'; $('tMsg').textContent=j.msg; }).catch(function(e){ $('tMsg').style.color='#b91c1c'; $('tMsg').textContent=e.message; }); };
+  function loadTargets(){ $('tEdit').href='plan_target_entry.php?ym='+$('tYm').value;
+    fetch('plan_target_scenarios.php?ajax=targets&ym='+$('tYm').value,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){ TG={total:j.total,reps:j.reps||{}}; $('tTotV').innerHTML=j.total?'Rs. '+plF0(j.total):'<span style="font-size:13px;color:#b45309">No target entered for this month</span>'; buildReps(); compute(); P.apply(); })
+      .catch(function(){ TG={total:'',reps:{}}; buildReps(); compute(); P.apply(); }); }
+  $('tYm').onchange=loadTargets; $('tSc').onchange=function(){ compute(); P.apply(); };
   loadTargets();
 })();
 </script>
