@@ -24,6 +24,17 @@ function pl_frame($title, $icon, $grad, $desc, $middle = '') {
         . '<div class="tw" id="tw"><table><thead id="th"></thead><tbody id="tb"></tbody><tfoot id="tf"></tfoot></table></div></div>'
         . '<div class="plm" id="dm"><div class="bx"><div class="hd" style="background:' . $grad . '"><div><b id="dT" style="font-size:18px"></b><div id="dS" style="font-size:12.5px;opacity:.85"></div></div><button type="button" data-close>&times;</button></div><div class="bd" id="dB"></div><div class="ft" id="dF"></div></div></div>';
 }
+/** saved Unilever targets of a month split to outlets (same rule as Target Scenarios): a rep's target over that rep's outlets in proportion to
+ *  the chosen scenario; the company total not covered by rep targets over the outlets of reps without a target. Returns [code => amount] */
+function pl_outlet_targets($conn, array $rows, $ym, $sc = 'mod') {
+    $T = 0; $R = []; $r = pl_q($conn, "SELECT rep, amount FROM plan_targets WHERE ym = '" . mysqli_real_escape_string($conn, $ym) . "'");
+    while ($r && ($x = mysqli_fetch_assoc($r))) { if ($x['rep'] === '') $T = (float)$x['amount']; else $R[$x['rep']] = (float)$x['amount']; }
+    if (!$T && !$R) return [];
+    $by = []; $restBase = 0; foreach ($rows as $x) { $k = $x['repc'] ?? $x['rep']; $by[$k] = ($by[$k] ?? 0) + $x[$sc]; if (empty($R[$k])) $restBase += $x[$sc]; }
+    $rest = max(0, $T - array_sum($R)); $out = [];
+    foreach ($rows as $x) { $k = $x['repc'] ?? $x['rep']; $v = !empty($R[$k]) ? ($by[$k] > 0 ? $x[$sc] * $R[$k] / $by[$k] : 0) : ($T > 0 && $restBase > 0 ? $x[$sc] * $rest / $restBase : 0); $out[$x['c']] = round($v, -2); }
+    return $out;
+}
 /** shared look (scoped to .pl) */
 function pl_css() { return <<<'CSS'
 <style>

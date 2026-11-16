@@ -55,7 +55,7 @@ function hs_build($conn, array $S) {
                           WHERE bill_date >= '{$e($firstFrom)}' AND bill_date < '{$e($S['cutover'])}' AND outlet_hul_code <> '' GROUP BY code, cyc");
         while ($r && ($x = mysqli_fetch_assoc($r))) { $cells[$x['code']][$x['cyc']] = ($cells[$x['code']][$x['cyc']] ?? 0) + (float)$x['v']; $cnts[$x['code']][$x['cyc']] = ($cnts[$x['code']][$x['cyc']] ?? 0) + (int)$x['n']; $src['analysis'] += (int)$x['n']; if ($x['ld'] > $lastDate) $lastDate = $x['ld']; }
         $r = hs_q($conn, "SELECT UPPER(TRIM(t.outlet_hul_code)) AS code, t.party_name, t.salesperson_code, t.salesperson_name, t.beat FROM analysis_sec_invoices t JOIN (SELECT MAX(id) AS id FROM analysis_sec_invoices WHERE outlet_hul_code <> '' GROUP BY UPPER(TRIM(outlet_hul_code))) m ON m.id = t.id");
-        while ($r && ($x = mysqli_fetch_assoc($r))) { $info[$x['code']] = ['name' => trim($x['party_name']), 'sp' => trim($x['salesperson_name']), 'beat' => trim($x['beat'])]; if ($x['salesperson_code'] !== '') $spName[strtoupper(trim($x['salesperson_code']))] = trim($x['salesperson_name']); }
+        while ($r && ($x = mysqli_fetch_assoc($r))) { $info[$x['code']] = ['name' => trim($x['party_name']), 'spc' => strtoupper(trim($x['salesperson_code'])), 'sp' => trim($x['salesperson_name']), 'beat' => trim($x['beat'])]; if ($x['salesperson_code'] !== '') $spName[strtoupper(trim($x['salesperson_code']))] = trim($x['salesperson_name']); }
     }
     /* 2) our own secondary import — bills from the cut-over date */
     if (hs_has($conn, 'secondary_invoice_import_details')) {
@@ -67,8 +67,12 @@ function hs_build($conn, array $S) {
         while ($r && ($x = mysqli_fetch_assoc($r))) { $cells[$x['code']][$x['cyc']] = ($cells[$x['code']][$x['cyc']] ?? 0) + (float)$x['v']; $cnts[$x['code']][$x['cyc']] = ($cnts[$x['code']][$x['cyc']] ?? 0) + (int)$x['n']; $src['system'] += (int)$x['n']; if ($x['ld'] > $lastDate) $lastDate = $x['ld']; }
         $r = hs_q($conn, "SELECT UPPER(TRIM(t.t_code)) AS code, t.customer_name, t.party_name, t.sales_person_code, t.route_name FROM secondary_invoice_import_details t JOIN (SELECT MAX(id) AS id FROM secondary_invoice_import_details WHERE t_code <> '' GROUP BY UPPER(TRIM(t_code))) m ON m.id = t.id");
         while ($r && ($x = mysqli_fetch_assoc($r))) { $c = $x['code']; $nm = trim($x['customer_name'] ?: $x['party_name']); $sp = $spName[strtoupper(trim($x['sales_person_code']))] ?? trim($x['sales_person_code']);
-            $info[$c] = ['name' => $nm !== '' ? $nm : ($info[$c]['name'] ?? ''), 'sp' => $sp !== '' ? $sp : ($info[$c]['sp'] ?? ''), 'beat' => trim($x['route_name']) !== '' ? trim($x['route_name']) : ($info[$c]['beat'] ?? '')]; }
+            $spc = strtoupper(trim($x['sales_person_code']));
+            $info[$c] = ['name' => $nm !== '' ? $nm : ($info[$c]['name'] ?? ''), 'spc' => $spc !== '' ? $spc : ($info[$c]['spc'] ?? ''), 'sp' => $sp !== '' ? $sp : ($info[$c]['sp'] ?? ''), 'beat' => trim($x['route_name']) !== '' ? trim($x['route_name']) : ($info[$c]['beat'] ?? '')]; }
     }
+    /* rep names by rep code: latest name on the Invoice Wise Sales file, else the employee record */
+    $empName = []; if (hs_has($conn, 'employees')) foreach (['custom_code', 'tr_code', 'employee_id'] as $col) { $r = hs_q($conn, "SELECT UPPER(TRIM($col)) AS c, COALESCE(NULLIF(name_with_initials,''), employee_full_name) AS n FROM employees WHERE $col IS NOT NULL AND $col <> ''");
+        while ($r && ($x = mysqli_fetch_assoc($r))) if (!isset($empName[$x['c']]) && trim((string)$x['n']) !== '') $empName[$x['c']] = trim($x['n']); }
     /* customer master: name + secondary channel */
     $ch = []; if (hs_has($conn, 'customers')) { $hasCl = false; $cr = hs_q($conn, "SHOW COLUMNS FROM customers LIKE 'credit_limit'"); if ($cr && mysqli_num_rows($cr)) $hasCl = true;
         $r = hs_q($conn, "SELECT UPPER(TRIM(t_code)) AS code, shop_name, COALESCE(channel,'') AS ch, LOWER(TRIM(COALESCE(payment_mode,''))) AS pm, COALESCE(credit_days,0) AS days, " . ($hasCl ? "COALESCE(credit_limit,0)" : "0") . " AS climit FROM customers"); while ($r && ($x = mysqli_fetch_assoc($r))) $ch[$x['code']] = $x; }
@@ -85,7 +89,8 @@ function hs_build($conn, array $S) {
         $oldObs = array_values(array_filter(array_slice($vals, 0, count($months) - 3, true), fn($v) => $v !== null)); $a9 = $avg($oldObs);
         $ex = round($byc[$extraYm] ?? 0, 2);
         $inf = $info[$code] ?? []; $c = $ch[$code] ?? null;
-        $rows[] = ['code' => $code, 'name' => ($c['shop_name'] ?? '') !== '' ? $c['shop_name'] : ($inf['name'] ?? ''), 'sp' => $inf['sp'] ?? '', 'beat' => $inf['beat'] ?? '',
+        $spc = $inf['spc'] ?? ''; $spn = $spc !== '' ? ($spName[$spc] ?? $empName[$spc] ?? ($inf['sp'] ?? '')) : ($inf['sp'] ?? '');
+        $rows[] = ['spc' => $spc, 'spn' => $spn, 'code' => $code, 'name' => ($c['shop_name'] ?? '') !== '' ? $c['shop_name'] : ($inf['name'] ?? ''), 'sp' => $spc !== '' ? $spc . ' · ' . ($spn !== '' && $spn !== $spc ? $spn : '') : ($spn !== '' ? $spn : 'Unassigned'), 'beat' => $inf['beat'] ?? '',
             'channel' => $c ? ($c['ch'] !== '' ? $c['ch'] : 'Unclassified') : 'Unclassified (not in Customers)', 'v' => $vals, 'n' => $cnts[$code] ?? [], 'pm' => $c ? ($c['pm'] !== '' ? ucfirst($c['pm']) : '') : '', 'days' => $c ? (int)$c['days'] : null, 'climit' => $c ? (float)$c['climit'] : null, 'in_cust' => (bool)$c, 'pmraw' => $c ? $c['pm'] : '', 'extra' => $ex, 'extra_n' => $cnts[$code][$extraYm] ?? 0,
             'a12' => $a12, 'a6' => $a6, 'a3' => $a3, 'latest' => $lat, 'hi' => $obs ? max($obs) : 0, 'lo' => $obs ? min($obs) : 0, 'active' => count(array_filter($obs, fn($v) => $v > 0)),
             'cv' => $cv, 'mom' => $mom, 'base' => max(0, $W[0] * $a12 + $W[1] * $a6 + $W[2] * $a3 + $W[3] * $lat), 'r3' => array_sum($l3), 'trend' => $a9 > 0 ? $a3 / $a9 - 1 : null];

@@ -19,7 +19,7 @@ if (($_GET['ajax'] ?? '') === 'targets') {
 }
 $M = pm_get($conn, isset($_GET['recalc'])); pl_detail_endpoint($M);
 $S = hs_settings($conn); $openYm = hs_add($S['first_cycle'], $S['months']); $openRg = hs_range($openYm, $S['start_day']);
-$J = pl_slim($M['rows'], ['c', 'n', 'rep', 'b', 'ch', 'pay', 'cat', 'risk', 'cs', 'base', 'tgt', 'todate', 'min', 'mod', 'max', 'mxr', 'basis', 'risk_max', 'pgo', 'res', 'nm']);
+$J = pl_slim($M['rows'], ['c', 'n', 'repc', 'rep', 'b', 'ch', 'pay', 'cat', 'risk', 'cs', 'base', 'tgt', 'todate', 'min', 'mod', 'max', 'mxr', 'basis', 'risk_max', 'pgo', 'res', 'nm']);
 $months = []; for ($i = -2; $i <= 3; $i++) $months[] = hs_add($openYm, $i);
 ob_end_flush();
 include 'header.php';
@@ -40,7 +40,7 @@ echo pl_js();
 <script>
 (function(){
   var ALL=<?= json_encode(array_values($J), JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR) ?>, OPEN=<?= json_encode($openYm) ?>, $=function(i){return document.getElementById(i);}, esc=plEsc;
-  var REPS={}, repList=[]; ALL.forEach(function(x){ var r=x.rep||'Unassigned'; x.rep=r; if(!REPS[r]){ REPS[r]=1; repList.push(r); } }); repList.sort();
+  var REPS={}, repList=[]; ALL.forEach(function(x){ var r=x.repc||x.rep||'UNASSIGNED'; x.repc=r; x.rep=x.rep||r; if(!REPS[r]){ REPS[r]=x.rep; repList.push(r); } }); repList.sort(function(a,b){ return String(REPS[a]).localeCompare(String(REPS[b])); });   /* reps are keyed by REP CODE */
   var TG={total:'',reps:{}}, P=null;
   /* scenario values for the chosen month: the open cycle counts sales to date, a future month starts from zero */
   function scen(x,ym){ if(ym===OPEN) return {min:x.min,mod:x.mod,max:x.max};
@@ -48,11 +48,11 @@ echo pl_js();
   function compute(){ var ym=$('tYm').value, sc=$('tSc').value, T=parseFloat(TG.total)||0, rt={}, sumR=0, open=ym===OPEN;
     repList.forEach(function(r){ var v=parseFloat(TG.reps[r])||0; if(v>0){ rt[r]=v; sumR+=v; } });
     var byRep={}, tot={min:0,mod:0,max:0,base:0,todate:0};
-    ALL.forEach(function(x){ var s=scen(x,ym); x.smin=s.min; x.smod=s.mod; x.smax=s.max; x.sel=s[sc]; x.td=open?x.todate:0; var r=byRep[x.rep]=byRep[x.rep]||{n:0,min:0,mod:0,max:0,base:0,todate:0,sel:0};
+    ALL.forEach(function(x){ var s=scen(x,ym); x.smin=s.min; x.smod=s.mod; x.smax=s.max; x.sel=s[sc]; x.td=open?x.todate:0; var r=byRep[x.repc]=byRep[x.repc]||{n:0,min:0,mod:0,max:0,base:0,todate:0,sel:0};
       r.n++; r.min+=s.min; r.mod+=s.mod; r.max+=s.max; r.base+=x.base; r.todate+=x.td; r.sel+=x.sel; tot.min+=s.min; tot.mod+=s.mod; tot.max+=s.max; tot.base+=x.base; tot.todate+=x.td; });
     /* rest of the company target goes to reps without an own target */
     var rest=Math.max(0,T-sumR), restBase=0; repList.forEach(function(r){ if(!rt[r]) restBase+=byRep[r].sel; });
-    ALL.forEach(function(x){ var r=byRep[x.rep], tr=rt[x.rep];
+    ALL.forEach(function(x){ var r=byRep[x.repc], tr=rt[x.repc];
       if(tr) x.req=r.sel>0?x.sel*tr/r.sel:tr/r.n; else if(T>0) x.req=restBase>0?x.sel*rest/restBase:0; else x.req=x.sel;
       x.req=Math.round(x.req/100)*100; x.stretch=x.sel>0?x.req/x.sel-1:(x.req>0?1:0); x.bal=Math.max(0,x.req-x.td); x.xexp=(x.pay==='Credit'||x.pay==='Cheque'||x.cs.indexOf('BLOCKED')===0)?Math.max(0,x.req-x.smin):0; });
     /* scenario cards */
@@ -69,7 +69,7 @@ echo pl_js();
       c[8].innerHTML='<b>'+plF0(sel)+'</b>'; c[9].innerHTML=t?'<b style="color:'+(t>sel?'#b91c1c':'#15803d')+'">'+plF0(t-sel)+'</b>':''; c[10].textContent=t?(sel/t*100).toFixed(1)+'%':''; });
     $('repF').innerHTML='<tr><td class="l">TOTAL</td><td>'+tr.n+'</td><td>'+plF0(tr.base)+'</td><td>'+plF0(tr.todate)+'</td><td>'+plF0(tr.min)+'</td><td>'+plF0(tr.mod)+'</td><td>'+plF0(tr.max)+'</td><td>'+plF0(tr.tg)+'</td><td>'+plF0(tr.sel)+'</td><td>'+(tr.tg?plF0(tr.tg-tr.sel):'')+'</td><td>'+(tr.tg?(tr.sel/tr.tg*100).toFixed(1)+'%':'')+'</td></tr>';
   }
-  function buildReps(){ $('repB').innerHTML=repList.map(function(r,i){ return '<tr data-i="'+i+'"><td class="l"><b>'+esc(r)+'</b></td><td></td><td></td><td></td><td></td><td></td><td></td><td style="background:#fffbeb;font-weight:700">'+(TG.reps[r]?plF0(TG.reps[r]):'<span class="z">—</span>')+'</td><td></td><td></td><td></td></tr>'; }).join(''); }
+  function buildReps(){ $('repB').innerHTML=repList.map(function(r,i){ return '<tr data-i="'+i+'"><td class="l"><b>'+esc(REPS[r])+'</b></td><td></td><td></td><td></td><td></td><td></td><td></td><td style="background:#fffbeb;font-weight:700">'+(TG.reps[r]?plF0(TG.reps[r]):'<span class="z">—</span>')+'</td><td></td><td></td><td></td></tr>'; }).join(''); }
   var SC={min:'Min-risk',mod:'Moderate',max:'Max-risk'};
   P=plPage({data:ALL,exportTitle:'Target Scenarios — outlet split',exportName:'target_scenarios',exportSub:'Outlet targets split from the monthly target in proportion to the chosen scenario.',sort:{k:'req',dir:-1},
     filters:[{k:'rep',label:'Sales rep'},{k:'b',label:'Beat'},{k:'ch',label:'Channel'},{k:'cat',label:'Category'},{k:'pay',label:'Pay mode'}],

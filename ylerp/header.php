@@ -2076,6 +2076,18 @@ if (isset($conn) && $conn) {
                     <a href="plan_restricted_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_restricted_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-shield-halved"></i><span>Restricted &amp; High-Risk Customers</span>
                     </a>
+                    <a href="plan_executive_dashboard.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_executive_dashboard.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-gauge-high"></i><span>Executive Planning Dashboard</span>
+                    </a>
+                    <a href="plan_sr_action_plans.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_sr_action_plans.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-route"></i><span>SR Action Plans</span>
+                    </a>
+                    <a href="plan_channel_performance.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_channel_performance.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-sitemap"></i><span>Channel Performance</span>
+                    </a>
+                    <a href="plan_retention.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_retention.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-person-walking-arrow-loop-left"></i><span>Retention &amp; Reactivation</span>
+                    </a>
                     <a href="plan_model_assumptions.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_model_assumptions.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-book"></i><span>Model Assumptions &amp; Methodology</span>
                     </a>

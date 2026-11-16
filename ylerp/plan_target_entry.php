@@ -29,9 +29,9 @@ $S = hs_settings($conn); $openYm = hs_add($S['first_cycle'], $S['months']);
 $sel = preg_match('/^\d{4}-\d{2}$/', $_GET['ym'] ?? '') ? $_GET['ym'] : $openYm;
 $months = []; for ($i = -3; $i <= 6; $i++) $months[] = hs_add($openYm, $i); if (!in_array($sel, $months, true)) $months[] = $sel;
 /* reference figures per rep (last complete cycle, baseline, scenarios for the open cycle) */
-$R = []; foreach ($M['rows'] as $x) { $k = $x['rep'] ?: 'Unassigned'; $o = &$R[$k]; if (!$o) $o = ['n' => 0, 'base' => 0, 'last' => 0, 'min' => 0, 'mod' => 0, 'max' => 0];
+$R = []; foreach ($M['rows'] as $x) { $k = $x['repc'] ?? ($x['rep'] ?: 'UNASSIGNED'); $o = &$R[$k]; if (!$o) $o = ['label' => $x['rep'] ?: $k, 'n' => 0, 'base' => 0, 'last' => 0, 'min' => 0, 'mod' => 0, 'max' => 0];   // keyed by REP CODE
     $o['n']++; $o['base'] += $x['base']; $o['last'] += $x['l'] ?? 0; $o['min'] += $x['min']; $o['mod'] += $x['mod']; $o['max'] += $x['max']; unset($o); }
-ksort($R);
+uasort($R, fn($a, $b) => strcmp($a['label'], $b['label']));
 $hist = []; $r = pl_q($conn, "SELECT ym, SUM(rep = '') AS has_total, SUM(CASE WHEN rep = '' THEN amount ELSE 0 END) AS total, SUM(CASE WHEN rep <> '' THEN amount ELSE 0 END) AS reps, SUM(rep <> '') AS nrep, MAX(updated_at) AS at, MAX(updated_by) AS by_ FROM plan_targets GROUP BY ym ORDER BY ym DESC LIMIT 24");
 while ($r && ($x = mysqli_fetch_assoc($r))) $hist[] = $x;
 ob_end_flush();
@@ -50,7 +50,7 @@ $can = pl_can_edit();
     <button class="btn o" id="eClear" type="button"<?= $can ? '' : ' disabled' ?>>Clear reps</button>
     <button class="btn" id="eSave" type="button"<?= $can ? '' : ' disabled title="Edit right needed"' ?>><i class="fa-solid fa-floppy-disk"></i> Save targets</button><span id="eMsg" style="font-size:12.5px"></span></div>
     <div id="eChk" style="margin-top:10px;font-size:13px"></div></div>
-  <div class="tw" style="margin-bottom:14px"><table style="width:100%"><thead><tr><th class="l">Sales Rep</th><th>Outlets</th><th>Baseline</th><th>Last cycle sales</th><th>Min-risk</th><th>Moderate</th><th>Max-risk</th><th style="background:#92400e">Rep target (LKR)</th><th>vs baseline</th><th>Share of total</th></tr></thead><tbody id="eB"></tbody><tfoot id="eF"></tfoot></table></div>
+  <div class="tw" style="margin-bottom:14px"><table style="width:100%"><thead><tr><th class="l">Sales Rep (code · name)</th><th>Outlets</th><th>Baseline</th><th>Last cycle sales</th><th>Min-risk</th><th>Moderate</th><th>Max-risk</th><th style="background:#92400e">Rep target (LKR)</th><th>vs baseline</th><th>Share of total</th></tr></thead><tbody id="eB"></tbody><tfoot id="eF"></tfoot></table></div>
   <?php if ($hist): ?><div class="card"><b>Saved targets</b><div class="tw" style="margin-top:8px"><table style="width:100%"><thead><tr><th class="l">Month</th><th>Company total</th><th>Rep targets (sum)</th><th>Reps</th><th>Difference</th><th class="l">Last saved</th><th class="l"></th></tr></thead><tbody>
   <?php foreach ($hist as $h): ?><tr><td class="l"><b><?= hs_label($h['ym']) ?></b></td><td><?= $h['has_total'] ? number_format((float)$h['total']) : '—' ?></td><td><?= number_format((float)$h['reps']) ?></td><td><?= (int)$h['nrep'] ?></td><td><?= $h['has_total'] && $h['nrep'] ? number_format((float)$h['total'] - (float)$h['reps']) : '' ?></td><td class="l"><?= pl_h($h['at']) ?> · <?= pl_h($h['by_']) ?></td><td class="l"><a href="?ym=<?= pl_h($h['ym']) ?>">Edit</a> · <a href="plan_target_scenarios.php">Scenarios</a></td></tr><?php endforeach; ?></tbody></table></div></div><?php endif; ?>
 </div>
@@ -58,7 +58,7 @@ $can = pl_can_edit();
 <script>
 (function(){
   var R=<?= json_encode($R, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?>, CAN=<?= $can ? 'true' : 'false' ?>, $=function(i){return document.getElementById(i);}, esc=plEsc, reps=Object.keys(R);
-  $('eB').innerHTML=reps.map(function(r,i){ var o=R[r]; return '<tr data-i="'+i+'"><td class="l"><b>'+esc(r)+'</b></td><td>'+o.n+'</td><td>'+plF0(o.base)+'</td><td>'+plF0(o.last)+'</td><td>'+plF0(o.min)+'</td><td>'+plF0(o.mod)+'</td><td>'+plF0(o.max)+'</td>'
+  $('eB').innerHTML=reps.map(function(r,i){ var o=R[r]; return '<tr data-i="'+i+'"><td class="l"><b>'+esc(o.label)+'</b></td><td>'+o.n+'</td><td>'+plF0(o.base)+'</td><td>'+plF0(o.last)+'</td><td>'+plF0(o.min)+'</td><td>'+plF0(o.mod)+'</td><td>'+plF0(o.max)+'</td>'
     +'<td><input class="ti" type="number" min="0" step="1000" data-rep="'+esc(r)+'"'+(CAN?'':' disabled')+'></td><td class="vb"></td><td class="sh"></td></tr>'; }).join('');
   var inputs=function(){ return [].slice.call(document.querySelectorAll('#eB input[data-rep]')); };
   function refresh(){ var T=parseFloat($('eTot').value)||0, sum=0, t={n:0,base:0,last:0,min:0,mod:0,max:0};

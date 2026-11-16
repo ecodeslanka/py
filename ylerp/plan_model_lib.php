@@ -246,8 +246,8 @@ function pm_build($conn) {
     $codes = array_map(fn($x) => $x['code'], $H['rows']);
     /* customers */
     $hasCol = function ($c) use ($conn) { $r = hs_q($conn, "SHOW COLUMNS FROM customers LIKE '" . $c . "'"); return $r && mysqli_num_rows($r) > 0; };
-    $hasCwd = $hasCol('cheques_will_delay'); $hasCl = $hasCol('credit_limit'); $hasBl = $hasCol('blacklisted'); $hasBlT = $hasBl && $hasCol('blacklist_type');
-    $cust = []; $r = hs_q($conn, "SELECT t_code, shop_name, LOWER(TRIM(COALESCE(payment_mode,''))) AS pm, COALESCE(credit_days,0) AS days, " . ($hasCl ? "COALESCE(credit_limit,0)" : "0") . " AS cl, " . ($hasCwd ? "COALESCE(cheques_will_delay,0)" : "0") . " AS cwd, " . ($hasBl ? "COALESCE(blacklisted,0)" : "0") . " AS bl, " . ($hasBlT ? "COALESCE(blacklist_type,'')" : "''") . " AS blt FROM customers");
+    $hasCwd = $hasCol('cheques_will_delay'); $hasCl = $hasCol('credit_limit'); $hasPc = $hasCol('primary_channel'); $hasBl = $hasCol('blacklisted'); $hasBlT = $hasBl && $hasCol('blacklist_type');
+    $cust = []; $r = hs_q($conn, "SELECT t_code, shop_name, LOWER(TRIM(COALESCE(payment_mode,''))) AS pm, COALESCE(credit_days,0) AS days, " . ($hasPc ? "COALESCE(primary_channel,'')" : "''") . " AS pch, " . ($hasCl ? "COALESCE(credit_limit,0)" : "0") . " AS cl, " . ($hasCwd ? "COALESCE(cheques_will_delay,0)" : "0") . " AS cwd, " . ($hasBl ? "COALESCE(blacklisted,0)" : "0") . " AS bl, " . ($hasBlT ? "COALESCE(blacklist_type,'')" : "''") . " AS blt FROM customers");
     while ($r && ($x = mysqli_fetch_assoc($r))) $cust[strtoupper(trim($x['t_code']))] = $x;
     /* bills → violations / open overdue (same rules as Customer Details) */
     $since = date('Y-m-d', strtotime('-24 months')); $mt = []; $bills = 0; $splitTs = $todayTs - 165 * 86400; $inc = [];      // incidents before / after the split date (risk outcome check)
@@ -324,12 +324,14 @@ function pm_build($conn) {
         $f = ['todate' => (float)$x['extra'], 'not_master' => $notMaster, 'pgo' => $pgo, 'pace_share' => $pace['share'], 'cv' => $x['cv'], 'days' => $c ? (int)$c['days'] : 0, 'cl' => $c ? (float)$c['cl'] : 0, 'ob' => $m['ob'], 'a6m' => $l6a,
               'b12' => $billsT / max(1, $N), 'b3' => array_sum(array_slice($cnts, -3)) / 3, 'inv' => $billsT > 0 ? $sales12 / $billsT : 0];
         $sc = pm_scenarios($o, $seg, $f); $f['min'] = $sc['min']; $po = pm_policy($o, $seg, $f); $li = pm_limit($o, $seg, $f, $po); $bi = pm_billing($o, $seg, $f);
-        $out[] = ['c' => $x['code'], 'n' => $x['name'], 'rep' => $x['sp'], 'b' => $x['beat'], 'ch' => $x['channel'], 'cat' => $seg['cat'], 'cs' => $o['bl'] ? 'BLOCKED (' . $mode . ')' : 'Active', 'pay' => $x['pm'], 'risk' => $o['risk'], 'band' => pm_band($o['risk']),
+        $out[] = ['c' => $x['code'], 'n' => $x['name'], 'repc' => $x['spc'] !== '' ? $x['spc'] : 'UNASSIGNED', 'repn' => $x['spn'], 'rep' => $x['sp'], 'b' => $x['beat'], 'ch' => $x['channel'], 'cat' => $seg['cat'], 'cs' => $o['bl'] ? 'BLOCKED (' . $mode . ')' : 'Active', 'pay' => $x['pm'], 'risk' => $o['risk'], 'band' => pm_band($o['risk']),
             'prio' => $prio, 'odn' => $o['od_n'], 'odb' => round($o['od_bal'], 2), 'odd' => $o['od_n'] ? $o['od_max'] : null, 'ret' => round($o['ret_unsettled'], 2), 'sent' => round($o['sb_unsettled'], 2),
             'exp' => round(max(0, $o['od_bal']) + $o['ret_unsettled'] + $o['sb_unsettled'], 2), 'viol' => $o['nv'], 'avgd' => $o['nv'] ? round($o['avg_over'], 2) : null, 'rcq' => $o['ret_n'], 'repv' => ($o['nv'] >= 6 && $o['avg_over'] >= 14) ? 'Yes' : '',
             'a12' => round($x['a12'], 2), 'base' => round($o['base'], 2), 'tgt' => round($seg['target'], 2), 'res' => round($seg['restor'], 2), 'gr' => $seg['gr'], 'add' => round(max(0, $seg['target'] - $o['base']), 2), 'med' => round($medCh, 2), 'pgo' => round($pgo, 2), 'a6m' => $o['last6_active'], 'rk' => array_map(fn($p) => [round($p[0], 3), $p[1]], array_values($rp['parts'])), 'why' => $seg['why'], 'acts' => pm_actions($o, $seg), 'cap' => round($seg['cap'], 2), 'gpot' => round($seg['gpot'], 2), 'c78' => $seg['c78'] ? 1 : 0, 'a3' => round($x['a3'], 2), 'a6' => round($x['a6'], 2), 'v' => array_map(fn($v) => $v === null ? null : round($v), $vals),
             'todate' => round($f['todate'], 2), 'todn' => (int)$x['extra_n'], 'cv' => $x['cv'] === null ? null : round($x['cv'], 3), 'days' => $f['days'], 'cl' => round($f['cl'], 2), 'ob' => round($m['ob'], 2), 'obn' => $m['obn'], 'cwd' => $o['cwd'], 'blt' => $o['bl_type'], 'pmraw' => $pay,
-            'nm' => $notMaster ? 1 : 0, 'b12' => round($f['b12'], 2), 'b3' => round($f['b3'], 2), 'inv' => round($f['inv'], 2), 'cnt' => $cnts, 'l' => round($x['latest'], 2), 'trend' => $o['trend'] === null ? null : round($o['trend'], 4), 'ac' => (int)$x['active'], 'sku' => $o['sku'], 'skum' => $o['sku_med']] + $sc + $po + $li + $bi + ['conf' => $conf, 'appr' => $appr, 'act' => pm_action($o, $seg)];
+            'nm' => $notMaster ? 1 : 0, 'b12' => round($f['b12'], 2), 'b3' => round($f['b3'], 2), 'inv' => round($f['inv'], 2), 'cnt' => $cnts, 'l' => round($x['latest'], 2), 'trend' => $o['trend'] === null ? null : round($o['trend'], 4), 'ac' => (int)$x['active'], 'pch' => ($c && $c['pch'] !== '') ? $c['pch'] : ($notMaster ? 'Unclassified' : '—'), 'tot12' => round($sales12, 2), 'prior9' => round($o['prior9'], 2),
+            'lastp' => (function () use ($vals, $months) { for ($i = count($vals) - 1; $i >= 0; $i--) if ($vals[$i] !== null && $vals[$i] > 0) return $months[$i]; return null; })(),
+            'react' => ($seg['cat'][0] === '7' && $o['r3'] <= 0) ? round($seg['restor'], 2) : 0, 'decl' => ($seg['cat'][0] === '7' && $o['r3'] > 0) ? round($seg['restor'], 2) : 0, 'rest' => $seg['cat'][0] === '6' ? round($seg['restor'], 2) : 0, 'sku' => $o['sku'], 'skum' => $o['sku_med']] + $sc + $po + $li + $bi + ['conf' => $conf, 'appr' => $appr, 'act' => pm_action($o, $seg)];
     }
     /* risk outcome check: credit / cheque outlets — incidents before the split date vs any incident after it */
     $bk = ['0 events' => [0, 0], '1–2' => [0, 0], '3–5' => [0, 0], '6+' => [0, 0]];
@@ -341,7 +343,7 @@ function pm_build($conn) {
 
 /** fingerprint of everything the model reads from the sales-trend side: the Sales Range Settings and the imported / system sales rows */
 function pm_signature($conn) {
-    $S = hs_settings($conn); $sig = [$S, 'model-v8', pm_load_assumptions($conn)];
+    $S = hs_settings($conn); $sig = [$S, 'model-v10', pm_load_assumptions($conn)];
     foreach (["SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(bill_value),0) FROM analysis_sec_invoices", "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(final_bill_amount),0) FROM secondary_invoice_import_details", "SELECT COUNT(*), COALESCE(SUM(credit_days),0), COALESCE(SUM(credit_limit),0) FROM customers"] as $q) {
         $r = hs_q($conn, $q); $sig[] = $r ? mysqli_fetch_row($r) : null; }
     return md5(json_encode($sig));
