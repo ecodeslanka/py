@@ -2061,6 +2061,9 @@ if (isset($conn) && $conn) {
                     <a href="analysis_secondary_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'analysis_secondary_import.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-file-import"></i><span>Import Secondary Invoices</span>
                     </a>
+                    <a href="analysis_party_master_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'analysis_party_master_import.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-address-book"></i><span>Import Party Master</span>
+                    </a>
                 </div>
       </div>
 
