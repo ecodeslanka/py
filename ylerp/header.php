@@ -2070,6 +2070,15 @@ if (isset($conn) && $conn) {
                     <a href="historical_sales_settings.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'historical_sales_settings.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-sliders"></i><span>Sales Range Settings</span>
                     </a>
+                    <a href="plan_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_import.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-file-import"></i><span>Import Planning Data</span>
+                    </a>
+                    <a href="plan_development_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_development_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-seedling"></i><span>Development Opportunities</span>
+                    </a>
+                    <a href="plan_restricted_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_restricted_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-shield-halved"></i><span>Restricted &amp; High-Risk Customers</span>
+                    </a>
                 </div>
       </div>
 

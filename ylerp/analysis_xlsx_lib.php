@@ -28,6 +28,16 @@ function as_first_sheet($zipPath) {
     if ($rid !== '' && $rels && ($r = @simplexml_load_string($rels))) foreach ($r->Relationship as $rel) if ((string)$rel['Id'] === $rid) { $t = (string)$rel['Target']; $path = ltrim(strpos($t, '/') === 0 ? $t : 'xl/' . $t, '/'); break; }
     return [$name, $path];
 }
+/** every sheet of the workbook: [[name, path inside the zip], ...] */
+function as_sheet_list($zipPath) {
+    $za = new ZipArchive(); if ($za->open($zipPath) !== true) return [];
+    $wb = $za->getFromName('xl/workbook.xml'); $rels = $za->getFromName('xl/_rels/workbook.xml.rels'); $za->close(); if (!$wb) return [];
+    $map = []; if ($rels && ($r = @simplexml_load_string($rels))) foreach ($r->Relationship as $rel) { $t = (string)$rel['Target']; $map[(string)$rel['Id']] = ltrim(strpos($t, '/') === 0 ? $t : 'xl/' . $t, '/'); }
+    $out = []; $x = @simplexml_load_string($wb);
+    if ($x) { $x->registerXPathNamespace('m', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main');
+        foreach ($x->xpath('//m:sheets/m:sheet') as $sh) { $a = $sh->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships'); $out[] = [(string)$sh['name'], $map[(string)$a['id']] ?? '']; } }
+    return $out;
+}
 /** calls $cb($rowNumber, array colIndex => value) for every row of the sheet */
 function as_each_row($zipPath, $sheetPath, array $shared, callable $cb) {
     $z = new XMLReader(); if (!@$z->open('zip://' . $zipPath . '#' . $sheetPath)) return false;
