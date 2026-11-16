@@ -176,6 +176,7 @@ function hr_status($x) {
 }
 function hr_pill($v) { if ($v === null) return '<span class="z">—</span>'; $c = $v > 0.005 ? 'up' : ($v < -0.005 ? 'dn' : 'fl'); return '<span class="pl ' . $c . '">' . ($v > 0.005 ? '▲' : ($v < -0.005 ? '▼' : '■')) . ' ' . number_format(abs($v) * 100, 1) . '%</span>'; }
 function hr_chip($t) { $pal = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#ef4444']; $c = $pal[crc32($t) % count($pal)]; return '<span class="chip" style="--c:' . $c . '">' . hr_h($t) . '</span>'; }
+$fa = ['a12' => 0, 'a6' => 0, 'a3' => 0, 'latest' => 0, 'base' => 0, 'r3' => 0]; foreach ($rows as $x) foreach ($fa as $k => $_) $fa[$k] += $x[$k];
 $maxTot = max(1, max(array_map(fn($m) => $tot[$m] ?? 0, $months)));
 ob_end_flush();
 include 'header.php';
@@ -227,6 +228,6 @@ include 'header.php';
     <td><?= number_format($x['a12'], 0) ?></td><td><?= number_format($x['a6'], 0) ?></td><td><?= number_format($x['a3'], 0) ?></td><td><?= number_format($x['latest'], 0) ?></td><td><?= number_format($x['hi'], 0) ?></td><td><?= number_format($x['lo'], 0) ?></td><td><?= (int)$x['active'] ?></td><td><?= $x['cv'] === null ? '<span class="z">—</span>' : number_format($x['cv'], 2) ?></td>
     <td><?= hr_pill($x['mom']) ?></td><td><span class="base"><?= number_format($x['base'], 0) ?></span></td><td><?= number_format($x['r3'], 0) ?></td><td><?= hr_pill($x['trend']) ?></td></tr>
   <?php endforeach; if (!$rows): ?><tr><td class="l" colspan="<?= 9 + count($months) + 13 ?>" style="padding:26px;color:#9ca3af;text-align:center">No outlets for these filters.</td></tr><?php endif; ?></tbody>
-  <?php if ($rows): ?><tfoot><tr><td class="l s1" style="z-index:4">TOTAL</td><td class="l s2" style="z-index:4"><?= number_format(count($rows)) ?> outlets</td><td colspan="7"></td><?php foreach ($months as $m): ?><td><?= number_format($tot[$m] ?? 0, 0) ?></td><?php endforeach; ?><td><?= number_format($ex, 0) ?></td><td colspan="12"></td></tr></tfoot><?php endif; ?></table></div>
+  <?php if ($rows): ?><tfoot><tr><td class="l s1" style="z-index:4">TOTAL</td><td class="l s2" style="z-index:4"><?= number_format(count($rows)) ?> outlets</td><td colspan="7"></td><?php foreach ($months as $m): ?><td><?= number_format($tot[$m] ?? 0, 0) ?></td><?php endforeach; ?><td><?= number_format($ex, 0) ?></td><td><?= number_format($fa['a12'], 0) ?></td><td><?= number_format($fa['a6'], 0) ?></td><td><?= number_format($fa['a3'], 0) ?></td><td><?= number_format($fa['latest'], 0) ?></td><td colspan="5"></td><td><?= number_format($fa['base'], 0) ?></td><td><?= number_format($fa['r3'], 0) ?></td><td></td></tr></tfoot><?php endif; ?></table></div>
 </div>
 <?php include 'footer.php'; ?>
