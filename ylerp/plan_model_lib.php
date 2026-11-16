@@ -156,10 +156,19 @@ function pm_build($conn) {
     return ['built_at' => date('Y-m-d H:i:s'), 'rows' => $out, 'stats' => ['outlets' => count($out), 'bills' => $bills, 'sales_to' => $H['last_date'], 'cutover' => $S['cutover']]];
 }
 
+/** fingerprint of everything the model reads from the sales-trend side: the Sales Range Settings and the imported / system sales rows */
+function pm_signature($conn) {
+    $S = hs_settings($conn); $sig = [$S];
+    foreach (["SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(bill_value),0) FROM analysis_sec_invoices", "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(final_bill_amount),0) FROM secondary_invoice_import_details", "SELECT COUNT(*), COALESCE(SUM(credit_days),0), COALESCE(SUM(credit_limit),0) FROM customers"] as $q) {
+        $r = hs_q($conn, $q); $sig[] = $r ? mysqli_fetch_row($r) : null; }
+    return md5(json_encode($sig));
+}
 function pm_get($conn, $force = false) {
-    hs_q($conn, "CREATE TABLE IF NOT EXISTS plan_model_cache (id TINYINT PRIMARY KEY, built_at DATETIME, payload LONGTEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    if (!$force) { $r = hs_q($conn, "SELECT built_at, payload FROM plan_model_cache WHERE id = 1 AND built_at >= DATE_SUB(NOW(), INTERVAL 60 MINUTE)"); $x = $r ? mysqli_fetch_assoc($r) : null; if ($x && ($d = json_decode($x['payload'], true))) return $d; }
+    hs_q($conn, "CREATE TABLE IF NOT EXISTS plan_model_cache (id TINYINT PRIMARY KEY, built_at DATETIME, payload LONGTEXT, sig CHAR(32) NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $c = hs_q($conn, "SHOW COLUMNS FROM plan_model_cache LIKE 'sig'"); if ($c && !mysqli_num_rows($c)) hs_q($conn, "ALTER TABLE plan_model_cache ADD COLUMN sig CHAR(32) NULL");
+    $sig = pm_signature($conn);
+    if (!$force) { $r = hs_q($conn, "SELECT built_at, payload FROM plan_model_cache WHERE id = 1 AND sig = '$sig' AND built_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)"); $x = $r ? mysqli_fetch_assoc($r) : null; if ($x && ($d = json_decode($x['payload'], true))) return $d; }
     $d = pm_build($conn); $j = mysqli_real_escape_string($conn, json_encode($d, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR));
-    @hs_q($conn, "SET SESSION max_allowed_packet = 268435456"); hs_q($conn, "REPLACE INTO plan_model_cache (id, built_at, payload) VALUES (1, '" . mysqli_real_escape_string($conn, $d['built_at']) . "', '$j')");
+    @hs_q($conn, "SET SESSION max_allowed_packet = 268435456"); hs_q($conn, "REPLACE INTO plan_model_cache (id, built_at, payload, sig) VALUES (1, '" . mysqli_real_escape_string($conn, $d['built_at']) . "', '$j', '$sig')");
     return $d;
 }
