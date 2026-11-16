@@ -70,7 +70,8 @@ function hs_build($conn, array $S) {
             $info[$c] = ['name' => $nm !== '' ? $nm : ($info[$c]['name'] ?? ''), 'sp' => $sp !== '' ? $sp : ($info[$c]['sp'] ?? ''), 'beat' => trim($x['route_name']) !== '' ? trim($x['route_name']) : ($info[$c]['beat'] ?? '')]; }
     }
     /* customer master: name + secondary channel */
-    $ch = []; if (hs_has($conn, 'customers')) { $r = hs_q($conn, "SELECT UPPER(TRIM(t_code)) AS code, shop_name, COALESCE(channel,'') AS ch, LOWER(TRIM(COALESCE(payment_mode,''))) AS pm, COALESCE(credit_days,0) AS days FROM customers"); while ($r && ($x = mysqli_fetch_assoc($r))) $ch[$x['code']] = $x; }
+    $ch = []; if (hs_has($conn, 'customers')) { $hasCl = false; $cr = hs_q($conn, "SHOW COLUMNS FROM customers LIKE 'credit_limit'"); if ($cr && mysqli_num_rows($cr)) $hasCl = true;
+        $r = hs_q($conn, "SELECT UPPER(TRIM(t_code)) AS code, shop_name, COALESCE(channel,'') AS ch, LOWER(TRIM(COALESCE(payment_mode,''))) AS pm, COALESCE(credit_days,0) AS days, " . ($hasCl ? "COALESCE(credit_limit,0)" : "0") . " AS climit FROM customers"); while ($r && ($x = mysqli_fetch_assoc($r))) $ch[$x['code']] = $x; }
     $rows = []; $tot = []; $W = [$S['w12'], $S['w6'], $S['w3'], $S['wl']];
     $avg = fn($a) => $a ? array_sum($a) / count($a) : 0;
     foreach ($cells as $code => $byc) {
@@ -85,7 +86,7 @@ function hs_build($conn, array $S) {
         $ex = round($byc[$extraYm] ?? 0, 2);
         $inf = $info[$code] ?? []; $c = $ch[$code] ?? null;
         $rows[] = ['code' => $code, 'name' => ($c['shop_name'] ?? '') !== '' ? $c['shop_name'] : ($inf['name'] ?? ''), 'sp' => $inf['sp'] ?? '', 'beat' => $inf['beat'] ?? '',
-            'channel' => $c ? ($c['ch'] !== '' ? $c['ch'] : 'Unclassified') : 'Unclassified (not in Customers)', 'v' => $vals, 'n' => $cnts[$code] ?? [], 'pm' => $c ? ($c['pm'] !== '' ? ucfirst($c['pm']) : '') : '', 'days' => $c ? (int)$c['days'] : null, 'extra' => $ex, 'extra_n' => $cnts[$code][$extraYm] ?? 0,
+            'channel' => $c ? ($c['ch'] !== '' ? $c['ch'] : 'Unclassified') : 'Unclassified (not in Customers)', 'v' => $vals, 'n' => $cnts[$code] ?? [], 'pm' => $c ? ($c['pm'] !== '' ? ucfirst($c['pm']) : '') : '', 'days' => $c ? (int)$c['days'] : null, 'climit' => $c ? (float)$c['climit'] : null, 'in_cust' => (bool)$c, 'pmraw' => $c ? $c['pm'] : '', 'extra' => $ex, 'extra_n' => $cnts[$code][$extraYm] ?? 0,
             'a12' => $a12, 'a6' => $a6, 'a3' => $a3, 'latest' => $lat, 'hi' => $obs ? max($obs) : 0, 'lo' => $obs ? min($obs) : 0, 'active' => count(array_filter($obs, fn($v) => $v > 0)),
             'cv' => $cv, 'mom' => $mom, 'base' => max(0, $W[0] * $a12 + $W[1] * $a6 + $W[2] * $a3 + $W[3] * $lat), 'r3' => array_sum($l3), 'trend' => $a9 > 0 ? $a3 / $a9 - 1 : null];
         foreach ($months as $m) $tot[$m] = ($tot[$m] ?? 0) + ($vals[$m] ?? 0); $tot['extra'] = ($tot['extra'] ?? 0) + $ex;
