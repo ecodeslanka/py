@@ -115,7 +115,7 @@ function pm_build($conn) {
             $ref = $open ? $todayTs : ($b['last_paid'] ? strtotime($b['last_paid']) : null); $over = $ref !== null ? (int)floor(($ref - $due) / 86400) : 0;
             $m = &$mt[$k]; if (!$m) $m = ['nv' => 0, 'sum_over' => 0, 'last_viol' => 0, 'od_n' => 0, 'od_bal' => 0.0, 'od_max' => 0];
             if ($policy !== 'none' && $over > 0) { $m['nv']++; $m['sum_over'] += $over; if ($ref > $m['last_viol']) $m['last_viol'] = $ref; }
-            if ($open && $over > 0) { $m['od_n']++; $m['od_bal'] += $bal; if ($over > $m['od_max']) $m['od_max'] = $over; }
+            if ($policy !== 'none' && $open && $over > 0) { $m['od_n']++; $m['od_bal'] += $bal; if ($over > $m['od_max']) $m['od_max'] = $over; }
             unset($m);
         }
     }
@@ -154,7 +154,8 @@ function pm_build($conn) {
               'last6_active' => $l6a, 'trend' => $x['trend']];
         $rp = pm_risk_parts($o); $o['risk'] = $rp['score']; $seg = pm_segment($o, $med[$x['channel']] ?? 0); $mode = $o['bl'] ? ($BLL[$o['bl_type']] ?? 'Blacklisted') : '';
         $cashOnly = !in_array($pay, ['credit', 'cheque'], true) && $policy === 'none'; $uns = $o['ret_unsettled'] > 0 || $o['sb_unsettled'] > 0;
-        if ($cashOnly) $prio = '5 — None (cash)';
+        if ($cashOnly && !$uns && $o['od_n'] == 0) $prio = '5 — None (cash)';        // cash outlet with nothing open; a cash outlet with unsettled returned / sent-back cheques or an open overdue invoice is still collected on
+        elseif ($cashOnly && !$o['bl']) $prio = ($uns || $o['od_max'] >= 30) ? '1 — Critical' : '2 — High';
         elseif ($o['bl']) $prio = ($uns || $o['od_n'] > 0) ? '1 — Critical' : ($o['nv'] > 0 ? '3 — Medium' : '4 — Routine');
         else $prio = ($uns || $o['od_max'] >= 30) ? '1 — Critical' : ($o['od_n'] > 0 ? '2 — High' : (($o['nv'] > 0 && $o['risk'] > 20) ? '3 — Medium' : '4 — Routine'));
         $notMaster = strpos($x['channel'], 'Unclassified') === 0;
@@ -171,7 +172,7 @@ function pm_build($conn) {
 
 /** fingerprint of everything the model reads from the sales-trend side: the Sales Range Settings and the imported / system sales rows */
 function pm_signature($conn) {
-    $S = hs_settings($conn); $sig = [$S, 'model-v3'];
+    $S = hs_settings($conn); $sig = [$S, 'model-v4'];
     foreach (["SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(bill_value),0) FROM analysis_sec_invoices", "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(final_bill_amount),0) FROM secondary_invoice_import_details", "SELECT COUNT(*), COALESCE(SUM(credit_days),0), COALESCE(SUM(credit_limit),0) FROM customers"] as $q) {
         $r = hs_q($conn, $q); $sig[] = $r ? mysqli_fetch_row($r) : null; }
     return md5(json_encode($sig));

@@ -6,7 +6,7 @@ include 'config.php';
 if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
 require_once __DIR__ . '/plan_lib.php'; require_once __DIR__ . '/plan_model_lib.php';
 $M = pm_get($conn, isset($_GET['recalc'])); $imp = ['filename' => 'system data', 'imported_at' => $M['built_at']];
-$sel = array_values(array_filter($M['rows'], fn($x) => in_array($x['prio'][0], ['1', '2'], true)));   // collection priority Critical or High (cash-only outlets carry no credit exposure)
+$sel = array_values(array_filter($M['rows'], fn($x) => in_array($x['cat'][0], ['4', '5', '6'], true) || in_array($x['prio'][0], ['1', '2'], true)));   // categories 4, 5, 6 + any outlet with an overdue invoice or unsettled cheques — whatever its pay mode (cash outlets included)
 usort($sel, fn($a, $b) => strcmp($a['prio'], $b['prio']) ?: ($b['exp'] <=> $a['exp'])); $rows = [];
 foreach ($sel as $x) $rows[] = ['hul' => $x['c'], 'customer_name' => $x['n'], 'sales_rep' => $x['rep'], 'beat' => $x['b'], 'category' => $x['cat'], 'credit_status' => $x['cs'], 'pay_mode' => $x['pay'], 'risk_score' => $x['risk'], 'risk_band' => $x['band'], 'priority' => $x['prio'],
     'od_invoices' => $x['odn'], 'od_balance' => $x['odb'], 'od_max_days' => $x['odd'], 'ret_chq' => $x['ret'], 'sent_chq' => $x['sent'], 'exposure' => $x['exp'], 'violations' => $x['viol'], 'avg_days_over' => $x['avgd'], 'returned_cheques' => $x['rcq'], 'repeat_violator' => $x['repv'],
@@ -21,7 +21,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     $X = new MiniXlsx(); $sh = $X->sheet('Restricted and High Risk'); $sh->tab = 'B91C1C'; $sh->landscape = true;
     $FM = ['font' => 'Arial']; $NUM = '#,##0;\(#,##0\);"-"'; $NAVY = '1F3864'; $HS = $FM + ['b' => 1, 'color' => 'FFFFFF', 'bg' => $NAVY, 'h' => 'center', 'wrap' => 1, 'border' => 1];
     $sh->set(1, 1, 'Restricted and High-Risk Customers — credit restriction, collection or management approval', $FM + ['b' => 1, 'sz' => 14, 'color' => $NAVY]);
-    $sh->set(2, 1, 'Collection priority Critical (blocked with issues, unsettled returned / sent-back cheques, 30+ days overdue) or High (open overdue invoices). Sorted by collection priority, then exposure. Calculated from the system data on ' . ($imp['imported_at'] ?? '') . '.', $FM + ['sz' => 9, 'color' => '595959']);
+    $sh->set(2, 1, 'Categories 4, 5, 6 plus any outlet with open overdue invoices or unsettled returned / sent-back cheques (all pay modes, cash included). Sorted by collection priority, then exposure. Calculated from the system data on ' . ($imp['imported_at'] ?? '') . '.', $FM + ['sz' => 9, 'color' => '595959']);
     $cols = [['HUL', 'hul', 's', 18], ['Customer Name', 'customer_name', 's', 30], ['Sales Rep', 'sales_rep', 's', 28], ['Beat', 'beat', 's', 24], ['Category', 'category', 's', 24], ['Credit Status', 'credit_status', 's', 30], ['Pay Mode', 'pay_mode', 's', 10], ['Risk Score', 'risk_score', 'd', 9], ['Risk Band', 'risk_band', 's', 14],
         ['Collection Priority', 'priority', 's', 14], ['Open Overdue Invoices', 'od_invoices', 'i', 10], ['Open Overdue Balance', 'od_balance', 'n', 15], ['Open Max Days Over', 'od_max_days', 'i', 10], ['Unsettled Returned Chq', 'ret_chq', 'n', 15], ['Unsettled Sent-back Chq', 'sent_chq', 'n', 15],
         ['Total Visible Exposure', 'exposure', 'n', 16], ['Violations', 'violations', 'i', 10], ['Avg Days Over', 'avg_days_over', 'd', 10], ['Returned Cheques', 'returned_cheques', 'i', 10], ['Repeat Violator', 'repeat_violator', 's', 10], ['Baseline', 'baseline', 'n', 14],
@@ -51,7 +51,7 @@ echo pl_css();
 ?>
 <div class="pl">
   <div class="hero" style="background:linear-gradient(120deg,#1c0a0a 0%,#7f1d1d 50%,#dc2626 100%)"><h2><i class="fa-solid fa-shield-halved"></i> Restricted &amp; High-Risk Customers</h2>
-    <p>Outlets with collection priority <b>Critical</b> (blocked with issues, unsettled returned / sent-back cheques, or 30+ days overdue) or <b>High</b> (open overdue invoices) — sorted by <b>collection priority</b>, then exposure. <b>Click a row</b> for the full picture and the required action. Calculated live from the system data (sales history, customers, bills, cheques) on <b><?= pl_h($M['built_at']) ?></b>. <a href="?recalc=1"><i class="fa-solid fa-rotate"></i> Recalculate now</a></p></div>
+    <p>Categories <b>4, 5, 6</b> plus any outlet with an <b>open overdue invoice or unsettled returned / sent-back cheques</b> — <b>every pay mode, cash included</b> — sorted by <b>collection priority</b>, then exposure. <b>Click a row</b> for the full picture and the required action. Calculated live from the system data (sales history, customers, bills, cheques) on <b><?= pl_h($M['built_at']) ?></b>. <a href="?recalc=1"><i class="fa-solid fa-rotate"></i> Recalculate now</a></p></div>
   <?php if (!$rows): ?><div class="card" style="color:#92400e;background:#fffbeb">No restricted or high-risk customers found (or no sales history yet).</div><?php endif; ?>
   <div class="card"><div class="row">
     <div class="fld"><label>Search</label><input id="fQ" type="search" placeholder="HUL, customer, rep, beat"></div>
@@ -74,7 +74,7 @@ echo pl_css();
   var F={q:'',prio:'',cat:'',cs:'',band:'',appr:'',rep:'',pay:''}, cur=ALL, sort={k:'exp',dir:-1}, ids={prio:['fPrio','prio'],cat:['fCat','cat'],cs:['fCs','cs'],band:['fBand','band'],appr:['fAppr','appr'],rep:['fRep','rep'],pay:['fPay','pay']};
   Object.keys(ids).forEach(function(k){ var key=ids[k][1],s={},a=[]; ALL.forEach(function(x){ if(x[key]!==''&&!s[x[key]]){ s[x[key]]=1; a.push(x[key]); } }); a.sort(); $(ids[k][0]).innerHTML='<option value="">All</option>'+a.map(function(v){return '<option>'+esc(v)+'</option>';}).join(''); });
   function riskCol(v){ return v<=20?'#16a34a':(v<=40?'#f59e0b':(v<=60?'#ea580c':'#dc2626')); }
-  var BC={'A':'#16a34a','B':'#0ea5e9','C':'#f59e0b','D':'#dc2626','E':'#7f1d1d'}, PC={'1':'#dc2626','2':'#ea580c'}, CC={'2':'#0ea5e9','3':'#10b981','4':'#f59e0b','5':'#ea580c','6':'#dc2626'};
+  var BC={'A':'#16a34a','B':'#0ea5e9','C':'#f59e0b','D':'#dc2626','E':'#7f1d1d'}, PC={'1':'#dc2626','2':'#ea580c','3':'#f59e0b','4':'#0ea5e9','5':'#64748b'}, CC={'2':'#0ea5e9','3':'#10b981','4':'#f59e0b','5':'#ea580c','6':'#dc2626'};
   function money(v){ return v?plF0(v):'<span class="z">—</span>'; }
   var T=PLVT({tw:$('tw'),tb:$('tb'),cols:23,rh:38,height:'68vh',rowHtml:function(x,i){
     var blocked=x.cs.indexOf('BLOCKED')===0, yes=x.appr.indexOf('YES')===0;
