@@ -2076,6 +2076,18 @@ if (isset($conn) && $conn) {
                     <a href="plan_restricted_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_restricted_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-shield-halved"></i><span>Restricted &amp; High-Risk Customers</span>
                     </a>
+                    <a href="plan_target_scenarios.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_target_scenarios.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-bullseye"></i><span>Target Scenarios (Min / Mod / Max)</span>
+                    </a>
+                    <a href="plan_credit_policy.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_credit_policy.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-scale-balanced"></i><span>Credit Policy Recommendations</span>
+                    </a>
+                    <a href="plan_billing_frequency.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_billing_frequency.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-calendar-week"></i><span>Billing Frequency</span>
+                    </a>
+                    <a href="plan_credit_limit.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_credit_limit.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-credit-card"></i><span>Credit Limit Management</span>
+                    </a>
                 </div>
       </div>
 
