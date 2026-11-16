@@ -17,19 +17,29 @@ function pm_band($s) { return $s <= 20.05 ? 'A — Low' : ($s <= 40.05 ? 'B — 
 function pm_median(array $a) { sort($a); $n = count($a); if (!$n) return 0; return $n % 2 ? $a[intdiv($n, 2)] : ($a[$n / 2 - 1] + $a[$n / 2]) / 2; }
 function pm_mean(array $a) { return $a ? array_sum($a) / count($a) : 0; }
 
-/** risk score 0–100 from the factor inputs (pure function) */
-function pm_risk(array $i) {
+/** risk score 0–100 with the explanation of every factor (pure function). Returns ['score' => x, 'parts' => [key => [sub-score 0..1, note]]] */
+function pm_risk_parts(array $i) {
+    $f0 = fn($v) => number_format($v);
     $viol = ($i['policy'] === 'none') ? 0 : 0.5 * min($i['nv'] / 6, 1) + 0.3 * min($i['avg_over'] / 21, 1) + 0.2 * ($i['viol_60'] ? 1 : 0);
-    $chq  = 0.6 * min($i['ret_n'] / 3, 1) + 0.25 * ($i['ret_unsettled'] > 0 ? 1 : 0) + 0.15 * ($i['ret_90'] ? 1 : 0);
-    $bl   = !$i['bl'] ? 0 : (in_array($i['bl_type'], ['no_cheque_cod', 'no_cash_cod'], true) ? 0.6 : ($i['bl_type'] === 'temporary' ? 0.8 : 1.0));
-    $late = 0.5 * min($i['od_max'] / 60, 1) + 0.3 * min($i['a3'] > 0 ? $i['od_bal'] / $i['a3'] : ($i['od_bal'] > 0 ? 1 : 0), 1) + 0.2 * ($i['cwd'] ? 1 : 0);
-    $sb   = 0.7 * min($i['sb_n'] / 2, 1) + 0.3 * ($i['sb_unsettled'] > 0 ? 1 : 0);
+    $nViol = $i['policy'] === 'none' ? 'Cash outlet — no credit bills, so nothing is scored.' : $i['nv'] . ' policy violation(s) (full score at 6) · average ' . round($i['avg_over'], 1) . ' days over (full at 21) · violation in the last 60 days: ' . ($i['viol_60'] ? 'yes' : 'no');
+    $chq = 0.6 * min($i['ret_n'] / 3, 1) + 0.25 * ($i['ret_unsettled'] > 0 ? 1 : 0) + 0.15 * ($i['ret_90'] ? 1 : 0);
+    $nChq = $i['ret_n'] . ' returned cheque(s) (full at 3) · unsettled LKR ' . $f0($i['ret_unsettled']) . ' · returned in the last 90 days: ' . ($i['ret_90'] ? 'yes' : 'no');
+    $bl = !$i['bl'] ? 0 : (in_array($i['bl_type'], ['no_cheque_cod', 'no_cash_cod'], true) ? 0.6 : ($i['bl_type'] === 'temporary' ? 0.8 : 1.0));
+    $nBl = !$i['bl'] ? 'Not blacklisted.' : 'Blacklisted (' . ($i['bl_type'] ?: 'blacklisted') . '): permanent / not serviced = 100%, temporary = 80%, block cash / cheque on delivery = 60%.';
+    $odRatio = $i['a3'] > 0 ? $i['od_bal'] / $i['a3'] : ($i['od_bal'] > 0 ? 1 : 0);
+    $late = 0.5 * min($i['od_max'] / 60, 1) + 0.3 * min($odRatio, 1) + 0.2 * ($i['cwd'] ? 1 : 0);
+    $nLate = 'Open invoice max ' . $i['od_max'] . ' days over (full at 60) · open overdue LKR ' . $f0($i['od_bal']) . ' = ' . round($odRatio * 100) . '% of the 3-month average sales · "cheques will delay": ' . ($i['cwd'] ? 'yes' : 'no');
+    $sb = 0.7 * min($i['sb_n'] / 2, 1) + 0.3 * ($i['sb_unsettled'] > 0 ? 1 : 0);
+    $nSb = $i['sb_n'] . ' sent-back cheque(s) (full at 2) · unsettled LKR ' . $f0($i['sb_unsettled']);
     $canc = min($i['canc_rate'] / 0.15, 1);
-    $irr  = $i['irr_cv'] === null ? 0 : min($i['irr_cv'], 1);
-    $sub = ['viol' => $viol, 'chq' => $chq, 'bl' => $bl, 'late' => $late, 'sb' => $sb, 'canc' => $canc, 'irr' => $irr]; $s = 0;
-    foreach (PM_W as $k => $w) $s += $w * $sub[$k];
-    return round(100 * $s, 1);
+    $nCanc = 'Cancelled bills are ' . round($i['canc_rate'] * 100, 1) . '% of billing over the last 8 cycles (full score at 15%).';
+    $irr = $i['irr_cv'] === null ? 0 : min($i['irr_cv'], 1);
+    $nIrr = $i['irr_cv'] === null ? 'Fewer than 3 billed months — not scored.' : 'Bill-count variation (CV) ' . round($i['irr_cv'], 2) . ' (full score at 1.0).';
+    $parts = ['viol' => [$viol, $nViol], 'chq' => [$chq, $nChq], 'bl' => [$bl, $nBl], 'late' => [$late, $nLate], 'sb' => [$sb, $nSb], 'canc' => [$canc, $nCanc], 'irr' => [$irr, $nIrr]]; $s = 0;
+    foreach (PM_W as $k => $w) $s += $w * $parts[$k][0];
+    return ['score' => round(100 * $s, 1), 'parts' => $parts];
 }
+function pm_risk(array $i) { return pm_risk_parts($i)['score']; }
 
 /** segmentation + growth + capacity + target — the workbook's formulas:
  *  B. Growth potential = Baseline × Growth%        C. Credit-adj capacity = by category (below)
@@ -39,26 +49,28 @@ function pm_segment(array $o, $chMedian) {
     $run = max(0, min($o['base'], $o['a3'])); $gr = 0.0; $restor = 0.0;
     $prior9 = $o['prior9']; $declining = $prior9 > 0 && $o['a3'] < 0.5 * $prior9;
     $unsettled = $o['ret_unsettled'] > 0 || $o['sb_unsettled'] > 0; $repeat = $o['nv'] >= 6 && $o['avg_over'] >= 14;
-    if ($o['bl']) { $cat = '6 — Blocked / Recovery'; $cap = $cod ? $run : 0; if (!$cod) $restor = $run; }
-    elseif ($risk > 60) { $cat = '5 — Restrict Credit'; $cap = $creditish ? 0.75 * $run : $o['a3']; }
+    $why = '';
+    if ($o['bl']) { $cat = '6 — Blocked / Recovery'; $cap = $cod ? $run : 0; if (!$cod) $restor = $run; $why = 'The customer is blacklisted (' . ($o['bl_type'] ?: 'blocked') . ') — a blocked customer is always category 6, whatever the score.'; }
+    elseif ($risk > 60) { $cat = '5 — Restrict Credit'; $cap = $creditish ? 0.75 * $run : $o['a3']; $why = 'Risk score ' . $risk . ' is above 60.'; }
     elseif ($o['r3'] <= 0 || $declining) { $cat = '7 — Dormant / Reactivation';
-        if ($o['r3'] <= 0) { $cap = 0; if ($risk <= 40) $restor = 0.5 * $o['prior_active_avg']; } else { $cap = $o['a3']; $restor = max(0, 0.75 * $prior9 - $o['a3']); } }
-    elseif ($risk > 40 || $o['od_max'] > 30 || $unsettled || $repeat) { $cat = '4 — Control & Collect'; $cap = $run; }
-    elseif ($o['obs'] < 3 || $o['first_recent']) { $cat = '8 — New / Insufficient History'; $cap = min($o['base'], $o['active_avg']); }
+        if ($o['r3'] <= 0) { $cap = 0; if ($risk <= 40) $restor = 0.5 * $o['prior_active_avg']; $why = 'No purchase in the last 3 sales cycles.'; } else { $cap = $o['a3']; $restor = max(0, 0.75 * $prior9 - $o['a3']); $why = 'The last-3-month average (' . number_format($o['a3']) . ') is below 50% of the earlier months (' . number_format($prior9) . ').'; } }
+    elseif ($risk > 40 || $o['od_max'] > 30 || $unsettled || $repeat) { $cat = '4 — Control & Collect'; $cap = $run; $r4 = []; if ($risk > 40) $r4[] = 'risk score ' . $risk . ' > 40'; if ($o['od_max'] > 30) $r4[] = 'open invoice ' . $o['od_max'] . ' days overdue (> 30)'; if ($unsettled) $r4[] = 'unsettled returned / sent-back cheques'; if ($repeat) $r4[] = 'repeat violator (6+ violations, avg 14+ days over)'; $why = 'Control & collect because: ' . implode('; ', $r4) . '.'; }
+    elseif ($o['obs'] < 3 || $o['first_recent']) { $cat = '8 — New / Insufficient History'; $cap = min($o['base'], $o['active_avg']); $why = $o['obs'] < 3 ? 'Fewer than 3 observed sales months.' : 'First purchase was in the last 3 sales cycles.'; }
     else {
         $stable = $risk <= 40 && $o['last6_active'] >= 5 && $o['a3'] >= 0.9 * $o['a6'] && ($o['trend'] === null || $o['trend'] >= -0.05);
         $gap = $chMedian > 0 ? ($chMedian - $o['base']) / $chMedian : 0;
-        if ($stable && $risk <= 20 && $gap > 0.25) { $cat = '1 — Develop Aggressively'; $gr = max(0.10, min(0.20, 0.10 + 0.25 * $gap)); }
-        elseif ($stable) { $cat = '2 — Develop Moderately'; $gr = $risk <= 20 ? 0.075 : 0.05; }
-        else $cat = '3 — Maintain Normal Sales';
+        $chk = 'risk ' . $risk . ($risk <= 40 ? ' ≤ 40 ✓' : ' > 40 ✗') . '; active in ' . $o['last6_active'] . ' of the last 6 months' . ($o['last6_active'] >= 5 ? ' ✓' : ' ✗ (need 5)') . '; 3M avg ' . ($o['a6'] > 0 ? round($o['a3'] / $o['a6'] * 100) : 0) . '% of 6M avg' . ($o['a3'] >= 0.9 * $o['a6'] ? ' ✓' : ' ✗ (need 90%)') . '; trend ' . ($o['trend'] === null ? 'n/a' : round($o['trend'] * 100, 1) . '%') . (($o['trend'] === null || $o['trend'] >= -0.05) ? ' ✓' : ' ✗');
+        if ($stable && $risk <= 20 && $gap > 0.25) { $cat = '1 — Develop Aggressively'; $gr = max(0.10, min(0.20, 0.10 + 0.25 * $gap)); $why = 'Low risk, steady buyer, and the baseline is ' . round($gap * 100) . '% below the channel median (' . number_format($chMedian) . ') — room to grow. Growth = 10% + 25% × gap, capped 10–20% = ' . round($gr * 100, 1) . '%. Checks: ' . $chk . '.'; }
+        elseif ($stable) { $cat = '2 — Develop Moderately'; $gr = $risk <= 20 ? 0.075 : 0.05; $why = 'Steady, consistent buyer without clear headroom against the channel median (' . number_format($chMedian) . '). Growth ' . ($risk <= 20 ? '7.5% (risk ≤ 20)' : '5% (risk 21–40)') . '. Checks: ' . $chk . '.'; }
+        else { $cat = '3 — Maintain Normal Sales'; $why = 'Not consistent / stable enough to grow. Checks: ' . $chk . '.'; }
         $cap = $o['base'] * (1 + $gr);
     }
     $growthPot = $o['base'] * $gr; $c7 = in_array($cat[0], ['7', '8'], true);
     $target = max(0, round($c7 ? $cap : min($o['base'] + $growthPot, $cap), -2));
-    return ['cat' => $cat, 'gr' => $gr, 'cap' => $cap, 'target' => $target, 'restor' => $restor, 'run' => $run, 'gpot' => $growthPot];
+    return ['cat' => $cat, 'gr' => $gr, 'cap' => $cap, 'target' => $target, 'restor' => $restor, 'run' => $run, 'gpot' => $growthPot, 'why' => $why, 'c78' => $c7];
 }
 
-function pm_action(array $o, array $s) {
+function pm_actions(array $o, array $s) {
     $p = [];
     if ($o['od_n'] > 0) $p[] = 'Collect ' . $o['od_n'] . ' overdue invoice(s) (LKR ' . number_format($o['od_bal']) . ', max ' . $o['od_max'] . ' days over) BEFORE the next credit bill.';
     if ($o['ret_unsettled'] > 0) $p[] = 'Recover unsettled returned cheques LKR ' . number_format($o['ret_unsettled']) . ' in cash.';
@@ -73,8 +85,9 @@ function pm_action(array $o, array $s) {
     elseif ($c === '8') $p[] = 'New / short history — bill at the lower of baseline and active-month average; no growth target yet.';
     else $p[] = 'Maintain normal billing at baseline; do not extend credit beyond current pattern.';
     if ($o['ret_n'] >= 3) $p[] = $o['ret_n'] . ' returned cheques — review before allowing further cheque sales.';
-    return implode(' ', $p);
+    return $p;
 }
+function pm_action(array $o, array $s) { return implode(' ', pm_actions($o, $s)); }
 
 /** gather everything from the database and calculate every outlet */
 function pm_build($conn) {
@@ -139,7 +152,7 @@ function pm_build($conn) {
               'od_n' => $m['od_n'], 'od_bal' => $m['od_bal'], 'od_max' => $m['od_max'], 'a3' => $x['a3'], 'a6' => $x['a6'], 'canc_rate' => $crate, 'irr_cv' => $irr,
               'base' => $x['base'], 'r3' => $x['r3'], 'obs' => count($obsV), 'prior9' => pm_mean($prior), 'prior_active_avg' => pm_mean($priorAct), 'first_recent' => $firstIdx !== null && $firstIdx >= $N - 3, 'active_avg' => pm_mean(array_filter($obsV, fn($v) => $v > 0)),
               'last6_active' => $l6a, 'trend' => $x['trend']];
-        $o['risk'] = pm_risk($o); $seg = pm_segment($o, $med[$x['channel']] ?? 0); $mode = $o['bl'] ? ($BLL[$o['bl_type']] ?? 'Blacklisted') : '';
+        $rp = pm_risk_parts($o); $o['risk'] = $rp['score']; $seg = pm_segment($o, $med[$x['channel']] ?? 0); $mode = $o['bl'] ? ($BLL[$o['bl_type']] ?? 'Blacklisted') : '';
         $cashOnly = !in_array($pay, ['credit', 'cheque'], true) && $policy === 'none'; $uns = $o['ret_unsettled'] > 0 || $o['sb_unsettled'] > 0;
         if ($cashOnly) $prio = '5 — None (cash)';
         elseif ($o['bl']) $prio = ($uns || $o['od_n'] > 0) ? '1 — Critical' : ($o['nv'] > 0 ? '3 — Medium' : '4 — Routine');
@@ -151,14 +164,14 @@ function pm_build($conn) {
         $out[] = ['c' => $x['code'], 'n' => $x['name'], 'rep' => $x['sp'], 'b' => $x['beat'], 'ch' => $x['channel'], 'cat' => $seg['cat'], 'cs' => $o['bl'] ? 'BLOCKED (' . $mode . ')' : 'Active', 'pay' => $x['pm'], 'risk' => $o['risk'], 'band' => pm_band($o['risk']),
             'prio' => $prio, 'odn' => $o['od_n'], 'odb' => round($o['od_bal'], 2), 'odd' => $o['od_n'] ? $o['od_max'] : null, 'ret' => round($o['ret_unsettled'], 2), 'sent' => round($o['sb_unsettled'], 2),
             'exp' => round(max(0, $o['od_bal']) + $o['ret_unsettled'] + $o['sb_unsettled'], 2), 'viol' => $o['nv'], 'avgd' => $o['nv'] ? round($o['avg_over'], 2) : null, 'rcq' => $o['ret_n'], 'repv' => ($o['nv'] >= 6 && $o['avg_over'] >= 14) ? 'Yes' : '',
-            'a12' => round($x['a12'], 2), 'base' => round($o['base'], 2), 'tgt' => round($seg['target'], 2), 'res' => round($seg['restor'], 2), 'gr' => $seg['gr'], 'add' => round(max(0, $seg['target'] - $o['base']), 2), 'med' => round($medCh, 2), 'pgo' => round($pgo, 2), 'a6m' => $o['last6_active'], 'conf' => $conf, 'appr' => $appr, 'act' => pm_action($o, $seg)];
+            'a12' => round($x['a12'], 2), 'base' => round($o['base'], 2), 'tgt' => round($seg['target'], 2), 'res' => round($seg['restor'], 2), 'gr' => $seg['gr'], 'add' => round(max(0, $seg['target'] - $o['base']), 2), 'med' => round($medCh, 2), 'pgo' => round($pgo, 2), 'a6m' => $o['last6_active'], 'rk' => array_map(fn($p) => [round($p[0], 3), $p[1]], array_values($rp['parts'])), 'why' => $seg['why'], 'acts' => pm_actions($o, $seg), 'cap' => round($seg['cap'], 2), 'gpot' => round($seg['gpot'], 2), 'c78' => $seg['c78'] ? 1 : 0, 'a3' => round($x['a3'], 2), 'a6' => round($x['a6'], 2), 'v' => array_map(fn($v) => $v === null ? null : round($v), $vals), 'conf' => $conf, 'appr' => $appr, 'act' => pm_action($o, $seg)];
     }
     return ['built_at' => date('Y-m-d H:i:s'), 'rows' => $out, 'stats' => ['outlets' => count($out), 'bills' => $bills, 'sales_to' => $H['last_date'], 'cutover' => $S['cutover']]];
 }
 
 /** fingerprint of everything the model reads from the sales-trend side: the Sales Range Settings and the imported / system sales rows */
 function pm_signature($conn) {
-    $S = hs_settings($conn); $sig = [$S];
+    $S = hs_settings($conn); $sig = [$S, 'model-v3'];
     foreach (["SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(bill_value),0) FROM analysis_sec_invoices", "SELECT COUNT(*), COALESCE(MAX(id),0), COALESCE(SUM(final_bill_amount),0) FROM secondary_invoice_import_details", "SELECT COUNT(*), COALESCE(SUM(credit_days),0), COALESCE(SUM(credit_limit),0) FROM customers"] as $q) {
         $r = hs_q($conn, $q); $sig[] = $r ? mysqli_fetch_row($r) : null; }
     return md5(json_encode($sig));

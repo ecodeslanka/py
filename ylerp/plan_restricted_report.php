@@ -10,7 +10,7 @@ $sel = array_values(array_filter($M['rows'], fn($x) => in_array($x['prio'][0], [
 usort($sel, fn($a, $b) => strcmp($a['prio'], $b['prio']) ?: ($b['exp'] <=> $a['exp'])); $rows = [];
 foreach ($sel as $x) $rows[] = ['hul' => $x['c'], 'customer_name' => $x['n'], 'sales_rep' => $x['rep'], 'beat' => $x['b'], 'category' => $x['cat'], 'credit_status' => $x['cs'], 'pay_mode' => $x['pay'], 'risk_score' => $x['risk'], 'risk_band' => $x['band'], 'priority' => $x['prio'],
     'od_invoices' => $x['odn'], 'od_balance' => $x['odb'], 'od_max_days' => $x['odd'], 'ret_chq' => $x['ret'], 'sent_chq' => $x['sent'], 'exposure' => $x['exp'], 'violations' => $x['viol'], 'avg_days_over' => $x['avgd'], 'returned_cheques' => $x['rcq'], 'repeat_violator' => $x['repv'],
-    'baseline' => $x['base'], 'target' => $x['tgt'], 'restorable' => $x['res'], 'status_conflict' => $x['conf'], 'approval' => $x['appr'], 'required_action' => $x['act']];
+    'baseline' => $x['base'], 'target' => $x['tgt'], 'restorable' => $x['res'], 'status_conflict' => $x['conf'], 'approval' => $x['appr'], 'required_action' => $x['act'], 'm' => $x];
 $F = ['q' => trim($_GET['q'] ?? ''), 'cat' => trim($_GET['cat'] ?? ''), 'cs' => trim($_GET['cs'] ?? ''), 'prio' => trim($_GET['prio'] ?? ''), 'band' => trim($_GET['band'] ?? ''), 'appr' => trim($_GET['appr'] ?? ''), 'rep' => trim($_GET['rep'] ?? ''), 'pay' => trim($_GET['pay'] ?? '')];
 
 if (isset($_GET['export']) && class_exists('ZipArchive')) {
@@ -43,7 +43,8 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
 }
 $J = array_map(fn($x) => ['c' => $x['hul'], 'n' => $x['customer_name'], 'rep' => $x['sales_rep'], 'b' => $x['beat'], 'cat' => $x['category'], 'cs' => $x['credit_status'], 'pay' => $x['pay_mode'], 'risk' => (float)$x['risk_score'], 'band' => $x['risk_band'], 'prio' => $x['priority'],
     'odn' => (int)$x['od_invoices'], 'odb' => (float)$x['od_balance'], 'odd' => $x['od_max_days'] === null ? null : (int)$x['od_max_days'], 'ret' => (float)$x['ret_chq'], 'sent' => (float)$x['sent_chq'], 'exp' => (float)$x['exposure'], 'viol' => (int)$x['violations'],
-    'avgd' => $x['avg_days_over'] === null ? null : (float)$x['avg_days_over'], 'rcq' => (int)$x['returned_cheques'], 'repv' => $x['repeat_violator'], 'base' => (float)$x['baseline'], 'tgt' => (float)$x['target'], 'res' => (float)$x['restorable'], 'conf' => $x['status_conflict'], 'appr' => $x['approval'], 'act' => $x['required_action']], $rows);
+    'avgd' => $x['avg_days_over'] === null ? null : (float)$x['avg_days_over'], 'rcq' => (int)$x['returned_cheques'], 'repv' => $x['repeat_violator'], 'base' => (float)$x['baseline'], 'tgt' => (float)$x['target'], 'res' => (float)$x['restorable'], 'conf' => $x['status_conflict'], 'appr' => $x['approval'], 'act' => $x['required_action'],
+    'rk' => $x['m']['rk'], 'why' => $x['m']['why'], 'acts' => $x['m']['acts'], 'cap' => $x['m']['cap'], 'gpot' => $x['m']['gpot'], 'c78' => $x['m']['c78'], 'a3m' => $x['m']['a3'], 'a6mv' => $x['m']['a6'], 'a12' => $x['m']['a12'], 'gr' => $x['m']['gr'], 'v' => $x['m']['v'], 'med' => $x['m']['med'], 'pgo' => $x['m']['pgo']], $rows);
 ob_end_flush();
 include 'header.php';
 echo pl_css();
@@ -102,11 +103,9 @@ echo pl_css();
   $('tb').addEventListener('click',function(e){ var tr=e.target.closest('tr.r'); if(!tr) return; var x=cur[+tr.dataset.i]; if(!x) return;
     $('dT').textContent=x.n; $('dS').textContent=x.c+' · '+x.rep+' · '+x.b;
     function g(l,v){ return '<div><small>'+l+'</small><b>'+v+'</b></div>'; }
-    $('dB').innerHTML='<div class="gr">'+g('Category',esc(x.cat))+g('Credit status',esc(x.cs))+g('Pay mode',esc(x.pay))+g('Risk score / band',x.risk.toFixed(1)+' · '+esc(x.band))+g('Collection priority',esc(x.prio))+g('Approval required',esc(x.appr))
-      +g('Open overdue invoices',x.odn)+g('Open overdue balance',plF2(x.odb))+g('Max days over (open)',x.odd==null?'—':x.odd)+g('Unsettled returned cheques',plF2(x.ret))+g('Unsettled sent-back cheques',plF2(x.sent))+g('Total visible exposure','<span style="color:#b91c1c">'+plF2(x.exp)+'</span>')
-      +g('Violations',x.viol)+g('Avg days over',x.avgd==null?'—':x.avgd.toFixed(1))+g('Returned cheques',x.rcq)+g('Repeat violator',x.repv?'Yes':'No')+g('Baseline',plF2(x.base))+g('Recommended target',plF2(x.tgt))+g('Restorable if authorised',plF2(x.res))+'</div>'
-      +(x.conf?'<div class="act" style="background:#fef2f2;border-color:#fecaca;color:#7f1d1d;margin-top:12px"><b><i class="fa-solid fa-triangle-exclamation"></i> Status conflict:</b> '+esc(x.conf)+'</div>':'')
-      +'<div class="act"><b><i class="fa-solid fa-list-check"></i> Required action</b><br>'+esc(x.act)+'</div>'; DM.classList.add('open'); });
+    var facts='<div class="gr" style="margin-top:10px">'+g('Approval required',esc(x.appr))+g('Open overdue invoices',x.odn)+g('Open overdue balance',plF2(x.odb))+g('Max days over (open)',x.odd==null?'—':x.odd)+g('Unsettled returned cheques',plF2(x.ret))+g('Unsettled sent-back cheques',plF2(x.sent))+g('Total visible exposure','<span style="color:#b91c1c">'+plF2(x.exp)+'</span>')
+      +g('Violations',x.viol)+g('Avg days over',x.avgd==null?'—':x.avgd.toFixed(1))+g('Returned cheques',x.rcq)+g('Repeat violator',x.repv?'Yes':'No')+g('Restorable if authorised',plF2(x.res))+'</div>';
+    var d=Object.assign({},x,{a3:x.a3m,a6:x.a6mv}); $('dB').innerHTML=plDetail(d,facts); DM.classList.add('open'); });
   $('dX').onclick=function(){ DM.classList.remove('open'); }; DM.addEventListener('click',function(e){ if(e.target===DM) DM.classList.remove('open'); }); document.addEventListener('keydown',function(e){ if(e.key==='Escape') DM.classList.remove('open'); });
   apply();
 })();
