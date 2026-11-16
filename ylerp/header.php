@@ -2064,6 +2064,12 @@ if (isset($conn) && $conn) {
                     <a href="analysis_party_master_import.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'analysis_party_master_import.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-address-book"></i><span>Import Party Master</span>
                     </a>
+                    <a href="historical_sales_trend_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'historical_sales_trend_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-chart-line"></i><span>Historical Sales Trends</span>
+                    </a>
+                    <a href="historical_sales_settings.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'historical_sales_settings.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-sliders"></i><span>Sales Range Settings</span>
+                    </a>
                 </div>
       </div>
 
