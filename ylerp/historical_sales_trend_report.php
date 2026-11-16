@@ -9,6 +9,8 @@ include 'config.php';
 if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
 @set_time_limit(0); @ini_set('memory_limit', '1024M');
 require_once __DIR__ . '/historical_sales_lib.php';
+/** number format showing the amount and the bill count in brackets: 123,456 (15); distinct counts are capped so the workbook stays within Excel's number-format limit */
+function hr_nf($n, array &$seen) { $seen[$n] = 1; return '#,##0" (' . (int)$n . ')";\(#,##0\)" (' . (int)$n . ')";"-"'; }
 function hr_h($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 function hr_n($v) { return $v === null ? '' : number_format((float)$v, 2); }
 function hr_p($v) { return $v === null ? '' : number_format($v * 100, 1) . '%'; }
@@ -35,7 +37,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     $X = new MiniXlsx(); $db = $X->sheet('1 Dashboard'); $sh = $X->sheet('2 Historical Sales Trends'); $as = $X->sheet('3 Assumptions');
     foreach ([$db, $sh, $as] as $w) { $w->tab = '1F3864'; $w->landscape = true; }
     $T = "'2 Historical Sales Trends'!";
-    $N = count($months); $c1 = 6; $cl = 5 + $N; $cx = 6 + $N; $cs = 7 + $N; $cst = $cs + 12;            // first month · last month · to-date · first stat · Status column
+    $N = count($months); $c1 = 8; $cl = 7 + $N; $cx = 8 + $N; $cs = 9 + $N; $cst = $cs + 12;            // first month · last month · to-date · first stat · Status column
     $L = fn($i) => MiniXlsx::col($i);
     $FM = ['font' => 'Arial']; $NUM = '#,##0;\(#,##0\);"-"'; $PCT = '0.0%;\(0.0%\);"-"'; $NAVY = '1F3864';
     $basisTxt = $S['basis'] === 'billvalue' ? 'Bill Value + Total Discount' : 'Total Discount + Final Bill Amount (to be collected)';
@@ -49,17 +51,17 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     /* ───── sheet 2 ───── */
     $sh->set(1, 1, 'Historical Sales Trends — sales = ' . $basisTxt . ', per company cycle (' . $cyc . '), LKR', $FM + ['b' => 1, 'sz' => 14, 'color' => $NAVY]);
     $sh->set(2, 1, 'Cycle columns: ' . hs_label($months[0]) . ' = ' . date('d-M-y', strtotime($rg0[0])) . '→' . date('d-M-y', strtotime($rg0[1])) . ' … ' . hs_label(end($months)) . ' = ' . date('d-M-y', strtotime($rgN[0])) . '→' . date('d-M-y', strtotime($rgN[1])) . '. Grey header = cycle still open, excluded from averages. Source: Analysis secondary import before ' . $S['cutover'] . ', our secondary import from that date. Blank = before first purchase (not observed); 0 = no purchase. Averages, baseline and status are live formulas (weights on sheet 3).', $FM + ['sz' => 9, 'color' => '595959']);
-    $heads = ['HUL', 'Customer_Name', 'Sales_SP_Name', 'Beat', 'Secondary_Channel']; foreach ($months as $m) $heads[] = hs_label($m);
+    $heads = ['HUL', 'Customer_Name', 'Sales_SP_Name', 'Beat', 'Secondary_Channel', 'Customer_Pay_Mode', 'Policy_Days']; foreach ($months as $m) $heads[] = hs_label($m);
     $heads[] = hs_label($D['extra']) . ' to date (' . date('d M', strtotime($exRange[0])) . '–' . ($D['last_date'] ? date('d M', strtotime($D['last_date'])) : '…') . ')';
     $m3 = hs_label($months[$N - 3]) . '–' . hs_label($months[$N - 1]);
     foreach (['Avg ' . $N . 'M', 'Avg 6M', 'Avg 3M', 'Latest Month', 'Highest Month', 'Lowest Month', 'Active Months', 'Volatility CV', 'MoM Growth', 'Baseline (LKR)', 'Rolling 3M (' . $m3 . ')', 'Trend vs prior ' . ($N - 3) . 'M', 'Status'] as $h) $heads[] = $h;
     foreach ($heads as $i => $h) $sh->set(4, $i + 1, $h, $i + 1 === $cx ? array_merge($HS, ['bg' => '7F7F7F']) : $HS);
     $sh->heights[4] = 42;
-    $tot12 = array_fill_keys($months, 0.0); $sumA = [0, 0, 0, 0, 0, 0]; $r = $r1;
+    $nfSeen = []; $tot12 = array_fill_keys($months, 0.0); $sumA = [0, 0, 0, 0, 0, 0]; $r = $r1;
     foreach ($rows as $x) {
-        $c = 1; foreach ([$x['code'], $x['name'], $x['sp'], $x['beat'], $x['channel']] as $v) $sh->set($r, $c++, $v, $FM);
-        foreach ($months as $m) { $v = $x['v'][$m]; $sh->set($r, $c++, $v === null ? '' : $v, $FM + ['nfs' => $NUM]); }
-        $sh->set($r, $c++, $x['extra'] ?: '', $FM + ['nfs' => $NUM]);
+        $c = 1; foreach ([$x['code'], $x['name'], $x['sp'], $x['beat'], $x['channel'], $x['pm']] as $v) $sh->set($r, $c++, $v, $FM); $sh->set($r, $c++, $x['days'] === null ? '' : (int)$x['days'], $FM + ['h' => 'center', 'nfs' => '0']);
+        foreach ($months as $m) { $v = $x['v'][$m]; $bn = (int)($x['n'][$m] ?? 0); $sh->set($r, $c++, $v === null ? '' : $v, $FM + ['nfs' => ($v !== null && (float)$v != 0 && $bn > 0 && (isset($nfSeen[$bn]) || count($nfSeen) < 200)) ? hr_nf($bn, $nfSeen) : $NUM]); }
+        $bn = (int)$x['extra_n']; $sh->set($r, $c++, $x['extra'] ?: '', $FM + ['nfs' => ($x['extra'] && $bn > 0 && (isset($nfSeen[$bn]) || count($nfSeen) < 200)) ? hr_nf($bn, $nfSeen) : $NUM]);
         $all = $rg($c1, $cl, $r); $l6 = $rg($cl - 5, $cl, $r); $l3 = $rg($cl - 2, $cl, $r); $old = $rg($c1, $cl - 3, $r);
         $A = "'3 Assumptions'!\$C\$5*" . $L($cs) . $r . "+'3 Assumptions'!\$C\$6*" . $L($cs + 1) . $r . "+'3 Assumptions'!\$C\$7*" . $L($cs + 2) . $r . "+'3 Assumptions'!\$C\$8*" . $L($cs + 3) . $r;
         $sh->set($r, $cs,      round($x['a12'], 2), $FM + ['nfs' => $NUM, 'f' => "IFERROR(AVERAGE($all),0)"]);
@@ -90,7 +92,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
         $sh->condfmt[] = [$L($c1) . $r1 . ':' . $L($cl) . $rL, 'FFFFFF', '63BE7B', 95];
         $sh->filter = 'A4:' . $L($cst) . $rL;
     }
-    foreach ([18, 28, 24, 22, 22] as $i => $wd) $sh->widths[$i + 1] = $wd; for ($i = $c1; $i <= $cl; $i++) $sh->widths[$i] = 11; $sh->widths[$cx] = 27;
+    foreach ([18, 28, 24, 22, 22, 15, 11] as $i => $wd) $sh->widths[$i + 1] = $wd; for ($i = $c1; $i <= $cl; $i++) $sh->widths[$i] = 14; $sh->widths[$cx] = 27;
     foreach ([11, 11, 11, 11, 11.5, 11, 11, 11, 10, 13, 18, 15.3, 12] as $i => $wd) $sh->widths[$cs + $i] = $wd;
     $sh->freeze = [4, 2]; $sh->titles = ['rows' => '4:4', 'cols' => 'A:B'];
 
@@ -150,7 +152,7 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
     $as->set(11, 1, 'DEFINITIONS', $FM + ['b' => 1, 'color' => $NAVY]);
     foreach (['SALES of a bill = ' . $basisTxt . '.', 'SALES MONTH = company cycle: month M runs from ' . $cyc . ' (e.g. ' . hs_label($months[0]) . ' = ' . $rg0[0] . ' to ' . $rg0[1] . ').',
               'SOURCES: bills before ' . $S['cutover'] . ' — Analysis > Import Secondary Invoices (Invoice Wise Sales); from ' . $S['cutover'] . ' — our own secondary invoice import.',
-              'Months before an outlet\'s first purchase are blank (not observed) and excluded from averages; zero months after the first purchase count as zero.',
+              'Each month cell shows the sales amount with the number of bills in brackets, e.g. 123,456 (15); the cell value is the amount only, so every formula still works.', 'Months before an outlet\'s first purchase are blank (not observed) and excluded from averages; zero months after the first purchase count as zero.',
               'BASELINE = 12-month avg × w12 + 6-month avg × w6 + 3-month avg × w3 + latest month × wL.',
               'STATUS: Dormant = no purchase in the last 3 cycles · New = fewer than 3 active months · Growing = last-3M average more than 10% above the earlier months · Declining = more than 10% below · otherwise Stable.',
               'The open cycle (to date) is shown separately and is not part of any average.'] as $i => $t) $as->set(12 + $i, 1, $t, $FM);
@@ -193,7 +195,7 @@ include 'header.php';
 .hs th{background:linear-gradient(180deg,#1e3a8a,#1e2f6e);color:#fff;padding:10px 10px;text-align:right;position:sticky;top:0;z-index:2;white-space:nowrap;font-size:11.5px;letter-spacing:.3px}.hs th.l,.hs td.l{text-align:left}.hs th.g{background:#64748b}.hs th.st2{background:linear-gradient(180deg,#4f46e5,#4338ca)}
 .hs td{padding:5px 9px;border-bottom:1px solid #f1f5f9;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.hs tbody tr:nth-child(even) td{background-color:#fbfcff}
 .hs td.s1,.hs th.s1{position:sticky;left:0;z-index:3;background:#fff;min-width:150px;font-weight:700;color:#1e3a8a}.hs th.s1{background:#1e3a8a;color:#fff}.hs td.s2,.hs th.s2{position:sticky;left:150px;z-index:3;background:#fff;min-width:210px;max-width:210px;overflow:hidden;text-overflow:ellipsis;box-shadow:6px 0 8px -6px rgba(15,23,42,.25)}.hs th.s2{background:#1e3a8a}.hs tbody tr:nth-child(even) td.s1,.hs tbody tr:nth-child(even) td.s2{background:#fbfcff}.hs tbody tr:hover td{background:#eef2ff!important}
-.hs td.m{border-radius:0}.hs td.z0{color:#cbd5e1}.hs td.nb{background:repeating-linear-gradient(135deg,#fff,#fff 5px,#f1f5f9 5px,#f1f5f9 10px)!important}.hs td.ex{background:#f1f5f9!important;color:#64748b;font-style:italic}.hs .z{color:#cbd5e1}.hs svg.sp{display:block;margin:auto}
+.hs td.m{border-radius:0}.hs .bc{font-size:10.5px;opacity:.7;font-weight:600}.hs .pm{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#f1f5f9;color:#334155}.hs .pm-credit{background:#ede9fe;color:#5b21b6}.hs .pm-cash{background:#dcfce7;color:#166534}.hs .pm-cheque{background:#fef3c7;color:#92400e}.hs td.z0{color:#cbd5e1}.hs td.nb{background:repeating-linear-gradient(135deg,#fff,#fff 5px,#f1f5f9 5px,#f1f5f9 10px)!important}.hs td.ex{background:#f1f5f9!important;color:#64748b;font-style:italic}.hs .z{color:#cbd5e1}.hs svg.sp{display:block;margin:auto}
 .hs .chip{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 14%,#fff);border:1px solid color-mix(in srgb,var(--c) 35%,#fff)}
 .hs .stt{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:800;letter-spacing:.3px}.hs .stt.gr{background:#dcfce7;color:#166534}.hs .stt.st{background:#e0e7ff;color:#3730a3}.hs .stt.dc{background:#ffedd5;color:#9a3412}.hs .stt.dm{background:#fee2e2;color:#991b1b}.hs .stt.nw{background:#cffafe;color:#155e75}
 .hs .pl{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11.5px;font-weight:700}.hs .pl.up{background:#dcfce7;color:#166534}.hs .pl.dn{background:#fee2e2;color:#991b1b}.hs .pl.fl{background:#f1f5f9;color:#475569}
@@ -216,15 +218,15 @@ include 'header.php';
   <?php if ($rows): ?><div class="card"><div style="font-weight:800;margin-bottom:2px"><i class="fa-solid fa-chart-column" style="color:#4f46e5"></i> Sales by cycle</div><div class="bars">
     <?php foreach ($months as $m): $v = $tot[$m] ?? 0; ?><div class="bar" title="<?= hr_h(hs_label($m) . ': ' . number_format($v, 2)) ?>"><em><?= number_format($v / 1000000, 1) ?>M</em><div style="height:<?= max(2, round($v / $maxTot * 88)) ?>%"></div><small><?= hr_h(hs_label($m)) ?></small></div><?php endforeach; ?>
     <div class="bar cur" title="<?= hr_h($exLbl . ': ' . number_format($ex, 2)) ?>"><em><?= number_format($ex / 1000000, 1) ?>M</em><div style="height:<?= max(2, round($ex / $maxTot * 88)) ?>%"></div><small>to date</small></div></div></div><?php endif; ?>
-  <div class="tw"><table><thead><tr><th class="l s1">HUL</th><th class="l s2">Customer Name</th><th class="l">Sales SP Name</th><th class="l">Beat</th><th class="l">Secondary Channel</th><th class="st2" style="text-align:center">Status</th><th class="st2" style="text-align:center">Trend</th>
+  <div class="tw"><table><thead><tr><th class="l s1">HUL</th><th class="l s2">Customer Name</th><th class="l">Sales SP Name</th><th class="l">Beat</th><th class="l">Secondary Channel</th><th class="l">Pay Mode</th><th>Policy Days</th><th class="st2" style="text-align:center">Status</th><th class="st2" style="text-align:center">Trend</th>
     <?php foreach ($months as $m): $rg = hs_range($m, $S['start_day']); ?><th title="<?= hr_h($rg[0] . ' → ' . $rg[1]) ?>"><?= hr_h(hs_label($m)) ?></th><?php endforeach; ?><th class="g" title="<?= hr_h($exRange[0]) ?> → <?= hr_h($lastTxt) ?>"><?= hr_h($exLbl) ?></th>
     <th>Avg <?= count($months) ?>M</th><th>Avg 6M</th><th>Avg 3M</th><th>Latest</th><th>Highest</th><th>Lowest</th><th>Active</th><th>CV</th><th>MoM</th><th>Baseline</th><th>Rolling 3M</th><th>vs prior</th></tr></thead><tbody>
-  <?php foreach ($rows as $x): [$stT, $stC] = hr_status($x); ?><tr><td class="l s1"><?= hr_h($x['code']) ?></td><td class="l s2" title="<?= hr_h($x['name']) ?>"><?= hr_h($x['name']) ?></td><td class="l"><?= hr_h($x['sp']) ?></td><td class="l"><?= hr_h($x['beat']) ?></td><td class="l"><?= hr_chip($x['channel']) ?></td>
+  <?php foreach ($rows as $x): [$stT, $stC] = hr_status($x); ?><tr><td class="l s1"><?= hr_h($x['code']) ?></td><td class="l s2" title="<?= hr_h($x['name']) ?>"><?= hr_h($x['name']) ?></td><td class="l"><?= hr_h($x['sp']) ?></td><td class="l"><?= hr_h($x['beat']) ?></td><td class="l"><?= hr_chip($x['channel']) ?></td><td class="l"><?= $x['pm'] !== '' ? '<span class="pm pm-' . hr_h(strtolower($x['pm'])) . '">' . hr_h($x['pm']) . '</span>' : '<span class="z">—</span>' ?></td><td style="text-align:center"><?= (int)$x['days'] > 0 ? '<b>' . (int)$x['days'] . '</b>' : '<span class="z">—</span>' ?></td>
     <td style="text-align:center"><span class="stt <?= $stC ?>"><?= $stT ?></span></td><td><?= hr_spark($x['v'], $months) ?></td>
-    <?php foreach ($months as $m): $v = $x['v'][$m]; if ($v === null) echo '<td class="m nb"></td>'; elseif ($v <= 0) echo '<td class="m z0">–</td>'; else { $a = min(1, $v / $heatMax); echo '<td class="m" style="background-color:rgba(34,197,94,' . round(0.10 + $a * 0.55, 2) . ');color:' . ($a > 0.75 ? '#052e16;font-weight:700' : '#14532d') . '">' . number_format($v, 0) . '</td>'; } endforeach; ?><td class="ex"><?= $x['extra'] ? number_format($x['extra'], 0) : '' ?></td>
+    <?php foreach ($months as $m): $v = $x['v'][$m]; if ($v === null) echo '<td class="m nb"></td>'; elseif ($v <= 0) echo '<td class="m z0">–</td>'; else { $a = min(1, $v / $heatMax); echo '<td class="m" style="background-color:rgba(34,197,94,' . round(0.10 + $a * 0.55, 2) . ');color:' . ($a > 0.75 ? '#052e16;font-weight:700' : '#14532d') . '">' . number_format($v, 0) . ' <span class="bc">(' . (int)($x['n'][$m] ?? 0) . ')</span></td>'; } endforeach; ?><td class="ex"><?= $x['extra'] ? number_format($x['extra'], 0) . ' <span class="bc">(' . (int)$x['extra_n'] . ')</span>' : '' ?></td>
     <td><?= number_format($x['a12'], 0) ?></td><td><?= number_format($x['a6'], 0) ?></td><td><?= number_format($x['a3'], 0) ?></td><td><?= number_format($x['latest'], 0) ?></td><td><?= number_format($x['hi'], 0) ?></td><td><?= number_format($x['lo'], 0) ?></td><td><?= (int)$x['active'] ?></td><td><?= $x['cv'] === null ? '<span class="z">—</span>' : number_format($x['cv'], 2) ?></td>
     <td><?= hr_pill($x['mom']) ?></td><td><span class="base"><?= number_format($x['base'], 0) ?></span></td><td><?= number_format($x['r3'], 0) ?></td><td><?= hr_pill($x['trend']) ?></td></tr>
-  <?php endforeach; if (!$rows): ?><tr><td class="l" colspan="<?= 7 + count($months) + 13 ?>" style="padding:26px;color:#9ca3af;text-align:center">No outlets for these filters.</td></tr><?php endif; ?></tbody>
-  <?php if ($rows): ?><tfoot><tr><td class="l s1" style="z-index:4">TOTAL</td><td class="l s2" style="z-index:4"><?= number_format(count($rows)) ?> outlets</td><td colspan="5"></td><?php foreach ($months as $m): ?><td><?= number_format($tot[$m] ?? 0, 0) ?></td><?php endforeach; ?><td><?= number_format($ex, 0) ?></td><td colspan="12"></td></tr></tfoot><?php endif; ?></table></div>
+  <?php endforeach; if (!$rows): ?><tr><td class="l" colspan="<?= 9 + count($months) + 13 ?>" style="padding:26px;color:#9ca3af;text-align:center">No outlets for these filters.</td></tr><?php endif; ?></tbody>
+  <?php if ($rows): ?><tfoot><tr><td class="l s1" style="z-index:4">TOTAL</td><td class="l s2" style="z-index:4"><?= number_format(count($rows)) ?> outlets</td><td colspan="7"></td><?php foreach ($months as $m): ?><td><?= number_format($tot[$m] ?? 0, 0) ?></td><?php endforeach; ?><td><?= number_format($ex, 0) ?></td><td colspan="12"></td></tr></tfoot><?php endif; ?></table></div>
 </div>
 <?php include 'footer.php'; ?>
