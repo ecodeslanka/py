@@ -3,7 +3,8 @@
 if (class_exists('MiniXlsx')) return;
 class MiniSheet {
     public $name; public $cells = []; public $merges = []; public $widths = []; public $heights = [];
-    public $freeze = null; public $filter = null; public $maxR = 0; public $maxC = 0; public $condfmt = [];   // condfmt: [[sqref, minColor, maxColor, percentile]] 2-colour scales
+    public $freeze = null; public $filter = null; public $maxR = 0; public $maxC = 0; public $condfmt = []; public $tab = null; public $landscape = false; public $titles = null;   // tab colour · landscape fit-to-width print · titles = ['rows'=>'4:4','cols'=>'A:B']
+    // condfmt: [[sqref, minColor, maxColor, percentile]] 2-colour scales
     function __construct($n) { $this->name = $n; }
     function set($r, $c, $v, $st = []) { $this->cells[$r][$c] = [$v, $st]; $this->maxR = max($this->maxR, $r); $this->maxC = max($this->maxC, $c); }
     function style($r, $c, $st) { if (!isset($this->cells[$r][$c])) $this->set($r, $c, '', $st); else $this->cells[$r][$c][1] = $st; }
@@ -49,6 +50,7 @@ class MiniXlsx {
     }
     private function sheetXml(MiniSheet $sh) {
         $x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+        if ($sh->tab || $sh->landscape) $x .= '<sheetPr>' . ($sh->tab ? '<tabColor rgb="FF' . $sh->tab . '"/>' : '') . ($sh->landscape ? '<pageSetUpPr fitToPage="1"/>' : '') . '</sheetPr>';
         $x .= '<dimension ref="A1:' . self::col(max(1, $sh->maxC)) . max(1, $sh->maxR) . '"/>';
         $x .= '<sheetViews><sheetView workbookViewId="0" showGridLines="0"' . ($sh === $this->sheets[0] ? ' tabSelected="1"' : '') . '>';
         if ($sh->freeze) { [$fr, $fc] = $sh->freeze;
@@ -80,6 +82,7 @@ class MiniXlsx {
         if ($sh->merges) { $x .= '<mergeCells count="' . count($sh->merges) . '">';
             foreach ($sh->merges as [$r1, $c1, $r2, $c2]) $x .= '<mergeCell ref="' . self::col($c1) . $r1 . ':' . self::col($c2) . $r2 . '"/>'; $x .= '</mergeCells>'; }
         foreach ($sh->condfmt as $i => [$sq, $c1, $c2, $pc]) $x .= '<conditionalFormatting sqref="' . $sq . '"><cfRule type="colorScale" priority="' . ($i + 1) . '"><colorScale><cfvo type="num" val="0"/><cfvo type="percentile" val="' . (int)$pc . '"/><color rgb="FF' . $c1 . '"/><color rgb="FF' . $c2 . '"/></colorScale></cfRule></conditionalFormatting>';
+        if ($sh->landscape) $x .= '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>';
         return $x . '</worksheet>';
     }
     function save($path) {
@@ -101,6 +104,10 @@ class MiniXlsx {
         $dn = '';
         foreach ($this->sheets as $i => $sh) if ($sh->filter && preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $sh->filter, $fm))
             $dn .= '<definedName name="_xlnm._FilterDatabase" localSheetId="' . $i . '" hidden="1">\'' . str_replace("'", "''", self::esc($sh->name)) . '\'!$' . $fm[1] . '$' . $fm[2] . ':$' . $fm[3] . '$' . $fm[4] . '</definedName>';
+        foreach ($this->sheets as $i => $sh) if ($sh->titles) { $q = "'" . str_replace("'", "''", self::esc($sh->name)) . "'!"; $parts = [];
+            if (!empty($sh->titles['cols'])) { [$a, $b] = explode(':', $sh->titles['cols']); $parts[] = $q . '$' . $a . ':$' . $b; }
+            if (!empty($sh->titles['rows'])) { [$a, $b] = explode(':', $sh->titles['rows']); $parts[] = $q . '$' . $a . ':$' . $b; }
+            $dn .= '<definedName name="_xlnm.Print_Titles" localSheetId="' . $i . '">' . implode(',', $parts) . '</definedName>'; }
         $z->addFromString('xl/workbook.xml', $wb . '</sheets>' . ($dn !== '' ? '<definedNames>' . $dn . '</definedNames>' : '') . '<calcPr fullCalcOnLoad="1"/></workbook>');
         $z->addFromString('xl/_rels/workbook.xml.rels', $rel);
         $z->addFromString('xl/styles.xml', $this->stylesXml());

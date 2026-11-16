@@ -29,31 +29,39 @@ $exRange = hs_range($D['extra'], $S['start_day']); $exLbl = hs_label($D['extra']
 $hdr = array_merge(['HUL', 'Customer Name', 'Sales SP Name', 'Beat', 'Secondary Channel'], array_map('hs_label', $months), [$exLbl], ['Avg 12M', 'Avg 6M', 'Avg 3M', 'Latest Month', 'Highest Month', 'Lowest Month', 'Active Months', 'Volatility CV', 'MoM Growth', 'Baseline (LKR)', 'Rolling 3M', 'Trend vs prior months']);
 
 if (isset($_GET['export']) && class_exists('ZipArchive')) {
-    /* same layout as the planning model's "3 Historical Sales Trends" sheet: title · note · header (row 4) · one row per outlet · live formulas · colour scale on the months · Assumptions sheet for the baseline weights */
+    /* Workbook in the style of the planning model: 1 Dashboard · 2 Historical Sales Trends (one row per outlet, live formulas, total row) · 3 Assumptions.
+       Arial, navy 1F3864 headers, hidden gridlines, navy tab colours, frozen panes, green colour scale on the months, landscape print set-up. */
     require_once __DIR__ . '/rbac_xlsx.php'; while (ob_get_level()) ob_end_clean();
-    $X = new MiniXlsx(); $sh = $X->sheet('Historical Sales Trends'); $as = $X->sheet('Assumptions');
-    $N = count($months); $c1 = 6; $cl = 5 + $N; $cx = 6 + $N; $cs = 7 + $N;                      // first month col, last month col, to-date col, first stat col
+    $X = new MiniXlsx(); $db = $X->sheet('1 Dashboard'); $sh = $X->sheet('2 Historical Sales Trends'); $as = $X->sheet('3 Assumptions');
+    foreach ([$db, $sh, $as] as $w) { $w->tab = '1F3864'; $w->landscape = true; }
+    $T = "'2 Historical Sales Trends'!";
+    $N = count($months); $c1 = 6; $cl = 5 + $N; $cx = 6 + $N; $cs = 7 + $N; $cst = $cs + 12;            // first month · last month · to-date · first stat · Status column
     $L = fn($i) => MiniXlsx::col($i);
-    $FM = ['font' => 'Arial']; $NUM = '#,##0;\(#,##0\);"-"'; $PCT = '0.0%;\(0.0%\);"-"';
+    $FM = ['font' => 'Arial']; $NUM = '#,##0;\(#,##0\);"-"'; $PCT = '0.0%;\(0.0%\);"-"'; $NAVY = '1F3864';
     $basisTxt = $S['basis'] === 'billvalue' ? 'Bill Value + Total Discount' : 'Total Discount + Final Bill Amount (to be collected)';
     $rg0 = hs_range($months[0], $S['start_day']); $rgN = hs_range(end($months), $S['start_day']);
-    $sh->set(1, 1, 'Historical Sales Trends — sales = ' . $basisTxt . ', per company cycle (day ' . $S['start_day'] . ' of the previous month to day ' . max(1, $S['start_day'] - 1) . '), LKR', $FM + ['b' => 1, 'sz' => 14, 'color' => '1F3864']);
-    $sh->set(2, 1, 'Cycle columns: ' . hs_label($months[0]) . ' = ' . date('d-M-y', strtotime($rg0[0])) . '→' . date('d-M-y', strtotime($rg0[1])) . ' … ' . hs_label(end($months)) . ' = ' . date('d-M-y', strtotime($rgN[0])) . '→' . date('d-M-y', strtotime($rgN[1])) . '. Grey header = cycle still open, excluded from averages. Source: Analysis secondary import before ' . $S['cutover'] . ', our secondary import from that date. Blank = before first purchase (not observed); 0 = no purchase. Averages and baseline are live formulas using the weights on the Assumptions sheet.', $FM + ['sz' => 9, 'color' => '595959']);
-    $HS = $FM + ['b' => 1, 'color' => 'FFFFFF', 'bg' => '1F3864', 'h' => 'center', 'wrap' => 1];
+    $cyc = 'day ' . $S['start_day'] . ' of the previous month to day ' . max(1, $S['start_day'] - 1);
+    $n = count($rows); $r1 = 5; $rL = $r1 + max(0, $n - 1); $rT = $rL + 2;                           // first data row · last data row · TOTAL row (one blank row between, as in the model)
+    $HS = $FM + ['b' => 1, 'color' => 'FFFFFF', 'bg' => $NAVY, 'h' => 'center', 'wrap' => 1, 'border' => 1];
+    $rg = fn($a, $b, $r) => $L($a) . $r . ':' . $L($b) . $r;
+    $statusOf = fn($x) => hr_status($x)[0];
+
+    /* ───── sheet 2 ───── */
+    $sh->set(1, 1, 'Historical Sales Trends — sales = ' . $basisTxt . ', per company cycle (' . $cyc . '), LKR', $FM + ['b' => 1, 'sz' => 14, 'color' => $NAVY]);
+    $sh->set(2, 1, 'Cycle columns: ' . hs_label($months[0]) . ' = ' . date('d-M-y', strtotime($rg0[0])) . '→' . date('d-M-y', strtotime($rg0[1])) . ' … ' . hs_label(end($months)) . ' = ' . date('d-M-y', strtotime($rgN[0])) . '→' . date('d-M-y', strtotime($rgN[1])) . '. Grey header = cycle still open, excluded from averages. Source: Analysis secondary import before ' . $S['cutover'] . ', our secondary import from that date. Blank = before first purchase (not observed); 0 = no purchase. Averages, baseline and status are live formulas (weights on sheet 3).', $FM + ['sz' => 9, 'color' => '595959']);
     $heads = ['HUL', 'Customer_Name', 'Sales_SP_Name', 'Beat', 'Secondary_Channel']; foreach ($months as $m) $heads[] = hs_label($m);
     $heads[] = hs_label($D['extra']) . ' to date (' . date('d M', strtotime($exRange[0])) . '–' . ($D['last_date'] ? date('d M', strtotime($D['last_date'])) : '…') . ')';
     $m3 = hs_label($months[$N - 3]) . '–' . hs_label($months[$N - 1]);
-    foreach (['Avg ' . $N . 'M', 'Avg 6M', 'Avg 3M', 'Latest Month', 'Highest Month', 'Lowest Month', 'Active Months', 'Volatility CV', 'MoM Growth', 'Baseline (LKR)', 'Rolling 3M (' . $m3 . ')', 'Trend vs prior ' . ($N - 3) . 'M'] as $h) $heads[] = $h;
+    foreach (['Avg ' . $N . 'M', 'Avg 6M', 'Avg 3M', 'Latest Month', 'Highest Month', 'Lowest Month', 'Active Months', 'Volatility CV', 'MoM Growth', 'Baseline (LKR)', 'Rolling 3M (' . $m3 . ')', 'Trend vs prior ' . ($N - 3) . 'M', 'Status'] as $h) $heads[] = $h;
     foreach ($heads as $i => $h) $sh->set(4, $i + 1, $h, $i + 1 === $cx ? array_merge($HS, ['bg' => '7F7F7F']) : $HS);
     $sh->heights[4] = 42;
-    $rg = fn($a, $b, $r) => $L($a) . $r . ':' . $L($b) . $r;
-    $r = 5;
+    $tot12 = array_fill_keys($months, 0.0); $sumA = [0, 0, 0, 0, 0, 0]; $r = $r1;
     foreach ($rows as $x) {
         $c = 1; foreach ([$x['code'], $x['name'], $x['sp'], $x['beat'], $x['channel']] as $v) $sh->set($r, $c++, $v, $FM);
         foreach ($months as $m) { $v = $x['v'][$m]; $sh->set($r, $c++, $v === null ? '' : $v, $FM + ['nfs' => $NUM]); }
         $sh->set($r, $c++, $x['extra'] ?: '', $FM + ['nfs' => $NUM]);
         $all = $rg($c1, $cl, $r); $l6 = $rg($cl - 5, $cl, $r); $l3 = $rg($cl - 2, $cl, $r); $old = $rg($c1, $cl - 3, $r);
-        $A = "Assumptions!\$C\$5*" . $L($cs) . $r . "+Assumptions!\$C\$6*" . $L($cs + 1) . $r . "+Assumptions!\$C\$7*" . $L($cs + 2) . $r . "+Assumptions!\$C\$8*" . $L($cs + 3) . $r;
+        $A = "'3 Assumptions'!\$C\$5*" . $L($cs) . $r . "+'3 Assumptions'!\$C\$6*" . $L($cs + 1) . $r . "+'3 Assumptions'!\$C\$7*" . $L($cs + 2) . $r . "+'3 Assumptions'!\$C\$8*" . $L($cs + 3) . $r;
         $sh->set($r, $cs,      round($x['a12'], 2), $FM + ['nfs' => $NUM, 'f' => "IFERROR(AVERAGE($all),0)"]);
         $sh->set($r, $cs + 1,  round($x['a6'], 2),  $FM + ['nfs' => $NUM, 'f' => "IFERROR(AVERAGE($l6),0)"]);
         $sh->set($r, $cs + 2,  round($x['a3'], 2),  $FM + ['nfs' => $NUM, 'f' => "IFERROR(AVERAGE($l3),0)"]);
@@ -66,23 +74,87 @@ if (isset($_GET['export']) && class_exists('ZipArchive')) {
         $sh->set($r, $cs + 9,  round($x['base'], 2), $FM + ['b' => 1, 'nfs' => $NUM, 'f' => "MAX(0,$A)"]);
         $sh->set($r, $cs + 10, round($x['r3'], 2),  $FM + ['nfs' => $NUM, 'f' => "SUM($l3)"]);
         $sh->set($r, $cs + 11, $x['trend'] === null ? '' : round($x['trend'], 4), $FM + ['nfs' => $PCT, 'f' => 'IFERROR(' . $L($cs + 2) . $r . "/AVERAGE($old)-1,\"\")"]);
+        $sh->set($r, $cst,     $statusOf($x), $FM + ['h' => 'center', 'f' => 'IF(' . $L($cs + 10) . $r . '<=0,"Dormant",IF(' . $L($cs + 6) . $r . '<3,"New",IF(N(' . $L($cs + 11) . $r . ')>0.1,"Growing",IF(AND(' . $L($cs + 11) . $r . '<>"",N(' . $L($cs + 11) . $r . ')<-0.1),"Declining","Stable"))))']);
+        foreach ($months as $m) $tot12[$m] += (float)($x['v'][$m] ?? 0);
+        $sumA[0] += $x['a12']; $sumA[1] += $x['a6']; $sumA[2] += $x['a3']; $sumA[3] += $x['latest']; $sumA[4] += $x['base']; $sumA[5] += $x['r3'];
         $r++;
     }
+    $TB = $FM + ['b' => 1, 'bg' => 'D9E1F2', 'border' => 1, 'nfs' => $NUM, 'color' => $NAVY];
+    if ($n) {
+        for ($c = 1; $c <= $cst; $c++) $sh->set($rT, $c, '', $TB);
+        $sh->set($rT, 1, 'TOTAL', $TB); $sh->set($rT, 2, $n . ' outlets', $TB);
+        $c = $c1; foreach ($months as $m) { $sh->set($rT, $c, round($tot12[$m], 2), $TB + ['f' => 'SUM(' . $L($c) . $r1 . ':' . $L($c) . $rL . ')']); $c++; }
+        $sh->set($rT, $cx, round($ex, 2), $TB + ['f' => 'SUM(' . $L($cx) . $r1 . ':' . $L($cx) . $rL . ')']);
+        foreach ([0, 1, 2, 3] as $k) $sh->set($rT, $cs + $k, round($sumA[$k], 2), $TB + ['f' => 'SUM(' . $L($cs + $k) . $r1 . ':' . $L($cs + $k) . $rL . ')']);
+        $sh->set($rT, $cs + 9, round($sumA[4], 2), $TB + ['f' => 'SUM(' . $L($cs + 9) . $r1 . ':' . $L($cs + 9) . $rL . ')']); $sh->set($rT, $cs + 10, round($sumA[5], 2), $TB + ['f' => 'SUM(' . $L($cs + 10) . $r1 . ':' . $L($cs + 10) . $rL . ')']);
+        $sh->condfmt[] = [$L($c1) . $r1 . ':' . $L($cl) . $rL, 'FFFFFF', '63BE7B', 95];
+        $sh->filter = 'A4:' . $L($cst) . $rL;
+    }
     foreach ([18, 28, 24, 22, 22] as $i => $wd) $sh->widths[$i + 1] = $wd; for ($i = $c1; $i <= $cl; $i++) $sh->widths[$i] = 11; $sh->widths[$cx] = 27;
-    foreach ([11, 11, 11, 11, 11.5, 11, 11, 11, 10, 13, 18, 15.3] as $i => $wd) $sh->widths[$cs + $i] = $wd;
-    $sh->freeze = [4, 2]; $sh->filter = 'A4:' . $L(count($heads)) . max(5, $r - 1);
-    if ($r > 5) $sh->condfmt[] = [$L($c1) . '5:' . $L($cl) . ($r - 1), 'FFFFFF', '63BE7B', 95];
-    /* Assumptions sheet — the weights the Baseline formulas read (C5:C8) */
-    $BL = $FM + ['color' => '0000FF', 'bg' => 'FFF2CC', 'nfs' => '0.00'];
-    $as->set(1, 1, 'Assumptions & Methodology', $FM + ['b' => 1, 'sz' => 14, 'color' => '1F3864']); $as->set(2, 1, 'Blue = editable. Changing the weights recalculates the Baseline column on the Historical Sales Trends sheet.', $FM + ['sz' => 9, 'color' => '595959']);
-    $as->set(4, 1, 'FORECAST WEIGHTS', $FM + ['b' => 1, 'color' => '1F3864']);
+    foreach ([11, 11, 11, 11, 11.5, 11, 11, 11, 10, 13, 18, 15.3, 12] as $i => $wd) $sh->widths[$cs + $i] = $wd;
+    $sh->freeze = [4, 2]; $sh->titles = ['rows' => '4:4', 'cols' => 'A:B'];
+
+    /* ───── sheet 1: dashboard (cross-sheet formulas, green = link to sheet 2, like the model) ───── */
+    $link = $FM + ['color' => '008000', 'nfs' => $NUM]; $KV = $FM + ['b' => 1, 'sz' => 11, 'color' => $NAVY, 'nfs' => $NUM]; $KVP = $KV; $KVP['nfs'] = $PCT;
+    $db->set(1, 1, 'Historical Sales Dashboard — ' . hs_label($months[0]) . ' to ' . hs_label(end($months)), $FM + ['b' => 1, 'sz' => 16, 'color' => $NAVY]);
+    $db->set(2, 1, 'Sales months = company cycles (' . $cyc . '). Sales = ' . $basisTxt . '. Bills before ' . $S['cutover'] . ': Analysis secondary import; from that date: our secondary import. Every figure is a live formula on sheet 2.', $FM + ['sz' => 9, 'color' => '595959']);
+    $db->set(4, 1, 'KEY FIGURES', $FM + ['b' => 1]); $db->set(4, 4, 'NET SALES & ACTIVE OUTLETS BY CYCLE', $FM + ['b' => 1]); $db->set(4, 9, 'OUTLET STATUS', $FM + ['b' => 1]);
+    $mc = $L($c1) . $rT . ':' . $L($cl) . $rT; $lastC = $L($cl); $prevC = $L($cl - 1);
+    $sumTot = array_sum($tot12); $lat = $tot12[end($months)] ?? 0; $prv = $tot12[$months[$N - 2]] ?? 0; $act = 0; foreach ($rows as $x) if (($x['v'][end($months)] ?? 0) > 0) $act++;
+    $kf = [['Outlets in report', $n, "COUNTA({$T}\$A\$$r1:\$A\$$rL)", '#,##0'],
+           ['Sales, ' . $N . ' cycles (' . date('d-M-y', strtotime($rg0[0])) . ' to ' . date('d-M-y', strtotime($rgN[1])) . ')', round($sumTot, 2), "SUM({$T}$mc)", $NUM],
+           ['Average sales per cycle', round($sumTot / max(1, $N), 2), "B6/$N", $NUM],
+           ['Latest cycle (' . hs_label(end($months)) . ')', round($lat, 2), "{$T}{$lastC}$rT", $NUM],
+           ['Latest vs previous cycle', $prv > 0 ? round($lat / $prv - 1, 4) : '', "IFERROR(B8/{$T}{$prevC}$rT-1,\"\")", $PCT],
+           ['Highest cycle', round(max($tot12 ?: [0]), 2), "MAX({$T}$mc)", $NUM], ['Lowest cycle', round(min($tot12 ?: [0]), 2), "MIN({$T}$mc)", $NUM],
+           ['Outlets that bought in ' . hs_label(end($months)), $act, "COUNTIF({$T}{$lastC}\$$r1:\${$lastC}\$$rL,\">0\")", '#,##0'],
+           ['Monthly baseline (weighted)', round($sumA[4], 2), "{$T}" . $L($cs + 9) . $rT, $NUM],
+           [hs_label($D['extra']) . ' to date', round($ex, 2), "{$T}{$L($cx)}$rT", $NUM]];
+    foreach ($kf as $i => [$lab, $val, $f, $nf]) { $db->set(5 + $i, 1, $lab, $FM); $db->set(5 + $i, 2, $val, $FM + ['b' => 1, 'sz' => 11, 'color' => $NAVY, 'nfs' => $nf, 'f' => $f]); }
+    foreach (['Cycle', 'Sales (LKR)', 'Active Outlets', 'vs previous'] as $i => $h) $db->set(5, 4 + $i, $h, $HS);
+    $row = 6; $prevV = null;
+    foreach ($months as $i => $m) { $cc = $L($c1 + $i);
+        $actN = 0; foreach ($rows as $x) if (($x['v'][$m] ?? 0) > 0) $actN++;
+        $db->set($row, 4, hs_label($m), $FM + ['border' => 1]); $db->set($row, 5, round($tot12[$m], 2), $link + ['border' => 1, 'f' => "{$T}{$cc}$rT"]);
+        $db->set($row, 6, $actN, $FM + ['border' => 1, 'nfs' => '#,##0', 'f' => "COUNTIF({$T}{$cc}\$$r1:\${$cc}\$$rL,\">0\")"]);
+        $db->set($row, 7, $prevV > 0 ? round($tot12[$m] / $prevV - 1, 4) : '', $FM + ['border' => 1, 'nfs' => $PCT, 'f' => $i ? 'IFERROR(E' . $row . '/E' . ($row - 1) . '-1,"")' : '""']);
+        $prevV = $tot12[$m]; $row++; }
+    $db->set($row, 4, hs_label($D['extra']) . ' (to date)', $FM + ['border' => 1, 'color' => '7F7F7F', 'i' => 1]); $db->set($row, 5, round($ex, 2), $link + ['border' => 1, 'color' => '7F7F7F', 'f' => "{$T}{$L($cx)}$rT"]);
+    $db->set($row, 6, '', $FM + ['border' => 1]); $db->set($row, 7, '', $FM + ['border' => 1]);
+    $db->set($row + 1, 4, 'Total ' . $N . ' cycles', $TB); $db->set($row + 1, 5, round($sumTot, 2), $TB + ['f' => 'SUM(E6:E' . ($row - 1) . ')']); $db->set($row + 1, 6, '', $TB); $db->set($row + 1, 7, '', $TB);
+    $db->condfmt[] = ['E6:E' . ($row - 1), 'FFFFFF', '63BE7B', 95];
+    /* status + channel tables */
+    $stat = ['Growing' => [0, 0], 'Stable' => [0, 0], 'Declining' => [0, 0], 'New' => [0, 0], 'Dormant' => [0, 0]]; $chn = [];
+    foreach ($rows as $x) { $k = $statusOf($x); $stat[$k][0]++; $stat[$k][1] += $x['r3']; $chn[$x['channel']][0] = ($chn[$x['channel']][0] ?? 0) + 1; $chn[$x['channel']][1] = ($chn[$x['channel']][1] ?? 0) + $x['r3']; $chn[$x['channel']][2] = ($chn[$x['channel']][2] ?? 0) + $x['base']; }
+    $sc = $L($cst); $r3c = $L($cs + 10); $bc = $L($cs + 9); $chc = $L(5);
+    foreach (['Status', 'Outlets', 'Rolling 3M', 'Share of 3M'] as $i => $h) $db->set(5, 9 + $i, $h, $HS);
+    $rr = 6; $sum3 = array_sum(array_column($stat, 1));
+    foreach ($stat as $k => [$cn, $s3]) { $db->set($rr, 9, $k, $FM + ['border' => 1]); $db->set($rr, 10, $cn, $FM + ['border' => 1, 'nfs' => '#,##0', 'f' => "COUNTIF({$T}\${$sc}\$$r1:\${$sc}\$$rL,I$rr)"]);
+        $db->set($rr, 11, round($s3, 2), $FM + ['border' => 1, 'nfs' => $NUM, 'f' => "SUMIF({$T}\${$sc}\$$r1:\${$sc}\$$rL,I$rr,{$T}\${$r3c}\$$r1:\${$r3c}\$$rL)"]);
+        $db->set($rr, 12, $sum3 > 0 ? round($s3 / $sum3, 4) : '', $FM + ['border' => 1, 'nfs' => $PCT, 'f' => "IFERROR(K$rr/K\$" . (6 + count($stat)) . ',"")']); $rr++; }
+    $db->set($rr, 9, 'Total', $TB); $db->set($rr, 10, $n, $TB + ['nfs' => '#,##0', 'f' => 'SUM(J6:J' . ($rr - 1) . ')']); $db->set($rr, 11, round($sum3, 2), $TB + ['f' => 'SUM(K6:K' . ($rr - 1) . ')']); $db->set($rr, 12, '', $TB);
+    $cr = $rr + 3; $db->set($cr - 1, 9, 'SECONDARY CHANNEL', $FM + ['b' => 1]);
+    foreach (['Channel', 'Outlets', 'Rolling 3M', 'Baseline'] as $i => $h) $db->set($cr, 9 + $i, $h, $HS);
+    uasort($chn, fn($a, $b) => $b[1] <=> $a[1]); $rr = $cr + 1;
+    foreach ($chn as $name => [$cn, $s3, $bs]) { $db->set($rr, 9, $name, $FM + ['border' => 1]); $db->set($rr, 10, $cn, $FM + ['border' => 1, 'nfs' => '#,##0', 'f' => "COUNTIF({$T}\${$chc}\$$r1:\${$chc}\$$rL,I$rr)"]);
+        $db->set($rr, 11, round($s3, 2), $FM + ['border' => 1, 'nfs' => $NUM, 'f' => "SUMIF({$T}\${$chc}\$$r1:\${$chc}\$$rL,I$rr,{$T}\${$r3c}\$$r1:\${$r3c}\$$rL)"]);
+        $db->set($rr, 12, round($bs, 2), $FM + ['border' => 1, 'nfs' => $NUM, 'f' => "SUMIF({$T}\${$chc}\$$r1:\${$chc}\$$rL,I$rr,{$T}\${$bc}\$$r1:\${$bc}\$$rL)"]); $rr++; }
+    foreach ([46, 18, 3, 26, 16, 15, 12, 3, 34, 11, 16, 14] as $i => $wd) $db->widths[$i + 1] = $wd; $db->heights[5] = 24;
+
+    /* ───── sheet 3: assumptions ───── */
+    $BL = $FM + ['color' => '0000FF', 'bg' => 'FFF2CC', 'nfs' => '0.00', 'border' => 1];
+    $as->set(1, 1, 'Assumptions & Methodology', $FM + ['b' => 1, 'sz' => 14, 'color' => $NAVY]); $as->set(2, 1, 'Blue on yellow = editable. Changing the weights recalculates the Baseline column on sheet 2 and the Dashboard.', $FM + ['sz' => 9, 'color' => '595959']);
+    $as->set(4, 1, 'FORECAST WEIGHTS', $FM + ['b' => 1, 'color' => $NAVY]);
     foreach ([['12-month average weight', $S['w12']], ['6-month average weight', $S['w6']], ['3-month average weight', $S['w3']], ['Latest month weight', $S['wl']]] as $i => [$lab, $w]) { $as->set(5 + $i, 1, $lab, $FM); $as->set(5 + $i, 3, (float)$w, $BL); }
-    $as->set(9, 1, 'Check: weights sum', $FM); $as->set(9, 3, round($S['w12'] + $S['w6'] + $S['w3'] + $S['wl'], 4), $FM + ['nfs' => '0.00', 'f' => 'SUM(C5:C8)']);
-    $as->set(11, 1, 'SALES DEFINITION', $FM + ['b' => 1, 'color' => '1F3864']); $as->set(12, 1, 'Sales of a bill = ' . $basisTxt . '.', $FM);
-    $as->set(13, 1, 'SALES MONTH = company cycle: month M runs from day ' . $S['start_day'] . ' of the previous month to day ' . max(1, $S['start_day'] - 1) . ' of M.', $FM);
-    $as->set(14, 1, 'SOURCES: bills before ' . $S['cutover'] . ' — Analysis > Import Secondary Invoices (Invoice Wise Sales); from ' . $S['cutover'] . ' — our own secondary invoice import.', $FM);
-    $as->set(15, 1, 'Months before an outlet\'s first purchase are blank (not observed) and excluded from averages; zero months after the first purchase count as zero.', $FM);
-    $as->widths[1] = 34; $as->widths[2] = 4; $as->widths[3] = 12;
+    $as->set(9, 1, 'Check: weights sum', $FM + ['b' => 1]); $as->set(9, 3, round($S['w12'] + $S['w6'] + $S['w3'] + $S['wl'], 4), $FM + ['b' => 1, 'nfs' => '0.00', 'f' => 'SUM(C5:C8)', 'border' => 1]);
+    $as->set(11, 1, 'DEFINITIONS', $FM + ['b' => 1, 'color' => $NAVY]);
+    foreach (['SALES of a bill = ' . $basisTxt . '.', 'SALES MONTH = company cycle: month M runs from ' . $cyc . ' (e.g. ' . hs_label($months[0]) . ' = ' . $rg0[0] . ' to ' . $rg0[1] . ').',
+              'SOURCES: bills before ' . $S['cutover'] . ' — Analysis > Import Secondary Invoices (Invoice Wise Sales); from ' . $S['cutover'] . ' — our own secondary invoice import.',
+              'Months before an outlet\'s first purchase are blank (not observed) and excluded from averages; zero months after the first purchase count as zero.',
+              'BASELINE = 12-month avg × w12 + 6-month avg × w6 + 3-month avg × w3 + latest month × wL.',
+              'STATUS: Dormant = no purchase in the last 3 cycles · New = fewer than 3 active months · Growing = last-3M average more than 10% above the earlier months · Declining = more than 10% below · otherwise Stable.',
+              'The open cycle (to date) is shown separately and is not part of any average.'] as $i => $t) $as->set(12 + $i, 1, $t, $FM);
+    $as->widths[1] = 52; $as->widths[2] = 4; $as->widths[3] = 12;
     $tmp = tempnam(sys_get_temp_dir(), 'hs'); $X->save($tmp);
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="historical_sales_trends_' . date('Ymd_His') . '.xlsx"'); header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
 }
