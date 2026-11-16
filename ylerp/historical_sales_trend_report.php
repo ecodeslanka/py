@@ -19,16 +19,16 @@ function hr_p($v) { return $v === null ? '' : number_format($v * 100, 1) . '%'; 
 if (($_POST['action'] ?? '') === 'update_customer') {
     while (ob_get_level()) ob_end_clean(); header('Content-Type: application/json; charset=utf-8');
     if (function_exists('rbac_can') && !rbac_can('edit')) { echo json_encode(['ok' => false, 'msg' => 'You do not have the Edit right on this page.']); exit; }
-    $code = strtoupper(trim((string)($_POST['code'] ?? ''))); $f = (string)($_POST['field'] ?? ''); $v = trim((string)($_POST['value'] ?? ''));
+    $code = strtoupper(trim((string)($_POST['code'] ?? ''))); if ($code === '') { echo json_encode(['ok' => false, 'msg' => 'No customer code.']); exit; }
     $cols = []; $cr = mysqli_query($conn, "SHOW COLUMNS FROM customers"); while ($cr && ($cx = mysqli_fetch_assoc($cr))) $cols[$cx['Field']] = 1;
-    if (!isset($cols['credit_limit'])) { mysqli_query($conn, "ALTER TABLE customers ADD COLUMN credit_limit DECIMAL(15,2) NULL"); $cols['credit_limit'] = 1; }
-    if ($code === '') { echo json_encode(['ok' => false, 'msg' => 'No customer code.']); exit; }
-    if ($f === 'payment_mode') { $v = strtolower($v); if (!in_array($v, ['cash', 'credit', 'cheque', ''], true)) { echo json_encode(['ok' => false, 'msg' => 'Pay mode must be cash, credit or cheque.']); exit; } $sql = "payment_mode = " . ($v === '' ? 'NULL' : "'" . mysqli_real_escape_string($conn, $v) . "'"); $show = ucfirst($v); }
-    elseif ($f === 'credit_days') { if (!ctype_digit($v) || (int)$v > 365) { echo json_encode(['ok' => false, 'msg' => 'Policy days must be a whole number from 0 to 365.']); exit; } $sql = 'credit_days = ' . (int)$v; $show = (int)$v; }
-    elseif ($f === 'credit_limit') { $n = str_replace(',', '', $v); if ($n === '' ) $n = '0'; if (!is_numeric($n) || (float)$n < 0) { echo json_encode(['ok' => false, 'msg' => 'Credit limit must be a number (0 or more).']); exit; } $sql = 'credit_limit = ' . round((float)$n, 2); $show = number_format((float)$n, 2); }
-    else { echo json_encode(['ok' => false, 'msg' => 'Unknown field.']); exit; }
-    $ok = mysqli_query($conn, "UPDATE customers SET $sql WHERE UPPER(TRIM(t_code)) = '" . mysqli_real_escape_string($conn, $code) . "'");
-    echo json_encode(['ok' => (bool)$ok && mysqli_affected_rows($conn) >= 0, 'msg' => $ok ? 'Saved' : 'Could not save.', 'value' => $show ?? '']); exit;
+    if (!isset($cols['credit_limit'])) { mysqli_query($conn, "ALTER TABLE customers ADD COLUMN credit_limit DECIMAL(15,2) NULL"); }
+    $set = []; $out = [];
+    if (isset($_POST['payment_mode'])) { $v = strtolower(trim((string)$_POST['payment_mode'])); if (!in_array($v, ['cash', 'credit', 'cheque', ''], true)) { echo json_encode(['ok' => false, 'msg' => 'Pay mode must be cash, credit or cheque.']); exit; } $set[] = "payment_mode = " . ($v === '' ? 'NULL' : "'" . mysqli_real_escape_string($conn, $v) . "'"); $out['pr'] = $v; $out['pm'] = ucfirst($v); }
+    if (isset($_POST['credit_days'])) { $v = trim((string)$_POST['credit_days']); if (!ctype_digit($v) || (int)$v > 365) { echo json_encode(['ok' => false, 'msg' => 'Policy days must be a whole number from 0 to 365.']); exit; } $set[] = 'credit_days = ' . (int)$v; $out['d'] = (int)$v; }
+    if (isset($_POST['credit_limit'])) { $n = str_replace(',', '', trim((string)$_POST['credit_limit'])); if ($n === '') $n = '0'; if (!is_numeric($n) || (float)$n < 0) { echo json_encode(['ok' => false, 'msg' => 'Credit limit must be a number (0 or more).']); exit; } $set[] = 'credit_limit = ' . round((float)$n, 2); $out['cl'] = round((float)$n, 2); }
+    if (!$set) { echo json_encode(['ok' => false, 'msg' => 'Nothing to save.']); exit; }
+    $ok = mysqli_query($conn, "UPDATE customers SET " . implode(', ', $set) . " WHERE UPPER(TRIM(t_code)) = '" . mysqli_real_escape_string($conn, $code) . "'");
+    echo json_encode(['ok' => (bool)$ok, 'msg' => $ok ? 'Saved' : 'Could not save.'] + $out); exit;
 }
 $canEdit = function_exists('rbac_can') ? (bool)rbac_can('edit') : true;
 $S = hs_settings($conn); $D = hs_build($conn, $S); $months = $D['months'];
@@ -235,28 +235,82 @@ include 'header.php';
   <?php if ($rows): ?><div class="card"><div style="font-weight:800;margin-bottom:2px"><i class="fa-solid fa-chart-column" style="color:#4f46e5"></i> Sales by cycle</div><div class="bars">
     <?php foreach ($months as $m): $v = $tot[$m] ?? 0; ?><div class="bar" title="<?= hr_h(hs_label($m) . ': ' . number_format($v, 2)) ?>"><em><?= number_format($v / 1000000, 1) ?>M</em><div style="height:<?= max(2, round($v / $maxTot * 88)) ?>%"></div><small><?= hr_h(hs_label($m)) ?></small></div><?php endforeach; ?>
     <div class="bar cur" title="<?= hr_h($exLbl . ': ' . number_format($ex, 2)) ?>"><em><?= number_format($ex / 1000000, 1) ?>M</em><div style="height:<?= max(2, round($ex / $maxTot * 88)) ?>%"></div><small>to date</small></div></div></div><?php endif; ?>
-  <div class="tw"><table><thead><tr><th class="l s1">HUL</th><th class="l s2">Customer Name</th><th class="l">Sales SP Name</th><th class="l">Beat</th><th class="l">Secondary Channel</th><th class="l">Pay Mode</th><th>Policy Days</th><th>Credit Limit</th><th class="st2" style="text-align:center">Status</th><th class="st2" style="text-align:center">Trend</th>
+  <div class="tw" id="tw"><table id="tb"><thead><tr><th class="l s1">HUL</th><th class="l s2">Customer Name</th><th class="l">Sales SP Name</th><th class="l">Beat</th><th class="l">Secondary Channel</th><th class="l">Pay Mode</th><th>Policy Days</th><th>Credit Limit</th><th class="st2" style="text-align:center">Status</th><th class="st2" style="text-align:center">Trend</th>
     <?php foreach ($months as $m): $rg = hs_range($m, $S['start_day']); ?><th title="<?= hr_h($rg[0] . ' → ' . $rg[1]) ?>"><?= hr_h(hs_label($m)) ?></th><?php endforeach; ?><th class="g" title="<?= hr_h($exRange[0]) ?> → <?= hr_h($lastTxt) ?>"><?= hr_h($exLbl) ?></th>
-    <th>Avg <?= count($months) ?>M</th><th>Avg 6M</th><th>Avg 3M</th><th>Latest</th><th>Highest</th><th>Lowest</th><th>Active</th><th>CV</th><th>MoM</th><th>Baseline</th><th>Rolling 3M</th><th>vs prior</th></tr></thead><tbody>
-  <?php foreach ($rows as $x): [$stT, $stC] = hr_status($x); ?><tr><td class="l s1"><?= hr_h($x['code']) ?></td><td class="l s2" title="<?= hr_h($x['name']) ?>"><?= hr_h($x['name']) ?></td><td class="l"><?= hr_h($x['sp']) ?></td><td class="l"><?= hr_h($x['beat']) ?></td><td class="l"><?= hr_chip($x['channel']) ?></td><td class="l"><?php if ($canEdit && $x['in_cust']): ?><select class="ed" data-code="<?= hr_h($x['code']) ?>" data-f="payment_mode" data-o="<?= hr_h($x['pmraw']) ?>"><?php foreach (['' => '—', 'cash' => 'Cash', 'credit' => 'Credit', 'cheque' => 'Cheque'] as $k => $lb): ?><option value="<?= $k ?>" <?= $x['pmraw'] === $k ? 'selected' : '' ?>><?= $lb ?></option><?php endforeach; ?></select><?php else: ?><?= $x['pm'] !== '' ? '<span class="pm pm-' . hr_h(strtolower($x['pm'])) . '">' . hr_h($x['pm']) . '</span>' : '<span class="z">—</span>' ?><?php endif; ?></td>
-    <td style="text-align:center"><?php if ($canEdit && $x['in_cust']): ?><input class="ed num" type="number" min="0" max="365" step="1" value="<?= (int)$x['days'] ?>" data-code="<?= hr_h($x['code']) ?>" data-f="credit_days" data-o="<?= (int)$x['days'] ?>" style="width:64px"><?php else: ?><?= (int)$x['days'] > 0 ? '<b>' . (int)$x['days'] . '</b>' : '<span class="z">—</span>' ?><?php endif; ?></td>
-    <td><?php if ($canEdit && $x['in_cust']): ?><input class="ed num" type="number" min="0" step="0.01" value="<?= (float)$x['climit'] ?>" data-code="<?= hr_h($x['code']) ?>" data-f="credit_limit" data-o="<?= (float)$x['climit'] ?>" style="width:112px;text-align:right"><?php else: ?><?= $x['climit'] ? number_format($x['climit'], 2) : '<span class="z">—</span>' ?><?php endif; ?></td>
-    <td style="text-align:center"><span class="stt <?= $stC ?>"><?= $stT ?></span></td><td><?= hr_spark($x['v'], $months) ?></td>
-    <?php foreach ($months as $m): $v = $x['v'][$m]; if ($v === null) echo '<td class="m nb"></td>'; elseif ($v <= 0) echo '<td class="m z0">–</td>'; else { $a = min(1, $v / $heatMax); echo '<td class="m" style="background-color:rgba(34,197,94,' . round(0.10 + $a * 0.55, 2) . ');color:' . ($a > 0.75 ? '#052e16;font-weight:700' : '#14532d') . '">' . number_format($v, 0) . ' <span class="bc">(' . (int)($x['n'][$m] ?? 0) . ')</span></td>'; } endforeach; ?><td class="ex"><?= $x['extra'] ? number_format($x['extra'], 0) . ' <span class="bc">(' . (int)$x['extra_n'] . ')</span>' : '' ?></td>
-    <td><?= number_format($x['a12'], 0) ?></td><td><?= number_format($x['a6'], 0) ?></td><td><?= number_format($x['a3'], 0) ?></td><td><?= number_format($x['latest'], 0) ?></td><td><?= number_format($x['hi'], 0) ?></td><td><?= number_format($x['lo'], 0) ?></td><td><?= (int)$x['active'] ?></td><td><?= $x['cv'] === null ? '<span class="z">—</span>' : number_format($x['cv'], 2) ?></td>
-    <td><?= hr_pill($x['mom']) ?></td><td><span class="base"><?= number_format($x['base'], 0) ?></span></td><td><?= number_format($x['r3'], 0) ?></td><td><?= hr_pill($x['trend']) ?></td></tr>
-  <?php endforeach; if (!$rows): ?><tr><td class="l" colspan="<?= 10 + count($months) + 13 ?>" style="padding:26px;color:#9ca3af;text-align:center">No outlets for these filters.</td></tr><?php endif; ?></tbody>
-  <?php if ($rows): ?><tfoot><tr><td class="l s1" style="z-index:4">TOTAL</td><td class="l s2" style="z-index:4"><?= number_format(count($rows)) ?> outlets</td><td colspan="8"></td><?php foreach ($months as $m): ?><td><?= number_format($tot[$m] ?? 0, 0) ?></td><?php endforeach; ?><td><?= number_format($ex, 0) ?></td><td><?= number_format($fa['a12'], 0) ?></td><td><?= number_format($fa['a6'], 0) ?></td><td><?= number_format($fa['a3'], 0) ?></td><td><?= number_format($fa['latest'], 0) ?></td><td colspan="5"></td><td><?= number_format($fa['base'], 0) ?></td><td><?= number_format($fa['r3'], 0) ?></td><td></td></tr></tfoot><?php endif; ?></table></div>
+    <th>Avg <?= count($months) ?>M</th><th>Avg 6M</th><th>Avg 3M</th><th>Latest</th><th>Highest</th><th>Lowest</th><th>Active</th><th>CV</th><th>MoM</th><th>Baseline</th><th>Rolling 3M</th><th>vs prior</th></tr></thead><tbody id="tbody"></tbody><?php if ($rows): ?><tfoot><tr><td class="l s1" style="z-index:4">TOTAL</td><td class="l s2" style="z-index:4"><?= number_format(count($rows)) ?> outlets</td><td colspan="8"></td><?php foreach ($months as $m): ?><td><?= number_format($tot[$m] ?? 0, 0) ?></td><?php endforeach; ?><td><?= number_format($ex, 0) ?></td><td><?= number_format($fa['a12'], 0) ?></td><td><?= number_format($fa['a6'], 0) ?></td><td><?= number_format($fa['a3'], 0) ?></td><td><?= number_format($fa['latest'], 0) ?></td><td colspan="5"></td><td><?= number_format($fa['base'], 0) ?></td><td><?= number_format($fa['r3'], 0) ?></td><td></td></tr></tfoot><?php endif; ?></table></div>
 </div>
-<div id="edToast" style="position:fixed;right:18px;bottom:18px;background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font:600 13px 'Inter',system-ui,sans-serif;display:none;z-index:99999"></div>
+<?php
+$JR = []; foreach ($rows as $x) {
+    $vv = []; $kk = []; foreach ($months as $m) { $vv[] = $x['v'][$m] === null ? null : round($x['v'][$m], 2); $kk[] = (int)($x['n'][$m] ?? 0); }
+    $JR[] = ['c' => $x['code'], 'n' => $x['name'], 'sp' => $x['sp'], 'b' => $x['beat'], 'ch' => $x['channel'], 'pm' => $x['pm'], 'pr' => $x['pmraw'], 'd' => $x['days'] === null ? null : (int)$x['days'], 'cl' => $x['climit'] === null ? null : round($x['climit'], 2), 'ic' => $x['in_cust'] ? 1 : 0,
+             'v' => $vv, 'k' => $kk, 'ex' => round($x['extra'], 2), 'exn' => (int)$x['extra_n'], 'a12' => round($x['a12'], 2), 'a6' => round($x['a6'], 2), 'a3' => round($x['a3'], 2), 'l' => round($x['latest'], 2), 'hi' => round($x['hi'], 2), 'lo' => round($x['lo'], 2),
+             'ac' => (int)$x['active'], 'cv' => $x['cv'] === null ? null : round($x['cv'], 3), 'mo' => $x['mom'] === null ? null : round($x['mom'], 4), 'ba' => round($x['base'], 2), 'r3' => round($x['r3'], 2), 'tr' => $x['trend'] === null ? null : round($x['trend'], 4)];
+}
+?>
+<div class="edm" id="edm"><div class="edbx"><div class="edhd"><div><b id="edT">Customer</b><div id="edS" style="font-size:12px;opacity:.8"></div></div><button type="button" id="edX" class="edx">&times;</button></div>
+  <div class="edbd">
+    <label>Customer pay mode</label><select id="edPm"><option value="">— not set —</option><option value="cash">Cash</option><option value="credit">Credit</option><option value="cheque">Cheque</option></select>
+    <label>Policy days (credit days)</label><input id="edDays" type="number" min="0" max="365" step="1">
+    <label>Credit limit (Rs.)</label><input id="edCl" type="number" min="0" step="0.01">
+    <div id="edMsg" style="min-height:18px;font-size:12.5px;margin-top:8px"></div>
+  </div>
+  <div class="edft"><button type="button" class="btn o" id="edC">Cancel</button><button type="button" class="btn" id="edSv"><i class="fa-solid fa-floppy-disk"></i> Save</button></div></div></div>
+<div id="edToast" style="position:fixed;right:18px;bottom:18px;background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font:600 13px 'Inter',system-ui,sans-serif;display:none;z-index:2147483100"></div>
+<style>
+.edm{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;z-index:2147483000;padding:14px;font-family:'Inter',system-ui,sans-serif}.edm.open{display:flex}
+.edbx{background:#fff;border-radius:16px;width:100%;max-width:420px;overflow:hidden;box-shadow:0 24px 60px -20px rgba(15,23,42,.6)}.edhd{background:linear-gradient(120deg,#0f172a,#1e3a8a 60%,#6366f1);color:#fff;padding:14px 18px;display:flex;gap:10px;align-items:flex-start;justify-content:space-between}.edx{background:none;border:none;color:#fff;font-size:24px;line-height:1;cursor:pointer}
+.edbd{padding:16px 18px}.edbd label{display:block;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin:10px 0 4px}.edbd select,.edbd input{width:100%;padding:10px 12px;border:1.5px solid #cbd5e1;border-radius:10px;font:inherit;font-size:14px;box-sizing:border-box}.edbd select:focus,.edbd input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.18)}
+.edft{padding:12px 18px;background:#f8fafc;display:flex;gap:10px;justify-content:flex-end}.edft .btn{padding:9px 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#1e3a8a,#4f46e5);color:#fff;font:600 13px 'Inter',system-ui,sans-serif;cursor:pointer;display:inline-flex;gap:6px;align-items:center}.edft .btn.o{background:#fff;color:#1e3a8a;border:1.5px solid #c7d2fe}.edft .btn[disabled]{opacity:.6}.hs td.ec{cursor:pointer}.hs td.ec:hover{background:#eef2ff!important;box-shadow:inset 0 0 0 1.5px #a5b4fc}.hs td.ec .pen{opacity:0;margin-left:4px;font-size:10px;color:#6366f1}.hs td.ec:hover .pen{opacity:1}
+.hs .vs td{padding:0!important;border:0!important;background:none!important;box-shadow:none!important}.hs tr.r{height:34px}.hs tr.r td{height:34px;box-sizing:border-box}.hs tr.r.ev td{background-color:#fbfcff}
+</style>
 <script>
 (function(){
-  var tt=document.getElementById('edToast'), tm=null; function toast(m,bad){ tt.textContent=m; tt.style.background=bad?'#b91c1c':'#0f172a'; tt.style.display='block'; clearTimeout(tm); tm=setTimeout(function(){tt.style.display='none';},2600); }
-  document.addEventListener('change',function(e){ var el=e.target; if(!el.classList||!el.classList.contains('ed')) return;
-    var fd=new FormData(); fd.append('action','update_customer'); fd.append('code',el.dataset.code); fd.append('field',el.dataset.f); fd.append('value',el.value); el.classList.add('sv');
-    fetch('historical_sales_trend_report.php',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.text();}).then(function(t){ var j; try{j=JSON.parse(t);}catch(x){ throw new Error('Not saved — you may not have the Edit right on this page.'); }
-      el.classList.remove('sv'); if(!j.ok) throw new Error(j.msg||'Could not save'); el.dataset.o=el.value; el.classList.remove('bad'); el.classList.add('ok'); setTimeout(function(){el.classList.remove('ok');},1400); toast('Saved '+el.dataset.code+' · '+({payment_mode:'pay mode',credit_days:'policy days',credit_limit:'credit limit'}[el.dataset.f]));
-    }).catch(function(er){ el.classList.remove('sv'); el.classList.add('bad'); el.value=el.dataset.o; toast(er.message,true); setTimeout(function(){el.classList.remove('bad');},2000); }); });
+  var ROWS=<?= json_encode($JR, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR) ?>, MAXH=<?= json_encode(round($heatMax, 2)) ?>, NM=<?= count($months) ?>, CANEDIT=<?= $canEdit ? 'true' : 'false' ?>;
+  var RH=34, BUF=14, tw=document.getElementById('tw'), tb=document.getElementById('tbody'), COLS=<?= 10 + count($months) + 13 ?>;
+  var PAL=['#6366f1','#0ea5e9','#10b981','#f59e0b','#ec4899','#8b5cf6','#14b8a6','#ef4444'];
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function f0(v){ return Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+  function f2(v){ return (Math.round(v*100)/100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+  function hash(t){ var h=0; for(var i=0;i<t.length;i++) h=(h*31+t.charCodeAt(i))|0; return Math.abs(h); }
+  function dash(){ return '<span class="z">—</span>'; }
+  function pill(v){ if(v==null) return dash(); var c=v>0.005?'up':(v<-0.005?'dn':'fl'); return '<span class="pl '+c+'">'+(v>0.005?'▲':(v<-0.005?'▼':'■'))+' '+(Math.abs(v)*100).toFixed(1)+'%</span>'; }
+  function status(x){ if(x.r3<=0) return ['Dormant','dm']; if(x.ac<3) return ['New','nw']; if(x.tr!=null&&x.tr>0.10) return ['Growing','gr']; if(x.tr!=null&&x.tr<-0.10) return ['Declining','dc']; return ['Stable','st']; }
+  function spark(vals){ var max=0,i; for(i=0;i<vals.length;i++) if(vals[i]>max) max=vals[i]; if(max<=0) return dash(); var w=92,h=26,p=[],lx=0,ly=0,n=vals.length;
+    for(i=0;i<n;i++){ var v=vals[i]; if(v!=null){ var x=(i*w/Math.max(1,n-1)).toFixed(1), y=(h-3-(v/max)*(h-6)).toFixed(1); p.push(x+','+y); lx=x; ly=y; } }
+    if(p.length<2) return '<span class="z">new</span>';
+    return '<svg class="sp" width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'"><polyline fill="none" stroke="#6366f1" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" points="'+p.join(' ')+'"/><circle cx="'+lx+'" cy="'+ly+'" r="2.6" fill="#f43f5e"/></svg>'; }
+  function rowHtml(x,i){
+    var st=status(x), h='<tr class="r'+(i%2?' ev':'')+'" data-i="'+i+'"><td class="l s1">'+esc(x.c)+'</td><td class="l s2" title="'+esc(x.n)+'">'+esc(x.n)+'</td><td class="l">'+esc(x.sp)+'</td><td class="l">'+esc(x.b)+'</td>';
+    var col=PAL[hash(x.ch)%PAL.length]; h+='<td class="l"><span class="chip" style="--c:'+col+'">'+esc(x.ch)+'</span></td>';
+    var ec=(CANEDIT&&x.ic)?' ec" data-i="'+i+'" title="Click to edit':'';
+    h+='<td class="l'+ec+'">'+(x.pm?'<span class="pm pm-'+esc(x.pm.toLowerCase())+'">'+esc(x.pm)+'</span>':dash())+(ec?'<i class="fa-solid fa-pen pen"></i>':'')+'</td>';
+    h+='<td class="'+ec.replace('l ','')+'" style="text-align:center">'+(x.d>0?'<b>'+x.d+'</b>':dash())+(ec?'<i class="fa-solid fa-pen pen"></i>':'')+'</td>';
+    h+='<td class="'+ec.replace('l ','')+'">'+(x.cl?f2(x.cl):dash())+(ec?'<i class="fa-solid fa-pen pen"></i>':'')+'</td>';
+    h+='<td style="text-align:center"><span class="stt '+st[1]+'">'+st[0]+'</span></td><td>'+spark(x.v)+'</td>';
+    for(var m=0;m<NM;m++){ var v=x.v[m]; if(v==null) h+='<td class="m nb"></td>'; else if(v<=0) h+='<td class="m z0">–</td>'; else { var a=Math.min(1,v/MAXH); h+='<td class="m" style="background-color:rgba(34,197,94,'+(0.10+a*0.55).toFixed(2)+');color:'+(a>0.75?'#052e16;font-weight:700':'#14532d')+'">'+f0(v)+' <span class="bc">('+x.k[m]+')</span></td>'; } }
+    h+='<td class="ex">'+(x.ex?f0(x.ex)+' <span class="bc">('+x.exn+')</span>':'')+'</td>';
+    h+='<td>'+f0(x.a12)+'</td><td>'+f0(x.a6)+'</td><td>'+f0(x.a3)+'</td><td>'+f0(x.l)+'</td><td>'+f0(x.hi)+'</td><td>'+f0(x.lo)+'</td><td>'+x.ac+'</td><td>'+(x.cv==null?dash():x.cv.toFixed(2))+'</td><td>'+pill(x.mo)+'</td><td><span class="base">'+f0(x.ba)+'</span></td><td>'+f0(x.r3)+'</td><td>'+pill(x.tr)+'</td></tr>';
+    return h; }
+  var lo=-1,hi=-1,ticking=false;
+  function draw(force){ var n=ROWS.length; if(!n){ tb.innerHTML='<tr><td class="l" colspan="'+COLS+'" style="padding:26px;color:#9ca3af;text-align:center">No outlets for these filters.</td></tr>'; return; }
+    var top=tw.scrollTop, vh=tw.clientHeight, s=Math.max(0,Math.floor(top/RH)-BUF), e=Math.min(n,Math.ceil((top+vh)/RH)+BUF);
+    if(!force&&s===lo&&e===hi) return; lo=s; hi=e; var parts=[]; if(s>0) parts.push('<tr class="vs" style="height:'+(s*RH)+'px"><td colspan="'+COLS+'"></td></tr>');
+    for(var i=s;i<e;i++) parts.push(rowHtml(ROWS[i],i)); if(e<n) parts.push('<tr class="vs" style="height:'+((n-e)*RH)+'px"><td colspan="'+COLS+'"></td></tr>'); tb.innerHTML=parts.join(''); }
+  tw.addEventListener('scroll',function(){ if(ticking) return; ticking=true; requestAnimationFrame(function(){ ticking=false; draw(false); }); },{passive:true});
+  window.addEventListener('resize',function(){ draw(true); });
+  tw.style.height='74vh'; tw.style.maxHeight='none'; draw(true);
+  /* ───── edit modal ───── */
+  var M=document.getElementById('edm'), cur=-1, $=function(i){return document.getElementById(i);}; document.body.appendChild(M);
+  var tt=$('edToast'), tm=null; function toast(m,bad){ tt.textContent=m; tt.style.background=bad?'#b91c1c':'#0f172a'; tt.style.display='block'; clearTimeout(tm); tm=setTimeout(function(){tt.style.display='none';},2600); }
+  function openM(i){ var x=ROWS[i]; cur=i; $('edT').textContent=x.n||x.c; $('edS').textContent=x.c+' · '+x.ch; $('edPm').value=x.pr||''; $('edDays').value=x.d==null?'':x.d; $('edCl').value=x.cl==null?'':x.cl; $('edMsg').textContent=''; M.classList.add('open'); setTimeout(function(){ $('edPm').focus(); },30); }
+  function closeM(){ M.classList.remove('open'); cur=-1; }
+  tb.addEventListener('click',function(e){ var c=e.target.closest('td.ec'); if(c) openM(+c.dataset.i); });
+  $('edX').onclick=closeM; $('edC').onclick=closeM; M.addEventListener('click',function(e){ if(e.target===M) closeM(); }); document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&cur>=0) closeM(); if(e.key==='Enter'&&cur>=0&&e.target.tagName==='INPUT') $('edSv').click(); });
+  $('edSv').onclick=function(){ if(cur<0) return; var x=ROWS[cur], fd=new FormData(); fd.append('action','update_customer'); fd.append('code',x.c); fd.append('payment_mode',$('edPm').value); fd.append('credit_days',$('edDays').value===''?'0':$('edDays').value); fd.append('credit_limit',$('edCl').value===''?'0':$('edCl').value);
+    var b=$('edSv'); b.disabled=true; $('edMsg').style.color='#475569'; $('edMsg').textContent='Saving…';
+    fetch('historical_sales_trend_report.php',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.text();}).then(function(t){ var j; try{j=JSON.parse(t);}catch(er){ throw new Error('Not saved — you may not have the Edit right on this page.'); }
+      if(!j.ok) throw new Error(j.msg||'Could not save'); x.pr=j.pr; x.pm=j.pm; x.d=j.d; x.cl=j.cl; b.disabled=false; closeM(); draw(true); toast('Saved '+x.c);
+    }).catch(function(er){ b.disabled=false; $('edMsg').style.color='#b91c1c'; $('edMsg').textContent=er.message; }); };
 })();
 </script>
 <?php include 'footer.php'; ?>
