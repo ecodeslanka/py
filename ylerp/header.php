@@ -1686,6 +1686,14 @@ if (isset($conn) && $conn) {
                        <a href="credit_bill_beat_update.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'credit_bill_beat_update.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Import Bulk SR Code Change (T Code Wise)</span>
                     </a>
+
+                       <a href="beat_mapping_upload.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'beat_mapping_upload.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-route"></i><span>Beat Mapping Upload</span>
+                    </a>
+
+                       <a href="beat_mapping_history.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'beat_mapping_history.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-clock-rotate-left"></i><span>Beat Mapping History</span>
+                    </a>
                    
                 </div>
 
