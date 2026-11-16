@@ -24,7 +24,7 @@ if (($_POST['action'] ?? '') === 'save_limit') {
 }
 if (($_GET['ajax'] ?? '') === 'log') { $o = []; $r = pl_q($conn, "SELECT * FROM plan_credit_limit_log WHERE t_code = '{$e(strtoupper(trim((string)($_GET['c'] ?? ''))))}' ORDER BY id DESC LIMIT 20"); while ($r && ($x = mysqli_fetch_assoc($r))) $o[] = $x; pl_json(['ok' => true, 'log' => $o]); }
 $M = pm_get($conn, isset($_GET['recalc'])); pl_detail_endpoint($M);
-$J = pl_slim($M['rows'], ['c', 'n', 'rep', 'b', 'cat', 'risk', 'band', 'pay', 'cs', 'days', 'cl', 'ob', 'obn', 'odb', 'odd', 'viol', 'ret', 'sent', 'tgt', 'min', 'pol_mode', 'pol_days', 'lim_act', 'lim_prop', 'lim_util', 'lim_why', 'lim_when', 'cv']);
+$J = pl_slim($M['rows'], ['c', 'n', 'rep', 'b', 'cat', 'risk', 'band', 'pay', 'cs', 'days', 'cl', 'ob', 'obn', 'odb', 'odd', 'viol', 'ret', 'sent', 'tgt', 'min', 'pol_mode', 'pol_days', 'lim_act', 'lim_prop', 'lim_util', 'lim_why', 'lim_when', 'cv', 'a12', 'a6', 'a3', 'l']);
 foreach ($J as &$x) { $x['diff'] = round($x['lim_prop'] - $x['cl'], 2); $x['uncq'] = round($x['ret'] + $x['sent'], 2); } unset($x);
 ob_end_flush();
 include 'header.php';
@@ -44,7 +44,7 @@ echo pl_js();
     filters:[{k:'lim_act',label:'Recommendation'},{k:'band',label:'Risk band'},{k:'pay',label:'Pay mode'},{k:'rep',label:'Sales rep'},{k:'cat',label:'Category'}],
     cols:[{k:'c',h:'HUL',t:'s',s1:1,w:18},{k:'n',h:'Customer',t:'s',s2:1,w:30},{k:'rep',h:'Sales Rep',t:'s',w:24},{k:'b',h:'Beat',t:'s',w:20},{k:'pay',h:'Pay',t:'s',fmt:function(x){return plPm(x.pay);},w:9},{k:'days',h:'Policy days',xt:'i',w:8},
       {k:'risk',h:'Risk',fmt:function(x){return plMeter(x.risk);},xt:'d',w:8},{k:'band',h:'Band',t:'s',w:13},{k:'cl',h:'Current limit',tot:1,w:14},{k:'ob',h:'Open bills',tot:1},{k:'lim_util',h:'Utilisation',fmt:function(x){return ut(x.lim_util);},xt:'p',w:10},
-      {k:'odb',h:'Overdue',tot:1},{k:'uncq',h:'Unsettled cheques',tot:1},{k:'tgt',h:'Monthly target',tot:1},{k:'lim_prop',h:'Recommended limit',tot:1,fmt:function(x){return '<b style="color:#047857">'+plF0(x.lim_prop)+'</b>';},w:15},
+      {k:'odb',h:'Overdue',tot:1},{k:'uncq',h:'Unsettled cheques',tot:1},{k:'tgt',h:'Monthly target',tot:1},{k:'a12',h:'12-month avg sales',tot:1},{k:'a6',h:'6-month avg sales',tot:1},{k:'a3',h:'3-month avg sales',tot:1},{k:'l',h:'Last month sales',tot:1},{k:'lim_prop',h:'Recommended limit',tot:1,fmt:function(x){return '<b style="color:#047857">'+plF0(x.lim_prop)+'</b>';},w:15},
       {k:'diff',h:'Change',fmt:function(x){ return x.diff?'<b style="color:'+(x.diff>0?'#15803d':'#b91c1c')+'">'+(x.diff>0?'+':'')+plF0(x.diff)+'</b>':'<span class="z">—</span>'; },tot:1},
       {k:'lim_act',h:'Recommendation',t:'s',fmt:function(x){return plTag(x.lim_act);},w:22},{k:'lim_when',h:'When',t:'s',w:18},{k:'lim_why',h:'Why',t:'s',fmt:function(x){ return '<span style="font-size:12px;color:#475569">'+esc(x.lim_why)+'</span>'; },w:60}],
     kpis:function(rows,t){ var c={}; rows.forEach(function(x){ var k=x.lim_act.split(' ')[0]; c[k]=(c[k]||0)+1; });

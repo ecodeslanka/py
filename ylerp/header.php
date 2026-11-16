@@ -2097,6 +2097,9 @@ if (isset($conn) && $conn) {
                     <a href="plan_target_scenarios.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_target_scenarios.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-bullseye"></i><span>Target Scenarios (Min / Mod / Max)</span>
                     </a>
+                    <a href="plan_credit_policy_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_credit_policy_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-scale-balanced"></i><span>Credit Policy (by Channel)</span>
+                    </a>
                     <a href="plan_credit_policy.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_credit_policy.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-scale-balanced"></i><span>Credit Policy Recommendations</span>
                     </a>
