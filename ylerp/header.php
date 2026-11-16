@@ -2076,6 +2076,9 @@ if (isset($conn) && $conn) {
                     <a href="plan_restricted_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_restricted_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-shield-halved"></i><span>Restricted &amp; High-Risk Customers</span>
                     </a>
+                    <a href="plan_model_assumptions.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_model_assumptions.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-book"></i><span>Model Assumptions &amp; Methodology</span>
+                    </a>
                     <a href="plan_target_entry.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'plan_target_entry.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-pen-to-square"></i><span>Target Entry</span>
                     </a>
