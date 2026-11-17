@@ -113,8 +113,9 @@ $f_q     = trim($_GET['q'] ?? '');
 $f_claim = in_array($_GET['claim'] ?? '', ['', 'with', 'without'], true) ? ($_GET['claim'] ?? '') : '';
 $AMT = ['vat_same' => 'Difference = certificate VAT (fully same)', 'cc_same' => 'Claim = certificate (balance 0)', 'cc_diff' => 'Claim ≠ certificate (balance to pay)', 'cc_excess' => 'Certificate higher (excess)', 'cc_none' => 'No certificate yet', 'inv_same' => 'Claim = invoice discount (difference 0)', 'inv_diff' => 'Claim ≠ invoice discount'];
 $f_amt   = isset($AMT[$_GET['amt'] ?? '']) ? $_GET['amt'] : '';
+if (!empty($_GET['vatb'])) $f_amt = 'vat_same';      // "VAT = Balance 1" tick / button
 
-$items = []; $mocs = $types = $cmocs = [];
+$items = []; $mocs = $types = $cmocs = []; $n_vatb = 0;
 if ($ready) {
     $e = fn($v) => mysqli_real_escape_string($conn, $v);
     $w = ['1=1', "UPPER(TRIM(i.activity_type)) <> 'DAMAGE'"];       // DAMAGE rows are not part of this report
@@ -189,6 +190,7 @@ foreach ($items as &$__x) {
     $__x['balance'] = $rawb === null ? null : ($vsame ? sd_zero(round($rawb - (float)$c2['vat'], 2)) : sd_zero($rawb));
     if (!empty($__x['is_new'])) { $__x['diff'] = 0.0; $__x['balance'] = 0.0; $__x['balance1'] = 0.0; }      // new scheme (HUL / TOT) with no claim amount: difference and balance are 0
 } unset($__x);
+$n_vatb = count(array_filter($items, fn($x) => !empty($x['vat_same'])));   // rows where the certificate VAT = Balance 1 (before the amount filter)
 /* amount filter — rows whose amounts are the same / different (works on the final, calculated figures) */
 if ($f_amt !== '') $items = array_values(array_filter($items, function ($x) use ($f_amt) {
     $z = fn($v) => $v === null || abs((float)$v) < 0.005;
@@ -340,6 +342,7 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
       <div class="fld"><label>Activity type</label><select name="type"><option value="">All</option><?php foreach ($types as $t): ?><option <?= $f_type === $t ? 'selected' : '' ?>><?= sd_h($t) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Claim MOC Ref</label><select name="claim_moc"><option value="">All</option><?php foreach ($cmocs as $m): ?><option <?= $f_cmoc === $m ? 'selected' : '' ?>><?= sd_h($m) ?></option><?php endforeach; ?></select></div>
       <div class="fld"><label>Amounts</label><select name="amt"><option value="">All rows</option><?php foreach ($AMT as $k => $l): ?><option value="<?= $k ?>" <?= $f_amt === $k ? 'selected' : '' ?>><?= sd_h($l) ?></option><?php endforeach; ?></select></div>
+      <div class="fld"><label>VAT = Balance 1</label><label style="display:flex;gap:7px;align-items:center;padding:8px 10px;border:1.5px solid #c7d2fe;border-radius:10px;background:#f5f7ff;font-weight:700;color:#1e3a8a;cursor:pointer;text-transform:none;letter-spacing:0;font-size:12.5px"><input type="checkbox" name="vatb" value="1" <?= $f_amt === 'vat_same' ? 'checked' : '' ?> onchange="if(this.checked) this.form.amt.value='vat_same'; else if(this.form.amt.value==='vat_same') this.form.amt.value='';" style="width:16px;height:16px;accent-color:#1e3a8a"> Only rows where VAT = Balance 1</label></div>
       <div class="fld"><label>Claim</label><select name="claim"><option value="">All</option><option value="with" <?= $f_claim === 'with' ? 'selected' : '' ?>>With claim amount</option><option value="without" <?= $f_claim === 'without' ? 'selected' : '' ?>>Without claim</option></select></div>
       <div class="fld"><label>Search</label><input type="search" name="q" value="<?= sd_h($f_q) ?>" placeholder="activity code or description"></div>
       <button class="btn" type="submit"><i class="fa-solid fa-magnifying-glass"></i> Show</button><a class="btn o" href="scheme_discount_daily_report.php">Reset</a>
@@ -354,6 +357,8 @@ $active = array_filter([$f_from || $f_to ? 'Date: ' . ($f_from ? sd_d($f_from) :
     <?php if (abs($__d) < 0.5): ?>✓ This Balance is the same as the dashboard line "Scheme Discount &amp; Free Issues" (Rs. <?= number_format($__R['balance'], 2) ?>).<?php else: ?>Dashboard line "Scheme Discount &amp; Free Issues": Rs. <?= number_format($__R['balance'], 2) ?> — this report's Balance is Rs. <?= number_format($tot_bal, 2) ?> (difference Rs. <?= number_format($__d, 2) ?>).<?php endif; ?></div>
   <?php } } ?>
 
+  <?php $__on = $f_amt === 'vat_same'; $__q = $_GET; unset($__q['vatb'], $__q['export'], $__q['sheet']); if ($__on) unset($__q['amt']); else $__q['amt'] = 'vat_same'; ?>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><a href="?<?= sd_h(http_build_query($__q)) ?>" title="<?= $__on ? 'Show all rows again' : 'Show only the rows where the claim certificate VAT is the same as Balance 1 (Claim − certificate)' ?>" style="display:inline-flex;gap:7px;align-items:center;padding:7px 14px;border-radius:99px;font-size:12.5px;font-weight:800;text-decoration:none;border:1.5px solid #1e3a8a;<?= $__on ? 'background:#1e3a8a;color:#fff' : 'background:#fff;color:#1e3a8a' ?>"><i class="fa-solid fa-<?= $__on ? 'square-check' : 'square' ?>"></i> VAT = Balance 1 <span style="background:<?= $__on ? 'rgba(255,255,255,.25)' : '#e0e7ff' ?>;border-radius:99px;padding:1px 8px"><?= number_format($n_vatb) ?></span></a><?php if ($__on): ?><span style="font-size:12px;color:#64748b">Showing only the rows where the certificate VAT is the same as Balance 1 — click again for all rows.</span><?php endif; ?></div>
   <div class="sdtabs"><button type="button" data-v="det" class="on"><i class="fa-solid fa-table-list"></i> Detailed</button><button type="button" data-v="sum"><i class="fa-solid fa-calendar-days"></i> Monthly summary (by MOC Ref)</button><button type="button" data-v="unr"><i class="fa-solid fa-triangle-exclamation"></i> Unreconciled claim certificates <span class="sdbadge"><?= number_format($unrec_tot['n']) ?></span></button>
     <a class="btn o" id="sdSumXls" data-no-loader href="?<?= sd_h(http_build_query(array_merge($_GET, ['export' => 1, 'sheet' => 'summary']))) ?>" style="display:none;padding:7px 14px;border:1.5px solid #c7d2fe;border-radius:9px;color:#1e3a8a;text-decoration:none;font:600 13px inherit;background:#fff"><i class="fa-solid fa-file-excel"></i> Export monthly summary</a>
     <span id="sdMocBar" style="display:none;margin-left:auto;font-size:12.5px"><span class="chip" style="margin:0">MOC <b id="sdMocTxt"></b></span> <a href="#" id="sdMocClr" style="color:#1e3a8a;font-weight:700">show all MOC refs ✕</a></span></div>
