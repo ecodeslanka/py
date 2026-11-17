@@ -178,11 +178,18 @@ if (isset($_GET['action'])) {
         // IMPROVED: More lenient base matching
         /* the original automatic match (promoter / salary claims) + claims sent here from the Customer Claim Report ("Send to → Promoters Salary") */
         mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (claim_cert_item_id INT NOT NULL PRIMARY KEY, dest VARCHAR(20) NOT NULL, sent_by VARCHAR(100) NULL, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, KEY k_dest (dest))");   // claims sent here from the Customer Claim Report
-        $base_where = "(ci.claim_description LIKE '%promot%' 
+        /* SR Incentive claims are NOT promoter claims, even when the description says "salary": anything SR Incentive picks up
+           (incentive / advance / "SR" as a word), already paid on an SR Incentive record, or sent to SR Incentive is left out */
+        mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sricc_settlements (id INT AUTO_INCREMENT PRIMARY KEY, sricc_id INT NOT NULL, claim_cert_item_id INT NULL, INDEX idx_sricc (sricc_id))");
+        $txt = "CONCAT_WS(' ', COALESCE(ci.claim_type,''), COALESCE(ci.claim_description,''), COALESCE(ci.ledger_type,''))";   // empty fields must not hide a claim
+        $sr_claim = "($txt LIKE '%incentive%' OR $txt LIKE '%advance%' OR $txt REGEXP '(^|[^a-z])sr([^a-z]|$)'
+                      OR ci.id IN (SELECT claim_cert_item_id FROM sricc_settlements WHERE claim_cert_item_id IS NOT NULL AND claim_cert_item_id > 0)
+                      OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'sr_incentive'))";
+        $base_where = "(((ci.claim_description LIKE '%promot%' 
                        OR ci.claim_type LIKE '%promot%' 
                        OR ci.ledger_type LIKE '%promot%'
                        OR ci.claim_description LIKE '%salary%'
-                       OR ci.claim_type LIKE '%salary%'
+                       OR ci.claim_type LIKE '%salary%') AND NOT $sr_claim)
                        OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'promoters'))";
 
         $entity_sql  = '';
