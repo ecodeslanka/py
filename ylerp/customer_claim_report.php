@@ -96,9 +96,23 @@ function cc_build_where($conn) {
     $search = trim($_REQUEST['search'] ?? '');
     if ($search !== '') {
         $s_e = mysqli_real_escape_string($conn, $search);
+        $num = str_replace(',', '', $search);
+        $amtOr = is_numeric($num) ? " OR ABS(ci.actual_amount - " . (float)$num . ") < 0.5 OR ABS(ci.vat_amount - " . (float)$num . ") < 0.5 OR ABS(ci.total_amount - " . (float)$num . ") < 0.5" : '';   // a number typed in Search also finds that amount
         $w[] = "(ci.tax_invoice_no LIKE '%$s_e%' OR ci.claim_description LIKE '%$s_e%' " .
                "OR ci.customer_name LIKE '%$s_e%' OR ci.customer_code LIKE '%$s_e%' " .
-               "OR cu.file_name LIKE '%$s_e%')";
+               "OR cu.file_name LIKE '%$s_e%'$amtOr)";
+    }
+
+    /* Amount filter: one amount ("12500", "12,500.00"), a range ("10000-50000") or "> 100000" / "< 5000" / ">=" / "<=".
+       It matches the Actual, the VAT or the Total amount of the claim (amount_in = actual | vat | total | any). */
+    $amtIn = $_REQUEST['amount_in'] ?? 'any'; $cols = ['actual' => ['ci.actual_amount'], 'vat' => ['ci.vat_amount'], 'total' => ['ci.total_amount']][$amtIn] ?? ['ci.actual_amount', 'ci.vat_amount', 'ci.total_amount'];
+    $amt = str_replace([',', ' ', 'Rs.', 'rs.', 'Rs'], '', trim((string)($_REQUEST['amount'] ?? '')));
+    if ($amt !== '') {
+        $cond = null;
+        if (preg_match('/^(-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)$/', $amt, $m)) { $a = min((float)$m[1], (float)$m[2]); $b = max((float)$m[1], (float)$m[2]); $cond = fn($c) => "$c BETWEEN " . ($a - 0.005) . " AND " . ($b + 0.005); }
+        elseif (preg_match('/^(>=|<=|>|<)(-?\d+(?:\.\d+)?)$/', $amt, $m)) { $op = $m[1]; $v = (float)$m[2]; $cond = fn($c) => "$c $op $v"; }
+        elseif (is_numeric($amt)) { $v = (float)$amt; $cond = fn($c) => "ABS($c - $v) < 0.5"; }
+        if ($cond) $w[] = '(' . implode(' OR ', array_map($cond, $cols)) . ')';
     }
 
     $cust = trim($_REQUEST['customer_code'] ?? '');
@@ -245,7 +259,7 @@ if (isset($_GET['export_xlsx'])) {
     $heads = ['#', 'Customer Code', 'Customer Name', 'Upload File', 'Upload Date', 'Ledger Type', 'Status', 'Claim Type', 'Tax Invoice No', 'Invoice Date', 'Banking Date', 'Entity', 'Claim Description', 'Actual Amount', 'VAT Amount', 'Total Amount', 'Imported At', 'Imported By', 'Scheme No Source (F = first no · M = middle / normal)', 'Scheme No'];
     $sh->set(1, 1, 'Customer Claim Report — all rows of the table' . ((trim($_REQUEST['date_from'] ?? '') . trim($_REQUEST['date_to'] ?? '')) !== '' ? ' (' . trim($_REQUEST['date_from'] ?? '…') . ' to ' . trim($_REQUEST['date_to'] ?? '…') . ')' : ''), ['b' => 1, 'sz' => 14]);
     $fl = [];
-    foreach (['claim_type' => 'Claim type', 'entity' => 'Entity', 'status' => 'Status', 'customer_code' => 'Customer', 'search' => 'Search'] as $k => $lab) { $v = trim((string)($_REQUEST[$k] ?? '')); if ($v !== '') $fl[] = $lab . ': ' . str_replace('||', ', ', $v); }
+    foreach (['claim_type' => 'Claim type', 'entity' => 'Entity', 'status' => 'Status', 'customer_code' => 'Customer', 'search' => 'Search', 'amount' => 'Amount'] as $k => $lab) { $v = trim((string)($_REQUEST[$k] ?? '')); if ($v !== '') $fl[] = $lab . ': ' . str_replace('||', ', ', $v); }
     $sh->set(2, 1, $fl ? 'Filters — ' . implode(' · ', $fl) : 'No filters — all rows', ['i' => 1, 'color' => '6B7280']);
     foreach ($heads as $i => $h) $sh->set(3, $i + 1, $h, $H);
     $r = 4; $n = 0; $ta = $tv = $tt = 0.0; $byType = [];
@@ -440,6 +454,11 @@ include 'header.php';
           <input type="text" id="fSearch" placeholder="Tax invoice, description, customer, file name…">
         </div>
         <div class="f-field">
+          <label>Amount</label>
+          <div style="display:flex;gap:6px"><input type="text" id="fAmount" inputmode="decimal" placeholder="12500 · 1000-5000 · >100000" title="One amount (±0.50), a range 10000-50000, or >100000 / <5000" style="flex:1;min-width:0">
+            <select id="fAmountIn" title="Which amount" style="width:92px"><option value="any">Any</option><option value="actual">Actual</option><option value="vat">VAT</option><option value="total">Total</option></select></div>
+        </div>
+        <div class="f-field">
           <label>Customer</label>
           <select id="fCustomer"><option value="">All Customers</option></select>
         </div>
@@ -623,6 +642,8 @@ function getFilterParams(){
     date_from:  document.getElementById('fFrom').value,
     date_to:    document.getElementById('fTo').value,
     search:     document.getElementById('fSearch').value.trim(),
+    amount:     document.getElementById('fAmount').value.trim(),
+    amount_in:  document.getElementById('fAmountIn').value,
     customer_code: document.getElementById('fCustomer').value,
     entity:     document.getElementById('fEntity').value,
     status:     document.getElementById('fStatus').value,
@@ -635,6 +656,7 @@ function clearFilters(){
   document.getElementById('fFrom').value = '';
   document.getElementById('fTo').value = '';
   document.getElementById('fSearch').value = '';
+  document.getElementById('fAmount').value = ''; document.getElementById('fAmountIn').value = 'any';
   document.getElementById('fCustomer').value = '';
   document.getElementById('fEntity').value = '';
   document.getElementById('fStatus').value = '';
@@ -742,7 +764,8 @@ document.getElementById('fSearch').addEventListener('input', function(){
   clearTimeout(_searchDebounce);
   _searchDebounce = setTimeout(()=>loadReport(1), 450);
 });
-['fCustomer','fEntity','fStatus','fDateField'].forEach(id=>{
+document.getElementById('fAmount').addEventListener('input', function(){ clearTimeout(_searchDebounce); _searchDebounce = setTimeout(()=>loadReport(1), 450); });
+['fCustomer','fEntity','fStatus','fDateField','fAmountIn'].forEach(id=>{
   document.getElementById(id).addEventListener('change', ()=>loadReport(1));
 });
 
