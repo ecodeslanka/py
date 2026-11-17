@@ -178,6 +178,25 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_send' &&
     ob_end_clean(); echo json_encode(['success' => true, 'message' => $n . ' claim(s) matched to SSCL & VAT payment #' . $sv . ' (' . number_format($want, 2) . ').', 'balance' => round($bal - $want, 2)]); exit;
 }
 
+/* reverse: remove this claim's matched-certificate rows from one SSCL & VAT payment (the same as deleting the settlement on the SSCL & VAT page).
+   Rows already sent to Acknowledgment must be reversed there first. */
+if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_reverse' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    ob_start(); header('Content-Type: application/json'); cc_sv_tables($conn);
+    $fail = function ($m) { ob_end_clean(); echo json_encode(['success' => false, 'message' => $m]); exit; };
+    if (!function_exists('rbac_can')) @include_once __DIR__ . '/rbac.php';
+    if (function_exists('rbac_can') && !(rbac_can('delete', 'sscl_vat') || rbac_can('edit', 'sscl_vat'))) $fail('You do not have the right to remove payments on the SSCL & VAT page.');
+    $cid = intval($_POST['claim_id'] ?? 0); $sv = intval($_POST['sv_id'] ?? 0); if (!$cid || !$sv) $fail('Nothing to reverse.');
+    $rows = []; $q = mysqli_query($conn, "SELECT id, document_path, total_amount FROM sscl_vat_settlements WHERE claim_cert_item_id = $cid AND sv_id = $sv");
+    while ($q && ($x = mysqli_fetch_assoc($q))) $rows[] = $x; if (!$rows) $fail('This claim is no longer matched on payment #' . $sv . '.');
+    $t = @mysqli_query($conn, "SHOW TABLES LIKE 'dl_cheque_acknowledgments'");
+    if ($t && mysqli_num_rows($t)) { $ids = implode(',', array_map(fn($x) => (int)$x['id'], $rows));
+        $a = mysqli_fetch_row(mysqli_query($conn, "SELECT COUNT(*) FROM dl_cheque_acknowledgments WHERE (source = 'ssclvat' AND source_settlement_id IN ($ids)) OR (source = 'ssclvat_claim' AND claim_item_id = $cid AND confirmed_payment_id = $sv)"));
+        if ($a && (int)$a[0] > 0) $fail('This match was already sent to Acknowledgment — reverse it on the SSCL & VAT page (or the Acknowledgment page) first.'); }
+    $amt = 0; foreach ($rows as $x) { if (!empty($x['document_path']) && is_file($x['document_path'])) @unlink($x['document_path']); $amt += (float)$x['total_amount']; }
+    $ok = mysqli_query($conn, "DELETE FROM sscl_vat_settlements WHERE claim_cert_item_id = $cid AND sv_id = $sv");
+    ob_end_clean(); echo json_encode(['success' => (bool)$ok, 'message' => $ok ? 'Reversed: ' . number_format($amt, 2) . ' removed from SSCL & VAT payment #' . $sv . '.' : 'Could not reverse: ' . mysqli_error($conn)]); exit;
+}
+
 /* ── AJAX: get_report_data (paginated) ── */
 if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'get_report_data') {
     ob_start(); header('Content-Type: application/json');
@@ -524,6 +543,7 @@ include 'header.php';
 .svt{width:100%;border-collapse:collapse;font-size:12px}.svt th{background:#0f172a;color:#e2e8f0;padding:7px 9px;text-align:left;font-size:10.5px;position:sticky;top:0}.svt th.tr,.svt td.tr{text-align:right}.svt td{padding:6px 9px;border-bottom:1px solid #f1f5f9}
 .svt tr.pk td{background:#ccfbf1!important}.svt tbody tr.pay{cursor:pointer}.svt tbody tr.pay:hover td{background:#f0fdfa}.svt input.amt{width:120px;text-align:right;border:1.5px solid #5eead4;border-radius:7px;padding:5px 7px;font:inherit;font-weight:700}
 .prev-table input[type=checkbox],#svAll{appearance:auto!important;-webkit-appearance:checkbox!important;display:inline-block!important;opacity:1!important;visibility:visible!important;position:static!important;width:16px!important;height:16px!important;margin:0!important;cursor:pointer;accent-color:#0d9488}
+.sv-rev{display:inline-flex;gap:4px;align-items:center;border:1.5px solid #fca5a5;background:#fff;color:#b91c1c;border-radius:7px;padding:2px 8px;font-size:10.5px;font-weight:800;cursor:pointer}.sv-rev:hover{background:#fef2f2}
 .sv-btn.o{background:linear-gradient(135deg,#64748b,#94a3b8)}
 .sv-btn{display:inline-flex;gap:5px;align-items:center;border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:800;cursor:pointer;background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;white-space:nowrap}.sv-btn:hover{filter:brightness(1.1)}
 </style>
@@ -531,10 +551,9 @@ include 'header.php';
 let SVROWS = {}, SVPAY = [], SVCL = [], SVSEL = 0;
 function svCanSend(r){ return !(parseFloat(r.total_amount||0) - parseFloat(r.sv_settled||0) <= 0.004); }
 function svCell(r){
-  const tot=parseFloat(r.total_amount||0), st=parseFloat(r.sv_settled||0), pays=(r.sv_pays||[]).map(p=>'#'+p.id+(p.pd?' ('+p.pd+')':'')).join(', ');
+  const tot=parseFloat(r.total_amount||0), st=parseFloat(r.sv_settled||0), full=st>0 && tot-st<=0.004;
   let h='';
-  if(st>0 && tot-st<=0.004) h+='<span class="pill p-green" title="Matched on SSCL &amp; VAT payment '+esc(pays)+'"><i class="fa-solid fa-circle-check"></i> Matched '+esc(pays)+'</span>';
-  else if(st>0) h+='<span class="pill p-amber" title="Matched on '+esc(pays)+'">Partly matched '+fmtN(st)+' · '+esc(pays)+'</span> ';
+  if(st>0) h+='<div style="display:flex;flex-direction:column;gap:3px">'+(r.sv_pays||[]).map(p=>'<span style="display:inline-flex;gap:5px;align-items:center;white-space:nowrap"><span class="pill '+(full?'p-green':'p-amber')+'" title="Matched on SSCL &amp; VAT payment #'+p.id+'">'+(full?'<i class="fa-solid fa-circle-check"></i> Matched':'Partly')+' #'+p.id+(p.pd?' ('+esc(p.pd)+')':'')+' · '+fmtN(p.amt)+'</span><button type="button" class="sv-rev" onclick="svReverse('+r.id+','+p.id+','+p.amt+',\''+esc(r.tax_invoice_no||'')+'\')" title="Remove this claim from SSCL &amp; VAT payment #'+p.id+'"><i class="fa-solid fa-rotate-left"></i> Reverse</button></span>').join('')+'</div>';
   if(r.sv_ack>0) h+=' <span class="pill p-blue" title="Sent to Acknowledgment from SSCL &amp; VAT payment #'+r.sv_ack+'">Ack #'+r.sv_ack+'</span>';
   if(svCanSend(r)) h+=' <button type="button" class="sv-btn'+(r.sv_tax==1?'':' o')+'" onclick="svOpen(['+r.id+'])" title="'+(r.sv_tax==1?'':'This claim type is not SSCL / VAT — check before sending')+'"><i class="fa-solid fa-paper-plane"></i> Send to SSCL &amp; VAT</button>';
   return h;
@@ -571,6 +590,11 @@ function svCheck(){ let t=0, bad=''; document.querySelectorAll('#svC input.amt')
   const p=SVPAY.find(p=>+p.id===SVSEL); if(bad) return svMsg(bad,'err'); if(!SVSEL) return svMsg('Pick the SSCL & VAT payment these claims belong to.');
   if(t>p.balance+0.01) return svMsg('Total '+fmtN(t)+' is more than payment #'+p.id+' has left to match ('+fmtN(p.balance)+').','err');
   svMsg('Payment #'+p.id+' left to match after this: '+fmtN(p.balance-t),'ok'); }
+async function svReverse(cid,sv,amt,ti){
+  if(!confirm('Reverse the SSCL & VAT match?\n\nClaim '+ti+' — '+fmtN(amt)+' will be removed from SSCL & VAT payment #'+sv+'.\nThe claim becomes unmatched again and can be sent again.')) return;
+  const fd=new FormData(); fd.append('ajax_action','sv_reverse'); fd.append('claim_id',cid); fd.append('sv_id',sv);
+  try{ const d=await (await fetch('customer_claim_report.php',{method:'POST',body:fd})).json(); if(!d.success) throw new Error(d.message); showToast(d.message); loadReport(_curPage); }
+  catch(e){ showToast(e.message,'err'); } }
 async function svSend(){ if(!SVSEL) return svMsg('Pick the SSCL & VAT payment first.','err'); const items=[]; document.querySelectorAll('#svC input.amt').forEach(x=>{ const v=parseFloat(x.value||0); if(v>0) items.push({id:+SVCL[+x.dataset.i].id,amount:v}); });
   if(!items.length) return svMsg('Nothing to send — the amounts are 0.','err');
   const fd=new FormData(); fd.append('ajax_action','sv_send'); fd.append('sv_id',SVSEL); fd.append('items',JSON.stringify(items)); fd.append('bank_ref',document.getElementById('svRef').value);
