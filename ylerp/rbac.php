@@ -971,7 +971,7 @@ function rbac_page_buttons($page) {
         if (preg_match_all('~<a\b([^>]*class\s*=\s*\\?"[^"]*(?:btn|button)[^"]*\\?"[^>]*)>(.*?)</a>~is', $js, $m)) foreach ($m[2] as $i => $inner) $add($jsLabel($inner, $m[1][$i]));
     }
     /* a control can name itself for this list anywhere in the file: data-perm-btn="Send to SSCL & VAT" */
-    if (preg_match_all('~data-perm-btn\s*=\s*\\\\?"([^"\\\\]{3,40})\\\\?"~i', $raw, $m)) foreach ($m[1] as $v) $add($v);
+    if (preg_match_all('~data-perm-btn\s*=\s*\\\\?"([^"\\\\]{3,40})\\\\?"~i', $raw, $m)) foreach ($m[1] as $v) if (!preg_match('~[\'+(){}\[\]$`]~', $v)) $add($v);   // skip a value still built by JavaScript
     ksort($found);
     @file_put_contents($cache, json_encode(['m' => $mt, 'b' => $found]));
     return $memo[$page] = $found;

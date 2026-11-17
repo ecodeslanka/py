@@ -121,9 +121,13 @@ function cc_build_where($conn) {
 /* ══ SEND A CLAIM CERTIFICATE TO A CLAIM PAGE ══
    "Send to …" puts the claim certificate on that page's claim list (table claim_cert_send_list: one destination per claim);
    on that page it is then picked as the matched certificate when the payment is entered, as normal.
-     sscl_vat → SSCL & VAT (sscl_vat.php)   ·   dal → Drivers & Loyalty (dal.php)   ·   others → Others (others_cc.php)
-   Matches already made: SSCL & VAT from sscl_vat_settlements, Drivers & Loyalty from dl_confirmed_payments. */
-$CC_DEST = ['sscl_vat' => ['SSCL & VAT', 'sscl_vat'], 'dal' => ['Drivers & Loyalty', 'dal'], 'others' => ['Others', 'others_cc']];
+     sscl_vat → SSCL & VAT (sscl_vat.php) · muthupalasa → Muthupalasa BP Claims (debit_note.php) · promoters → Promoters Salary (promoters_salary_cl.php)
+     sr_incentive → SR Incentive (sr_incentive_cc.php) · dal → Drivers & Loyalty (dal.php) · others → Others (others_cc.php)
+   Matches already made: the settlement table of each page ($CC_SETTLE), Drivers & Loyalty from dl_confirmed_payments. */
+$CC_DEST = ['sscl_vat' => ['SSCL & VAT', 'sscl_vat'], 'muthupalasa' => ['Muthupalasa BP Claims', 'debit_note'], 'promoters' => ['Promoters Salary', 'promoters_salary_cl'],
+            'sr_incentive' => ['SR Incentive', 'sr_incentive_cc'], 'dal' => ['Drivers & Loyalty', 'dal'], 'others' => ['Others', 'others_cc']];
+/* settlement table of each page: matched claims are read from claim_cert_item_id (amount = total_amount, payment = the record id column) */
+$CC_SETTLE = ['sscl_vat' => ['sscl_vat_settlements', 'sv_id'], 'muthupalasa' => ['dn_settlements', 'dn_id'], 'promoters' => ['pscl_settlements', 'pscl_id'], 'sr_incentive' => ['sricc_settlements', 'sricc_id']];
 function cc_sv_has($conn, $t) { $r = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $t) . "'"); return $r && mysqli_num_rows($r) > 0; }
 function cc_sv_tables($conn) {
     static $done = false; if ($done) return; $done = true;
@@ -136,12 +140,11 @@ function cc_sv_can($conn, $dest) { global $CC_DEST; if (!function_exists('rbac_c
 function cc_sv_is_tax($r) { $t = strtoupper(($r['claim_type'] ?? '') . ' ' . ($r['claim_description'] ?? '')); return strpos($t, 'SSCL') !== false || strpos($t, 'VAT') !== false; }
 /* per claim: where it was sent, and what is already matched (SSCL & VAT payments / Drivers & Loyalty confirmed payments) */
 function cc_sv_links($conn, array $ids) {
-    $out = []; $ids = array_values(array_filter(array_map('intval', $ids))); if (!$ids) return $out;
+    global $CC_SETTLE; $out = []; $ids = array_values(array_filter(array_map('intval', $ids))); if (!$ids) return $out;
     cc_sv_tables($conn); $in = implode(',', $ids);
-    if (cc_sv_has($conn, 'sscl_vat_settlements')) {
-        $q = @mysqli_query($conn, "SELECT s.claim_cert_item_id AS cid, s.sv_id, SUM(COALESCE(s.total_amount, s.amount, 0)) AS amt, MAX(v.paid_date) AS pd
-                                   FROM sscl_vat_settlements s LEFT JOIN sscl_vat v ON v.id = s.sv_id WHERE s.claim_cert_item_id IN ($in) GROUP BY s.claim_cert_item_id, s.sv_id");
-        while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['cid']; $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + (float)$x['amt']; $out[$c]['pays'][] = ['d' => 'sscl_vat', 'id' => (int)$x['sv_id'], 'amt' => round((float)$x['amt'], 2), 'pd' => $x['pd']]; } }
+    foreach ($CC_SETTLE as $d => [$tb, $pk]) { if (!cc_sv_has($conn, $tb)) continue;
+        $q = @mysqli_query($conn, "SELECT claim_cert_item_id AS cid, $pk AS rid, SUM(COALESCE(total_amount, amount, 0)) AS amt, MAX(DATE(created_at)) AS pd FROM $tb WHERE claim_cert_item_id IN ($in) GROUP BY claim_cert_item_id, $pk");
+        while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['cid']; $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + (float)$x['amt']; $out[$c]['pays'][] = ['d' => $d, 'id' => (int)$x['rid'], 'amt' => round((float)$x['amt'], 2), 'pd' => $x['pd']]; } }
     if (cc_sv_has($conn, 'dl_confirmed_payments')) {
         $q = @mysqli_query($conn, "SELECT claim_item_id AS cid, MAX(COALESCE(dl_record_id, id)) AS rid, SUM(COALESCE(total_amount, 0)) AS amt, MAX(DATE(confirmed_at)) AS pd FROM dl_confirmed_payments WHERE claim_item_id IN ($in) GROUP BY claim_item_id");
         while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['cid']; $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + (float)$x['amt']; $out[$c]['pays'][] = ['d' => 'dal', 'id' => (int)$x['rid'], 'amt' => round((float)$x['amt'], 2), 'pd' => $x['pd']]; } }
@@ -175,7 +178,7 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_unlist' 
     $dest = $L[$c]['dest'] ?? ''; if ($dest === '') $fail('This claim is not on any list.'); $dn = $CC_DEST[$dest][0] ?? $dest;
     if (!cc_sv_can($conn, $dest)) $fail('You do not have the right to change the ' . $dn . ' list.');
     if (!cc_sv_btn('reverse')) $fail('Permission blocked: you are not allowed to use the Reverse button.');
-    if (!empty($L[$c]['pays'])) $fail('This claim is already matched on a ' . ($L[$c]['pays'][0]['d'] === 'dal' ? 'Drivers & Loyalty' : 'SSCL & VAT') . ' payment — remove that payment line on that page first.');
+    if (!empty($L[$c]['pays'])) $fail('This claim is already matched on a ' . ($CC_DEST[$L[$c]['pays'][0]['d']][0] ?? '') . ' payment — remove that payment line on that page first.');
     if (!empty($L[$c]['ack'])) $fail('This claim was already sent to Acknowledgment — reverse it there first.');
     $ok = mysqli_query($conn, "DELETE FROM claim_cert_send_list WHERE claim_cert_item_id = $c");
     ob_end_clean(); echo json_encode(['success' => (bool)$ok, 'message' => $ok ? 'Reversed — the claim is removed from the ' . $dn . ' list.' : mysqli_error($conn)]); exit;
@@ -458,7 +461,7 @@ include 'header.php';
   <div class="rc-card">
     <div class="rc-card-hdr">
       <div class="rc-card-title"><i class="fa-solid fa-table-list"></i> Claim Records</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><select id="svDest" title="Where to send the selected claims" style="border:1.5px solid #5eead4;border-radius:9px;padding:8px 10px;font-size:12.5px;font-weight:700;color:#134e4a"><option value="sscl_vat">SSCL &amp; VAT</option><option value="dal">Drivers &amp; Loyalty</option><option value="others">Others</option></select><button class="btn-primary" id="svBulk" type="button" data-perm-btn="Send selected" onclick="svList(svPicked(),'bulk',document.getElementById('svDest').value)" disabled style="background:linear-gradient(135deg,#0f766e,#0d9488)"><i class="fa-solid fa-paper-plane"></i> Send selected <span id="svBulkN"></span></button>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><select id="svDest" title="Where to send the selected claims" style="border:1.5px solid #5eead4;border-radius:9px;padding:8px 10px;font-size:12.5px;font-weight:700;color:#134e4a"><option value="sscl_vat">SSCL &amp; VAT</option><option value="muthupalasa">Muthupalasa BP Claims</option><option value="promoters">Promoters Salary</option><option value="sr_incentive">SR Incentive</option><option value="dal">Drivers &amp; Loyalty</option><option value="others">Others</option></select><button class="btn-primary" id="svBulk" type="button" data-perm-btn="Send selected" onclick="svList(svPicked(),'bulk',document.getElementById('svDest').value)" disabled style="background:linear-gradient(135deg,#0f766e,#0d9488)"><i class="fa-solid fa-paper-plane"></i> Send selected <span id="svBulkN"></span></button>
       <div style="font-size:11.5px;color:var(--muted);" id="resultInfo"></div></div>
     </div>
     <div class="prev-outer">
@@ -482,7 +485,7 @@ include 'header.php';
               <th onclick="setSort('imported_at')">Imported At <span class="sort-ic" id="si-imported_at"></span></th>
               <th title="F = only the first number of the description · M = middle number / normal" style="text-align:center">F / M</th>
               <th>Scheme No</th>
-              <th style="cursor:default">Send to (SSCL &amp; VAT / Drivers &amp; Loyalty / Others)</th>
+              <th style="cursor:default">Send to claim page</th>
             </tr>
           </thead>
           <tbody id="repBody">
@@ -526,12 +529,13 @@ include 'header.php';
 </style>
 <script>
 let SVROWS = {};
-const SVD = {sscl_vat:'SSCL & VAT', dal:'Drivers & Loyalty', others:'Others'};
+const SVD = {sscl_vat:'SSCL & VAT', muthupalasa:'Muthupalasa BP Claims', promoters:'Promoters Salary', sr_incentive:'SR Incentive', dal:'Drivers & Loyalty', others:'Others'};
+const SVI = {sscl_vat:'fa-receipt', muthupalasa:'fa-file-invoice', promoters:'fa-user-tie', sr_incentive:'fa-trophy', dal:'fa-truck', others:'fa-layer-group'};
 function svFull(r){ return parseFloat(r.sv_settled||0)>0 && parseFloat(r.total_amount||0)-parseFloat(r.sv_settled||0)<=0.004; }
 function svCanSend(r){ return !r.sv_dest && !svFull(r); }
 function svCell(r){
   let h='';
-  (r.sv_pays||[]).forEach(p=>{ const pg=p.d==='dal'?'Drivers &amp; Loyalty':'SSCL &amp; VAT'; h+='<span class="pill '+(svFull(r)?'p-green':'p-amber')+'" title="Matched on '+pg+' payment #'+p.id+' — to undo, remove that payment line on the '+pg+' page">'+(svFull(r)?'<i class="fa-solid fa-circle-check"></i> Matched':'Partly matched')+' · '+pg+' #'+p.id+(p.pd?' ('+esc(p.pd)+')':'')+' · '+fmtN(p.amt)+'</span> '; });
+  (r.sv_pays||[]).forEach(p=>{ const pg=esc(SVD[p.d]||p.d); h+='<span class="pill '+(svFull(r)?'p-green':'p-amber')+'" title="Matched on '+pg+' payment #'+p.id+' — to undo, remove that payment line on the '+pg+' page">'+(svFull(r)?'<i class="fa-solid fa-circle-check"></i> Matched':'Partly matched')+' · '+pg+' #'+p.id+(p.pd?' ('+esc(p.pd)+')':'')+' · '+fmtN(p.amt)+'</span> '; });
   if(r.sv_ack>0) h+='<span class="pill p-blue">Ack #'+r.sv_ack+'</span> ';
   if(r.sv_dest && !svFull(r)) h+='<span class="pill p-teal" title="Sent '+esc(r.sv_listed)+' — pick it on the '+esc(SVD[r.sv_dest]||r.sv_dest)+' page when entering the payment"><i class="fa-solid fa-list-check"></i> In '+esc(SVD[r.sv_dest]||r.sv_dest)+' list</span> '
      +((r.sv_pays||[]).length||r.sv_ack>0?'':'<button type="button" class="sv-rev" onclick="svUnlist('+r.id+',\''+esc(r.tax_invoice_no||'')+'\')" title="Take this claim off the list"><i class="fa-solid fa-rotate-left"></i> Reverse</button>');
@@ -540,9 +544,8 @@ function svCell(r){
 }
 /* the three choices are real buttons, so each one can be ticked / unticked on the role form */
 function svMenu(btn,id){ document.querySelectorAll('.sv-menu').forEach(m=>m.remove()); const r=SVROWS[id], m=document.createElement('div'); m.className='sv-menu';
-  m.innerHTML='<button type="button" data-perm-btn="Send to SSCL &amp; VAT" onclick="svList(['+id+'],\'row\',\'sscl_vat\')"><i class="fa-solid fa-receipt"></i> Send to SSCL &amp; VAT'+(r&&r.sv_tax!=1?' <small>(not an SSCL / VAT type)</small>':'')+'</button>'
-    +'<button type="button" data-perm-btn="Send to Drivers &amp; Loyalty" onclick="svList(['+id+'],\'row\',\'dal\')"><i class="fa-solid fa-truck"></i> Send to Drivers &amp; Loyalty</button>'
-    +'<button type="button" data-perm-btn="Send to Others" onclick="svList(['+id+'],\'row\',\'others\')"><i class="fa-solid fa-layer-group"></i> Send to Others</button>';
+  m.innerHTML=Object.keys(SVD).map(d=>'<button type="button" data-perm-btn="Send to '+esc(SVD[d])+'" onclick="svList(['+id+'],\'row\',\''+d+'\')"><i class="fa-solid '+SVI[d]+'"></i> Send to '+esc(SVD[d])+(d==='sscl_vat'&&r&&r.sv_tax!=1?' <small>(not an SSCL / VAT type)</small>':'')+'</button>').join('');
+  /* fixed labels for the role form's button list: data-perm-btn="Send to SSCL & VAT" data-perm-btn="Send to Muthupalasa BP Claims" data-perm-btn="Send to Promoters Salary" data-perm-btn="Send to SR Incentive" data-perm-btn="Send to Drivers & Loyalty" data-perm-btn="Send to Others" */
   document.body.appendChild(m); const b=btn.getBoundingClientRect(); m.style.top=(b.bottom+4)+'px'; m.style.left=Math.max(8,Math.min(b.left,window.innerWidth-m.offsetWidth-8))+'px'; }
 document.addEventListener('click',e=>{ if(!e.target.closest('.sv-menu,.sv-dd')) document.querySelectorAll('.sv-menu').forEach(m=>m.remove()); });
 window.addEventListener('scroll',()=>document.querySelectorAll('.sv-menu').forEach(m=>m.remove()),true);
