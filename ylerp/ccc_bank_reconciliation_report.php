@@ -18,6 +18,9 @@ function cb_has($conn, $t) { $r = cb_q($conn, "SHOW TABLES LIKE '" . mysqli_real
 $e = fn($v) => mysqli_real_escape_string($GLOBALS['conn'], (string)$v);
 $hasCC = cb_has($conn, 'claim_cert_items');
 $hasRec = cb_has($conn, 'unilever_reconcile_log') && cb_has($conn, 'unilever_reconcile_claim_lines');
+$ulrAcc = 0; $ulrBt = '';
+if (cb_has($conn, 'unilever_recon_settings')) { $sr = cb_q($conn, "SELECT bank_account_id, UPPER(bank_type) AS bt FROM unilever_recon_settings WHERE id = 1 LIMIT 1"); $sx = $sr ? mysqli_fetch_assoc($sr) : null; $ulrAcc = (int)($sx['bank_account_id'] ?? 0); $ulrBt = (string)($sx['bt'] ?? ''); }
+$ulrLogW = $ulrAcc > 0 ? "l.account_id = $ulrAcc" : '1=1';   // the same reconcile entries Unilever Reconcile counts: its saved account, bank line still there
 $canRemove = function_exists('rbac_can') ? (bool)rbac_can('delete', 'unilever_reconcile') : true;   // removing a reconciled payment = a delete on Unilever Reconcile
 
 /* ═════════ detail of one banking date + entity ═════════ */
@@ -30,8 +33,8 @@ if (($_GET['ajax'] ?? '') === 'detail') {
     $recs = [];
     if ($hasRec) {
         $r = cb_q($conn, "SELECT l.id, l.id AS log_id, (SELECT COUNT(*) FROM unilever_reconcile_claim_lines c2 WHERE c2.log_id = l.id) AS n_lines, l.bank_field, l.bank_amount, cl.cert_amount, cl.bank_ref, l.reconciled_at, l.reconciled_by, l.description AS note, t.transaction_date, t.description AS bank_desc, t.credit, t.debit
-                          FROM unilever_reconcile_claim_lines cl JOIN unilever_reconcile_log l ON l.id = cl.log_id LEFT JOIN bank_statement_transactions t ON t.id = l.bank_txn_id
-                          WHERE DATE(cl.banking_date) = '{$e($d)}' AND COALESCE(cl.entity,'') = '{$e($en)}' ORDER BY l.reconciled_at, l.id");
+                          FROM unilever_reconcile_claim_lines cl JOIN unilever_reconcile_log l ON l.id = cl.log_id JOIN bank_statement_transactions t ON t.id = l.bank_txn_id
+                          WHERE DATE(cl.banking_date) = '{$e($d)}' AND COALESCE(cl.entity,'') = '{$e($en)}' AND $ulrLogW ORDER BY l.reconciled_at, l.id");
         while ($r && ($x = mysqli_fetch_assoc($r))) $recs[] = $x;
     }
     echo json_encode(['success' => true, 'certs' => $certs, 'recs' => $recs], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR); exit;
@@ -56,7 +59,8 @@ if ($hasCC) {
 if ($hasRec && $groups) {
     $r = cb_q($conn, "SELECT DATE(cl.banking_date) AS bdate, COALESCE(cl.entity,'') AS entity, SUM(cl.cert_amount) AS applied, MAX(t.transaction_date) AS last_bank, COUNT(DISTINCT l.bank_txn_id) AS banks,
                              GROUP_CONCAT(DISTINCT NULLIF(cl.bank_ref,'') SEPARATOR ', ') AS refs
-                      FROM unilever_reconcile_claim_lines cl JOIN unilever_reconcile_log l ON l.id = cl.log_id LEFT JOIN bank_statement_transactions t ON t.id = l.bank_txn_id
+                      FROM unilever_reconcile_claim_lines cl JOIN unilever_reconcile_log l ON l.id = cl.log_id JOIN bank_statement_transactions t ON t.id = l.bank_txn_id
+                      WHERE $ulrLogW
                       GROUP BY DATE(cl.banking_date), COALESCE(cl.entity,'')");
     while ($r && ($x = mysqli_fetch_assoc($r))) { $k = $x['bdate'] . '___' . $x['entity']; if (isset($groups[$k])) { $groups[$k]['applied'] = round((float)$x['applied'], 2); $groups[$k]['last'] = (string)$x['last_bank']; $groups[$k]['refs'] = (string)$x['refs']; $groups[$k]['banks'] = (int)$x['banks']; } }
 }
@@ -72,18 +76,19 @@ foreach ($groups as $g) {
 $UL_DESC = ['UNILEVER LANKA CONSUMER LIMITED', 'UNILEVER SRI LANKA LIMITED', 'UNILEVER SRI LANKA LIMITED USLL', 'UNILEVER LANKA CONSUMER LIMITED ULCL', 'UNILEVER SRI LANKA LTD', 'UNILEVER LANKA CONSUMER LTD', 'UNILEVER LIPTON CEYLON LIMITED'];
 $bank = []; $bankTot = ['n' => 0, 'credit' => 0.0, 'applied' => 0.0, 'left' => 0.0]; $bankCfg = ''; $bankErr = '';
 if (cb_has($conn, 'bank_statement_transactions') && cb_has($conn, 'bank_statement_uploads') && cb_has($conn, 'unilever_recon_settings')) {
-    $sr = cb_q($conn, "SELECT bank_account_id, UPPER(bank_type) AS bt FROM unilever_recon_settings WHERE id = 1 LIMIT 1"); $sx = $sr ? mysqli_fetch_assoc($sr) : null;
-    $acc = (int)($sx['bank_account_id'] ?? 0); $bt = (string)($sx['bt'] ?? '');
+    $acc = $ulrAcc; $bt = $ulrBt;
     if ($acc > 0) {
         $dw = []; foreach ($UL_DESC as $d) $dw[] = "UPPER(t.description) LIKE '%" . $e($d) . "%'";
-        $w = ["u.account_id = $acc", "(t.recon_source IS NULL OR t.recon_source = '' OR t.recon_source = 'unilever_recon')", "(t.reconciled = 0 OR t.reconcile_balance > 0)", "t.credit > 0", '(' . implode(' OR ', $dw) . ')'];
+        $w = ["u.account_id = $acc", "(t.recon_source IS NULL OR t.recon_source = '' OR t.recon_source = 'unilever_recon')", "t.credit > 0", '(' . implode(' OR ', $dw) . ')'];
         if ($bt !== '') $w[] = "UPPER(u.bank_type) = '{$e($bt)}'";
         if ($f_from) $w[] = "t.transaction_date >= '{$e($f_from)}'";
         if ($f_to)   $w[] = "t.transaction_date <= '{$e($f_to)}'";
         if ($f_q !== '') $w[] = "(t.description LIKE '%{$e($f_q)}%' OR t.reference LIKE '%{$e($f_q)}%' OR CAST(t.credit AS CHAR) LIKE '%{$e($f_q)}%')";
-        $r = cb_q($conn, "SELECT t.id, t.transaction_date, t.description, t.reference, t.credit, t.reconcile_balance, t.reconciled_amount FROM bank_statement_transactions t JOIN bank_statement_uploads u ON u.id = t.upload_id WHERE " . implode(' AND ', $w) . " ORDER BY t.transaction_date DESC, t.id DESC LIMIT 3000");
+        /* applied to a bank line = what Unilever Reconcile's log has put on it (the stored reconcile balance on the line can be out of date) */
+        $lg = $hasRec ? "LEFT JOIN (SELECT bank_txn_id, SUM(claim_total) AS ap FROM unilever_reconcile_log WHERE account_id = $acc GROUP BY bank_txn_id) lg ON lg.bank_txn_id = t.id" : '';
+        $r = cb_q($conn, "SELECT t.id, t.transaction_date, t.description, t.reference, t.credit, " . ($lg ? 'COALESCE(lg.ap,0)' : 'COALESCE(t.reconciled_amount,0)') . " AS ap FROM bank_statement_transactions t JOIN bank_statement_uploads u ON u.id = t.upload_id $lg WHERE " . implode(' AND ', $w) . " ORDER BY t.transaction_date DESC, t.id DESC LIMIT 5000");
         while ($r && ($x = mysqli_fetch_assoc($r))) {
-            $cr = round((float)$x['credit'], 2); $left = $x['reconcile_balance'] !== null ? round((float)$x['reconcile_balance'], 2) : $cr;
+            $cr = round((float)$x['credit'], 2); $left = round($cr - (float)$x['ap'], 2);
             if ($left <= 0.009) continue;
             $x['left'] = $left; $x['applied'] = round($cr - $left, 2); $x['credit'] = $cr; $bank[] = $x;
             $bankTot['n']++; $bankTot['credit'] += $cr; $bankTot['applied'] += $x['applied']; $bankTot['left'] += $left;
