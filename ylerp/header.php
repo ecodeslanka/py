@@ -712,6 +712,7 @@ if (isset($conn) && $conn) {
 </style>
 </head>
 <body class="<?php echo function_exists('rbac_body_classes') ? rbac_body_classes() : ''; ?>">
+<?php if (is_file(__DIR__ . '/yms_bot_widget.php')) include __DIR__ . '/yms_bot_widget.php';   /* YMS Bot help assistant (each user can hide it) */ ?>
     <style>/* RBAC: hide buttons marked data-perm="create|edit|delete" when the role lacks that right */
     body.rbac-no-create [data-perm~="create"], body.rbac-no-edit [data-perm~="edit"], body.rbac-no-delete [data-perm~="delete"]{display:none!important}</style>
     <script>window.RBAC = <?php echo function_exists('rbac_js') ? rbac_js() : '{}'; ?>;</script>
