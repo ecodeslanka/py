@@ -11,6 +11,7 @@
  *     shortcuts every user gets (table company_quick_links; on/off in system_settings 'ql_enabled').
  * Called directly (yms_quicklinks.php?ql=…) it reads / saves the list.
  */
+if (!function_exists('yms_q')) { function yms_q($conn, $sql) { try { return $conn ? mysqli_query($conn, $sql) : false; } catch (Throwable $e) { return false; } } }   // a failed query returns false (the server throws mysqli exceptions)
 if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'yms_quicklinks.php') {
     include 'config.php';
     if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
@@ -21,8 +22,8 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'yms_quicklinks.php') {
     if (($_GET['ql'] ?? '') === 'company' && $_SERVER['REQUEST_METHOD'] === 'POST') {   // Quick Shortcuts Settings: the shortcuts every user gets
         if (function_exists('rbac_can') && !rbac_can('edit', 'ql_settings')) { echo json_encode(['success' => false, 'message' => 'Your role cannot change the company shortcuts (Edit right on Quick Shortcuts Settings).']); exit; }
         $clean = ql_clean(json_decode($_POST['items'] ?? '[]', true));
-        mysqli_begin_transaction($conn); @mysqli_query($conn, "DELETE FROM company_quick_links");
-        foreach ($clean as $i => $k) { $e = mysqli_real_escape_string($conn, $k); @mysqli_query($conn, "INSERT INTO company_quick_links (page_key, sort_no) VALUES ('$e', $i)"); }
+        mysqli_begin_transaction($conn); yms_q($conn, "DELETE FROM company_quick_links");
+        foreach ($clean as $i => $k) { $e = mysqli_real_escape_string($conn, $k); yms_q($conn, "INSERT INTO company_quick_links (page_key, sort_no) VALUES ('$e', $i)"); }
         mysqli_commit($conn);
         echo json_encode(['success' => true, 'items' => $clean]); exit;
     }
@@ -31,8 +32,8 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'yms_quicklinks.php') {
         $clean = [];
         foreach ($items as $k) { $k = (string)$k; if (preg_match('/^(?:[a-z0-9_\-]{1,100}|menu:[^\'"<>\\\\]{1,90})$/i', $k) && !in_array($k, $clean, true)) $clean[] = $k; if (count($clean) >= 40) break; }
         mysqli_begin_transaction($conn);
-        @mysqli_query($conn, "DELETE FROM user_quick_links WHERE user_id = $uid");
-        foreach ($clean as $i => $k) { $e = mysqli_real_escape_string($conn, $k); @mysqli_query($conn, "INSERT INTO user_quick_links (user_id, page_key, sort_no) VALUES ($uid, '$e', $i)"); }
+        yms_q($conn, "DELETE FROM user_quick_links WHERE user_id = $uid");
+        foreach ($clean as $i => $k) { $e = mysqli_real_escape_string($conn, $k); yms_q($conn, "INSERT INTO user_quick_links (user_id, page_key, sort_no) VALUES ($uid, '$e', $i)"); }
         mysqli_commit($conn);
         echo json_encode(['success' => true, 'items' => $clean]); exit;
     }
@@ -46,26 +47,26 @@ function ql_clean($items) {
 }
 function ql_enabled($conn) {
     if (!$conn) return true;
-    $r = @mysqli_query($conn, "SELECT setting_value FROM system_settings WHERE setting_key = 'ql_enabled'");
+    $r = yms_q($conn, "SELECT setting_value FROM system_settings WHERE setting_key = 'ql_enabled'");
     return !($r && ($x = mysqli_fetch_row($r)) && $x[0] === '0');
 }
 function ql_company($conn) {
     if (!$conn) return []; ql_table($conn); $o = [];
-    $r = @mysqli_query($conn, "SELECT page_key FROM company_quick_links ORDER BY sort_no");
+    $r = yms_q($conn, "SELECT page_key FROM company_quick_links ORDER BY sort_no");
     while ($r && ($x = mysqli_fetch_row($r))) $o[] = $x[0];
     return $o;
 }
 function ql_table($conn) {
     static $done = false; if ($done || !$conn) return; $done = true;
-    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS company_quick_links (page_key VARCHAR(120) NOT NULL PRIMARY KEY, sort_no INT NOT NULL DEFAULT 0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS system_settings (setting_key VARCHAR(80) NOT NULL PRIMARY KEY, setting_value VARCHAR(255) NULL, updated_by VARCHAR(100) NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS user_quick_links (user_id INT NOT NULL, page_key VARCHAR(120) NOT NULL, sort_no INT NOT NULL DEFAULT 0,
+    yms_q($conn, "CREATE TABLE IF NOT EXISTS company_quick_links (page_key VARCHAR(120) NOT NULL PRIMARY KEY, sort_no INT NOT NULL DEFAULT 0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    yms_q($conn, "CREATE TABLE IF NOT EXISTS system_settings (setting_key VARCHAR(80) NOT NULL PRIMARY KEY, setting_value VARCHAR(255) NULL, updated_by VARCHAR(100) NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    yms_q($conn, "CREATE TABLE IF NOT EXISTS user_quick_links (user_id INT NOT NULL, page_key VARCHAR(120) NOT NULL, sort_no INT NOT NULL DEFAULT 0,
                           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, page_key), KEY k_user (user_id, sort_no)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 function ql_items($conn, $uid) {
     if (!$conn || !$uid) return [];
     ql_table($conn); $o = [];
-    $r = @mysqli_query($conn, "SELECT page_key FROM user_quick_links WHERE user_id = " . (int)$uid . " ORDER BY sort_no, created_at");
+    $r = yms_q($conn, "SELECT page_key FROM user_quick_links WHERE user_id = " . (int)$uid . " ORDER BY sort_no, created_at");
     while ($r && ($x = mysqli_fetch_row($r))) $o[] = $x[0];
     return $o;
 }

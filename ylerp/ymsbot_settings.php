@@ -11,6 +11,7 @@
 include 'config.php';
 if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
 require_once __DIR__ . '/yms_bot_widget_lib.php';
+if (!function_exists('yms_q')) { function yms_q($conn, $sql) { try { return $conn ? mysqli_query($conn, $sql) : false; } catch (Throwable $e) { return false; } } }   // a failed query returns false (the server throws mysqli exceptions)
 ymsbot_settings_table($conn);
 $canEdit = function_exists('rbac_can') ? rbac_can('edit') : true;
 $msg = ''; $err = '';
@@ -21,13 +22,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
         $vals = ['ymsbot_enabled' => empty($_POST['enabled']) ? '0' : '1', 'ymsbot_user_hide' => empty($_POST['user_hide']) ? '0' : '1',
                  'ymsbot_default' => ($_POST['default'] ?? '') === 'mini' ? 'mini' : 'full', 'ymsbot_ai' => empty($_POST['ai']) ? '0' : '1', 'ymsbot_hello' => empty($_POST['hello']) ? '0' : '1'];
         foreach ($vals as $k => $v) ymsbot_set($conn, $k, $v, $u);
-        if (!empty($_POST['reset_users'])) @mysqli_query($conn, "DELETE FROM user_ui_prefs WHERE pref_key = 'ymsbot_mode' AND user_id > 0");
+        if (!empty($_POST['reset_users'])) yms_q($conn, "DELETE FROM user_ui_prefs WHERE pref_key = 'ymsbot_mode' AND user_id > 0");
         $msg = 'Saved. The change shows on the next page each user opens.' . (!empty($_POST['reset_users']) ? ' Every user\'s own choice was cleared — they now see the default.' : '');
     }
 }
 $S = ymsbot_settings($conn);
 $nUsers = ['full' => 0, 'mini' => 0, 'off' => 0];
-$r = @mysqli_query($conn, "SELECT pref_value, COUNT(*) AS n FROM user_ui_prefs WHERE pref_key = 'ymsbot_mode' AND user_id > 0 GROUP BY pref_value");
+$r = yms_q($conn, "SELECT pref_value, COUNT(*) AS n FROM user_ui_prefs WHERE pref_key = 'ymsbot_mode' AND user_id > 0 GROUP BY pref_value");
 while ($r && ($x = mysqli_fetch_assoc($r))) if (isset($nUsers[$x['pref_value']])) $nUsers[$x['pref_value']] = (int)$x['n'];
 include 'header.php';
 ?>

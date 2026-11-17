@@ -9,6 +9,7 @@
  * Called directly (yms_bot_widget.php?yb=…) it answers the widget's own requests.
  */
 require_once __DIR__ . '/yms_bot_widget_lib.php';
+if (!function_exists('yms_q')) { function yms_q($conn, $sql) { try { return $conn ? mysqli_query($conn, $sql) : false; } catch (Throwable $e) { return false; } } }   // a failed query returns false (the server throws mysqli exceptions)
 if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'yms_bot_widget.php') {
     include 'config.php';
     if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
@@ -44,7 +45,7 @@ ymsbot_settings_table($conn ?? null);
 $__CS = ymsbot_settings($conn ?? null);
 $__ybGlobal = $__CS['ymsbot_enabled'] === '0' ? 'off' : 'on'; $__ybUser = $__CS['ymsbot_user_hide'] === '1';
 $__ybMode = $__CS['ymsbot_default'] === 'mini' ? 'mini' : 'full';
-if ($__ybUser && isset($conn) && $conn) { try { $r = @mysqli_query($conn, "SELECT pref_value FROM user_ui_prefs WHERE user_id = " . (int)$_SESSION['user_id'] . " AND pref_key = 'ymsbot_mode'"); if ($r && ($x = mysqli_fetch_row($r))) $__ybMode = in_array($x[0], ['mini', 'off', 'full'], true) ? $x[0] : $__ybMode; } catch (Throwable $e) {} }
+if ($__ybUser && isset($conn) && $conn) { try { $r = yms_q($conn, "SELECT pref_value FROM user_ui_prefs WHERE user_id = " . (int)$_SESSION['user_id'] . " AND pref_key = 'ymsbot_mode'"); if ($r && ($x = mysqli_fetch_row($r))) $__ybMode = in_array($x[0], ['mini', 'off', 'full'], true) ? $x[0] : $__ybMode; } catch (Throwable $e) {} }
 $__ybAdmin = function_exists('rbac_can') ? rbac_can('view', 'ymsbot_settings') : false;
 $__ybName = trim(explode(' ', (string)($_SESSION['full_name'] ?? ($_SESSION['username'] ?? '')))[0] ?? '');
 ?>

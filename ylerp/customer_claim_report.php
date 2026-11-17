@@ -7,9 +7,10 @@
  */
 if (session_status() === PHP_SESSION_NONE) session_start();
 include_once 'config.php';
+if (!function_exists('yms_q')) { function yms_q($conn, $sql) { try { return $conn ? mysqli_query($conn, $sql) : false; } catch (Throwable $e) { return false; } } }   // a failed query returns false (the server throws mysqli exceptions)
 
 function ensure_claim_tables_r($conn) {
-    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_uploads (
+    yms_q($conn, "CREATE TABLE IF NOT EXISTS claim_cert_uploads (
         id INT AUTO_INCREMENT PRIMARY KEY,
         file_name VARCHAR(255) NOT NULL,
         customer_code VARCHAR(50) DEFAULT NULL,
@@ -24,7 +25,7 @@ function ensure_claim_tables_r($conn) {
         INDEX idx_created(created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
-    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_items (
+    yms_q($conn, "CREATE TABLE IF NOT EXISTS claim_cert_items (
         id INT AUTO_INCREMENT PRIMARY KEY,
         upload_id INT NOT NULL,
         row_no INT DEFAULT NULL,
@@ -128,12 +129,12 @@ $CC_DEST = ['sscl_vat' => ['SSCL & VAT', 'sscl_vat'], 'muthupalasa' => ['Muthupa
             'sr_incentive' => ['SR Incentive', 'sr_incentive_cc'], 'dal' => ['Drivers & Loyalty', 'dal'], 'others' => ['Others', 'others_cc']];
 /* settlement table of each page: matched claims are read from claim_cert_item_id (amount = total_amount, payment = the record id column) */
 $CC_SETTLE = ['sscl_vat' => ['sscl_vat_settlements', 'sv_id'], 'muthupalasa' => ['dn_settlements', 'dn_id'], 'promoters' => ['pscl_settlements', 'pscl_id'], 'sr_incentive' => ['sricc_settlements', 'sricc_id']];
-function cc_sv_has($conn, $t) { $r = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $t) . "'"); return $r && mysqli_num_rows($r) > 0; }
+function cc_sv_has($conn, $t) { $r = yms_q($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $t) . "'"); return $r && mysqli_num_rows($r) > 0; }
 function cc_sv_tables($conn) {
     static $done = false; if ($done) return; $done = true;
-    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (claim_cert_item_id INT NOT NULL PRIMARY KEY, dest VARCHAR(20) NOT NULL, sent_by VARCHAR(100) NULL, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, KEY k_dest (dest))");
+    yms_q($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (claim_cert_item_id INT NOT NULL PRIMARY KEY, dest VARCHAR(20) NOT NULL, sent_by VARCHAR(100) NULL, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, KEY k_dest (dest))");
     if (cc_sv_has($conn, 'sscl_vat_claim_list'))   // the first version kept the SSCL & VAT list in its own table
-        @mysqli_query($conn, "INSERT IGNORE INTO claim_cert_send_list (claim_cert_item_id, dest, sent_by, sent_at) SELECT claim_cert_item_id, 'sscl_vat', sent_by, sent_at FROM sscl_vat_claim_list");
+        yms_q($conn, "INSERT IGNORE INTO claim_cert_send_list (claim_cert_item_id, dest, sent_by, sent_at) SELECT claim_cert_item_id, 'sscl_vat', sent_by, sent_at FROM sscl_vat_claim_list");
 }
 function cc_sv_can($conn, $dest) { global $CC_DEST; if (!function_exists('rbac_can')) @include_once __DIR__ . '/rbac.php'; $pg = $CC_DEST[$dest][1] ?? 'sscl_vat';
     return function_exists('rbac_can') ? (rbac_can('create', $pg) || rbac_can('edit', $pg)) : true; }
@@ -143,14 +144,14 @@ function cc_sv_links($conn, array $ids) {
     global $CC_SETTLE; $out = []; $ids = array_values(array_filter(array_map('intval', $ids))); if (!$ids) return $out;
     cc_sv_tables($conn); $in = implode(',', $ids);
     foreach ($CC_SETTLE as $d => [$tb, $pk]) { if (!cc_sv_has($conn, $tb)) continue;
-        $q = @mysqli_query($conn, "SELECT claim_cert_item_id AS cid, $pk AS rid, SUM(COALESCE(total_amount, amount, 0)) AS amt, MAX(DATE(created_at)) AS pd FROM $tb WHERE claim_cert_item_id IN ($in) GROUP BY claim_cert_item_id, $pk");
+        $q = yms_q($conn, "SELECT claim_cert_item_id AS cid, $pk AS rid, SUM(COALESCE(total_amount, amount, 0)) AS amt, MAX(DATE(created_at)) AS pd FROM $tb WHERE claim_cert_item_id IN ($in) GROUP BY claim_cert_item_id, $pk");
         while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['cid']; $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + (float)$x['amt']; $out[$c]['pays'][] = ['d' => $d, 'id' => (int)$x['rid'], 'amt' => round((float)$x['amt'], 2), 'pd' => $x['pd']]; } }
     if (cc_sv_has($conn, 'dl_confirmed_payments')) {
-        $q = @mysqli_query($conn, "SELECT claim_item_id AS cid, MAX(COALESCE(dl_record_id, id)) AS rid, SUM(COALESCE(total_amount, 0)) AS amt, MAX(DATE(confirmed_at)) AS pd FROM dl_confirmed_payments WHERE claim_item_id IN ($in) GROUP BY claim_item_id");
+        $q = yms_q($conn, "SELECT claim_item_id AS cid, MAX(COALESCE(dl_record_id, id)) AS rid, SUM(COALESCE(total_amount, 0)) AS amt, MAX(DATE(confirmed_at)) AS pd FROM dl_confirmed_payments WHERE claim_item_id IN ($in) GROUP BY claim_item_id");
         while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['cid']; $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + (float)$x['amt']; $out[$c]['pays'][] = ['d' => 'dal', 'id' => (int)$x['rid'], 'amt' => round((float)$x['amt'], 2), 'pd' => $x['pd']]; } }
-    $q = @mysqli_query($conn, "SELECT claim_cert_item_id AS cid, dest, sent_at FROM claim_cert_send_list WHERE claim_cert_item_id IN ($in)");
+    $q = yms_q($conn, "SELECT claim_cert_item_id AS cid, dest, sent_at FROM claim_cert_send_list WHERE claim_cert_item_id IN ($in)");
     while ($q && ($x = mysqli_fetch_assoc($q))) { $out[(int)$x['cid']]['dest'] = $x['dest']; $out[(int)$x['cid']]['listed'] = $x['sent_at']; }
-    if (cc_sv_has($conn, 'dl_cheque_acknowledgments')) { $q = @mysqli_query($conn, "SELECT claim_item_id AS cid, confirmed_payment_id AS sv FROM dl_cheque_acknowledgments WHERE claim_item_id IN ($in)");
+    if (cc_sv_has($conn, 'dl_cheque_acknowledgments')) { $q = yms_q($conn, "SELECT claim_item_id AS cid, confirmed_payment_id AS sv FROM dl_cheque_acknowledgments WHERE claim_item_id IN ($in)");
         while ($q && ($x = mysqli_fetch_assoc($q))) $out[(int)$x['cid']]['ack'] = (int)$x['sv']; }
     return $out;
 }

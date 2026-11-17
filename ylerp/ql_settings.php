@@ -8,6 +8,7 @@
 include 'config.php';
 if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
 require_once __DIR__ . '/yms_quicklinks.php';
+if (!function_exists('yms_q')) { function yms_q($conn, $sql) { try { return $conn ? mysqli_query($conn, $sql) : false; } catch (Throwable $e) { return false; } } }   // a failed query returns false (the server throws mysqli exceptions)
 ql_table($conn);
 $canEdit = function_exists('rbac_can') ? rbac_can('edit') : true;
 $msg = ''; $err = '';
@@ -16,12 +17,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
     else {
         $u = mysqli_real_escape_string($conn, $_SESSION['username'] ?? ($_SESSION['user_name'] ?? 'system'));
         $v = empty($_POST['enabled']) ? '0' : '1';
-        @mysqli_query($conn, "INSERT INTO system_settings (setting_key, setting_value, updated_by) VALUES ('ql_enabled', '$v', '$u') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by)");
+        yms_q($conn, "INSERT INTO system_settings (setting_key, setting_value, updated_by) VALUES ('ql_enabled', '$v', '$u') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by)");
         $msg = $v === '1' ? 'Quick shortcuts are ON for every user.' : 'Quick shortcuts are switched OFF for every user.';
     }
 }
 $on = ql_enabled($conn); $company = ql_company($conn);
-$nUsers = 0; $nLinks = 0; $r = @mysqli_query($conn, "SELECT COUNT(DISTINCT user_id), COUNT(*) FROM user_quick_links"); if ($r && ($x = mysqli_fetch_row($r))) { $nUsers = (int)$x[0]; $nLinks = (int)$x[1]; }
+$nUsers = 0; $nLinks = 0; $r = yms_q($conn, "SELECT COUNT(DISTINCT user_id), COUNT(*) FROM user_quick_links"); if ($r && ($x = mysqli_fetch_row($r))) { $nUsers = (int)$x[0]; $nLinks = (int)$x[1]; }
 include 'header.php';
 ?>
 <style>
