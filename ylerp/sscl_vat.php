@@ -1570,11 +1570,12 @@ function pickClaim(el){
   $('apf-desc').value = el.dataset.desc||'';
   $('apf-head').textContent = 'From Claim: '+(el.dataset.ti||'Selected');
 
-  // Pre-fill amount = invoice (record) balance: total_amount − already settled on this record
+  // Pre-fill amount = the claim's remaining amount WITH VAT (claim total incl. VAT − already settled on it);
+  // nothing left on the claim → the payment record's balance
   const recTotal    = parseFloat($('sm-inv').value||0);
   const recSettled  = parseFloat($('ss-tot').value||0);
   const recBal      = Math.max(0, recTotal - recSettled);
-  $('apf-amt').value = recBal > 0 ? recBal.toFixed(2) : '';
+  $('apf-amt').value = remaining > 0 ? remaining.toFixed(2) : (recBal > 0 ? recBal.toFixed(2) : '');
 
   showAPF();
 }

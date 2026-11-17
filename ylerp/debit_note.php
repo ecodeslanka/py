@@ -1372,15 +1372,12 @@ function pickClaim(el){
   $('apf-desc').value = el.dataset.desc||'';
   $('apf-ref').value  = '';
 
-  const remainingBase = Math.max(0, claimAmt - gSettledAmt);
+  /* payment amount = the claim's remaining amount WITH VAT (claim total incl. VAT − what is already paid on it);
+     nothing left on the claim → the payment record's balance */
   const recBal = Math.max(0, parseFloat($('sm-inv').value||0) - parseFloat(($('ss-tot').textContent||'0').replace(/,/g,'')));
-  if(recBal > 0){
-    $('apf-amt').value = (remainingBase>0 ? Math.min(remainingBase,recBal) : recBal).toFixed(2);
-  } else if(remainingBase > 0){
-    $('apf-amt').value = remainingBase.toFixed(2);
-  } else {
-    $('apf-amt').value = claimAmt>0 ? claimAmt.toFixed(2) : '';
-  }
+  if(remaining > 0)      $('apf-amt').value = remaining.toFixed(2);
+  else if(recBal > 0)    $('apf-amt').value = recBal.toFixed(2);
+  else                   $('apf-amt').value = claimTot>0 ? claimTot.toFixed(2) : '';
 
   $('apf-head').textContent = 'From Claim: '+(el.dataset.ti||'Selected');
   showAPF();
