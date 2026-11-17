@@ -15,10 +15,17 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'yms_bot_widget.php') {
     $q = function ($sql) use ($conn) { try { return mysqli_query($conn, $sql); } catch (Throwable $e) { return false; } };
     $q("CREATE TABLE IF NOT EXISTS user_ui_prefs (user_id INT NOT NULL, pref_key VARCHAR(60) NOT NULL, pref_value VARCHAR(255) NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (user_id, pref_key)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $yb = $_GET['yb'] ?? '';
+    $isAdmin = function_exists('rbac_context') ? !empty(rbac_context()['full']) : true;
     if ($yb === 'pref' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $v = in_array($_POST['mode'] ?? '', ['full', 'mini'], true) ? $_POST['mode'] : 'full';
+        $v = in_array($_POST['mode'] ?? '', ['full', 'mini', 'off'], true) ? $_POST['mode'] : 'full';
         $q("REPLACE INTO user_ui_prefs (user_id, pref_key, pref_value) VALUES ($uid, 'ymsbot_mode', '$v')");
         echo json_encode(['success' => true, 'mode' => $v]); exit;
+    }
+    if ($yb === 'global' && $_SERVER['REQUEST_METHOD'] === 'POST') {   // Full Access roles only: switch YMS Bot on / off for every user (stored as user 0)
+        if (!$isAdmin) { echo json_encode(['success' => false, 'message' => 'Only a Full Access role can change this for everyone.']); exit; }
+        $v = ($_POST['on'] ?? '1') === '0' ? 'off' : 'on';
+        $q("REPLACE INTO user_ui_prefs (user_id, pref_key, pref_value) VALUES (0, 'ymsbot_global', '$v')");
+        echo json_encode(['success' => true, 'global' => $v]); exit;
     }
     if ($yb === 'pages') {   // the menu pages this user may open — used to search the menu and to show only links that work for this user
         if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
@@ -35,23 +42,45 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'yms_bot_widget.php') {
 /* ── included from header.php: draw the widget ── */
 if (empty($_SESSION['user_id'])) return;
 if (!empty($GLOBALS['YMSBOT_OFF']) || isset($_GET['print']) || isset($_GET['printview'])) return;   // a page can switch it off: $YMSBOT_OFF = true;
-$__ybMode = 'full';
-if (isset($conn) && $conn) { try { $r = @mysqli_query($conn, "SELECT pref_value FROM user_ui_prefs WHERE user_id = " . (int)$_SESSION['user_id'] . " AND pref_key = 'ymsbot_mode'"); if ($r && ($x = mysqli_fetch_row($r))) $__ybMode = $x[0] === 'mini' ? 'mini' : 'full'; } catch (Throwable $e) {} }
+$__ybMode = 'full'; $__ybGlobal = 'on';
+if (isset($conn) && $conn) { try { $r = @mysqli_query($conn, "SELECT user_id, pref_key, pref_value FROM user_ui_prefs WHERE (user_id = " . (int)$_SESSION['user_id'] . " AND pref_key = 'ymsbot_mode') OR (user_id = 0 AND pref_key = 'ymsbot_global')");
+    while ($r && ($x = mysqli_fetch_assoc($r))) { if ($x['pref_key'] === 'ymsbot_mode') $__ybMode = in_array($x['pref_value'], ['mini', 'off'], true) ? $x['pref_value'] : 'full'; else $__ybGlobal = $x['pref_value'] === 'off' ? 'off' : 'on'; } } catch (Throwable $e) {} }
+$__ybAdmin = function_exists('rbac_context') ? !empty(rbac_context()['full']) : false;
 $__ybName = trim(explode(' ', (string)($_SESSION['full_name'] ?? ($_SESSION['username'] ?? '')))[0] ?? '');
 ?>
-<div id="ymsBot" class="yb <?= $__ybMode === 'mini' ? 'yb-mini' : '' ?>" data-perm-skip>
+<div id="ymsBot" class="yb <?= $__ybMode === 'mini' ? 'yb-mini' : '' ?><?= ($__ybMode === 'off' || $__ybGlobal === 'off') ? ' yb-off' : '' ?>" data-perm-skip data-mode="<?= $__ybMode ?>" data-global="<?= $__ybGlobal ?>">
   <div class="yb-hint" id="ybHint">Hi<?= $__ybName !== '' ? ' ' . htmlspecialchars($__ybName) : '' ?>! 👋 I'm <b>YMS Bot</b>.<br>Ask me how to do something.</div>
   <button type="button" class="yb-fab" id="ybFab" title="YMS Bot — ask how to use the system" aria-label="Open YMS Bot"><span class="yb-ring"></span><img src="images/yms_bot_icon.png" alt="YMS Bot"><span class="yb-dot"></span></button>
   <div class="yb-panel" id="ybPanel" role="dialog" aria-label="YMS Bot">
     <div class="yb-hd"><img src="images/yms_bot_icon.png" alt=""><div><b>YMS Bot</b><small><i></i> Here to help you use the system</small></div>
       <button type="button" class="yb-ib" id="ybMenuBtn" title="Settings">⋯</button><button type="button" class="yb-ib" id="ybClose" title="Close">✕</button>
-      <div class="yb-menu" id="ybMenu"><button type="button" id="ybMini">🙈 Hide assistant (show a small icon)</button><button type="button" id="ybClear">🧹 Clear this chat</button><a href="bot.php" target="_blank">🤖 Open full Yelo AI</a></div></div>
+      <div class="yb-menu" id="ybMenu"><button type="button" id="ybMini">🙈 Hide assistant (show a small icon)</button><button type="button" id="ybClear">🧹 Clear this chat</button><button type="button" onclick="ymsBotSettings(event)">⚙️ YMS Bot settings</button><a href="bot.php" target="_blank">🤖 Open full Yelo AI</a></div></div>
     <div class="yb-body" id="ybBody"></div>
     <div class="yb-chips" id="ybChips"></div>
     <form class="yb-in" id="ybForm" autocomplete="off"><input id="ybQ" type="text" maxlength="300" placeholder="e.g. How to add a customer?"><button type="submit" title="Send">➤</button></form>
   </div>
 </div>
+<div class="ybs-bg" id="ybSet" data-perm-skip><div class="ybs">
+  <div class="ybs-hd"><img src="images/yms_bot_icon.png" alt=""><div><b>YMS Bot settings</b><small>How the help assistant shows for you</small></div><button type="button" id="ybSetX">✕</button></div>
+  <div class="ybs-bd">
+    <label class="ybs-o"><input type="radio" name="ybMode" value="full"><span><b>🤖 Show YMS Bot</b><small>The animated assistant at the bottom right of every page.</small></span></label>
+    <label class="ybs-o"><input type="radio" name="ybMode" value="mini"><span><b>🙈 Small icon only</b><small>A small bot icon in the corner — click it when you need help.</small></span></label>
+    <label class="ybs-o"><input type="radio" name="ybMode" value="off"><span><b>🚫 Hide completely</b><small>No bot on the pages. Turn it back on here (profile menu → YMS Bot).</small></span></label>
+    <?php if ($__ybAdmin): ?><div class="ybs-adm"><label><input type="checkbox" id="ybGlobal" <?= $__ybGlobal === 'on' ? 'checked' : '' ?>> <span><b>Show YMS Bot for every user</b><small>Administrator: untick to switch the assistant off for the whole company.</small></span></label></div><?php endif; ?>
+    <div class="ybs-msg" id="ybSetMsg"></div>
+  </div></div></div>
 <style>
+.ybs-bg{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:2147483600;display:none;align-items:center;justify-content:center;padding:14px;font-family:'Inter',system-ui,sans-serif}.ybs-bg.open{display:flex}
+.ybs{width:min(420px,100%);background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 30px 70px -20px rgba(15,23,42,.5);animation:ybIn .2s ease-out}
+.ybs-hd{display:flex;gap:10px;align-items:center;padding:14px 16px;color:#fff;background:linear-gradient(120deg,#991b1b,#dc2626 60%,#ef4444)}.ybs-hd img{width:42px;height:42px;border-radius:50%;background:#fff}
+.ybs-hd>div{flex:1}.ybs-hd b{display:block;font-size:15.5px}.ybs-hd small{font-size:12px;opacity:.9}.ybs-hd button{width:32px;height:32px;border:none;border-radius:10px;background:rgba(255,255,255,.18);color:#fff;font-size:15px;cursor:pointer}
+.ybs-bd{padding:14px 16px 16px;display:flex;flex-direction:column;gap:9px}
+.ybs-o{display:flex;gap:11px;align-items:flex-start;padding:11px 12px;border:1.5px solid #e2e8f0;border-radius:13px;cursor:pointer;transition:all .15s}.ybs-o:hover{border-color:#fca5a5;background:#fff7f7}
+.ybs-o input{margin-top:3px;width:17px;height:17px;accent-color:#dc2626;flex:0 0 auto}.ybs-o b{display:block;font-size:13.5px;color:#0f172a}.ybs-o small{display:block;font-size:12px;color:#64748b;margin-top:2px}
+.ybs-o:has(input:checked){border-color:#dc2626;background:#fef2f2}
+.ybs-adm{margin-top:4px;padding-top:10px;border-top:1px dashed #e2e8f0}.ybs-adm label{display:flex;gap:10px;align-items:flex-start;cursor:pointer}.ybs-adm input{margin-top:3px;width:17px;height:17px;accent-color:#1e3a8a}.ybs-adm b{display:block;font-size:13px;color:#1e3a8a}.ybs-adm small{font-size:12px;color:#64748b}
+.ybs-msg{font-size:12.5px;font-weight:700;color:#15803d;min-height:16px}
+.yb.yb-off{display:none!important}
 .yb{position:fixed;right:22px;bottom:22px;z-index:2147483000;font-family:'Inter',system-ui,sans-serif}
 .yb *{box-sizing:border-box}
 .yb-fab{position:relative;width:66px;height:66px;border-radius:50%;border:none;padding:0;cursor:pointer;background:#fff;box-shadow:0 10px 26px -6px rgba(220,38,38,.55),0 4px 12px rgba(15,23,42,.18);animation:ybFloat 3.2s ease-in-out infinite;transition:transform .2s}
@@ -165,8 +194,19 @@ $__ybName = trim(explode(' ', (string)($_SESSION['full_name'] ?? ($_SESSION['use
     $('ybChips').innerHTML=CH.map(function(c){ return '<button type="button">'+esc(c)+'</button>'; }).join(''); loadPages(function(){}); }
   function open(){ W.classList.add('open'); greet(); setTimeout(function(){ $('ybQ').focus(); },150); try{ sessionStorage.setItem('ybSeen','1'); }catch(e){} }
   function close(){ W.classList.remove('open'); $('ybMenu').classList.remove('open'); }
-  function setMode(m){ W.classList.toggle('yb-mini',m==='mini'); var f=new FormData(); f.append('mode',m); fetch('yms_bot_widget.php?yb=pref',{method:'POST',body:f,credentials:'same-origin'}).catch(function(){});
-    $('ybMini').innerHTML=m==='mini'?'👀 Show assistant (full size)':'🙈 Hide assistant (show a small icon)'; }
+  function apply(){ var m=W.dataset.mode, g=W.dataset.global; W.classList.toggle('yb-mini',m==='mini'); W.classList.toggle('yb-off',m==='off'||g==='off'); if(m==='off'||g==='off') close();
+    $('ybMini').innerHTML=m==='mini'?'👀 Show assistant (full size)':'🙈 Hide assistant (show a small icon)';
+    document.querySelectorAll('[data-ybstate]').forEach(function(el){ el.textContent=g==='off'?'Off for all':({full:'Shown',mini:'Small icon',off:'Hidden'})[m]; }); }
+  function setMode(m){ W.dataset.mode=m; apply(); var f=new FormData(); f.append('mode',m); return fetch('yms_bot_widget.php?yb=pref',{method:'POST',body:f,credentials:'same-origin'}).catch(function(){}); }
+  /* profile menu → YMS Bot: the settings window */
+  window.ymsBotSettings=function(e){ if(e){ e.preventDefault(); e.stopPropagation(); } document.querySelectorAll('input[name=ybMode]').forEach(function(r){ r.checked=r.value===W.dataset.mode; }); $('ybSetMsg').textContent=W.dataset.global==='off'?'An administrator has switched YMS Bot off for everyone.':''; $('ybSet').classList.add('open');
+    var dd=document.getElementById('userDropdown'); if(dd) dd.classList.remove('show','active','open'); };
+  $('ybSetX').addEventListener('click',function(){ $('ybSet').classList.remove('open'); });
+  $('ybSet').addEventListener('click',function(e){ if(e.target.id==='ybSet') $('ybSet').classList.remove('open'); });
+  document.querySelectorAll('input[name=ybMode]').forEach(function(r){ r.addEventListener('change',function(){ setMode(r.value).then(function(){ $('ybSetMsg').style.color='#15803d'; $('ybSetMsg').textContent='✓ Saved — '+({full:'YMS Bot is shown.',mini:'only a small icon is shown.',off:'YMS Bot is hidden. Turn it on again from the profile menu.'})[r.value]; }); }); });
+  if($('ybGlobal')) $('ybGlobal').addEventListener('change',function(){ var on=this.checked, f=new FormData(); f.append('on',on?'1':'0');
+    fetch('yms_bot_widget.php?yb=global',{method:'POST',body:f,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){ if(!d.success) throw new Error(d.message); W.dataset.global=on?'on':'off'; apply(); $('ybSetMsg').style.color='#1e3a8a'; $('ybSetMsg').textContent=on?'✓ YMS Bot is on for every user.':'✓ YMS Bot is switched off for every user.'; })
+      .catch(function(e){ $('ybSetMsg').style.color='#b91c1c'; $('ybSetMsg').textContent=e.message; }); });
   $('ybFab').addEventListener('click',function(){ W.classList.contains('open')?close():open(); });
   $('ybClose').addEventListener('click',close);
   $('ybMenuBtn').addEventListener('click',function(e){ e.stopPropagation(); $('ybMenu').classList.toggle('open'); });
@@ -177,9 +217,9 @@ $__ybName = trim(explode(' ', (string)($_SESSION['full_name'] ?? ($_SESSION['use
   $('ybChips').addEventListener('click',function(e){ var b=e.target.closest('button'); if(b) ask(b.textContent); });
   body.addEventListener('click',function(e){ var b=e.target.closest('[data-ai]'); if(b){ b.disabled=true; askAI(b.getAttribute('data-ai')); } });
   document.addEventListener('keydown',function(e){ if(e.key==='Escape') close(); });
-  if(W.classList.contains('yb-mini')) $('ybMini').innerHTML='👀 Show assistant (full size)';
+  apply(); document.addEventListener('DOMContentLoaded',apply);   // the profile menu is drawn after this script
   /* say hello once per browser session (not when hidden) */
   var seen=false; try{ seen=!!sessionStorage.getItem('ybSeen'); }catch(e){}
-  if(!seen && !W.classList.contains('yb-mini')) setTimeout(function(){ $('ybFab').classList.add('wave'); $('ybHint').classList.add('show'); setTimeout(function(){ $('ybHint').classList.remove('show'); },6500); try{ sessionStorage.setItem('ybSeen','1'); }catch(e){} },1800);
+  if(!seen && !W.classList.contains('yb-mini') && !W.classList.contains('yb-off')) setTimeout(function(){ $('ybFab').classList.add('wave'); $('ybHint').classList.add('show'); setTimeout(function(){ $('ybHint').classList.remove('show'); },6500); try{ sessionStorage.setItem('ybSeen','1'); }catch(e){} },1800);
 })();
 </script>

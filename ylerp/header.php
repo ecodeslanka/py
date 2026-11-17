@@ -897,6 +897,10 @@ if (isset($conn) && $conn) {
                         <i class="fa-solid fa-gear"></i>
                         <span>Settings</span>
                     </a>
+                    <a href="#" class="dropdown-item" onclick="if(window.ymsBotSettings){ ymsBotSettings(event); } return false;" data-perm-skip>
+                        <i class="fa-solid fa-robot"></i>
+                        <span>YMS Bot <small data-ybstate style="margin-left:6px;padding:1px 7px;border-radius:99px;background:#fee2e2;color:#b91c1c;font-size:10.5px;font-weight:700"></small></span>
+                    </a>
                     <a href="help.php" class="dropdown-item">
                         <i class="fa-solid fa-circle-question"></i>
                         <span>Help</span>
@@ -2327,6 +2331,7 @@ if (isset($conn) && $conn) {
                     <div class="ms-sidebar-user-dropdown" id="msSidebarUserDropdown">
                         <a href="profile.php" class="dropdown-item"><i class="fa-solid fa-user"></i><span>Profile</span></a>
                         <a href="settings.php" class="dropdown-item"><i class="fa-solid fa-gear"></i><span>Settings</span></a>
+                        <a href="#" class="dropdown-item" onclick="if(window.ymsBotSettings){ ymsBotSettings(event); } return false;" data-perm-skip><i class="fa-solid fa-robot"></i><span>YMS Bot <small data-ybstate style="margin-left:6px;padding:1px 7px;border-radius:99px;background:#fee2e2;color:#b91c1c;font-size:10.5px;font-weight:700"></small></span></a>
                         <a href="help.php" class="dropdown-item"><i class="fa-solid fa-circle-question"></i><span>Help</span></a>
                         <a href="logout.php" class="dropdown-item logout"><i class="fa-solid fa-right-from-bracket"></i><span>Logout</span></a>
                     </div>
