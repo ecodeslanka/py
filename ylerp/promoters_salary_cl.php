@@ -176,10 +176,14 @@ if (isset($_GET['action'])) {
         }
 
         // IMPROVED: More lenient base matching
-        /* only the claims sent here from the Customer Claim Report ("Send to → Promoters Salary"), plus those already matched here */
+        /* the original automatic match (promoter / salary claims) + claims sent here from the Customer Claim Report ("Send to → Promoters Salary") */
         mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (claim_cert_item_id INT NOT NULL PRIMARY KEY, dest VARCHAR(20) NOT NULL, sent_by VARCHAR(100) NULL, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, KEY k_dest (dest))");   // claims sent here from the Customer Claim Report
-        $base_where = "(ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'promoters')
-                       OR ci.id IN (SELECT claim_cert_item_id FROM pscl_settlements WHERE claim_cert_item_id > 0))";
+        $base_where = "(ci.claim_description LIKE '%promot%' 
+                       OR ci.claim_type LIKE '%promot%' 
+                       OR ci.ledger_type LIKE '%promot%'
+                       OR ci.claim_description LIKE '%salary%'
+                       OR ci.claim_type LIKE '%salary%'
+                       OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'promoters'))";
 
         $entity_sql  = '';
         $entity_trim = trim($rec['entity'] ?? '');

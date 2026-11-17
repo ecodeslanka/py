@@ -193,8 +193,8 @@ if (isset($_GET['action'])) {
                         WHERE ds.claim_cert_item_id = ci.id AND ds.dn_id = $dn_id
                     ),0) AS this_dn_settled_total
              FROM claim_cert_items ci
-             WHERE ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'muthupalasa')
-                OR ci.id IN (SELECT claim_cert_item_id FROM dn_settlements WHERE claim_cert_item_id > 0)
+             WHERE ci.claim_type = 'Muthupalasa BP Claims'
+                OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'muthupalasa')   -- + claims sent here from the Customer Claim Report
              ORDER BY ci.invoice_date DESC, ci.id DESC
              LIMIT 500"
         );

@@ -36,7 +36,7 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sscl_vat_settlements (
     INDEX idx_sv (sv_id)
 )");
 
-/* claims sent here from the Customer Claim Report ("Send to → SSCL & VAT", table claim_cert_send_list) — only these are offered as claim certificates to match */
+/* claims sent here from the Customer Claim Report ("Send to → SSCL & VAT", table claim_cert_send_list) — offered IN ADDITION to the SSCL / VAT claims found automatically */
 mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (
     claim_cert_item_id  INT NOT NULL PRIMARY KEY,
     dest                VARCHAR(20) NOT NULL,          -- sscl_vat | dal | others
@@ -45,7 +45,7 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (
     KEY k_dest (dest)
 )");
 $_old = mysqli_query($conn, "SHOW TABLES LIKE 'sscl_vat_claim_list'");   // the first version kept this list in its own table
-if ($_old && mysqli_num_rows($_old)) @mysqli_query($conn, "INSERT IGNORE INTO claim_cert_send_list (claim_cert_item_id, dest, sent_by, sent_at) SELECT claim_cert_item_id, 'sscl_vat', sent_by, sent_at FROM sscl_vat_claim_list");
+if ($_old && mysqli_num_rows($_old)) try { mysqli_query($conn, "INSERT IGNORE INTO claim_cert_send_list (claim_cert_item_id, dest, sent_by, sent_at) SELECT claim_cert_item_id, 'sscl_vat', sent_by, sent_at FROM sscl_vat_claim_list"); } catch (Throwable $e) {}
 
 foreach (['bank_ref','amount','vat_amount','total_amount','claim_description','entity','claim_cert_item_id','document_path','document_name'] as $col) {
     $chk = mysqli_query($conn, "SHOW COLUMNS FROM sscl_vat_settlements LIKE '$col'");
@@ -211,10 +211,15 @@ if (isset($_GET['action'])) {
                     COALESCE((SELECT SUM(s2.vat_amount)   FROM sscl_vat_settlements s2 WHERE s2.claim_cert_item_id=ci.id),0) as globally_settled_vat,
                     COALESCE((SELECT SUM(s2.total_amount) FROM sscl_vat_settlements s2 WHERE s2.claim_cert_item_id=ci.id),0) as globally_settled_total
              FROM claim_cert_items ci
-             WHERE ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'sscl_vat')
-                OR ci.id IN (SELECT claim_cert_item_id FROM sscl_vat_settlements WHERE claim_cert_item_id IS NOT NULL AND claim_cert_item_id > 0)
+             WHERE (
+                 ci.claim_type LIKE '%SSCL%'
+                 OR ci.claim_type LIKE '%VAT%'
+                 OR ci.claim_description LIKE '%SSCL%'
+                 OR ci.claim_description LIKE '%VAT%'
+             )
+                OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'sscl_vat')   -- + claims sent here from the Customer Claim Report
              ORDER BY ci.invoice_date DESC, ci.id DESC
-             LIMIT 1000"
+             LIMIT 400"
         );
         $claims = [];
         if ($res) { while ($r = mysqli_fetch_assoc($res)) $claims[] = $r; }
@@ -1435,7 +1440,7 @@ function renderClaims(list){
   if(q) filtered=filtered.filter(c=>((c.tax_invoice_no||'')+' '+(c.claim_description||'')+' '+(c.entity||'')).toLowerCase().includes(q));
 
   if(!filtered.length){
-    $('claimsList').innerHTML='<div class="no-claims"><i class="fa-solid fa-file-invoice"></i><p>No matching claims found.<br><small>Claims sent from the Customer Claim Report (Send to SSCL &amp; VAT) appear here.</small></p></div>';
+    $('claimsList').innerHTML='<div class="no-claims"><i class="fa-solid fa-file-invoice"></i><p>No matching claims found.<br><small>SSCL Claims and VAT Claims appear here.</small></p></div>';
     $('smClaimCount').textContent='0';
     return;
   }
