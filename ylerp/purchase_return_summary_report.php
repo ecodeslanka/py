@@ -352,13 +352,13 @@ $base_url = 'purchase_return_summary_report.php?' . http_build_query($query_para
                     <td class="td-recon-action no-print">
                         <?php if ($is_reconciled): ?>
                         <a href="purchase_return_reconciliation.php?inv_no=<?= $inv_encoded ?>"
-                           class="btn-recon btn-recon-done" onclick="return prOpen(event, this)"
+                           class="btn-recon btn-recon-done" onclick="return prOpen(event, this)" data-no-loader
                            title="View / Unlink reconciliation">
                             <i class="fa-solid fa-circle-check"></i> Reconciled
                         </a>
                         <?php else: ?>
                         <a href="purchase_return_reconciliation.php?inv_no=<?= $inv_encoded ?>"
-                           class="btn-recon btn-recon-pending" onclick="return prOpen(event, this)"
+                           class="btn-recon btn-recon-pending" onclick="return prOpen(event, this)" data-no-loader
                            title="Reconcile this invoice">
                             <i class="fa-solid fa-code-compare"></i> Reconcile
                         </a>
@@ -670,9 +670,12 @@ function prStep(dir){ const R=prRows(), i=R.findIndex(t=>t.dataset.inv===_pr.inv
   if(dir>0) t=R.slice(i+1).concat(R.slice(0,i)).find(x=>x.dataset.done!=='1'); else t=R[i-1];   // after the last row, starts again from the top
   if(t){ _pr.q=''; prLoad(t.dataset.inv); t.scrollIntoView({block:'center'}); } }
 function prClose(){ document.getElementById('prM').classList.remove('open'); document.body.style.overflow=''; prRows().forEach(t=>t.style.outline='');
-  if(_pr.changed){ try{ sessionStorage.setItem('prSumY',String(window.scrollY)); }catch(e){} location.reload(); } }   // refresh the totals, stay at the same place
+  if(_pr.changed){ _pr.changed=false; prRefresh(); } }
+/* refresh the table and the totals in place — no page load, the page stays where it is */
+async function prRefresh(){ try{ const html=await (await fetch(location.href,{credentials:'same-origin'})).text(); const doc=new DOMParser().parseFromString(html,'text/html');
+    ['.totals-row','tbody','tfoot'].forEach(sel=>{ const a=document.querySelector('.content-card '+sel)||document.querySelector(sel), b=doc.querySelector('.content-card '+sel)||doc.querySelector(sel); if(a&&b) a.innerHTML=b.innerHTML; });
+  }catch(e){} }
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('prM').classList.contains('open'))prClose(); });
-(function(){ try{ const y=sessionStorage.getItem('prSumY'); if(y!==null){ sessionStorage.removeItem('prSumY'); window.scrollTo(0,+y); } }catch(e){} })();
 </script>
 
 <?php include 'footer.php'; ?>
