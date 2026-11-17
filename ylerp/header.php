@@ -1860,9 +1860,6 @@ if (isset($conn) && $conn) {
                     <a href="customer_claim_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'customer_claim_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-chart-line"></i><span>Customer Claim Report</span>
                     </a>
-                    <a href="daily_scheme_discounts.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'daily_scheme_discounts.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-plus"></i><span>Daily Scheme Discounts</span>
-                    </a>
                     <a href="scheme_discount_daily_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_discount_daily_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-calendar-day"></i><span>Scheme Discount Daily Report</span>
                     </a>
@@ -1871,9 +1868,6 @@ if (isset($conn) && $conn) {
                     </a>
                     <a href="scheme_status_list.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_status_list.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-clipboard-check"></i><span>Current Scheme Status Report</span>
-                    </a>
-                    <a href="scheme_ledger_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_ledger_report.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-book-open"></i><span>Scheme Ledger</span>
                     </a>
                     <a href="scheme_discount_receivable.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_discount_receivable.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-plus"></i><span>Scheme Discount</span>

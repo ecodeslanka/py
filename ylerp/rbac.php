@@ -131,8 +131,11 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     'save_cash_shortage_report' => ['cash_shortage_employee_report', 'edit'],
     'save_credit_bill_issue' => ['credit_bill_issue', 'edit'],
     'save_credit_bill_verify' => ['credit_bill_issue', 'edit'],
-    'save_scheme_settlement' => ['daily_scheme_discounts', 'edit'],
-    'scheme_settlement_ajax' => ['daily_scheme_discounts', 'edit'],
+    'save_scheme_settlement' => ['scheme_discount_daily_report', 'edit'],
+    'scheme_settlement_ajax' => ['scheme_discount_daily_report', 'edit'],
+    // removed from the menu: they follow Vendor Ledger → Scheme Discount Daily Report
+    'daily_scheme_discounts' => ['scheme_discount_daily_report', 'view'],
+    'scheme_ledger_report'   => ['scheme_discount_daily_report', 'view'],
     'save_sentback_issue'  => ['sentback_cheques', 'edit'],
     'save_unloading_pay'   => ['reconcile_unloading', 'edit'],
     'sscl_vat_new'         => ['sscl_vat', 'view'],
