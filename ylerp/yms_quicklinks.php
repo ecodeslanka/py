@@ -118,6 +118,17 @@ function ql_header_button() {
 .ql-mine .mi.dragging{opacity:.35}.ql-mine .mi.over{outline:2px dashed #f59e0b}
 .ql-pop{position:fixed;z-index:2147482600;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 16px 36px rgba(0,0,0,.18);padding:8px;min-width:240px;max-height:60vh;overflow:auto;font-family:'Inter',system-ui,sans-serif}
 .ql-pop b{display:block;font-size:12px;color:#94a3b8;text-transform:uppercase;padding:4px 8px}.ql-pop a{display:flex;gap:9px;align-items:center;padding:8px 9px;border-radius:9px;text-decoration:none;color:#1e293b;font-size:13px;font-weight:600}.ql-pop a:hover{background:#eef2ff}
+.ql-pk-ft{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid #f1f5f9;background:#fff}.ql-pk-ft span{flex:1;font-size:12.5px;font-weight:700;color:#b45309}
+.ql-pk-ft button{border:none;border-radius:11px;padding:10px 18px;font:800 13px 'Inter',system-ui,sans-serif;cursor:pointer}.ql-pk-ft .ql-c{background:#f1f5f9;color:#334155}.ql-pk-ft .ql-s{background:linear-gradient(135deg,#f59e0b,#b45309);color:#fff}
+.ql-tr-sec{font-size:11px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin:12px 4px 4px;display:flex;align-items:center;gap:6px}
+.ql-tr-m{display:flex;align-items:center;gap:9px;padding:8px 8px;border-radius:11px;font-size:13.5px;font-weight:700;color:#1e293b;cursor:pointer;user-select:none}.ql-tr-m:hover{background:#f8fafc}
+.ql-tr-m .mic{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;flex:0 0 auto}
+.ql-tr-m .chev{color:#94a3b8;font-size:11px;transition:transform .15s;width:12px}.ql-tr-m.op .chev{transform:rotate(90deg)}.ql-tr-m span{flex:1;min-width:0}.ql-tr-m small{color:#94a3b8;font-weight:600;font-size:11px;margin-left:4px}
+.ql-tr-kids{margin:2px 0 6px 22px;padding-left:10px;border-left:2px solid #f1f5f9;display:none}.ql-tr-kids.op{display:block}
+.ql-tr-g{font-size:11.5px;font-weight:800;color:#64748b;margin:8px 4px 2px}
+.ql-pk-row.sub{padding:6px 8px;font-size:12.8px}.ql-pk-row.sub i.fi{width:22px;height:22px;font-size:11px;border-radius:7px}
+.ql-btnadd{border:1.5px solid #fcd34d;background:#fff;color:#92400e;border-radius:8px;padding:3px 9px;font:800 11.5px 'Inter',sans-serif;cursor:pointer;white-space:nowrap}.ql-btnadd.on{background:#f59e0b;border-color:#f59e0b;color:#fff}.ql-btnadd.co{border-color:#ddd6fe;color:#6d28d9;background:#f5f3ff;cursor:default}
+#sidebar .ql-side-hd .menu-icon{background:linear-gradient(135deg,#f59e0b,#d97706)!important}#sidebar .ql-side-add{color:#b45309!important;font-weight:700}
 @media (max-width:700px){.ql-pk-bd{grid-template-columns:1fr}.ql-pk-r{border-left:none;border-top:1px solid #fde68a;max-height:40%}.ql-btn .ql-t{display:none}}
 </style>
 <div class="ql-wrap" id="qlWrap" data-perm-skip<?= $GLOBALS['QL_ON'] ? '' : ' style="display:none"' ?>>
@@ -127,9 +138,10 @@ function ql_header_button() {
 </div>
 <div class="ql-dz" id="qlDz">⚡ Drop on <b>Quick</b> (top) or on the home shortcuts to add it</div>
 <div class="ql-pk-bg" id="qlPk" data-perm-skip><div class="ql-pk">
-  <div class="ql-pk-hd"><i class="fa-solid fa-bolt" style="font-size:20px"></i><div><b>My quick shortcuts</b><small>Add pages or whole menus, drag to change the order</small></div><button type="button" id="qlPkX">✕</button></div>
+  <div class="ql-pk-hd"><i class="fa-solid fa-bolt" style="font-size:20px"></i><div><b>My quick shortcuts</b><small>Open a menu, click <b>+ Add</b> on the pages you want, then <b>Save shortcuts</b></small></div><button type="button" id="qlPkX">✕</button></div>
   <div class="ql-pk-bd"><div class="ql-pk-l"><input id="qlPkQ" type="search" placeholder="Search a page or menu…"><div class="ql-pk-list" id="qlPkList"></div></div>
-    <div class="ql-pk-r"><h4><i class="fa-solid fa-star" style="color:#f59e0b"></i> My shortcuts <small id="qlPkN" style="font-weight:600;color:#a16207"></small></h4><div class="ql-mine" id="qlMine"></div></div></div></div></div>
+    <div class="ql-pk-r"><h4><i class="fa-solid fa-star" style="color:#f59e0b"></i> My shortcuts <small id="qlPkN" style="font-weight:600;color:#a16207"></small></h4><div class="ql-mine" id="qlMine"></div></div></div>
+  <div class="ql-pk-ft"><span id="qlPkDirty"></span><button type="button" class="ql-c" id="qlPkCancel">Cancel</button><button type="button" class="ql-s" id="qlPkSave">💾 Save shortcuts</button></div></div></div>
 <script>
 (function(){
   if(window.QL) return; var Q=window.QL={items:<?= json_encode(array_values($items)) ?>,company:<?= json_encode(array_values($company)) ?>,map:null};
@@ -141,9 +153,22 @@ function ql_header_button() {
   function iconOf(el){ var i=el&&el.querySelector('i[class*="fa-"]:not(.submenu-toggle)'); if(i) return i.className.replace(/\b(menu-icon|icon-\w+)\b/g,'').trim(); return el&&el.querySelector('img')?'fa-solid fa-layer-group':'fa-solid fa-file'; }
   function mlabel(mi){ return mi.getAttribute('data-tooltip')||txt(mi.querySelector('.menu-item-content span:not(.menu-icon)'))||txt(mi.querySelector('span:not(.menu-icon)')); }
   /* top-level menu headings that have a list of pages under them (expandable menus and the always-open report headings) */
-  function heads(sb){ return [].filter.call(sb.querySelectorAll('.menu-item'),function(mi){ var n=mi.nextElementSibling; return !mi.closest('.submenu')&&n&&n.classList.contains('submenu'); }); }
+  function heads(sb){ return [].filter.call(sb.querySelectorAll('.menu-item'),function(mi){ var n=mi.nextElementSibling; return !mi.closest('.submenu')&&!mi.hasAttribute('data-qlside')&&n&&n.classList.contains('submenu'); }); }
+  function pageKey(a){ var m=(a.getAttribute('href')||'').split('?')[0].match(/^([a-z0-9_\-]+)\.php$/i); return m?m[1].toLowerCase():null; }
+  /* the sidebar as a tree: section → (page | menu → (page | group → pages)) — same order and names as the menu */
+  function tree(){ var sb=document.querySelector('#sidebar,.sidebar'), M=build(), out=[]; if(!sb) return out;
+    var secs=sb.querySelectorAll('.menu-section'); if(!secs.length) secs=[sb];
+    [].forEach.call(secs,function(sec){ var t=sec.querySelector('.menu-title span'), S={t:t?txt(t):'',items:[]};
+      [].forEach.call(sec.querySelectorAll('a.menu-item[href], .menu-item'),function(el){ if(el.closest('.submenu')||el.closest('[data-qlside]')) return;
+        if(el.tagName==='A'){ var k=pageKey(el); if(k&&M[k]) S.items.push({p:k}); return; }
+        var n=el.nextElementSibling; if(!n||!n.classList.contains('submenu')) return; var mk='menu:'+mlabel(el); if(!M[mk]) return; var kids=[];
+        [].forEach.call(n.children,function(c){ if(c.tagName==='A'){ var k=pageKey(c); if(k&&M[k]) kids.push({p:k}); }
+          else if(c.classList.contains('submenu')){ var g=c.previousElementSibling, pg=[]; c.querySelectorAll('a[href]').forEach(function(a){ var k=pageKey(a); if(k&&M[k]) pg.push(k); }); if(pg.length) kids.push({g:g?mlabel(g)||txt(g):'',pages:pg}); } });
+        S.items.push({m:mk,kids:kids}); });
+      if(S.items.length) out.push(S); });
+    return out; }
   function build(){ if(Q.map) return Q.map; var M={}, sb=document.querySelector('#sidebar,.sidebar'); if(!sb) return Q.map=M;
-    sb.querySelectorAll('a[href]').forEach(function(a){ var h=(a.getAttribute('href')||'').split('?')[0]; var m=h.match(/^([a-z0-9_\-]+)\.php$/i); if(!m) return; var p=m[1].toLowerCase(); if(p==='logout'||M[p]) return;
+    sb.querySelectorAll('a[href]').forEach(function(a){ if(a.closest('[data-qlside]')) return; var h=(a.getAttribute('href')||'').split('?')[0]; var m=h.match(/^([a-z0-9_\-]+)\.php$/i); if(!m) return; var p=m[1].toLowerCase(); if(p==='logout'||M[p]) return;
       var sub=a.closest('.submenu'), path=[]; var s2=sub; while(s2){ var hd=s2.previousElementSibling; if(hd&&hd.classList.contains('menu-item')) path.unshift(mlabel(hd)); s2=s2.parentElement&&s2.parentElement.closest('.submenu'); }
       var sec=a.closest('.menu-section'); var st=sec&&sec.querySelector('.menu-title span'); if(st&&txt(st)&&path[0]!==txt(st)) path.unshift(txt(st));
       M[p]={k:p,l:txt(a.querySelector('span'))||txt(a),i:iconOf(a),w:path.filter(Boolean).join(' › '),u:a.getAttribute('href')}; });
@@ -159,7 +184,15 @@ function ql_header_button() {
     $('qlGrid').innerHTML=L.length?L.map(function(x){return tile(x,'ql-it');}).join(''):'<div class="ql-empty">No shortcuts yet.<br>Drag a menu from the left onto <b>⚡ Quick</b>,<br>click a ☆ in the menu, or use <b>Add / edit</b>.</div>';
     var H=$('qlHome'); if(H){ H.innerHTML='<div class="qlh-grid">'+L.map(function(x){return tile(x,'ql-it qlh');}).join('')+'<div class="ql-it qlh qlh-add" id="qlHAdd" title="Add a shortcut"><span class="qi" style="background:#f1f5f9;color:#94a3b8"><i class="fa-solid fa-plus"></i></span>Add shortcut</div></div>'+(L.length?'':'<div class="qlh-tip">💡 Drag any menu or sub menu from the left into this box, click a ☆ in the menu, or click <b>Add shortcut</b>.</div>'); }
     document.querySelectorAll('.ql-star').forEach(function(s){ s.classList.toggle('on',Q.items.indexOf(s.dataset.k)>=0||Q.company.indexOf(s.dataset.k)>=0); s.title=Q.items.indexOf(s.dataset.k)>=0?'Remove from quick shortcuts':'Add to quick shortcuts'; });
+    side(L);
     if($('qlPk').classList.contains('open')) pk(); }
+  /* sidebar: "⚡ Quick Shortcuts" right after Dashboard, in the same style as the other menus */
+  function side(L){ var sb=document.querySelector('#sidebar,.sidebar'); if(!sb) return; sb.querySelectorAll('[data-qlside]').forEach(function(x){x.remove();});
+    var d=sb.querySelector('a.ms-dashboard-link')||sb.querySelector('a[href="index.php"]'); if(!d) return; var op=true; try{ op=localStorage.getItem('qlSide')!=='0'; }catch(e){}
+    var h='<div class="menu-item has-submenu ql-side-hd" data-qlside data-tooltip="Quick Shortcuts" onclick="toggleSubmenu(this);try{localStorage.setItem(\'qlSide\',this.nextElementSibling.classList.contains(\'open\')?\'1\':\'0\')}catch(e){}"><div class="menu-item-content"><span class="menu-icon"><i class="fa-solid fa-bolt"></i></span><span>Quick Shortcuts</span></div><i class="fa-solid fa-chevron-down submenu-toggle'+(op?' open':'')+'"></i></div>'
+      +'<div class="submenu'+(op?' open':'')+'" data-qlside>'+L.map(function(x){ return x.menu?'<a href="#" class="submenu-item" data-qlmenu data-k="'+esc(x.k)+'" title="'+esc(x.w)+'"><i class="'+esc(x.i)+'"></i><span>'+esc(x.l)+' ▾'+(x.co?' 🏢':'')+'</span></a>':'<a href="'+esc(x.u)+'" class="submenu-item'+(location.pathname.split('/').pop()===x.u?' active':'')+'" title="'+esc(x.w)+'"><i class="'+esc(x.i)+'"></i><span>'+esc(x.l)+(x.co?' 🏢':'')+'</span></a>'; }).join('')
+      +'<a href="#" class="submenu-item ql-side-add" data-qladd><i class="fa-solid fa-pen"></i><span>'+(L.length?'Add / edit shortcuts':'Add quick shortcuts')+'</span></a></div>';
+    d.insertAdjacentHTML('afterend',h); }
   function save(){ var f=new FormData(); f.append('items',JSON.stringify(Q.items)); fetch('yms_quicklinks.php?ql=save',{method:'POST',body:f,credentials:'same-origin'}).catch(function(){}); render(); }
   function addK(k,at){ if(!k||!build()[k]) return; var i=Q.items.indexOf(k); if(i>=0) Q.items.splice(i,1); if(at==null||at<0||at>Q.items.length) Q.items.push(k); else Q.items.splice(at,0,k); save(); flash(); }
   function rmK(k){ var i=Q.items.indexOf(k); if(i>=0){ Q.items.splice(i,1); save(); } }
@@ -167,7 +200,7 @@ function ql_header_button() {
   Q.add=addK; Q.remove=rmK; Q.render=render;
   /* sidebar: ☆ buttons + drag source */
   function prep(){ var M=build(); var sb=document.querySelector('#sidebar,.sidebar'); if(!sb) return;
-    sb.querySelectorAll('a[href]').forEach(function(a){ var m=(a.getAttribute('href')||'').match(/^([a-z0-9_\-]+)\.php/i); if(!m||!M[m[1].toLowerCase()]||a.querySelector('.ql-star')) return; var k=m[1].toLowerCase();
+    sb.querySelectorAll('a[href]').forEach(function(a){ if(a.closest('[data-qlside]')) return; var m=(a.getAttribute('href')||'').match(/^([a-z0-9_\-]+)\.php/i); if(!m||!M[m[1].toLowerCase()]||a.querySelector('.ql-star')) return; var k=m[1].toLowerCase();
       a.setAttribute('draggable','true'); a.dataset.qlk=k; if(getComputedStyle(a).position==='static') a.style.position='relative';
       var s=document.createElement('button'); s.type='button'; s.className='ql-star'; s.dataset.k=k; s.innerHTML='★'; a.appendChild(s); });
     heads(sb).forEach(function(mi){ var k='menu:'+mlabel(mi); if(!M[k]||mi.querySelector('.ql-star')) return;
@@ -175,8 +208,8 @@ function ql_header_button() {
     render(); }
   document.addEventListener('click',function(e){ var s=e.target.closest('.ql-star'); if(s){ e.preventDefault(); e.stopPropagation(); if(Q.company.indexOf(s.dataset.k)>=0){ s.title='Company shortcut — set by the administrator'; return; } Q.items.indexOf(s.dataset.k)>=0?rmK(s.dataset.k):addK(s.dataset.k); return; }
     var x=e.target.closest('[data-rm]'); if(x){ e.preventDefault(); e.stopPropagation(); rmK(x.dataset.rm); return; }
-    var mt=e.target.closest('.ql-it[data-k^="menu:"]'); if(mt){ e.preventDefault(); popMenu(mt); return; }
-    if(e.target.closest('#qlHAdd')){ openPk(); return; }
+    var mt=e.target.closest('.ql-it[data-k^="menu:"],[data-qlmenu]'); if(mt){ e.preventDefault(); e.stopPropagation(); popMenu(mt); return; }
+    if(e.target.closest('#qlHAdd,[data-qladd]')){ e.preventDefault(); e.stopPropagation(); openPk(); return; }
     if(!e.target.closest('.ql-pop')) document.querySelectorAll('.ql-pop').forEach(function(p){p.remove();});
     if(!e.target.closest('#qlWrap')) $('qlDrop').classList.remove('open'); }, true);
   function popMenu(el){ document.querySelectorAll('.ql-pop').forEach(function(p){p.remove();}); var M=build(), x=M[el.dataset.k]; if(!x) return; var p=document.createElement('div'); p.className='ql-pop';
@@ -191,25 +224,41 @@ function ql_header_button() {
   document.addEventListener('dragover',function(e){ if(!dragK) return; var z=zone(e); if(!z) return; e.preventDefault(); if(z==='btn') $('qlBtn').classList.add('drop'); if(z==='home') $('qlHome').classList.add('drop');
     document.querySelectorAll('.over').forEach(function(x){x.classList.remove('over');}); var t=e.target.closest('.ql-it[data-k],.ql-mine .mi'); if(t) t.classList.add('over'); });
   document.addEventListener('dragleave',function(e){ if(e.target.id==='qlBtn') $('qlBtn').classList.remove('drop'); });
-  document.addEventListener('drop',function(e){ if(!dragK) return; var z=zone(e); if(!z) return; e.preventDefault(); var t=e.target.closest('.ql-it[data-k],.ql-mine .mi'), at=t?Q.items.indexOf(t.dataset.k):null; if(at!=null&&at<0) at=null;
+  document.addEventListener('drop',function(e){ if(!dragK) return; var z=zone(e); if(!z) return; e.preventDefault();
+    if(z==='mine'&&D){ var t2=e.target.closest('.ql-mine .mi[data-k]'), i2=D.indexOf(dragK); if(i2>=0) D.splice(i2,1); var j2=t2?D.indexOf(t2.dataset.k):D.length; if(j2<0) j2=D.length; if(Q.company.indexOf(dragK)<0) D.splice(j2,0,dragK); dirty=true; pk(); return; }
+    var t=e.target.closest('.ql-it[data-k],.ql-mine .mi'), at=t?Q.items.indexOf(t.dataset.k):null; if(at!=null&&at<0) at=null;
     if(fromList&&at!=null){ var i=Q.items.indexOf(dragK); if(i>=0&&i<at) at--; } addK(dragK,at); });
   /* header drop-down */
   $('qlBtn').addEventListener('click',function(e){ e.stopPropagation(); $('qlDrop').classList.toggle('open'); });
   $('qlEdit').addEventListener('click',function(){ $('qlDrop').classList.remove('open'); openPk(); });
-  /* picker */
-  function openPk(){ $('qlPk').classList.add('open'); $('qlPkQ').value=''; pk(); setTimeout(function(){ $('qlPkQ').focus(); },100); }
-  $('qlPkX').addEventListener('click',function(){ $('qlPk').classList.remove('open'); });
-  $('qlPk').addEventListener('click',function(e){ if(e.target.id==='qlPk') $('qlPk').classList.remove('open'); });
+  /* picker: the menu tree (same order, names and icons as the sidebar) with Add buttons — nothing is kept until "Save shortcuts" */
+  var D=null, dirty=false, OPEN={};
+  function openPk(){ D=Q.items.filter(function(k){ return Q.company.indexOf(k)<0; }); dirty=false; $('qlPk').classList.add('open'); $('qlPkQ').value=''; pk(); setTimeout(function(){ $('qlPkQ').focus(); },100); }
+  function closePk(force){ if(!force&&dirty&&!confirm('Close without saving your changes?')) return; $('qlPk').classList.remove('open'); D=null; dirty=false; }
+  $('qlPkX').addEventListener('click',function(){ closePk(); }); $('qlPkCancel').addEventListener('click',function(){ closePk(true); });
+  $('qlPk').addEventListener('click',function(e){ if(e.target.id==='qlPk') closePk(); });
+  $('qlPkSave').addEventListener('click',function(){ var M=build(); Q.items=D.filter(function(k){ return !!M[k]; }); dirty=false; save(); closePk(true); flash(); });
   $('qlPkQ').addEventListener('input',pk);
-  function pk(){ var M=build(), q=$('qlPkQ').value.toLowerCase().trim(), g={};
-    Object.keys(M).forEach(function(k){ var x=M[k]; if(q&&(x.l+' '+x.w+' '+k).toLowerCase().indexOf(q)<0) return; var grp=x.menu?'Whole menus':(x.w.split(' › ')[0]||'Pages'); (g[grp]=g[grp]||[]).push(x); });
-    var h=''; Object.keys(g).sort(function(a,b){ return a==='Whole menus'?-1:(b==='Whole menus'?1:a.localeCompare(b)); }).forEach(function(grp){ h+='<div class="ql-pk-g">'+esc(grp)+'</div>'+g[grp].map(function(x){ var on=Q.items.indexOf(x.k)>=0||Q.company.indexOf(x.k)>=0; if(Q.company.indexOf(x.k)>=0) return '<div class="ql-pk-row on"><i class="fi '+esc(x.i)+'" style="background:'+col(x.k)+'"></i><span>'+esc(x.l)+'<small>'+esc(x.w)+'</small></span><span style="font-size:11px;font-weight:800;color:#6d28d9">🏢 Company</span></div>'; return '<div class="ql-pk-row'+(on?' on':'')+'" data-pk="'+esc(x.k)+'"><i class="fi '+esc(x.i)+'" style="background:'+col(x.k)+'"></i><span>'+esc(x.l)+'<small>'+esc(x.w)+'</small></span><button type="button" class="ad">'+(on?'✓ Added':'+ Add')+'</button></div>'; }).join(''); });
-    $('qlPkList').innerHTML=h||'<div class="ql-empty">No page matches.</div>';
-    var L=mine(), C=cmp(); $('qlPkN').textContent='('+(L.length+C.length)+')';
-    $('qlMine').innerHTML=L.map(function(x){ return '<div class="mi" draggable="true" data-k="'+esc(x.k)+'"><i class="fa-solid fa-grip-vertical" style="color:#d6d3d1"></i><i class="fi '+esc(x.i)+'" style="background:'+col(x.k)+'"></i><span>'+esc(x.l)+'</span><button type="button" data-rm="'+esc(x.k)+'" title="Remove">×</button></div>'; }).join('')||'<div class="ql-empty">Click <b>+ Add</b> on the left,<br>or drag a menu from the sidebar.</div>';
-    if(C.length) $('qlMine').insertAdjacentHTML('afterbegin','<div style="font-size:11px;font-weight:800;color:#6d28d9;margin:0 2px 2px">🏢 Company shortcuts (for every user)</div>'+C.map(function(x){ return '<div class="mi" style="background:#f5f3ff;border-color:#ddd6fe;cursor:default"><i class="fi '+esc(x.i)+'" style="background:'+col(x.k)+'"></i><span>'+esc(x.l)+'</span></div>'; }).join('')+(L.length?'<div style="font-size:11px;font-weight:800;color:#a16207;margin:6px 2px 2px">⭐ My own</div>':'')); }
-  $('qlPkList').addEventListener('click',function(e){ var r=e.target.closest('[data-pk]'); if(!r) return; var k=r.dataset.pk; Q.items.indexOf(k)>=0?rmK(k):addK(k); });
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ $('qlPk').classList.remove('open'); $('qlDrop').classList.remove('open'); } });
+  function isOn(k){ return Q.company.indexOf(k)>=0||(D&&D.indexOf(k)>=0); }
+  function addBtn(k){ return Q.company.indexOf(k)>=0?'<button type="button" class="ql-btnadd co" title="Company shortcut — set by the administrator">🏢 Company</button>':'<button type="button" class="ql-btnadd'+(isOn(k)?' on':'')+'" data-pk="'+esc(k)+'">'+(isOn(k)?'✓ Added':'+ Add')+'</button>'; }
+  function prow(k,sub){ var x=build()[k]; if(!x) return ''; return '<div class="ql-pk-row'+(sub?' sub':'')+(isOn(k)?' on':'')+'"><i class="fi '+esc(x.i)+'" style="background:'+col(k)+'"></i><span>'+esc(x.l)+'</span>'+addBtn(k)+'</div>'; }
+  function pk(){ if(!D) return; var M=build(), q=$('qlPkQ').value.toLowerCase().trim(), h='';
+    if(q){ /* search: every matching page / menu with its menu path */
+      Object.keys(M).forEach(function(k){ var x=M[k]; if((x.l+' '+x.w+' '+k).toLowerCase().indexOf(q)<0) return; h+='<div class="ql-pk-row'+(isOn(k)?' on':'')+'"><i class="fi '+esc(x.i)+'" style="background:'+col(k)+'"></i><span>'+esc(x.l)+'<small>'+esc(x.w)+'</small></span>'+addBtn(k)+'</div>'; });
+      if(!h) h='<div class="ql-empty">No page matches “'+esc(q)+'”.</div>';
+    } else tree().forEach(function(S){ if(S.t) h+='<div class="ql-tr-sec"><i class="fa-solid fa-layer-group"></i> '+esc(S.t)+'</div>';
+      S.items.forEach(function(it){ if(it.p){ h+=prow(it.p,false); return; } var x=M[it.m], op=!!OPEN[it.m];
+        h+='<div class="ql-tr-m'+(op?' op':'')+'" data-tog="'+esc(it.m)+'"><i class="fa-solid fa-chevron-right chev"></i><span class="mic" style="background:'+col(it.m)+'"><i class="'+esc(x.i)+'"></i></span><span>'+esc(x.l)+'<small>'+x.menu.length+' pages</small></span>'+addBtn(it.m).replace('+ Add','+ Add menu')+'</div>'
+          +'<div class="ql-tr-kids'+(op?' op':'')+'">'+it.kids.map(function(c){ return c.p?prow(c.p,true):'<div class="ql-tr-g">'+esc(c.g)+'</div>'+c.pages.map(function(k){ return prow(k,true); }).join(''); }).join('')+'</div>'; }); });
+    $('qlPkList').innerHTML=h||'<div class="ql-empty">No menu found.</div>';
+    var L=D.map(function(k){return M[k];}).filter(Boolean), C=cmp(); $('qlPkN').textContent='('+(L.length+C.length)+')';
+    $('qlMine').innerHTML=L.map(function(x){ return '<div class="mi" draggable="true" data-k="'+esc(x.k)+'"><i class="fa-solid fa-grip-vertical" style="color:#d6d3d1"></i><i class="fi '+esc(x.i)+'" style="background:'+col(x.k)+'"></i><span>'+esc(x.l)+(x.menu?' ▾':'')+'</span><button type="button" data-drm="'+esc(x.k)+'" title="Remove">×</button></div>'; }).join('')||'<div class="ql-empty">Click <b>+ Add</b> next to a menu or page on the left.</div>';
+    if(C.length) $('qlMine').insertAdjacentHTML('afterbegin','<div style="font-size:11px;font-weight:800;color:#6d28d9;margin:0 2px 2px">🏢 Company shortcuts (for every user)</div>'+C.map(function(x){ return '<div class="mi" style="background:#f5f3ff;border-color:#ddd6fe;cursor:default"><i class="fi '+esc(x.i)+'" style="background:'+col(x.k)+'"></i><span>'+esc(x.l)+'</span></div>'; }).join('')+(L.length?'<div style="font-size:11px;font-weight:800;color:#a16207;margin:6px 2px 2px">⭐ My own</div>':''));
+    $('qlPkDirty').textContent=dirty?'● Not saved yet — click “Save shortcuts”':''; }
+  $('qlPkList').addEventListener('click',function(e){ var b=e.target.closest('[data-pk]'); if(b){ e.stopPropagation(); var k=b.dataset.pk, i=D.indexOf(k); if(i>=0) D.splice(i,1); else if(D.length<40) D.push(k); dirty=true; pk(); return; }
+    var t=e.target.closest('[data-tog]'); if(t){ OPEN[t.dataset.tog]=!OPEN[t.dataset.tog]; pk(); } });
+  $('qlMine').addEventListener('click',function(e){ var b=e.target.closest('[data-drm]'); if(!b) return; e.stopPropagation(); D.splice(D.indexOf(b.dataset.drm),1); dirty=true; pk(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ if($('qlPk').classList.contains('open')) closePk(); $('qlDrop').classList.remove('open'); } });
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',prep); else setTimeout(prep,0);
 })();
 </script>
