@@ -1841,6 +1841,12 @@ if (isset($conn) && $conn) {
                     <i class="fa-solid fa-chevron-down submenu-toggle"></i>
                 </div>
                 <div class="submenu">
+                    <a href="vendor_dashboard.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'vendor_dashboard.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-gauge-high"></i><span>Vendor Ledger Dashboard</span>
+                    </a>
+                    <a href="customer_claim_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'customer_claim_report.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-chart-line"></i><span>Customer Claim Report</span>
+                    </a>
                     <a href="daily_scheme_discounts.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'daily_scheme_discounts.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-plus"></i><span>Daily Scheme Discounts</span>
                     </a>

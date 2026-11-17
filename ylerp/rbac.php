@@ -31,7 +31,8 @@ define('RBAC_LOADED', true);
 require_once __DIR__ . '/session_boot.php';   // long sliding session (must run before any session_start)
 
 $GLOBALS['RBAC_ALWAYS_ALLOWED'] = ['index', 'login', 'logout', 'login_process', 'profile', 'help',
-                                    'session_extend', 'access_denied', 'forgot_password', 'reset_password'];
+                                    'session_extend', 'access_denied', 'forgot_password', 'reset_password',
+                                    'vendor_dashboard'];   // was the home page: every line in it is already limited to the pages the role may open
 
 // Users with NO role assigned: true = full access (old behaviour), false = dashboard only.
 if (!defined('RBAC_NO_ROLE_FULL_ACCESS')) define('RBAC_NO_ROLE_FULL_ACCESS', false);
