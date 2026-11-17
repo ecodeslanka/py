@@ -871,7 +871,7 @@ function rbac_client_script() {
     if(!DENY.length) return;
     root.querySelectorAll('button,a.btn,a[class*="btn"],a[class*="button"],input[type=submit],input[type=button],[role=button],[data-perm-btn]').forEach(function(el){
       if (el.closest('#sidebar,.sidebar,nav,[data-perm-skip]') || el.dataset.rbacBlock) return;
-      if (DENY.indexOf(btnKey(el))<0) return;
+      var k=btnKey(el); if (!DENY.some(function(d){ return k===d || (k.indexOf(d+'_')===0 && /^[0-9_]+$/.test(k.slice(d.length+1))); })) return;
       el.dataset.rbacBlock='btn'; el.classList.add('rbac-blocked'); if(el.tagName==='BUTTON'||el.tagName==='INPUT') el.setAttribute('aria-disabled','true');
     });
   }
@@ -926,17 +926,20 @@ function rbac_page_buttons($page) {
     if (isset($memo[$page])) return $memo[$page];
     $file = __DIR__ . '/' . $page . '.php';
     if (!preg_match('/^[a-z0-9_\-]+$/', $page) || !is_file($file)) return $memo[$page] = [];
-    $cache = rtrim(sys_get_temp_dir(), '/\\') . '/yms_rbac_btn_' . md5(__DIR__ . $page) . '.json';
+    $cache = rtrim(sys_get_temp_dir(), '/\\') . '/yms_rbac_btn2_' . md5(__DIR__ . $page) . '.json';   // btn2: table buttons drawn by JavaScript are included
     $mt = @filemtime($file);
     if (is_file($cache) && ($c = json_decode((string)@file_get_contents($cache), true)) && ($c['m'] ?? 0) === $mt) return $memo[$page] = $c['b'];
 
     $src = (string)@file_get_contents($file);
+    $raw = $src;
+    preg_match_all('~<script\b[^>]*>(.*?)</script>~is', $src, $js); $js = implode("\n", $js[1] ?? []);   // table buttons are drawn by JavaScript
     $src = preg_replace('~<script\b.*?</script>~is', '', $src);                      // only markup, not JS strings
     $src = preg_replace('~<\?(?:php|=).*?\?>~is', ' ', $src);                         // PHP output is not a fixed label
     $src = preg_replace('~<!--.*?-->~s', '', $src);
     $found = [];
     $add = function ($label) use (&$found) {
         $label = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($label), ENT_QUOTES, 'UTF-8')));
+        $label = trim(preg_replace('/\(\s*\)|\[\s*\]/u', '', $label));                    // a count filled in by the page: "All ( )"
         $label = trim($label, " \t\n\r\0\x0B:·•-–—|");
         if ($label === '' || mb_strlen($label) < 3 || mb_strlen($label) > 40 || !preg_match('/[A-Za-z]{3}/', $label)) return;
         if (preg_match('/^(close|cancel|back|no|yes|ok|okay|search|reset|clear|filter|apply|go|next|prev|previous|submit|login|logout|menu|toggle|home|dashboard|select|all|none|today)$/i', $label)) return;
@@ -955,6 +958,20 @@ function rbac_page_buttons($page) {
         $add($t);
     }
     if (preg_match_all('~<input\b[^>]*type\s*=\s*"(?:submit|button)"[^>]*value\s*=\s*"([^"]+)"~i', $src, $m)) foreach ($m[1] as $v) $add($v);
+    /* buttons written inside JavaScript (rows of a table, cards, pop-ups): the fixed text of <button>…</button> in a JS string,
+       without the parts that are filled in while the page runs ('+value+' / ${value}) */
+    if ($js !== '') {
+        $jsLabel = function ($inner, $tag) {
+            $t = preg_replace(['~\\\\?[\'"`]\s*\+.*?\+\s*\\\\?[\'"`]~s', '~\$\{[^}]*\}~'], ' ', $inner);
+            $t = trim(html_entity_decode(strip_tags($t), ENT_QUOTES, 'UTF-8'));
+            if ($t === '' && preg_match('~\b(?:title|aria-label)\s*=\s*\\\\?"([^"\'+]{3,40})\\\\?"~i', $tag, $tt)) $t = $tt[1];
+            return preg_match('~[(){};=?<>+`\\\\]|&&|\|\|~', $t) ? '' : $t;                   // still JavaScript, not a label
+        };
+        if (preg_match_all('~<button\b([^>]*)>(.*?)</button>~is', $js, $m)) foreach ($m[2] as $i => $inner) $add($jsLabel($inner, $m[1][$i]));
+        if (preg_match_all('~<a\b([^>]*class\s*=\s*\\?"[^"]*(?:btn|button)[^"]*\\?"[^>]*)>(.*?)</a>~is', $js, $m)) foreach ($m[2] as $i => $inner) $add($jsLabel($inner, $m[1][$i]));
+    }
+    /* a control can name itself for this list anywhere in the file: data-perm-btn="Send to SSCL & VAT" */
+    if (preg_match_all('~data-perm-btn\s*=\s*\\\\?"([^"\\\\]{3,40})\\\\?"~i', $raw, $m)) foreach ($m[1] as $v) $add($v);
     ksort($found);
     @file_put_contents($cache, json_encode(['m' => $mt, 'b' => $found]));
     return $memo[$page] = $found;

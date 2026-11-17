@@ -144,11 +144,14 @@ function cc_sv_links($conn, array $ids) {
         while ($q && ($x = mysqli_fetch_assoc($q))) $out[(int)$x['cid']]['ack'] = (int)$x['sv']; }
     return $out;
 }
+/* the button ticks on the role form (Users → Roles → this page → Buttons on this page) are checked here too */
+function cc_sv_btn($key) { return !function_exists('rbac_btn_can') || rbac_btn_can($key, 'customer_claim_report'); }
 function cc_sv_user() { return $_SESSION['username'] ?? ($_SESSION['user_name'] ?? ($_SESSION['full_name'] ?? 'system')); }
 if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_list' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ob_start(); header('Content-Type: application/json'); cc_sv_tables($conn);
     $fail = function ($m) { ob_end_clean(); echo json_encode(['success' => false, 'message' => $m]); exit; };
     if (!cc_sv_can($conn)) $fail('You do not have the right to add to the SSCL & VAT page.');
+    if (!cc_sv_btn(($_POST['via'] ?? '') === 'bulk' ? 'send_selected_to_sscl_vat' : 'send_to_sscl_vat')) $fail('Permission blocked: you are not allowed to use this button.');
     $ids = array_values(array_unique(array_filter(array_map('intval', json_decode($_POST['ids'] ?? '[]', true) ?: [])))); if (!$ids) $fail('Select at least one claim.');
     $L = cc_sv_links($conn, $ids); $u = mysqli_real_escape_string($conn, cc_sv_user()); $n = 0; $skip = 0;
     $q = mysqli_query($conn, "SELECT id, total_amount FROM claim_cert_items WHERE id IN (" . implode(',', $ids) . ")");
@@ -161,6 +164,7 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_unlist' 
     ob_start(); header('Content-Type: application/json'); cc_sv_tables($conn);
     $fail = function ($m) { ob_end_clean(); echo json_encode(['success' => false, 'message' => $m]); exit; };
     if (!cc_sv_can($conn)) $fail('You do not have the right to change the SSCL & VAT list.');
+    if (!cc_sv_btn('reverse')) $fail('Permission blocked: you are not allowed to use the Reverse button.');
     $c = intval($_POST['id'] ?? 0); if (!$c) $fail('Nothing to reverse.'); $L = cc_sv_links($conn, [$c]);
     if (!empty($L[$c]['pays'])) $fail('This claim is already matched on SSCL & VAT payment #' . implode(', #', array_column($L[$c]['pays'], 'id')) . ' — remove that payment line on the SSCL & VAT page first.');
     if (!empty($L[$c]['ack'])) $fail('This claim was sent to Acknowledgment from SSCL & VAT payment #' . $L[$c]['ack'] . ' — reverse it there first.');
@@ -444,7 +448,7 @@ include 'header.php';
   <div class="rc-card">
     <div class="rc-card-hdr">
       <div class="rc-card-title"><i class="fa-solid fa-table-list"></i> Claim Records</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn-primary" id="svBulk" type="button" onclick="svList(svPicked())" disabled style="background:linear-gradient(135deg,#0f766e,#0d9488)"><i class="fa-solid fa-file-circle-check"></i> Send selected to SSCL &amp; VAT <span id="svBulkN"></span></button>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn-primary" id="svBulk" type="button" onclick="svList(svPicked(),'bulk')" disabled style="background:linear-gradient(135deg,#0f766e,#0d9488)"><i class="fa-solid fa-file-circle-check"></i> Send selected to SSCL &amp; VAT <span id="svBulkN"></span></button>
       <div style="font-size:11.5px;color:var(--muted);" id="resultInfo"></div></div>
     </div>
     <div class="prev-outer">
@@ -526,10 +530,10 @@ function svSync(){ const n=svPicked().length; document.getElementById('svBulk').
 document.getElementById('svAll').addEventListener('change',e=>{ document.querySelectorAll('.svChk').forEach(c=>c.checked=e.target.checked); svSync(); });
 document.getElementById('repBody').addEventListener('change',e=>{ if(e.target.classList.contains('svChk')) svSync(); });
 async function svPost(data){ const fd=new FormData(); Object.keys(data).forEach(k=>fd.append(k,data[k])); const d=await (await fetch('customer_claim_report.php',{method:'POST',body:fd})).json(); if(!d.success) throw new Error(d.message); return d; }
-async function svList(ids){
+async function svList(ids,via){
   if(!ids.length) return; const other=ids.filter(id=>SVROWS[id]&&SVROWS[id].sv_tax!=1).length;
   if(!confirm('Send '+ids.length+' claim(s) to the SSCL & VAT list?'+(other?'\n\n'+other+' of them are not SSCL / VAT claim types.':'')+'\n\nThey will appear on the SSCL & VAT page to pick when you enter the payment.')) return;
-  try{ const d=await svPost({ajax_action:'sv_list',ids:JSON.stringify(ids)}); showToast(d.message); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
+  try{ const d=await svPost({ajax_action:'sv_list',ids:JSON.stringify(ids),via:via||'row'}); showToast(d.message); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
 async function svUnlist(id,ti){
   if(!confirm('Reverse — take claim '+ti+' off the SSCL & VAT list?')) return;
   try{ const d=await svPost({ajax_action:'sv_unlist',id:id}); showToast(d.message); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }

@@ -34,6 +34,14 @@ Changed:  config.php (+3 lines at the end), header.php (sidebar filter + 4 lines
     <button data-perm="delete">Delete</button>   // hidden automatically when not allowed
     if (RBAC.can.create) { ... }          // in JavaScript
 
+## Buttons on a page (including buttons inside tables)
+The role form shows "Buttons on this page" for every menu page. The list is read from the page's
+own file: buttons in the HTML **and** buttons that JavaScript draws inside tables, cards and pop-ups
+(the fixed text of `<button>…</button>`, without the parts filled in at run time). Every button is
+ticked (allowed) by default; untick it to block it for that role. A button the scan cannot see can
+name itself: `data-perm-btn="Send to SSCL & VAT"`. In PHP, check a button with
+`rbac_btn_can('send_to_sscl_vat', 'customer_claim_report')` (key = lower-case words joined by _).
+
 ## Permissions follow the sidebar only
 The Role page lists only Section -> Main menu -> Sub menu -> Page from header.php. There is no
 "Other Pages (not in sidebar)" section any more. Imports, reports and add/edit/delete pages are
