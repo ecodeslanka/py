@@ -159,7 +159,43 @@ $LIVE = isset($_GET['ajax']) && $_GET['ajax'] === 'drill' ? cp_live_market_credi
 $OWN = $MCt; $MCsrc = 'own';
 if ($LIVE['ok'] && $LIVE['rows']) {
     $MCsrc = 'live'; $openC = []; $chq = []; $MCt = ['out' => 0, 'cih' => 0, 'ret' => 0];
-    foreach ($LIVE['rows'] as $c => [$o1, $o2, $o3]) { $ch = $chOf($c); $openC[$ch] = ($openC[$ch] ?? 0) + $o1; $chq[$ch] = ($chq[$ch] ?? 0) + $o2 + $o3; $MCt['out'] += $o1; $MCt['cih'] += $o2; $MCt['ret'] += $o3; }
+    foreach ($LIVE['rows'] as $c => [$o1, $o2, $o3]) { $MCt['out'] += $o1; $MCt['cih'] += $o2; $MCt['ret'] += $o3; }
+    /* Make every column agree with the Market Credit Report, customer by customer. The report gives one total per customer
+       (outstanding, cheques in hand, returned); this report's own bill / cheque lists are fitted to those totals:
+       less in the report → taken off the OLDEST bills / cheques first (payments settle the oldest first);
+       more in the report → the extra is kept as one line "amount not in the bill / cheque list" (age unknown, not counted overdue).
+       Total credit, credit overdue, the age buckets, cheques not realised / overdue and the click-through window are then
+       all rebuilt from the fitted lists, so every row adds up and the totals equal the Market Credit Report. */
+    $fit = function (array $list, float $target, string $amtKey, callable $ageOf, array $extraRow) {
+        usort($list, fn($a, $b) => $ageOf($b) <=> $ageOf($a));                    // oldest first
+        $have = 0; foreach ($list as $x) $have += (float)$x[$amtKey];
+        if ($target < $have - 0.004) { $cut = $have - $target; foreach ($list as $i => $x) { if ($cut <= 0.004) break; $t = min((float)$x[$amtKey], $cut); $list[$i][$amtKey] = round((float)$x[$amtKey] - $t, 2); $cut -= $t; }
+            $list = array_values(array_filter($list, fn($x) => (float)$x[$amtKey] > 0.004)); }
+        elseif ($target > $have + 0.004) { $extraRow[$amtKey] = round($target - $have, 2); $list[] = $extraRow; }
+        return $list; };
+    $bucket = fn($age) => $age <= 7 ? 0 : ($age <= 14 ? 1 : ($age <= 21 ? 2 : ($age <= 30 ? 3 : ($age <= 120 ? 4 : 5))));
+    $ages = []; $openC = []; $ovd = []; $chq = []; $chqO = []; $OB2 = []; $CQ2 = [];
+    foreach (array_unique(array_merge(array_keys($LIVE['rows']), array_keys($OB), array_keys($CQ))) as $c) {
+        $L = $LIVE['rows'][$c] ?? [0, 0, 0]; $ch = $chOf($c); $d = (int)($cust[$c]['d'] ?? 0);
+        /* bills → outstanding */
+        $bl = array_map(fn($b) => ['i' => $b[0], 'dd' => $b[1], 'bal' => (float)$b[2], 'age' => (int)$b[3]], $OB[$c]['bl'] ?? []);
+        $bl = $fit($bl, (float)$L[0], 'bal', fn($x) => $x['age'], ['i' => '(not in the bill list)', 'dd' => null, 'age' => -1]);
+        if ($bl) { $o = ['open' => 0, 'ovd' => 0, 'ages' => array_fill(0, 6, 0), 'bills' => 0, 'old' => 0, 'bl' => []];
+            foreach ($bl as $x) { $b = $x['bal']; $age = $x['age']; $od = $age >= 0 && $age > $d; $k = $bucket(max(0, $age));
+                $o['open'] += $b; $o['ages'][$k] += $b; $o['bills']++; if ($age > $o['old']) $o['old'] = $age; if ($od) $o['ovd'] += $b; $o['bl'][] = [$x['i'], $x['dd'], round($b, 2), max(0, $age), $od ? 1 : 0];
+                $ages[$ch][$k] = ($ages[$ch][$k] ?? 0) + $b; }
+            $OB2[$c] = $o; $openC[$ch] = ($openC[$ch] ?? 0) + $o['open']; $ovd[$ch] = ($ovd[$ch] ?? 0) + $o['ovd']; }
+        /* cheques → in hand and returned, each fitted on its own */
+        $own = $CQ[$c]['l'] ?? []; $cih = array_values(array_filter($own, fn($q) => !in_array($q['st'], ['returned', 'bounced'], true))); $ret = array_values(array_filter($own, fn($q) => in_array($q['st'], ['returned', 'bounced'], true)));
+        $cAge = fn($q) => $q['cd'] ? (int)((time() - strtotime($q['cd'])) / 86400) : -99999;
+        $cih = $fit($cih, (float)$L[1], 'amt', $cAge, ['no' => '(not in the cheque list)', 'cd' => null, 'dd' => null, 'inv' => '', 'st' => 'pending', 'bank' => '', 'age' => null, 'od' => '']);
+        $ret = $fit($ret, (float)$L[2], 'amt', $cAge, ['no' => '(not in the cheque list)', 'cd' => null, 'dd' => null, 'inv' => '', 'st' => 'returned', 'bank' => '', 'age' => null, 'od' => 'Returned']);
+        $all = array_merge($cih, $ret);
+        if ($all) { $q2 = ['v' => 0, 'n' => 0, 'ov' => 0, 'on' => 0, 'l' => $all];
+            foreach ($all as $q) { $q2['v'] += $q['amt']; $q2['n']++; if ($q['od'] !== '') { $q2['ov'] += $q['amt']; $q2['on']++; } }
+            $CQ2[$c] = $q2; $chq[$ch] = ($chq[$ch] ?? 0) + $q2['v']; $chqO[$ch] = ($chqO[$ch] ?? 0) + $q2['ov']; }
+    }
+    $OB = $OB2; $CQ = $CQ2;
 }
 /* customers whose market credit differs between the live report and this report's own calculation (shown in the check panel) */
 $DIFF = []; if ($MCsrc === 'live') { foreach (array_unique(array_merge(array_keys($LIVE['rows']), array_keys($MY))) as $c) { $l = $LIVE['rows'][$c] ?? [0, 0, 0]; $m = $MY[$c] ?? [0, 0, 0]; $m += [0, 0, 0]; ksort($m);
@@ -214,9 +250,9 @@ if (($_GET['ajax'] ?? '') === 'drill') {
     foreach (array_keys($codes) as $c) { $cu = $cust[$c] ?? null; $mo = $MO[$c] ?? []; $ob = $OB[$c] ?? ['open' => 0, 'ovd' => 0, 'ages' => array_fill(0, 6, 0), 'bills' => 0, 'old' => 0];
         $ch = $chOf($c); $mp = $SUB[$ch][1] ?? ''; $mx = preg_match('/(\d+)\s*$/', (string)$mp, $mm) ? (int)$mm[1] : null; $pm = $cu['pm'] ?? ''; $d = (int)($cu['d'] ?? 0); $credit = in_array($pm, ['credit', 'cheque'], true);
         $out[] = ['c' => $c, 'n' => ($cu['nm'] ?? '') ?: ($mo['n'] ?? ''), 'rep' => $mo['rep'] ?? '', 'b' => $mo['b'] ?? '', 'sub' => $ch, 'grp' => $SUB[$ch][0] ?? 'Other', 'pay' => $pm === '' ? '—' : ucfirst($pm), 'days' => $credit ? $d : null, 'mp' => $mp,
-            'over' => ($credit && $mx !== null && $d > $mx) ? 1 : 0, 'sales' => round($sales[$c] ?? 0, 2), 'avg' => $nCyc > 0 ? round(($sales[$c] ?? 0) / $nCyc, 2) : 0, 'open' => round($MCsrc === 'live' ? ($LIVE['rows'][$c][0] ?? 0) : $ob['open'], 2), 'ovd' => round($ob['ovd'], 2), 'bills' => $ob['bills'], 'old' => $ob['old'],
+            'over' => ($credit && $mx !== null && $d > $mx) ? 1 : 0, 'sales' => round($sales[$c] ?? 0, 2), 'avg' => $nCyc > 0 ? round(($sales[$c] ?? 0) / $nCyc, 2) : 0, 'open' => round($ob['open'], 2), 'ovd' => round($ob['ovd'], 2), 'bills' => $ob['bills'], 'old' => $ob['old'],
             'a0' => round($ob['ages'][0], 2), 'a1' => round($ob['ages'][1], 2), 'a2' => round($ob['ages'][2], 2), 'a3' => round($ob['ages'][3], 2), 'a4' => round($ob['ages'][4], 2), 'a5' => round($ob['ages'][5], 2),
-            'viol' => $mo['viol'] ?? 0, 'risk' => $mo['risk'] ?? null, 'band' => $mo['band'] ?? '', 'cs' => $mo['cs'] ?? '', 'cl' => $mo['cl'] ?? 0, 'credit' => $credit ? 1 : 0, 'chq' => round($MCsrc === 'live' ? (($LIVE['rows'][$c][1] ?? 0) + ($LIVE['rows'][$c][2] ?? 0)) : ($CQ[$c]['v'] ?? 0), 2), 'chqn' => $CQ[$c]['n'] ?? 0, 'chqo' => round($CQ[$c]['ov'] ?? 0, 2), 'mc' => round($MCsrc === 'live' ? array_sum($LIVE['rows'][$c] ?? [0]) : (($ob['open'] ?? 0) + ($CQ[$c]['v'] ?? 0)), 2), 'cql' => $CQ[$c]['l'] ?? [],
+            'viol' => $mo['viol'] ?? 0, 'risk' => $mo['risk'] ?? null, 'band' => $mo['band'] ?? '', 'cs' => $mo['cs'] ?? '', 'cl' => $mo['cl'] ?? 0, 'credit' => $credit ? 1 : 0, 'chq' => round($CQ[$c]['v'] ?? 0, 2), 'chqn' => $CQ[$c]['n'] ?? 0, 'chqo' => round($CQ[$c]['ov'] ?? 0, 2), 'mc' => round(($ob['open'] ?? 0) + ($CQ[$c]['v'] ?? 0), 2), 'cql' => $CQ[$c]['l'] ?? [],
             'lbd' => $LB[$c][0] ?? null, 'ldd' => $LB[$c][1] ?? null,
             'bl' => array_map(fn($bb) => ['i' => $bb[0], 'bd' => $bd[$bb[0]] ?? null, 'dd' => $bb[1], 'bal' => $bb[2], 'age' => $bb[3], 'od' => $bb[4]], $ob['bl'] ?? [])]; usort($out[count($out) - 1]['bl'], fn($a, $b) => strcmp((string)$a['dd'], (string)$b['dd']));
         $f1 = $out[count($out) - 1]['bl'][0] ?? null; $out[count($out) - 1]['obd'] = $f1['bd'] ?? null; $out[count($out) - 1]['odd2'] = $f1['dd'] ?? null; }
