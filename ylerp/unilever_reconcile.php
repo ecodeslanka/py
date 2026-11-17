@@ -1453,17 +1453,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);}
 
   <div class="selector-card">
     <span class="sel-label"><i class="fa-solid fa-building-columns" style="margin-right:5px;"></i>Bank Account</span>
-    <select id="accountSelect" class="sel-select" onchange="fillTypeSelect('');clearResults();markSettingsDirty()">
+    <select id="accountSelect" class="sel-select" onchange="fillTypeSelect('');clearResults();markSettingsDirty();autoReconcile()">
       <option value="">— Loading accounts… —</option>
     </select>
     <span class="sel-label">Statement Type</span>
-    <select id="typeSelect" class="sel-select" style="min-width:150px;max-width:220px;flex:0 1 auto;" onchange="clearResults();markSettingsDirty()">
+    <select id="typeSelect" class="sel-select" style="min-width:150px;max-width:220px;flex:0 1 auto;" onchange="clearResults();markSettingsDirty();autoReconcile()">
       <option value="">All types</option>
     </select>
     <button class="btn-cancel-sm" id="saveSettingsBtn" onclick="saveSettings(true)" title="Save account + type as the default"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
     <span id="settingsInfo" style="font-size:11px;color:var(--muted);font-weight:600;"></span>
     <button class="btn-run" id="runBtn" onclick="runReconcile()">
-      <i class="fa-solid fa-arrows-rotate"></i> Reconcile
+      <i class="fa-solid fa-arrows-rotate"></i> Reload
     </button>
     <div id="loadingSpinner" style="display:none;">
       <span class="spinner"></span>
@@ -1740,8 +1740,14 @@ async function loadAccounts(){
     fillTypeSelect(_ulrSaved.type);
     document.getElementById('settingsInfo').textContent=st.updated_at?('Saved '+st.updated_at+' by '+(st.updated_by||'')):'Not saved yet';
     document.getElementById('saveSettingsBtn').classList.remove('dirty');
+    /* no Reconcile click needed: load straight away with the saved account (or the only account there is) */
+    if(!sel.value && (data.accounts||[]).length===1){ sel.value=data.accounts[0].id; fillTypeSelect(''); }
+    if(sel.value) runReconcile();
   }catch(e){showToast('Failed to load accounts','err');}
 }
+/* changing the account or the statement type loads again by itself */
+let _ulrAutoT=null;
+function autoReconcile(){ clearTimeout(_ulrAutoT); _ulrAutoT=setTimeout(()=>{ if(document.getElementById('accountSelect').value && !document.getElementById('runBtn').disabled) runReconcile(); },400); }
 function fillTypeSelect(keep){
   const acc=_ulrAccounts[document.getElementById('accountSelect').value];
   const ts=document.getElementById('typeSelect');
