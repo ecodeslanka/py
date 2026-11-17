@@ -3,6 +3,7 @@
 if (!isset($conn)) { include_once 'config.php'; }
 include_once 'auth.php';
 require_once __DIR__ . '/rbac.php';
+@include_once __DIR__ . '/yms_quicklinks.php';   // ⚡ Quick shortcuts (each user's own)
 
 // Require login for all pages using this header
 requireLogin();
@@ -756,6 +757,7 @@ if (isset($conn) && $conn) {
         <div class="header-right">
             <button class="menu-toggle" onclick="toggleSidebar()"><i class="fa-solid fa-bars"></i></button>
 
+            <?php if (function_exists('ql_header_button')) ql_header_button(); /* ⚡ Quick shortcuts */ ?>
             <!-- ONLINE USERS PANEL -->
             <style>
             .ou-hd-wrap{position:relative}

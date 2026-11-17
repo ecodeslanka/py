@@ -191,6 +191,7 @@ $__name = $_SESSION['full_name'] ?? ($_SESSION['username'] ?? ($_SESSION['user_n
     <div class="hr"><span class="chipw"><i class="fa-regular fa-calendar"></i> <?= date('l, d F Y') ?></span><span class="chipw" id="dbCyc">Sales cycle …</span><span class="chipw" id="dbAt">Loading…</span>
       <button class="rbtn" type="button" id="dbRef"><i class="fa-solid fa-rotate"></i> Refresh</button></div>
   </div>
+  <?php if (function_exists('ql_home_section')) ql_home_section(); /* ⚡ my quick shortcuts */ ?>
   <div id="dbBody"><div class="grid g4"><?php for ($i = 0; $i < 8; $i++): ?><div class="kpi"><div class="sk" style="width:50%"></div><div class="sk" style="width:80%;height:24px"></div><div class="sk" style="width:60%"></div></div><?php endfor; ?></div></div>
 </div>
 <script>
