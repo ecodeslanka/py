@@ -118,6 +118,11 @@ function ql_header_button() {
 .ql-mine .mi.dragging{opacity:.35}.ql-mine .mi.over{outline:2px dashed #f59e0b}
 .ql-pop{position:fixed;z-index:2147482600;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 16px 36px rgba(0,0,0,.18);padding:8px;min-width:240px;max-height:60vh;overflow:auto;font-family:'Inter',system-ui,sans-serif}
 .ql-pop b{display:block;font-size:12px;color:#94a3b8;text-transform:uppercase;padding:4px 8px}.ql-pop a{display:flex;gap:9px;align-items:center;padding:8px 9px;border-radius:9px;text-decoration:none;color:#1e293b;font-size:13px;font-weight:600}.ql-pop a:hover{background:#eef2ff}
+.ql-pk,.ql-pk *,.ql-drop,.ql-drop *,.ql-pop,.ql-pop *{text-shadow:none}
+.ql-btn,.ql-btn .ql-t{color:#111827!important}.ql-btn .ql-n{color:#92400e!important}
+.ql-pk-row,.ql-pk-row span,.ql-tr-m,.ql-tr-m span:not(.mic),.ql-mine .mi,.ql-mine .mi span,.ql-it,.ql-top,.ql-pop a{color:#1e293b!important}
+.ql-pk-row small,.ql-tr-m small,.ql-pk-g,.ql-tr-sec,.ql-tr-g,.ql-hint,.ql-empty{color:#64748b!important}
+.ql-pk-r h4{color:#78350f!important}.ql-pk-row .fi,.ql-tr-m .mic,.ql-mine .mi .fi,.ql-it .qi{color:#fff!important}.ql-pk-ft .ql-s,.ql-pk-hd,.ql-pk-hd *{color:#fff!important}.ql-pk-ft .ql-c{color:#334155!important}
 .ql-pk-ft{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid #f1f5f9;background:#fff}.ql-pk-ft span{flex:1;font-size:12.5px;font-weight:700;color:#b45309}
 .ql-pk-ft button{border:none;border-radius:11px;padding:10px 18px;font:800 13px 'Inter',system-ui,sans-serif;cursor:pointer}.ql-pk-ft .ql-c{background:#f1f5f9;color:#334155}.ql-pk-ft .ql-s{background:linear-gradient(135deg,#f59e0b,#b45309);color:#fff}
 .ql-tr-sec{font-size:11px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin:12px 4px 4px;display:flex;align-items:center;gap:6px}
@@ -144,7 +149,9 @@ function ql_header_button() {
   <div class="ql-pk-ft"><span id="qlPkDirty"></span><button type="button" class="ql-c" id="qlPkCancel">Cancel</button><button type="button" class="ql-s" id="qlPkSave">💾 Save shortcuts</button></div></div></div>
 <script>
 (function(){
-  if(window.QL) return; var Q=window.QL={items:<?= json_encode(array_values($items)) ?>,company:<?= json_encode(array_values($company)) ?>,map:null};
+  if(window.QL) return;
+  ['qlPk','qlDz'].forEach(function(id){ var el=document.getElementById(id); if(el&&el.parentNode!==document.body) document.body.appendChild(el); });   // not inside the header: its colours must not apply
+  var Q=window.QL={items:<?= json_encode(array_values($items)) ?>,company:<?= json_encode(array_values($company)) ?>,map:null};
   var $=function(i){return document.getElementById(i);}, COL=['#4f46e5','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#14b8a6','#ec4899','#6366f1','#0284c7'];
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function col(k){ var h=0; for(var i=0;i<k.length;i++) h=(h*31+k.charCodeAt(i))>>>0; return COL[h%COL.length]; }
