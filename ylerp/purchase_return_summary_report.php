@@ -592,7 +592,7 @@ $base_url = 'purchase_return_summary_report.php?' . http_build_query($query_para
 
 <!-- ── Reconcile window: reconcile on this page, no page change ──────────────── -->
 <style>
-#prM{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-start;justify-content:center;z-index:10050;padding:40px 14px;overflow:auto}
+#prM{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-start;justify-content:center;z-index:2147483000;padding:40px 14px;overflow:auto}   /* above the header and the sidebar */
 #prM.open{display:flex}
 #prM .pm{background:#fff;border-radius:16px;width:min(1080px,100%);box-shadow:0 30px 60px -20px rgba(0,0,0,.45);overflow:hidden;font-size:13px;color:#0f172a}
 #prM .pm-h{display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(120deg,#1e3a8a,#2563eb);color:#fff}
@@ -623,6 +623,7 @@ $base_url = 'purchase_return_summary_report.php?' . http_build_query($query_para
 </div></div>
 <script>
 let _pr={inv:'',co:'',tol:10,q:'',changed:false,msg:null};
+(function(){ const m=document.getElementById('prM'); if(m&&m.parentNode!==document.body) document.body.appendChild(m); })();   // out of the page content box, so the header never covers it
 const prE=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const prN=v=>(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const prRows=()=>[...document.querySelectorAll('tr[data-inv]')];
