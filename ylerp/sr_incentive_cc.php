@@ -182,17 +182,13 @@ if (isset($_GET['action'])) {
             exit;
         }
 
-        /* the original automatic match (SR incentive / advance / "SR" claims) + claims sent here from the Customer Claim Report ("Send to → SR Incentive") */
+        /* the original automatic match (SR incentive claims) + claims sent here from the Customer Claim Report ("Send to → SR Incentive") */
         mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (claim_cert_item_id INT NOT NULL PRIMARY KEY, dest VARCHAR(20) NOT NULL, sent_by VARCHAR(100) NULL, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, KEY k_dest (dest))");   // claims sent here from the Customer Claim Report
         $base_where = "(ci.claim_type LIKE '%SR Incentive%'
                         OR ci.claim_type LIKE '%sr incentive%'
                         OR ci.claim_description LIKE '%SR Incentive%'
                         OR ci.ledger_type LIKE '%SR Incentive%'
                         OR ci.claim_type LIKE '%incentive%'
-                        OR ci.claim_description LIKE '%advance%'
-                        OR ci.claim_type LIKE '%advance%'
-                        OR ci.ledger_type LIKE '%advance%'
-                        OR CONCAT_WS(' ', COALESCE(ci.claim_type,''), COALESCE(ci.claim_description,''), COALESCE(ci.ledger_type,'')) REGEXP '(^|[^a-z])sr([^a-z]|$)'
                         OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'sr_incentive'))";
 
         $res = mysqli_query($conn,
