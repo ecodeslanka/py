@@ -118,83 +118,54 @@ function cc_build_where($conn) {
     return $w ? ('WHERE ' . implode(' AND ', $w)) : '';
 }
 
-/* ══ SSCL & VAT: send claim certificates to the "matched certificate" side of an SSCL & VAT payment ══
-   Same tables and the same row the SSCL & VAT page writes when a claim card is picked there (sscl_vat_settlements with claim_cert_item_id). */
+/* ══ SSCL & VAT: "Send to SSCL & VAT" puts the claim certificate on the SSCL & VAT page's claim list (table sscl_vat_claim_list);
+   there it is picked as a matched certificate when the payment is entered, as normal. Matches already made are read from sscl_vat_settlements. */
 function cc_sv_tables($conn) {
     @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sscl_vat (id INT AUTO_INCREMENT PRIMARY KEY, paid_date DATE NULL, tax_type VARCHAR(255) NULL, description VARCHAR(500) NULL, paid_amount DECIMAL(14,2) NULL, vat DECIMAL(14,2) NULL,
         total_amount DECIMAL(14,2) NULL, document_path VARCHAR(500) NULL, document_name VARCHAR(255) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NULL ON UPDATE CURRENT_TIMESTAMP)");
     @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sscl_vat_settlements (id INT AUTO_INCREMENT PRIMARY KEY, sv_id INT NOT NULL, tax_invoice_no VARCHAR(255) NULL, banking_date DATE NULL, bank_ref VARCHAR(255) NULL,
         amount DECIMAL(14,2) NULL DEFAULT 0, vat_amount DECIMAL(14,2) NULL DEFAULT 0, total_amount DECIMAL(14,2) NULL DEFAULT 0, claim_description VARCHAR(500) NULL, entity VARCHAR(255) NULL, claim_cert_item_id INT NULL,
         document_path VARCHAR(500) NULL, document_name VARCHAR(255) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX idx_sv (sv_id))");
+    @mysqli_query($conn, "CREATE TABLE IF NOT EXISTS sscl_vat_claim_list (claim_cert_item_id INT NOT NULL PRIMARY KEY, sent_by VARCHAR(100) NULL, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
 }
 function cc_sv_can($conn) { if (!function_exists('rbac_can')) @include_once __DIR__ . '/rbac.php'; return function_exists('rbac_can') ? (rbac_can('create', 'sscl_vat') || rbac_can('edit', 'sscl_vat')) : true; }
 function cc_sv_is_tax($r) { $t = strtoupper(($r['claim_type'] ?? '') . ' ' . ($r['claim_description'] ?? '')); return strpos($t, 'SSCL') !== false || strpos($t, 'VAT') !== false; }
 /* per claim: what is already matched on SSCL & VAT payments + which payment(s) */
 function cc_sv_links($conn, array $ids) {
     $out = []; $ids = array_values(array_filter(array_map('intval', $ids))); if (!$ids) return $out;
-    $t = @mysqli_query($conn, "SHOW TABLES LIKE 'sscl_vat_settlements'"); if (!$t || !mysqli_num_rows($t)) return $out; $in = implode(',', $ids);
+    cc_sv_tables($conn); $in = implode(',', $ids);
     $q = @mysqli_query($conn, "SELECT s.claim_cert_item_id AS cid, s.sv_id, SUM(COALESCE(s.total_amount, s.amount, 0)) AS amt, MAX(v.paid_date) AS pd, MAX(v.tax_type) AS tt
                                FROM sscl_vat_settlements s LEFT JOIN sscl_vat v ON v.id = s.sv_id WHERE s.claim_cert_item_id IN ($in) GROUP BY s.claim_cert_item_id, s.sv_id");
     while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['cid']; $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + (float)$x['amt']; $out[$c]['pays'][] = ['id' => (int)$x['sv_id'], 'amt' => round((float)$x['amt'], 2), 'pd' => $x['pd'], 'tt' => $x['tt']]; }
+    $q = @mysqli_query($conn, "SELECT claim_cert_item_id AS cid, sent_at FROM sscl_vat_claim_list WHERE claim_cert_item_id IN ($in)");
+    while ($q && ($x = mysqli_fetch_assoc($q))) $out[(int)$x['cid']]['listed'] = $x['sent_at'];
     $t = @mysqli_query($conn, "SHOW TABLES LIKE 'dl_cheque_acknowledgments'");
     if ($t && mysqli_num_rows($t)) { $q = @mysqli_query($conn, "SELECT claim_item_id AS cid, confirmed_payment_id AS sv FROM dl_cheque_acknowledgments WHERE source = 'ssclvat_claim' AND claim_item_id IN ($in)");
         while ($q && ($x = mysqli_fetch_assoc($q))) $out[(int)$x['cid']]['ack'] = (int)$x['sv']; }
     return $out;
 }
-if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_payments') {
-    ob_start(); header('Content-Type: application/json'); cc_sv_tables($conn);
-    $rows = []; $q = mysqli_query($conn, "SELECT v.id, v.paid_date, v.tax_type, v.description, COALESCE(v.paid_amount,0) AS paid_amount, COALESCE(v.vat,0) AS vat, COALESCE(v.total_amount,0) AS total_amount,
-            COALESCE(SUM(s.total_amount),0) AS settled, COUNT(s.id) AS n FROM sscl_vat v LEFT JOIN sscl_vat_settlements s ON s.sv_id = v.id GROUP BY v.id ORDER BY v.paid_date DESC, v.id DESC LIMIT 1000");
-    while ($q && ($x = mysqli_fetch_assoc($q))) { $x['balance'] = round((float)$x['total_amount'] - (float)$x['settled'], 2); $rows[] = $x; }
-    $ids = array_map('intval', json_decode($_REQUEST['ids'] ?? '[]', true) ?: []); $claims = [];
-    if ($ids) { $L = cc_sv_links($conn, $ids); $q = mysqli_query($conn, "SELECT id, customer_code, customer_name, claim_type, tax_invoice_no, invoice_date, banking_date, entity, claim_description, actual_amount, vat_amount, total_amount FROM claim_cert_items WHERE id IN (" . implode(',', $ids) . ")");
-        while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['id']; $x['settled'] = round($L[$c]['settled'] ?? 0, 2); $x['remaining'] = round(max(0, (float)$x['total_amount'] - ($L[$c]['settled'] ?? 0)), 2); $x['ack'] = $L[$c]['ack'] ?? 0; $x['pays'] = $L[$c]['pays'] ?? []; $x['is_tax'] = cc_sv_is_tax($x); $claims[] = $x; } }
-    ob_end_clean(); echo json_encode(['success' => true, 'payments' => $rows, 'claims' => $claims, 'can' => cc_sv_can($conn)]); exit;
-}
-if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_send' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+function cc_sv_user() { return $_SESSION['username'] ?? ($_SESSION['user_name'] ?? ($_SESSION['full_name'] ?? 'system')); }
+if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_list' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ob_start(); header('Content-Type: application/json'); cc_sv_tables($conn);
     $fail = function ($m) { ob_end_clean(); echo json_encode(['success' => false, 'message' => $m]); exit; };
-    if (!cc_sv_can($conn)) $fail('You do not have the right to add payments on the SSCL & VAT page.');
-    $sv = intval($_POST['sv_id'] ?? 0); $items = json_decode($_POST['items'] ?? '[]', true); $ref = mysqli_real_escape_string($conn, trim((string)($_POST['bank_ref'] ?? '')));
-    if (!$sv || !is_array($items) || !$items) $fail('Pick an SSCL & VAT payment and at least one claim.');
-    $pay = mysqli_fetch_assoc(mysqli_query($conn, "SELECT v.*, (SELECT COALESCE(SUM(total_amount),0) FROM sscl_vat_settlements WHERE sv_id = v.id) AS settled FROM sscl_vat v WHERE v.id = $sv"));
-    if (!$pay) $fail('That SSCL & VAT payment no longer exists.');
-    $bal = round((float)$pay['total_amount'] - (float)$pay['settled'], 2);
-    $ids = array_map(fn($i) => intval($i['id'] ?? 0), $items); $L = cc_sv_links($conn, $ids); $want = 0; $rows = [];
-    foreach ($items as $it) { $id = intval($it['id'] ?? 0); $amt = round((float)($it['amount'] ?? 0), 2); if (!$id || $amt <= 0) continue;
-        $c = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM claim_cert_items WHERE id = $id")); if (!$c) $fail('Claim #' . $id . ' was not found.');
-        if (!empty($L[$id]['ack']) && (int)$L[$id]['ack'] !== $sv) $fail('Claim ' . $c['tax_invoice_no'] . ' was already sent to Acknowledgment on another SSCL & VAT payment (#' . $L[$id]['ack'] . ').');
-        $rem = round((float)$c['total_amount'] - ($L[$id]['settled'] ?? 0), 2);
-        if ($amt > $rem + 0.01) $fail('Claim ' . $c['tax_invoice_no'] . ': ' . number_format($amt, 2) . ' is more than its unmatched balance ' . number_format(max(0, $rem), 2) . '.');
-        $want += $amt; $rows[] = [$c, $amt]; }
-    if (!$rows) $fail('Nothing to send — the amounts are 0.');
-    if ($want > $bal + 0.01) $fail('These claims total ' . number_format($want, 2) . ' but payment #' . $sv . ' has only ' . number_format(max(0, $bal), 2) . ' left to match. Lower the amounts or pick another payment.');
-    mysqli_begin_transaction($conn); $n = 0;
-    foreach ($rows as [$c, $amt]) { $e = fn($v) => mysqli_real_escape_string($conn, (string)$v); $bd = !empty($c['banking_date']) ? "'" . $e($c['banking_date']) . "'" : 'NULL';
-        $ok = mysqli_query($conn, "INSERT INTO sscl_vat_settlements (sv_id, tax_invoice_no, banking_date, bank_ref, amount, vat_amount, total_amount, claim_description, entity, claim_cert_item_id)
-                                   VALUES ($sv, '{$e($c['tax_invoice_no'])}', $bd, '$ref', $amt, 0, $amt, '{$e(mb_substr((string)$c['claim_description'], 0, 500))}', '{$e($c['entity'])}', " . (int)$c['id'] . ")");
-        if (!$ok) { $er = mysqli_error($conn); mysqli_rollback($conn); $fail('Could not save: ' . $er); } $n++; }
-    mysqli_commit($conn);
-    ob_end_clean(); echo json_encode(['success' => true, 'message' => $n . ' claim(s) matched to SSCL & VAT payment #' . $sv . ' (' . number_format($want, 2) . ').', 'balance' => round($bal - $want, 2)]); exit;
+    if (!cc_sv_can($conn)) $fail('You do not have the right to add to the SSCL & VAT page.');
+    $ids = array_values(array_unique(array_filter(array_map('intval', json_decode($_POST['ids'] ?? '[]', true) ?: [])))); if (!$ids) $fail('Select at least one claim.');
+    $L = cc_sv_links($conn, $ids); $u = mysqli_real_escape_string($conn, cc_sv_user()); $n = 0; $skip = 0;
+    $q = mysqli_query($conn, "SELECT id, total_amount FROM claim_cert_items WHERE id IN (" . implode(',', $ids) . ")");
+    while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['id'];
+        if (!empty($L[$c]['listed']) || ((float)$x['total_amount'] - ($L[$c]['settled'] ?? 0)) <= 0.004) { $skip++; continue; }
+        if (mysqli_query($conn, "INSERT IGNORE INTO sscl_vat_claim_list (claim_cert_item_id, sent_by) VALUES ($c, '$u')")) $n += mysqli_affected_rows($conn); }
+    ob_end_clean(); echo json_encode(['success' => true, 'message' => $n . ' claim(s) sent to the SSCL & VAT list' . ($skip ? ' (' . $skip . ' already there or fully matched)' : '') . '. Pick them on the SSCL & VAT page when you enter the payment.']); exit;
 }
-
-/* reverse: remove this claim's matched-certificate rows from one SSCL & VAT payment (the same as deleting the settlement on the SSCL & VAT page).
-   Rows already sent to Acknowledgment must be reversed there first. */
-if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_reverse' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_unlist' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     ob_start(); header('Content-Type: application/json'); cc_sv_tables($conn);
     $fail = function ($m) { ob_end_clean(); echo json_encode(['success' => false, 'message' => $m]); exit; };
-    if (!function_exists('rbac_can')) @include_once __DIR__ . '/rbac.php';
-    if (function_exists('rbac_can') && !(rbac_can('delete', 'sscl_vat') || rbac_can('edit', 'sscl_vat'))) $fail('You do not have the right to remove payments on the SSCL & VAT page.');
-    $cid = intval($_POST['claim_id'] ?? 0); $sv = intval($_POST['sv_id'] ?? 0); if (!$cid || !$sv) $fail('Nothing to reverse.');
-    $rows = []; $q = mysqli_query($conn, "SELECT id, document_path, total_amount FROM sscl_vat_settlements WHERE claim_cert_item_id = $cid AND sv_id = $sv");
-    while ($q && ($x = mysqli_fetch_assoc($q))) $rows[] = $x; if (!$rows) $fail('This claim is no longer matched on payment #' . $sv . '.');
-    $t = @mysqli_query($conn, "SHOW TABLES LIKE 'dl_cheque_acknowledgments'");
-    if ($t && mysqli_num_rows($t)) { $ids = implode(',', array_map(fn($x) => (int)$x['id'], $rows));
-        $a = mysqli_fetch_row(mysqli_query($conn, "SELECT COUNT(*) FROM dl_cheque_acknowledgments WHERE (source = 'ssclvat' AND source_settlement_id IN ($ids)) OR (source = 'ssclvat_claim' AND claim_item_id = $cid AND confirmed_payment_id = $sv)"));
-        if ($a && (int)$a[0] > 0) $fail('This match was already sent to Acknowledgment — reverse it on the SSCL & VAT page (or the Acknowledgment page) first.'); }
-    $amt = 0; foreach ($rows as $x) { if (!empty($x['document_path']) && is_file($x['document_path'])) @unlink($x['document_path']); $amt += (float)$x['total_amount']; }
-    $ok = mysqli_query($conn, "DELETE FROM sscl_vat_settlements WHERE claim_cert_item_id = $cid AND sv_id = $sv");
-    ob_end_clean(); echo json_encode(['success' => (bool)$ok, 'message' => $ok ? 'Reversed: ' . number_format($amt, 2) . ' removed from SSCL & VAT payment #' . $sv . '.' : 'Could not reverse: ' . mysqli_error($conn)]); exit;
+    if (!cc_sv_can($conn)) $fail('You do not have the right to change the SSCL & VAT list.');
+    $c = intval($_POST['id'] ?? 0); if (!$c) $fail('Nothing to reverse.'); $L = cc_sv_links($conn, [$c]);
+    if (!empty($L[$c]['pays'])) $fail('This claim is already matched on SSCL & VAT payment #' . implode(', #', array_column($L[$c]['pays'], 'id')) . ' — remove that payment line on the SSCL & VAT page first.');
+    if (!empty($L[$c]['ack'])) $fail('This claim was sent to Acknowledgment from SSCL & VAT payment #' . $L[$c]['ack'] . ' — reverse it there first.');
+    $ok = mysqli_query($conn, "DELETE FROM sscl_vat_claim_list WHERE claim_cert_item_id = $c");
+    ob_end_clean(); echo json_encode(['success' => (bool)$ok, 'message' => $ok ? 'Reversed — the claim is removed from the SSCL & VAT list.' : mysqli_error($conn)]); exit;
 }
 
 /* ── AJAX: get_report_data (paginated) ── */
@@ -228,7 +199,7 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'get_report_
     $rows = [];
     if ($dataRes) while ($r = mysqli_fetch_assoc($dataRes)) { [$r['scheme_no'], $r['scheme_src']] = cc_scheme_of($r['claim_description']); $rows[] = $r; }
     $L = cc_sv_links($conn, array_column($rows, 'id'));
-    foreach ($rows as &$r) { $c = (int)$r['id']; $r['sv_settled'] = round($L[$c]['settled'] ?? 0, 2); $r['sv_pays'] = $L[$c]['pays'] ?? []; $r['sv_ack'] = $L[$c]['ack'] ?? 0; $r['sv_tax'] = cc_sv_is_tax($r) ? 1 : 0; } unset($r);
+    foreach ($rows as &$r) { $c = (int)$r['id']; $r['sv_settled'] = round($L[$c]['settled'] ?? 0, 2); $r['sv_pays'] = $L[$c]['pays'] ?? []; $r['sv_ack'] = $L[$c]['ack'] ?? 0; $r['sv_listed'] = $L[$c]['listed'] ?? ''; $r['sv_tax'] = cc_sv_is_tax($r) ? 1 : 0; } unset($r);
 
     ob_end_clean();
     echo json_encode([
@@ -473,7 +444,7 @@ include 'header.php';
   <div class="rc-card">
     <div class="rc-card-hdr">
       <div class="rc-card-title"><i class="fa-solid fa-table-list"></i> Claim Records</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn-primary" id="svBulk" type="button" onclick="svOpen(svPicked())" disabled style="background:linear-gradient(135deg,#0f766e,#0d9488)"><i class="fa-solid fa-file-circle-check"></i> Send selected to SSCL &amp; VAT <span id="svBulkN"></span></button>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn-primary" id="svBulk" type="button" onclick="svList(svPicked())" disabled style="background:linear-gradient(135deg,#0f766e,#0d9488)"><i class="fa-solid fa-file-circle-check"></i> Send selected to SSCL &amp; VAT <span id="svBulkN"></span></button>
       <div style="font-size:11.5px;color:var(--muted);" id="resultInfo"></div></div>
     </div>
     <div class="prev-outer">
@@ -525,18 +496,8 @@ include 'header.php';
 
 <div id="toast"></div>
 
-<div id="svM" class="svm"><div class="svm-box">
-  <div class="svm-hd"><div><b style="font-size:17px"><i class="fa-solid fa-file-circle-check"></i> Send to SSCL &amp; VAT — matched certificates</b><div style="font-size:12px;opacity:.85">The claim(s) are added to the chosen SSCL &amp; VAT payment's settlement list (the matched-certificate side), the same as picking the claim card on the SSCL &amp; VAT page.</div></div><button type="button" onclick="svClose()">&times;</button></div>
-  <div class="svm-bd">
-    <div class="svm-sec"><div class="svm-t">1 · Claim certificate(s)</div><div style="overflow:auto"><table class="svt"><thead><tr><th>Tax invoice</th><th>Customer</th><th>Claim type</th><th>Banking date</th><th>Entity</th><th class="tr">Claim total</th><th class="tr">Already matched</th><th class="tr">Unmatched</th><th class="tr">Amount to match</th></tr></thead><tbody id="svC"></tbody><tfoot><tr><td colspan="8" class="tr"><b>Total to match</b></td><td class="tr"><b id="svCT">0.00</b></td></tr></tfoot></table></div></div>
-    <div class="svm-sec"><div class="svm-t" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">2 · SSCL &amp; VAT payment <input id="svQ" type="search" placeholder="Search date, tax type, description" style="margin-left:auto;border:1.5px solid var(--bdr);border-radius:8px;padding:6px 10px;font-size:12px;min-width:240px"><label style="font-size:12px;font-weight:600;color:var(--muted)"><input type="checkbox" id="svAllPay"> show fully matched payments</label></div>
-      <div style="max-height:260px;overflow:auto;border:1.5px solid var(--bdr);border-radius:10px"><table class="svt"><thead><tr><th></th><th>#</th><th>Paid date</th><th>Tax type</th><th>Description</th><th class="tr">Payment total</th><th class="tr">Matched</th><th class="tr">Left to match</th></tr></thead><tbody id="svP"></tbody></table></div></div>
-    <div class="svm-sec" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap"><div class="f-field" style="min-width:240px"><label>Bank reference (optional)</label><input id="svRef" type="text" placeholder="e.g. slip / transfer ref"></div>
-      <div id="svMsg" style="font-size:12.5px;font-weight:700;flex:1"></div>
-      <button class="btn-secondary" type="button" onclick="svClose()">Cancel</button><button class="btn-primary" id="svGo" type="button" onclick="svSend()" style="background:linear-gradient(135deg,#0f766e,#0d9488)"><i class="fa-solid fa-paper-plane"></i> Send to SSCL &amp; VAT</button></div>
-  </div></div></div>
 <style>
-.svm{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;z-index:9000;padding:14px}.svm.open{display:flex}
+/*m*/.svm{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;z-index:9000;padding:14px}.svm.open{display:flex}
 .svm-box{font-family:'Segoe UI',system-ui,sans-serif;background:#fff;border-radius:16px;width:min(1180px,100%);max-height:94vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.35)}
 .svm-hd{background:linear-gradient(120deg,#134e4a,#0f766e 55%,#14b8a6);color:#fff;padding:14px 18px;display:flex;gap:12px;align-items:flex-start;justify-content:space-between}.svm-hd button{background:rgba(255,255,255,.18);border:none;color:#fff;font-size:22px;width:36px;height:36px;border-radius:10px;cursor:pointer}
 .svm-bd{padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:14px}.svm-t{font-weight:800;font-size:13px;color:#134e4a;margin-bottom:6px}
@@ -548,59 +509,30 @@ include 'header.php';
 .sv-btn{display:inline-flex;gap:5px;align-items:center;border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:800;cursor:pointer;background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;white-space:nowrap}.sv-btn:hover{filter:brightness(1.1)}
 </style>
 <script>
-let SVROWS = {}, SVPAY = [], SVCL = [], SVSEL = 0;
-function svCanSend(r){ return !(parseFloat(r.total_amount||0) - parseFloat(r.sv_settled||0) <= 0.004); }
+let SVROWS = {};
+function svFull(r){ return parseFloat(r.sv_settled||0)>0 && parseFloat(r.total_amount||0)-parseFloat(r.sv_settled||0)<=0.004; }
+function svCanSend(r){ return !r.sv_listed && !svFull(r); }
 function svCell(r){
-  const tot=parseFloat(r.total_amount||0), st=parseFloat(r.sv_settled||0), full=st>0 && tot-st<=0.004;
   let h='';
-  if(st>0) h+='<div style="display:flex;flex-direction:column;gap:3px">'+(r.sv_pays||[]).map(p=>'<span style="display:inline-flex;gap:5px;align-items:center;white-space:nowrap"><span class="pill '+(full?'p-green':'p-amber')+'" title="Matched on SSCL &amp; VAT payment #'+p.id+'">'+(full?'<i class="fa-solid fa-circle-check"></i> Matched':'Partly')+' #'+p.id+(p.pd?' ('+esc(p.pd)+')':'')+' · '+fmtN(p.amt)+'</span><button type="button" class="sv-rev" onclick="svReverse('+r.id+','+p.id+','+p.amt+',\''+esc(r.tax_invoice_no||'')+'\')" title="Remove this claim from SSCL &amp; VAT payment #'+p.id+'"><i class="fa-solid fa-rotate-left"></i> Reverse</button></span>').join('')+'</div>';
-  if(r.sv_ack>0) h+=' <span class="pill p-blue" title="Sent to Acknowledgment from SSCL &amp; VAT payment #'+r.sv_ack+'">Ack #'+r.sv_ack+'</span>';
-  if(svCanSend(r)) h+=' <button type="button" class="sv-btn'+(r.sv_tax==1?'':' o')+'" onclick="svOpen(['+r.id+'])" title="'+(r.sv_tax==1?'':'This claim type is not SSCL / VAT — check before sending')+'"><i class="fa-solid fa-paper-plane"></i> Send to SSCL &amp; VAT</button>';
+  (r.sv_pays||[]).forEach(p=>{ h+='<span class="pill '+(svFull(r)?'p-green':'p-amber')+'" title="Matched on SSCL &amp; VAT payment #'+p.id+' — to undo, remove that payment line on the SSCL &amp; VAT page">'+(svFull(r)?'<i class="fa-solid fa-circle-check"></i> Matched':'Partly matched')+' #'+p.id+(p.pd?' ('+esc(p.pd)+')':'')+' · '+fmtN(p.amt)+'</span> '; });
+  if(r.sv_ack>0) h+='<span class="pill p-blue">Ack #'+r.sv_ack+'</span> ';
+  if(r.sv_listed && !svFull(r)) h+='<span class="pill p-teal" title="Sent '+esc(r.sv_listed)+' — pick it on the SSCL &amp; VAT page when entering the payment"><i class="fa-solid fa-list-check"></i> In SSCL &amp; VAT list</span> '
+     +((r.sv_pays||[]).length||r.sv_ack>0?'':'<button type="button" class="sv-rev" onclick="svUnlist('+r.id+',\''+esc(r.tax_invoice_no||'')+'\')" title="Take this claim off the SSCL &amp; VAT list"><i class="fa-solid fa-rotate-left"></i> Reverse</button>');
+  if(svCanSend(r)) h+='<button type="button" class="sv-btn'+(r.sv_tax==1?'':' o')+'" onclick="svList(['+r.id+'])" title="'+(r.sv_tax==1?'Add to the SSCL &amp; VAT claim list':'This claim type is not SSCL / VAT — check before sending')+'"><i class="fa-solid fa-paper-plane"></i> Send to SSCL &amp; VAT</button>';
   return h;
 }
 function svPicked(){ return [].slice.call(document.querySelectorAll('.svChk:checked')).map(c=>+c.value); }
 function svSync(){ const n=svPicked().length; document.getElementById('svBulk').disabled=!n; document.getElementById('svBulkN').textContent=n?'('+n+')':''; const all=document.querySelectorAll('.svChk'); document.getElementById('svAll').checked=all.length>0&&n===all.length; }
 document.getElementById('svAll').addEventListener('change',e=>{ document.querySelectorAll('.svChk').forEach(c=>c.checked=e.target.checked); svSync(); });
 document.getElementById('repBody').addEventListener('change',e=>{ if(e.target.classList.contains('svChk')) svSync(); });
-function svClose(){ document.getElementById('svM').classList.remove('open'); }
-document.getElementById('svM').addEventListener('click',e=>{ if(e.target.id==='svM') svClose(); });
-async function svOpen(ids){
-  if(!ids.length) return; SVSEL=0; document.getElementById('svMsg').textContent=''; document.getElementById('svRef').value=''; document.getElementById('svQ').value='';
-  document.getElementById('svC').innerHTML='<tr><td colspan="9" style="padding:18px;text-align:center;color:var(--muted)"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</td></tr>'; document.getElementById('svP').innerHTML='';
-  document.getElementById('svM').classList.add('open');
-  try{ const d=await (await fetch('customer_claim_report.php?ajax_action=sv_payments&ids='+encodeURIComponent(JSON.stringify(ids)))).json(); if(!d.success) throw new Error(d.message||'load failed');
-    SVPAY=d.payments; SVCL=d.claims.filter(c=>c.remaining>0.004); document.getElementById('svGo').disabled=!d.can;
-    if(!d.can) svMsg('You do not have the right to add payments on the SSCL & VAT page.','err');
-    const skipped=d.claims.length-SVCL.length;
-    document.getElementById('svC').innerHTML=SVCL.map((c,i)=>'<tr><td><b style="font-family:monospace;color:#312e81">'+esc(c.tax_invoice_no)+'</b>'+(c.is_tax?'':' <span class="pill p-amber" title="Not an SSCL / VAT claim type">not SSCL/VAT</span>')+(c.ack>0?' <span class="pill p-blue">Ack #'+c.ack+'</span>':'')+'</td><td>'+esc(c.customer_code||'')+' <span style="color:var(--muted)">'+esc(c.customer_name||'')+'</span></td><td>'+esc(c.claim_type||'')+'</td><td>'+esc(c.banking_date||'—')+'</td><td>'+esc(c.entity||'')+'</td><td class="tr">'+fmtN(c.total_amount)+'</td><td class="tr">'+fmtN(c.settled)+'</td><td class="tr"><b>'+fmtN(c.remaining)+'</b></td><td class="tr"><input class="amt" type="number" step="0.01" min="0" max="'+c.remaining+'" data-i="'+i+'" value="'+(+c.remaining).toFixed(2)+'"></td></tr>').join('')
-      +(skipped?'<tr><td colspan="9" style="color:var(--muted);font-size:11.5px">'+skipped+' selected claim(s) are already fully matched and were left out.</td></tr>':'')
-      +(!SVCL.length?'<tr><td colspan="9" style="padding:14px;text-align:center;color:var(--muted)">All selected claims are already fully matched.</td></tr>':'');
-    document.querySelectorAll('#svC input.amt').forEach(x=>x.addEventListener('input',svTot)); svTot(); svPays();
-  }catch(e){ document.getElementById('svC').innerHTML='<tr><td colspan="9" style="color:#dc2626;padding:14px">'+esc(e.message)+'</td></tr>'; }
-}
-function svTot(){ let t=0; document.querySelectorAll('#svC input.amt').forEach(x=>t+=parseFloat(x.value||0)); document.getElementById('svCT').textContent=fmtN(t); svCheck(); return t; }
-function svPays(){ const q=document.getElementById('svQ').value.toLowerCase(), all=document.getElementById('svAllPay').checked;
-  const L=SVPAY.filter(p=>(all||p.balance>0.004||+p.id===SVSEL)&&(!q||((p.paid_date||'')+' '+(p.tax_type||'')+' '+(p.description||'')+' #'+p.id).toLowerCase().indexOf(q)>=0));
-  document.getElementById('svP').innerHTML=L.map(p=>'<tr class="pay'+(+p.id===SVSEL?' pk':'')+'" data-id="'+p.id+'"><td><input type="radio" name="svPay" '+(+p.id===SVSEL?'checked':'')+'></td><td>#'+p.id+'</td><td>'+esc(p.paid_date||'—')+'</td><td><b>'+esc(p.tax_type||'')+'</b></td><td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(p.description||'')+'">'+esc(p.description||'')+'</td><td class="tr">'+fmtN(p.total_amount)+'</td><td class="tr">'+fmtN(p.settled)+' <span style="color:var(--muted)">('+p.n+')</span></td><td class="tr" style="font-weight:800;color:'+(p.balance>0.004?'#0f766e':'#94a3b8')+'">'+fmtN(p.balance)+'</td></tr>').join('')
-    ||'<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--muted)">No SSCL &amp; VAT payment with a balance left'+(SVPAY.length?' — tick "show fully matched payments" to see all':' — add the payment on the SSCL &amp; VAT page first')+'.</td></tr>'; }
-document.getElementById('svQ').addEventListener('input',svPays); document.getElementById('svAllPay').addEventListener('change',svPays);
-document.getElementById('svP').addEventListener('click',e=>{ const tr=e.target.closest('tr.pay'); if(!tr) return; SVSEL=+tr.dataset.id; svPays(); svCheck(); });
-function svMsg(m,t){ const el=document.getElementById('svMsg'); el.textContent=m; el.style.color=t==='err'?'#dc2626':(t==='ok'?'#15803d':'#475569'); }
-function svCheck(){ let t=0, bad=''; document.querySelectorAll('#svC input.amt').forEach(x=>{ const v=parseFloat(x.value||0), c=SVCL[+x.dataset.i]; t+=v; if(v>c.remaining+0.01) bad='Claim '+c.tax_invoice_no+' amount is more than its unmatched balance '+fmtN(c.remaining)+'.'; });
-  const p=SVPAY.find(p=>+p.id===SVSEL); if(bad) return svMsg(bad,'err'); if(!SVSEL) return svMsg('Pick the SSCL & VAT payment these claims belong to.');
-  if(t>p.balance+0.01) return svMsg('Total '+fmtN(t)+' is more than payment #'+p.id+' has left to match ('+fmtN(p.balance)+').','err');
-  svMsg('Payment #'+p.id+' left to match after this: '+fmtN(p.balance-t),'ok'); }
-async function svReverse(cid,sv,amt,ti){
-  if(!confirm('Reverse the SSCL & VAT match?\n\nClaim '+ti+' — '+fmtN(amt)+' will be removed from SSCL & VAT payment #'+sv+'.\nThe claim becomes unmatched again and can be sent again.')) return;
-  const fd=new FormData(); fd.append('ajax_action','sv_reverse'); fd.append('claim_id',cid); fd.append('sv_id',sv);
-  try{ const d=await (await fetch('customer_claim_report.php',{method:'POST',body:fd})).json(); if(!d.success) throw new Error(d.message); showToast(d.message); loadReport(_curPage); }
-  catch(e){ showToast(e.message,'err'); } }
-async function svSend(){ if(!SVSEL) return svMsg('Pick the SSCL & VAT payment first.','err'); const items=[]; document.querySelectorAll('#svC input.amt').forEach(x=>{ const v=parseFloat(x.value||0); if(v>0) items.push({id:+SVCL[+x.dataset.i].id,amount:v}); });
-  if(!items.length) return svMsg('Nothing to send — the amounts are 0.','err');
-  const fd=new FormData(); fd.append('ajax_action','sv_send'); fd.append('sv_id',SVSEL); fd.append('items',JSON.stringify(items)); fd.append('bank_ref',document.getElementById('svRef').value);
-  document.getElementById('svGo').disabled=true;
-  try{ const d=await (await fetch('customer_claim_report.php',{method:'POST',body:fd})).json(); if(!d.success) throw new Error(d.message);
-    svClose(); showToast(d.message); loadReport(_curPage); }catch(e){ svMsg(e.message,'err'); } finally{ document.getElementById('svGo').disabled=false; } }
+async function svPost(data){ const fd=new FormData(); Object.keys(data).forEach(k=>fd.append(k,data[k])); const d=await (await fetch('customer_claim_report.php',{method:'POST',body:fd})).json(); if(!d.success) throw new Error(d.message); return d; }
+async function svList(ids){
+  if(!ids.length) return; const other=ids.filter(id=>SVROWS[id]&&SVROWS[id].sv_tax!=1).length;
+  if(!confirm('Send '+ids.length+' claim(s) to the SSCL & VAT list?'+(other?'\n\n'+other+' of them are not SSCL / VAT claim types.':'')+'\n\nThey will appear on the SSCL & VAT page to pick when you enter the payment.')) return;
+  try{ const d=await svPost({ajax_action:'sv_list',ids:JSON.stringify(ids)}); showToast(d.message); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
+async function svUnlist(id,ti){
+  if(!confirm('Reverse — take claim '+ti+' off the SSCL & VAT list?')) return;
+  try{ const d=await svPost({ajax_action:'sv_unlist',id:id}); showToast(d.message); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
 </script>
 
 <script>
