@@ -138,6 +138,7 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     'scheme_ledger_report'   => ['scheme_discount_daily_report', 'view'],
     'free_issue_cc_receivable' => ['scheme_discount_receivable', 'view'],   // Free Issues: removed from the menu, follows Scheme Discount
     'free_issue_cc_ajax'       => ['scheme_discount_receivable', 'edit'],
+    'scheme_master_report'     => ['scheme_discount_daily_report', 'view'],   // Scheme Master Report (HUL + TOT): removed from the menu
     'save_sentback_issue'  => ['sentback_cheques', 'edit'],
     'save_unloading_pay'   => ['reconcile_unloading', 'edit'],
     'sscl_vat_new'         => ['sscl_vat', 'view'],
