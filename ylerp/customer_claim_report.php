@@ -523,19 +523,21 @@ include 'header.php';
 .svm-bd{padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:14px}.svm-t{font-weight:800;font-size:13px;color:#134e4a;margin-bottom:6px}
 .svt{width:100%;border-collapse:collapse;font-size:12px}.svt th{background:#0f172a;color:#e2e8f0;padding:7px 9px;text-align:left;font-size:10.5px;position:sticky;top:0}.svt th.tr,.svt td.tr{text-align:right}.svt td{padding:6px 9px;border-bottom:1px solid #f1f5f9}
 .svt tr.pk td{background:#ccfbf1!important}.svt tbody tr.pay{cursor:pointer}.svt tbody tr.pay:hover td{background:#f0fdfa}.svt input.amt{width:120px;text-align:right;border:1.5px solid #5eead4;border-radius:7px;padding:5px 7px;font:inherit;font-weight:700}
+.prev-table input[type=checkbox],#svAll{appearance:auto!important;-webkit-appearance:checkbox!important;display:inline-block!important;opacity:1!important;visibility:visible!important;position:static!important;width:16px!important;height:16px!important;margin:0!important;cursor:pointer;accent-color:#0d9488}
+.sv-btn.o{background:linear-gradient(135deg,#64748b,#94a3b8)}
 .sv-btn{display:inline-flex;gap:5px;align-items:center;border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:800;cursor:pointer;background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;white-space:nowrap}.sv-btn:hover{filter:brightness(1.1)}
 </style>
 <script>
 let SVROWS = {}, SVPAY = [], SVCL = [], SVSEL = 0;
-function svCanSend(r){ return r.sv_tax==1 && !(parseFloat(r.total_amount||0) - parseFloat(r.sv_settled||0) <= 0.004); }
+function svCanSend(r){ return !(parseFloat(r.total_amount||0) - parseFloat(r.sv_settled||0) <= 0.004); }
 function svCell(r){
   const tot=parseFloat(r.total_amount||0), st=parseFloat(r.sv_settled||0), pays=(r.sv_pays||[]).map(p=>'#'+p.id+(p.pd?' ('+p.pd+')':'')).join(', ');
   let h='';
   if(st>0 && tot-st<=0.004) h+='<span class="pill p-green" title="Matched on SSCL &amp; VAT payment '+esc(pays)+'"><i class="fa-solid fa-circle-check"></i> Matched '+esc(pays)+'</span>';
   else if(st>0) h+='<span class="pill p-amber" title="Matched on '+esc(pays)+'">Partly matched '+fmtN(st)+' · '+esc(pays)+'</span> ';
   if(r.sv_ack>0) h+=' <span class="pill p-blue" title="Sent to Acknowledgment from SSCL &amp; VAT payment #'+r.sv_ack+'">Ack #'+r.sv_ack+'</span>';
-  if(svCanSend(r)) h+=' <button type="button" class="sv-btn" onclick="svOpen(['+r.id+'])"><i class="fa-solid fa-paper-plane"></i> Send to SSCL &amp; VAT</button>';
-  return h || (r.sv_tax==1 ? '' : '<span style="color:var(--muted);font-size:11px" title="Only SSCL / VAT claim certificates are matched on the SSCL &amp; VAT page">— not SSCL / VAT</span>');
+  if(svCanSend(r)) h+=' <button type="button" class="sv-btn'+(r.sv_tax==1?'':' o')+'" onclick="svOpen(['+r.id+'])" title="'+(r.sv_tax==1?'':'This claim type is not SSCL / VAT — check before sending')+'"><i class="fa-solid fa-paper-plane"></i> Send to SSCL &amp; VAT</button>';
+  return h;
 }
 function svPicked(){ return [].slice.call(document.querySelectorAll('.svChk:checked')).map(c=>+c.value); }
 function svSync(){ const n=svPicked().length; document.getElementById('svBulk').disabled=!n; document.getElementById('svBulkN').textContent=n?'('+n+')':''; const all=document.querySelectorAll('.svChk'); document.getElementById('svAll').checked=all.length>0&&n===all.length; }
@@ -721,7 +723,7 @@ async function loadReport(page){
     d.rows.forEach((r, i) => {
       SVROWS[r.id] = r;
       h += '<tr data-id="' + r.id + '">' +
-        '<td>' + (svCanSend(r) ? '<input type="checkbox" class="svChk" value="' + r.id + '">' : '') + '</td>' +
+        '<td style="text-align:center">' + (svCanSend(r) ? '<input type="checkbox" class="svChk" value="' + r.id + '" title="Select to send to SSCL &amp; VAT">' : '<i class="fa-solid fa-circle-check" style="color:#16a34a" title="Already matched on SSCL &amp; VAT"></i>') + '</td>' +
         '<td style="font-family:monospace;font-size:11px;color:var(--muted);">' + ((( _curPage-1)*per)+i+1) + '</td>' +
         '<td><span class="pill p-violet">' + esc(r.customer_code||'—') + '</span> <span style="font-size:11px;color:var(--muted);">' + esc(r.customer_name||'') + '</span></td>' +
         '<td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(r.file_name||'') + '">' + esc(r.file_name||'—') + '<br><span style="color:var(--muted);">' + esc(r.upload_date||'') + '</span></td>' +
