@@ -174,6 +174,16 @@ if (isset($_GET['action'])) {
         }
 
         mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (claim_cert_item_id INT NOT NULL PRIMARY KEY, dest VARCHAR(20) NOT NULL, sent_by VARCHAR(100) NULL, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, KEY k_dest (dest))");   // claims sent here from the Customer Claim Report
+        /* a claim already sent to Acknowledgment from Muthupalasa BP Claims (straight from the claim card, or with its payment)
+           is hidden from the other payments — it stays only in the payment it was sent from, where it can be reversed */
+        $ackHide = '';
+        $ackT = mysqli_query($conn, "SHOW TABLES LIKE 'dl_cheque_acknowledgments'");
+        if ($ackT && mysqli_num_rows($ackT) > 0)
+            $ackHide = "AND ci.id NOT IN (SELECT a.claim_item_id FROM dl_cheque_acknowledgments a
+                            LEFT JOIN dn_settlements s2 ON a.source = 'dn' AND s2.id = a.source_settlement_id
+                         WHERE a.claim_item_id > 0 AND a.source IN ('dn','dn_claim')
+                           AND NOT (a.source = 'dn_claim' AND a.confirmed_payment_id = $dn_id)
+                           AND NOT (a.source = 'dn' AND s2.dn_id = $dn_id))";
         $res = mysqli_query($conn,
             "SELECT ci.*,
                     COALESCE((
@@ -193,8 +203,9 @@ if (isset($_GET['action'])) {
                         WHERE ds.claim_cert_item_id = ci.id AND ds.dn_id = $dn_id
                     ),0) AS this_dn_settled_total
              FROM claim_cert_items ci
-             WHERE ci.claim_type = 'Muthupalasa BP Claims'
-                OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'muthupalasa')   -- + claims sent here from the Customer Claim Report
+             WHERE (ci.claim_type = 'Muthupalasa BP Claims'
+                OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'muthupalasa'))   -- + claims sent here from the Customer Claim Report
+               $ackHide
              ORDER BY ci.invoice_date DESC, ci.id DESC
              LIMIT 500"
         );
