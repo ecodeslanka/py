@@ -1872,9 +1872,6 @@ if (isset($conn) && $conn) {
                     <a href="scheme_discount_receivable.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'scheme_discount_receivable.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-plus"></i><span>Scheme Discount</span>
                     </a>
-                    <a href="free_issue_cc_receivable.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'free_issue_cc_receivable.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-plus"></i><span>Free Issues</span>
-                    </a>
                     <a href="debit_note.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'debit_note.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-plus"></i><span>Muthupalasa BP Claims</span>
                     </a>
