@@ -13,7 +13,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'dash') {
     include 'config.php';
     if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
     if (empty($_SESSION['user_id'])) $out(['success' => false, 'message' => 'Please log in.']);
-    date_default_timezone_set('Asia/Colombo');
+    date_default_timezone_set('Asia/Colombo'); @set_time_limit(180);
     $can = function (array $pages) { if (!function_exists('rbac_can')) return true; foreach ($pages as $p) if (rbac_can('view', $p)) return true; return false; };
     $P = [
         'sales'    => $can(['historical_sales_trend_report', 'invoice_wise_sales_history', 'customer_analysis_report', 'plan_executive_dashboard']),
@@ -45,6 +45,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'dash') {
     $pTo = date('Y-m-d', strtotime($p0 . " +$elapsed day"));
     $D['cycle'] = ['label' => date('M-y', strtotime($cur . '-01')), 'from' => $c0, 'to' => $c1, 'prev' => date('M-y', strtotime($prev . '-01'))];
 
+    try {
     /* ── SALES ── */
     if ($P['sales']) {
         $dc = 'COALESCE(bill_date, delivery_date)';
@@ -85,6 +86,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'dash') {
         $D['top_reps'] = []; foreach (array_slice($sp, 0, 8, true) as $k => $x) $D['top_reps'][] = ['c' => $k, 'n' => $spn[$k] ?? '', 'v' => round($x['v'], 2), 'o' => $x['o']];
     }
 
+    try {
+    } catch (Throwable $__e) { $D['warn'][] = 'Sales: ' . $__e->getMessage(); }   // one block failing does not stop the others
     /* ── DELIVERIES (field summary) ── */
     if ($P['deliver'] && $has('field_summary_details')) {
         $dv = function ($a, $b) use ($all) { $x = $all("SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(fsd.adjust_net_value, fsd.net_value, 0)),0) AS v, COUNT(DISTINCT fs.id) AS fs, COUNT(DISTINCT fs.route) AS rt
@@ -92,6 +95,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'dash') {
         $D['deliver'] = ['today' => $dv($T, $T), 'cycle' => $dv($c0, $T)];
     }
 
+    try {
+    } catch (Throwable $__e) { $D['warn'][] = 'Deliveries: ' . $__e->getMessage(); }   // one block failing does not stop the others
     /* ── COLLECTIONS (invoice payments) ── */
     if ($P['collect'] && $has('invoice_payments')) {
         $D['collect'] = ['today' => (float)$one("SELECT COALESCE(SUM(amount),0) FROM invoice_payments WHERE is_reversed = 0 AND payment_date = '$T'"),
@@ -103,6 +108,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'dash') {
         $D['daily_collect'] = $dm;
     }
 
+    try {
+    } catch (Throwable $__e) { $D['warn'][] = 'Collections: ' . $__e->getMessage(); }   // one block failing does not stop the others
     /* ── MARKET CREDIT: outstanding bills (Market Credit Report formula), ageing by days since delivery, overdue past the customer's policy days ── */
     if ($P['credit'] && $has('field_summary_details')) {
         $siid = $has('secondary_invoice_import_details') ? "LEFT JOIN (SELECT bill_no, delivery_date, MAX(final_bill_amount) AS f FROM secondary_invoice_import_details WHERE status = 'imported' GROUP BY bill_no, delivery_date) siid ON siid.bill_no = fsd.invoice_num AND siid.delivery_date = fs.delivery_date" : '';
@@ -118,6 +125,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'dash') {
         $D['credit'] = ['outstanding' => round($tot, 2), 'overdue' => round($ovd, 2), 'customers' => count($cust), 'bills' => count($rows), 'ageing' => array_map(fn($k, $v) => ['k' => $k, 'v' => round($v, 2)], array_keys($ag), array_values($ag))];
     }
 
+    try {
+    } catch (Throwable $__e) { $D['warn'][] = 'Market credit: ' . $__e->getMessage(); }   // one block failing does not stop the others
     /* ── CHEQUES (same statuses as the Market Credit Report; Sampath cheques are not market credit) ── */
     if ($P['cheques'] && $has('cheques')) {
         $cols = []; foreach ($all("SHOW COLUMNS FROM cheques") as $x) $cols[$x['Field']] = 1;
@@ -134,6 +143,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'dash') {
                          'due_total' => (float)$one("SELECT COALESCE(SUM(total_amount),0) FROM cheques WHERE status IN ('pending','to_be_bank') AND cheque_date BETWEEN '$T' AND '$wk' $sp")];
     }
 
+    try {
+    } catch (Throwable $__e) { $D['warn'][] = 'Cheques: ' . $__e->getMessage(); }   // one block failing does not stop the others
     /* ── CUSTOMERS & PEOPLE ── */
     if ($P['sales'] && $has('customers')) {
         $D['customers'] = ['total' => (int)$one("SELECT COUNT(*) FROM customers WHERE COALESCE(active,1) = 1"),
@@ -146,6 +157,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'dash') {
         $c = []; foreach ($all("SHOW COLUMNS FROM employees") as $x) $c[$x['Field']] = 1;
         $D['people'] = ['employees' => (int)$one("SELECT COUNT(*) FROM employees" . (isset($c['active']) ? ' WHERE active = 1' : (isset($c['status']) ? " WHERE status IN ('Permanent','Probation')" : '')))];
     }
+    } catch (Throwable $__e) { $D['warn'][] = 'Customers / staff: ' . $__e->getMessage(); }   // one block failing does not stop the others
     $D['success'] = true;
     @file_put_contents($ck, json_encode($D, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR));
     $out($D);
@@ -253,9 +265,12 @@ $__name = $_SESSION['full_name'] ?? ($_SESSION['username'] ?? ($_SESSION['user_n
       h+='</div>'; }
     var L=[['vendor_dashboard.php','fa-gauge-high','Vendor Ledger Dashboard',P.vendor],['customer_claim_report.php','fa-file-circle-check','Customer Claim Report',P.vendor],['market_credit_report.php','fa-store','Market Credit',P.credit],['credit_aging_report.php','fa-hourglass-half','Credit Ageing',P.credit],['historical_sales_trend_report.php','fa-chart-line','Sales Trends',P.sales],['plan_executive_dashboard.php','fa-chess','Planning Dashboard',P.sales],['plan_credit_policy_report.php','fa-scale-balanced','Credit Policy',P.credit]];
     var ql=L.filter(function(x){return x[3];}); if(ql.length) h+='<div class="sec"><i class="fa-solid fa-bolt"></i> Quick links</div><div class="ql">'+ql.map(function(x){return '<a href="'+x[0]+'"><i class="fa-solid '+x[1]+'" style="color:#4f46e5"></i> '+x[2]+'</a>';}).join('')+'</div>';
+    if(d.warn&&d.warn.length) h='<div class="err" style="margin-bottom:12px;background:#fffbeb;border-color:#fde68a;color:#92400e"><i class="fa-solid fa-circle-info"></i> Some figures could not be read: '+d.warn.map(esc).join(' · ')+'</div>'+h;
     $('dbBody').innerHTML=h; }
-  function load(refresh){ $('dbAt').textContent='Loading…'; fetch('index.php?ajax=dash'+(refresh?'&refresh=1':''),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){ if(!d.success) throw new Error(d.message||'Could not load'); render(d); })
-      .catch(function(e){ $('dbBody').innerHTML='<div class="err"><i class="fa-solid fa-triangle-exclamation"></i> The dashboard figures could not be loaded: '+esc(e.message)+'</div>'; $('dbAt').textContent='—'; }); }
+  function load(refresh){ $('dbAt').textContent='Loading…'; var ctl=window.AbortController?new AbortController():null, tm=setTimeout(function(){ if(ctl) ctl.abort(); },90000);
+    fetch('index.php?ajax=dash'+(refresh?'&refresh=1':''),{credentials:'same-origin',signal:ctl?ctl.signal:undefined}).then(function(r){ return r.text().then(function(t){ clearTimeout(tm);
+        try{ return JSON.parse(t); }catch(e){ var m=t.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim(); throw new Error(r.status>=400?'the server answered HTTP '+r.status+(m?' — '+m.slice(0,300):''):(m?m.slice(0,300):'empty answer (you may need to log in again)')); } }); }).then(function(d){ if(!d.success) throw new Error(d.message||'Could not load'); render(d); })
+      .catch(function(e){ clearTimeout(tm); $('dbBody').innerHTML='<div class="err"><i class="fa-solid fa-triangle-exclamation"></i> The dashboard figures could not be loaded: '+esc(e.name==='AbortError'?'it took longer than 90 seconds.':e.message)+' <button type="button" onclick="document.getElementById(\'dbRef\').click()" style="margin-left:8px;border:1px solid #fecaca;background:#fff;color:#991b1b;border-radius:8px;padding:4px 10px;font-weight:700;cursor:pointer">Retry</button></div>'; $('dbAt').textContent='—'; }); }
   $('dbRef').onclick=function(){ load(true); }; load(false);
 })();
 </script>
