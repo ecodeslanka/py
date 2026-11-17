@@ -742,7 +742,7 @@ async function loadReport(page){
         '<td style="font-size:11.5px;">' + esc(r.invoice_date||'—') + '</td>' +
         '<td style="font-size:11.5px;">' + esc(r.banking_date||'—') + '</td>' +
         '<td><span class="pill p-gray">' + esc(r.entity||'—') + '</span></td>' +
-        '<td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(r.claim_description||'') + '">' + esc((r.claim_description||'').slice(0,50)) + '</td>' +
+        '<td style="font-size:11.5px;min-width:240px;max-width:340px;white-space:normal;word-break:break-word;line-height:1.4;">' + esc(r.claim_description||'') + '</td>' +
         '<td class="tr" style="font-weight:700;">' + fmtN(r.actual_amount) + '</td>' +
         '<td class="tr" style="color:var(--muted);">' + fmtN(r.vat_amount) + '</td>' +
         '<td class="tr" style="font-weight:800;color:#312e81;">' + fmtN(r.total_amount) + '</td>' +
