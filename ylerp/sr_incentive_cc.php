@@ -1143,7 +1143,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
                 <input type="text" class="apf-inp" id="apf-bacc" placeholder="e.g. 007-1-001-2-0001">
               </div>
               <div>
-                <label class="apf-lbl">Amount (excl. VAT)</label>
+                <label class="apf-lbl">Amount (incl. VAT)</label>
                 <input type="number" step="0.01" min="0" class="apf-inp" id="apf-amt"
                        placeholder="0.00" oninput="apfCalc()">
               </div>
@@ -1209,9 +1209,10 @@ function calcVAT(){
     $('f_amount_with_vat').value=a>0?(a+v).toFixed(2):'';
 }
 function apfCalc(){
-    const a=parseFloat($('apf-amt').value||0)||0,v=Math.round(a*.18*100)/100;
+    /* the amount is WITH VAT: the VAT box shows the VAT inside it (the picked claim's own VAT share, else 18/118) and Total = the amount */
+    const a=parseFloat($('apf-amt').value||0)||0, r=(window._apfVatRate!=null?window._apfVatRate:18/118), v=Math.round(a*r*100)/100;
     $('apf-vat').value=a>0?v.toFixed(2):'';
-    $('apf-tot').value=a>0?(a+v).toFixed(2):'';
+    $('apf-tot').value=a>0?a.toFixed(2):'';
 }
 
 function doSearch(){
@@ -1440,9 +1441,12 @@ function pickClaim(el){
     $('apf-ent').value=c.entity||'';
     $('apf-bd').value=c.banking_date||'';
     $('apf-bacc').value='';
-    $('apf-amt').value=parseFloat(c.actual_amount||0)>0?parseFloat(c.actual_amount).toFixed(2):'';
-    $('apf-vat').value=parseFloat(c.vat_amount||0)>0?parseFloat(c.vat_amount).toFixed(2):'';
-    $('apf-tot').value=parseFloat(c.total_amount||0)>0?parseFloat(c.total_amount).toFixed(2):'';
+    /* amount WITH VAT = the claim total (actual + VAT); VAT box = the claim's VAT */
+    const _ct=parseFloat(c.total_amount||0)||0, _cv=parseFloat(c.vat_amount||0)||0, _ca=parseFloat(c.actual_amount||0)||0, _tot=_ct>0?_ct:(_ca+_cv);
+    window._apfVatRate=_tot>0?_cv/_tot:null;
+    $('apf-amt').value=_tot>0?_tot.toFixed(2):'';
+    $('apf-vat').value=_cv>0?_cv.toFixed(2):'';
+    $('apf-tot').value=_tot>0?_tot.toFixed(2):'';
     $('apf-desc').value=c.claim_description||'';
     $('apf-head').textContent='Payment: '+(c.tax_invoice_no||'New');
     showAPF();
@@ -1493,7 +1497,7 @@ async function reverseClaimAck(claimItemId){
 function showAPF(){$('apf').classList.remove('hidden');$('smRightScroll').scrollTop=0;}
 function hideAPF(){
     $('apf').classList.add('hidden');
-    ['apf-cid','apf-ti','apf-ent','apf-bd','apf-br','apf-bacc','apf-amt','apf-vat','apf-tot','apf-desc'].forEach(id=>$(id).value='');
+    ['apf-cid','apf-ti','apf-ent','apf-bd','apf-br','apf-bacc','apf-amt','apf-vat','apf-tot','apf-desc'].forEach(id=>$(id).value=''); window._apfVatRate=null;
     $('apf-head').textContent='New Payment';
     document.querySelectorAll('.claim-card').forEach(c=>c.classList.remove('selected-pick'));
 }
@@ -1512,8 +1516,9 @@ async function savePayment(){
     fd.append('banking_date',$('apf-bd').value||'');
     fd.append('bank_ref',$('apf-br').value||'');
     fd.append('bank_account',$('apf-bacc').value||'');
-    fd.append('amount',$('apf-amt').value||0);
-    fd.append('vat_amount',$('apf-vat').value||0);
+    const _inc=parseFloat($('apf-amt').value||0)||0, _vat=parseFloat($('apf-vat').value||0)||0;
+    fd.append('amount',(Math.round((_inc-_vat)*100)/100).toFixed(2));   // the server adds the VAT back: total = amount + VAT = the amount entered
+    fd.append('vat_amount',_vat.toFixed(2));
     fd.append('claim_description',$('apf-desc').value||'');
     try{
         const res=await fetch('sr_incentive_cc.php?action=add_settlement',{method:'POST',body:fd});
