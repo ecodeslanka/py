@@ -154,15 +154,62 @@ function cc_sv_can($conn, $dest) { global $CC_DEST; if (!function_exists('rbac_c
     return function_exists('rbac_can') ? (rbac_can('create', $pg) || rbac_can('edit', $pg)) : true; }
 function cc_sv_is_tax($r) { $t = strtoupper(($r['claim_type'] ?? '') . ' ' . ($r['claim_description'] ?? '')); return strpos($t, 'SSCL') !== false || strpos($t, 'VAT') !== false; }
 /* per claim: where it was sent, and what is already matched (SSCL & VAT payments / Drivers & Loyalty confirmed payments) */
+function cc_cols($conn, $t) { static $m = []; if (isset($m[$t])) return $m[$t]; $o = []; $r = yms_q($conn, "SHOW COLUMNS FROM `$t`"); while ($r && ($x = mysqli_fetch_assoc($r))) $o[$x['Field']] = 1; return $m[$t] = $o; }
+/* Every settlement of the given claim certificates, on every claim page. A settlement belongs to a claim when
+     • it carries the claim's id (claim_cert_item_id) — picked from the claim cards, or
+     • Drivers & Loyalty linked it (source_type = 'claim_item', source_id = claim id), or
+     • it was typed in with the claim's TAX INVOICE NO (no claim id saved) — and, when both have an entity, the same entity.
+   Returns [claim id => [rows]]; each row says which page, which payment, the amounts, how it was matched and whether it can be deleted here. */
+function cc_settlements($conn, array $ids) {
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids)))); $res = []; if (!$ids) return $res; $in = implode(',', $ids);
+    $ti = []; $ent = [];
+    $q = yms_q($conn, "SELECT id, TRIM(COALESCE(tax_invoice_no,'')) AS ti, TRIM(COALESCE(entity,'')) AS en FROM claim_cert_items WHERE id IN ($in)");
+    while ($q && ($x = mysqli_fetch_assoc($q))) { $ent[(int)$x['id']] = strtolower($x['en']); if ($x['ti'] !== '') $ti[strtolower($x['ti'])][] = (int)$x['id']; }
+    $tiIn = $ti ? "'" . implode("','", array_map(fn($t) => mysqli_real_escape_string($conn, $t), array_keys($ti))) . "'" : "''";
+    $byTi = function ($t, $e) use ($ti, $ent) { $c = $ti[strtolower(trim((string)$t))] ?? []; $e = strtolower(trim((string)$e)); if ($e !== '' && count($c) > 1) $c = array_values(array_filter($c, fn($id) => $ent[$id] === '' || $ent[$id] === $e)); return count($c) === 1 ? $c[0] : null; };
+    $T = [   // key => [table, payment-record column, payment-record table, ack source, page name, can delete here]
+        'sscl_vat' => ['sscl_vat_settlements', 'sv_id', 'sscl_vat', 'ssclvat', 'SSCL & VAT', true], 'muthupalasa' => ['dn_settlements', 'dn_id', 'debit_note', 'dn', 'Muthupalasa BP Claims', true],
+        'promoters' => ['pscl_settlements', 'pscl_id', 'promoters_salary_cl', 'pscl', 'Promoters Salary', true], 'sr_incentive' => ['sricc_settlements', 'sricc_id', 'sr_incentive_cc', 'sricc', 'SR Incentive', true],
+        'others' => ['others_cc_settlements', 'others_cc_id', 'others_cc', '', 'Others', false]];
+    $par = function ($pt, array $rids) use ($conn) { $o = []; $rids = array_filter(array_unique($rids)); if (!$rids || !cc_sv_has($conn, $pt)) return $o; $P = cc_cols($conn, $pt);
+        $d = isset($P['paid_date']) ? 'paid_date' : (isset($P['entry_date']) ? 'entry_date' : (isset($P['email_date']) ? 'email_date' : 'NULL'));
+        $t = isset($P['description']) ? 'description' : (isset($P['tax_type']) ? 'tax_type' : (isset($P['category']) ? 'category' : (isset($P['remarks']) ? 'remarks' : "''")));
+        $q = yms_q($conn, "SELECT id, $d AS pd, $t AS pdesc FROM `$pt` WHERE id IN (" . implode(',', array_map('intval', $rids)) . ")"); while ($q && ($x = mysqli_fetch_assoc($q))) $o[(int)$x['id']] = $x; return $o; };
+    $acks = [];
+    if (cc_sv_has($conn, 'dl_cheque_acknowledgments')) { $q = yms_q($conn, "SELECT source, source_settlement_id FROM dl_cheque_acknowledgments WHERE source IN ('ssclvat','dn','pscl','sricc') AND source_settlement_id > 0"); while ($q && ($x = mysqli_fetch_row($q))) $acks[$x[0] . ':' . $x[1]] = 1; }
+    foreach ($T as $k => [$tb, $pk, $pt, $src, $pn, $del]) {
+        if (!cc_sv_has($conn, $tb)) continue; $C = cc_cols($conn, $tb); $w = [];
+        if (isset($C['claim_cert_item_id'])) $w[] = "claim_cert_item_id IN ($in)";
+        if (isset($C['source_id'], $C['source_type'])) $w[] = "(source_type = 'claim_item' AND source_id IN ($in))";
+        $noId = isset($C['claim_cert_item_id']) ? "(claim_cert_item_id IS NULL OR claim_cert_item_id = 0)" : "1=1";
+        if (isset($C['tax_invoice_no'])) $w[] = "($noId AND TRIM(LOWER(COALESCE(tax_invoice_no,''))) IN ($tiIn))";
+        if (isset($C['claim_reference'])) $w[] = "($noId AND TRIM(LOWER(COALESCE(claim_reference,''))) IN ($tiIn))";
+        if (!$w) continue; $rows = []; $q = yms_q($conn, "SELECT * FROM `$tb` WHERE " . implode(' OR ', $w)); while ($q && ($x = mysqli_fetch_assoc($q))) $rows[] = $x; if (!$rows) continue;
+        $P1 = $par($pt, array_map(fn($x) => (int)($x[$pk] ?? 0), $rows)); $P2 = isset($C['entry_id']) ? $par('sscl_vat_email_entries', array_map(fn($x) => (int)$x['entry_id'], $rows)) : [];
+        foreach ($rows as $x) {
+            $cid = null; $how = 'claim';
+            if (!empty($x['claim_cert_item_id']) && in_array((int)$x['claim_cert_item_id'], $ids, true)) $cid = (int)$x['claim_cert_item_id'];
+            elseif (isset($x['source_type']) && $x['source_type'] === 'claim_item' && in_array((int)$x['source_id'], $ids, true)) { $cid = (int)$x['source_id']; $how = 'source'; }
+            elseif (empty($x['claim_cert_item_id'])) { $cid = $byTi($x['tax_invoice_no'] ?? '', $x['entity'] ?? ''); if ($cid === null && !empty($x['claim_reference'])) $cid = $byTi($x['claim_reference'], $x['entity'] ?? ''); $how = 'tax invoice'; }
+            if (!$cid) continue;
+            $dalRow = $k === 'sscl_vat' && empty($x['sv_id']) && !empty($x['entry_id']);   // a Drivers & Loyalty line kept in the same table
+            $rid = $dalRow ? (int)$x['entry_id'] : (int)($x[$pk] ?? 0); $pp = $dalRow ? ($P2[$rid] ?? []) : ($P1[$rid] ?? []);
+            $amt = (float)($x['amount'] ?? $x['received_amount'] ?? 0); $vat = (float)($x['vat_amount'] ?? 0); $tot = (float)($x['total_amount'] ?? 0); if ($tot <= 0) $tot = $amt + $vat;
+            $res[$cid][] = ['page' => $dalRow ? 'dal' : $k, 'pn' => $dalRow ? 'Drivers & Loyalty' : $pn, 'url' => ($dalRow ? 'dal' : $pt) . '.php', 'id' => (int)$x['id'], 'rid' => $rid,
+                'ti' => $x['tax_invoice_no'] ?? ($x['reference_no'] ?? ''), 'bd' => $x['banking_date'] ?? null, 'ref' => $x['bank_ref'] ?? ($x['claim_reference'] ?? ''), 'amt' => round($amt, 2), 'vat' => round($vat, 2), 'tot' => round($tot, 2),
+                'at' => $x['created_at'] ?? ($x['settled_at'] ?? null), 'pd' => $pp['pd'] ?? null, 'pdesc' => $pp['pdesc'] ?? '', 'ack' => ($src && isset($acks[$src . ':' . $x['id']])) ? 1 : 0, 'how' => $how, 'del' => $del && !$dalRow]; } }
+    if (cc_sv_has($conn, 'dl_confirmed_payments')) { $D = cc_cols($conn, 'dl_confirmed_payments'); $f = fn($c, $d) => isset($D[$c]) ? $c : $d;
+        $q = yms_q($conn, "SELECT id, claim_item_id AS cid, " . $f('dl_record_id', 'id') . " AS rid, " . $f('tax_invoice_no', "''") . " AS ti, " . $f('banking_date', 'NULL') . " AS bd, COALESCE(" . $f('actual_amount', '0') . ",0) AS amt, COALESCE(" . $f('vat_amount', '0') . ",0) AS vat, COALESCE(" . $f('total_amount', '0') . ",0) AS tot, " . $f('confirmed_at', 'NULL') . " AS at FROM dl_confirmed_payments WHERE claim_item_id IN ($in)");
+        while ($q && ($x = mysqli_fetch_assoc($q))) $res[(int)$x['cid']][] = ['page' => 'dal', 'pn' => 'Drivers & Loyalty', 'url' => 'dal.php', 'id' => (int)$x['id'], 'rid' => (int)$x['rid'], 'ti' => $x['ti'], 'bd' => $x['bd'], 'ref' => '', 'amt' => round((float)$x['amt'], 2), 'vat' => round((float)$x['vat'], 2), 'tot' => round((float)$x['tot'], 2), 'at' => $x['at'], 'pd' => null, 'pdesc' => '', 'ack' => 0, 'how' => 'claim', 'del' => false]; }
+    return $res;
+}
 function cc_sv_links($conn, array $ids) {
-    global $CC_SETTLE; $out = []; $ids = array_values(array_filter(array_map('intval', $ids))); if (!$ids) return $out;
+    $out = []; $ids = array_values(array_filter(array_map('intval', $ids))); if (!$ids) return $out;
     cc_sv_tables($conn); $in = implode(',', $ids);
-    foreach ($CC_SETTLE as $d => [$tb, $pk]) { if (!cc_sv_has($conn, $tb)) continue;
-        $q = yms_q($conn, "SELECT claim_cert_item_id AS cid, $pk AS rid, SUM(COALESCE(total_amount, amount, 0)) AS amt, MAX(DATE(created_at)) AS pd FROM $tb WHERE claim_cert_item_id IN ($in) GROUP BY claim_cert_item_id, $pk");
-        while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['cid']; $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + (float)$x['amt']; $out[$c]['pays'][] = ['d' => $d, 'id' => (int)$x['rid'], 'amt' => round((float)$x['amt'], 2), 'pd' => $x['pd']]; } }
-    if (cc_sv_has($conn, 'dl_confirmed_payments')) {
-        $q = yms_q($conn, "SELECT claim_item_id AS cid, MAX(COALESCE(dl_record_id, id)) AS rid, SUM(COALESCE(total_amount, 0)) AS amt, MAX(DATE(confirmed_at)) AS pd FROM dl_confirmed_payments WHERE claim_item_id IN ($in) GROUP BY claim_item_id");
-        while ($q && ($x = mysqli_fetch_assoc($q))) { $c = (int)$x['cid']; $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + (float)$x['amt']; $out[$c]['pays'][] = ['d' => 'dal', 'id' => (int)$x['rid'], 'amt' => round((float)$x['amt'], 2), 'pd' => $x['pd']]; } }
+    foreach (cc_settlements($conn, $ids) as $c => $rows) { $g = [];
+        foreach ($rows as $x) { $out[$c]['settled'] = ($out[$c]['settled'] ?? 0) + $x['tot']; $gk = $x['page'] . ':' . $x['rid'];
+            if (!isset($g[$gk])) $g[$gk] = ['d' => $x['page'], 'id' => $x['rid'], 'amt' => 0, 'pd' => $x['pd'] ?: ($x['at'] ? substr($x['at'], 0, 10) : null)]; $g[$gk]['amt'] = round($g[$gk]['amt'] + $x['tot'], 2); }
+        $out[$c]['pays'] = array_values($g); $out[$c]['n'] = count($rows); }
     $q = yms_q($conn, "SELECT claim_cert_item_id AS cid, dest, sent_at FROM claim_cert_send_list WHERE claim_cert_item_id IN ($in)");
     while ($q && ($x = mysqli_fetch_assoc($q))) { $out[(int)$x['cid']]['dest'] = $x['dest']; $out[(int)$x['cid']]['listed'] = $x['sent_at']; }
     if (cc_sv_has($conn, 'dl_cheque_acknowledgments')) { $q = yms_q($conn, "SELECT claim_item_id AS cid, confirmed_payment_id AS sv FROM dl_cheque_acknowledgments WHERE claim_item_id IN ($in)");
@@ -208,26 +255,12 @@ $CC_STL = [   // page => [settlement table, payment-record column, payment-recor
     'sr_incentive' => ['sricc_settlements',    'sricc_id', 'sr_incentive_cc',     'sricc',   'SR Incentive',          false],
 ];
 $CC_PAGE = ['sscl_vat' => 'sscl_vat', 'muthupalasa' => 'debit_note', 'promoters' => 'promoters_salary_cl', 'sr_incentive' => 'sr_incentive_cc', 'dal' => 'dal'];
-function cc_cols($conn, $t) { static $m = []; if (isset($m[$t])) return $m[$t]; $o = []; $r = yms_q($conn, "SHOW COLUMNS FROM `$t`"); while ($r && ($x = mysqli_fetch_assoc($r))) $o[$x['Field']] = 1; return $m[$t] = $o; }
 if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_settlements') {
     ob_start(); header('Content-Type: application/json');
-    $cid = intval($_REQUEST['id'] ?? 0); $out = []; $ackOk = cc_sv_has($conn, 'dl_cheque_acknowledgments');
+    $cid = intval($_REQUEST['id'] ?? 0);
     $claim = $cid ? mysqli_fetch_assoc(yms_q($conn, "SELECT id, tax_invoice_no, customer_code, customer_name, claim_type, claim_description, actual_amount, vat_amount, total_amount FROM claim_cert_items WHERE id = $cid")) : null;
-    foreach ($CC_STL as $k => [$tb, $pk, $pt, $src, $pn, $doc]) {
-        if (!cc_sv_has($conn, $tb)) continue; $C = cc_cols($conn, $tb); $P = cc_sv_has($conn, $pt) ? cc_cols($conn, $pt) : [];
-        $pDate = isset($P['paid_date']) ? 'p.paid_date' : (isset($P['entry_date']) ? 'p.entry_date' : 'NULL');
-        $pDesc = isset($P['description']) ? 'p.description' : (isset($P['tax_type']) ? 'p.tax_type' : (isset($P['category']) ? 'p.category' : (isset($P['entity']) ? 'p.entity' : "''")));
-        $sel = "s.id, s.$pk AS rid, " . (isset($C['tax_invoice_no']) ? 's.tax_invoice_no' : "''") . " AS ti, " . (isset($C['banking_date']) ? 's.banking_date' : 'NULL') . " AS bd, " . (isset($C['bank_ref']) ? 's.bank_ref' : "''") . " AS ref, "
-             . (isset($C['amount']) ? 'COALESCE(s.amount,0)' : '0') . " AS amt, " . (isset($C['vat_amount']) ? 'COALESCE(s.vat_amount,0)' : '0') . " AS vat, " . (isset($C['total_amount']) ? 'COALESCE(s.total_amount, s.amount, 0)' : 'COALESCE(s.amount,0)') . " AS tot, "
-             . (isset($C['created_at']) ? 's.created_at' : 'NULL') . " AS at, " . ($P ? "$pDate AS pd, $pDesc AS pdesc" : "NULL AS pd, '' AS pdesc")
-             . ($ackOk ? ", (SELECT COUNT(*) FROM dl_cheque_acknowledgments a WHERE a.source = '$src' AND a.source_settlement_id = s.id) AS ack" : ", 0 AS ack");
-        $r = yms_q($conn, "SELECT $sel FROM `$tb` s " . ($P ? "LEFT JOIN `$pt` p ON p.id = s.$pk " : '') . "WHERE s.claim_cert_item_id = $cid ORDER BY s.id");
-        while ($r && ($x = mysqli_fetch_assoc($r))) $out[] = ['page' => $k, 'pn' => $pn, 'url' => $pt . '.php', 'id' => (int)$x['id'], 'rid' => (int)$x['rid'], 'ti' => $x['ti'], 'bd' => $x['bd'], 'ref' => $x['ref'], 'amt' => round((float)$x['amt'], 2), 'vat' => round((float)$x['vat'], 2),
-            'tot' => round((float)$x['tot'], 2), 'at' => $x['at'], 'pd' => $x['pd'], 'pdesc' => $x['pdesc'], 'ack' => (int)$x['ack'], 'can' => cc_sv_can($conn, $k) && cc_sv_btn('delete')]; }
-    if (cc_sv_has($conn, 'dl_confirmed_payments')) {   // Drivers & Loyalty: shown, but changed on its own page
-        $D = cc_cols($conn, 'dl_confirmed_payments'); $f = fn($c, $d) => isset($D[$c]) ? $c : $d;   // only the columns this version has
-        $r = yms_q($conn, "SELECT id, " . $f('dl_record_id', 'id') . " AS rid, " . $f('tax_invoice_no', "''") . " AS ti, " . $f('banking_date', 'NULL') . " AS bd, COALESCE(" . $f('actual_amount', '0') . ",0) AS amt, COALESCE(" . $f('vat_amount', '0') . ",0) AS vat, COALESCE(" . $f('total_amount', '0') . ",0) AS tot, " . $f('confirmed_at', 'NULL') . " AS at FROM dl_confirmed_payments WHERE claim_item_id = $cid");
-        while ($r && ($x = mysqli_fetch_assoc($r))) $out[] = ['page' => 'dal', 'pn' => 'Drivers & Loyalty', 'url' => 'dal.php', 'id' => (int)$x['id'], 'rid' => (int)$x['rid'], 'ti' => $x['ti'], 'bd' => $x['bd'], 'ref' => '', 'amt' => round((float)$x['amt'], 2), 'vat' => round((float)$x['vat'], 2), 'tot' => round((float)$x['tot'], 2), 'at' => $x['at'], 'pd' => null, 'pdesc' => '', 'ack' => 0, 'can' => false]; }
+    $out = cc_settlements($conn, [$cid])[$cid] ?? [];
+    foreach ($out as &$x) { $x['can'] = $x['del'] && cc_sv_can($conn, $x['page']) && cc_sv_btn('delete'); } unset($x);
     ob_end_clean(); echo json_encode(['success' => true, 'claim' => $claim, 'rows' => $out]); exit;
 }
 if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_settle_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -239,6 +272,7 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_settle_d
     if (function_exists('rbac_can') && !(rbac_can('delete', $pt) || rbac_can('edit', $pt))) $fail('You do not have the right to delete payments on the ' . $pn . ' page.');
     if (!cc_sv_btn('delete')) $fail('Permission blocked: you are not allowed to use the Delete button.');
     $C = cc_cols($conn, $tb); $row = mysqli_fetch_assoc(yms_q($conn, "SELECT * FROM `$tb` WHERE id = $sid")); if (!$row) $fail('That settlement no longer exists.');
+    if ($k === 'sscl_vat' && empty($row['sv_id']) && !empty($row['entry_id'])) $fail('This line belongs to Drivers & Loyalty — change it on that page.');
     if ($doc && !empty($row['document_path']) && is_file($row['document_path'])) @unlink($row['document_path']);   // as the page itself does
     if (cc_sv_has($conn, 'dl_cheque_acknowledgments')) yms_q($conn, "DELETE FROM dl_cheque_acknowledgments WHERE source = '$src' AND source_settlement_id = $sid");
     $ok = yms_q($conn, "DELETE FROM `$tb` WHERE id = $sid AND $pk = " . (int)$row[$pk]);
@@ -276,7 +310,7 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'get_report_
     $rows = [];
     if ($dataRes) while ($r = mysqli_fetch_assoc($dataRes)) { [$r['scheme_no'], $r['scheme_src']] = cc_scheme_of($r['claim_description']); $rows[] = $r; }
     $L = cc_sv_links($conn, array_column($rows, 'id'));
-    foreach ($rows as &$r) { $c = (int)$r['id']; $r['sv_settled'] = round($L[$c]['settled'] ?? 0, 2); $r['sv_pays'] = $L[$c]['pays'] ?? []; $r['sv_ack'] = $L[$c]['ack'] ?? 0; $r['sv_listed'] = $L[$c]['listed'] ?? ''; $r['sv_dest'] = $L[$c]['dest'] ?? ''; $r['sv_tax'] = cc_sv_is_tax($r) ? 1 : 0; } unset($r);
+    foreach ($rows as &$r) { $c = (int)$r['id']; $r['sv_settled'] = round($L[$c]['settled'] ?? 0, 2); $r['sv_pays'] = $L[$c]['pays'] ?? []; $r['sv_ack'] = $L[$c]['ack'] ?? 0; $r['sv_listed'] = $L[$c]['listed'] ?? ''; $r['sv_n'] = $L[$c]['n'] ?? 0; $r['sv_dest'] = $L[$c]['dest'] ?? ''; $r['sv_tax'] = cc_sv_is_tax($r) ? 1 : 0; } unset($r);
 
     ob_end_clean();
     echo json_encode([
@@ -609,7 +643,7 @@ function svFull(r){ return parseFloat(r.sv_settled||0)>0 && parseFloat(r.total_a
 function svCanSend(r){ return !r.sv_dest && !svFull(r); }
 function svCell(r){
   let h='';
-  if((r.sv_pays||[]).length) h+='<button type="button" class="sv-stl" onclick="event.stopPropagation();svStl('+r.id+')" title="Show the payments this claim is settled on — delete one here"><i class="fa-solid fa-list"></i> Settlements ('+(r.sv_pays||[]).length+')</button> ';
+  if((r.sv_pays||[]).length) h+='<button type="button" class="sv-stl" onclick="event.stopPropagation();svStl('+r.id+')" title="Show the payments this claim is settled on — delete one here"><i class="fa-solid fa-list"></i> Settlements ('+(r.sv_n||(r.sv_pays||[]).length)+')</button> ';
   (r.sv_pays||[]).forEach(p=>{ const pg=esc(SVD[p.d]||p.d); h+='<span class="pill '+(svFull(r)?'p-green':'p-amber')+'" title="Matched on '+pg+' payment #'+p.id+' — to undo, remove that payment line on the '+pg+' page">'+(svFull(r)?'<i class="fa-solid fa-circle-check"></i> Matched':'Partly matched')+' · '+pg+' #'+p.id+(p.pd?' ('+esc(p.pd)+')':'')+' · '+fmtN(p.amt)+'</span> '; });
   if(r.sv_ack>0) h+='<span class="pill p-blue">Ack #'+r.sv_ack+'</span> ';
   if(r.sv_dest && !svFull(r)) h+='<span class="pill p-teal" title="Sent '+esc(r.sv_listed)+' — pick it on the '+esc(SVD[r.sv_dest]||r.sv_dest)+' page when entering the payment"><i class="fa-solid fa-list-check"></i> In '+esc(SVD[r.sv_dest]||r.sv_dest)+' list</span> '
@@ -643,7 +677,7 @@ function stlDraw(id,d){ const c=d.claim||{}, L=d.rows||[], tot=L.reduce((a,x)=>a
   let h='<div class="stl-k"><span>Claim total <b>'+fmtN(ct)+'</b></span><span>Actual '+fmtN(c.actual_amount)+' · VAT '+fmtN(c.vat_amount)+'</span><span>Settled <b style="color:#15803d">'+fmtN(tot)+'</b></span><span>Balance <b style="color:'+(ct-tot>0.004?'#b91c1c':'#15803d')+'">'+fmtN(ct-tot)+'</b></span></div>';
   if(c.claim_description) h+='<div style="font-size:12px;color:#475569;margin:-4px 0 10px">'+esc(c.claim_description)+'</div>';
   h+=L.length?'<div style="overflow:auto"><table class="stl-t"><thead><tr><th>Page</th><th>Payment</th><th>Tax invoice</th><th>Banking date</th><th>Bank ref</th><th class="tr">Amount</th><th class="tr">VAT</th><th class="tr">Total</th><th>Added</th><th></th></tr></thead><tbody>'
-    +L.map(x=>'<tr><td><b>'+esc(x.pn)+'</b></td><td><a href="'+esc(x.url)+'" target="_blank">#'+x.rid+'</a>'+(x.pd?' <small>'+esc(x.pd)+'</small>':'')+(x.pdesc?'<div style="font-size:11px;color:#64748b;max-width:220px;white-space:normal">'+esc(x.pdesc)+'</div>':'')+'</td><td>'+esc(x.ti||'—')+'</td><td>'+esc(x.bd||'—')+'</td><td>'+esc(x.ref||'—')+'</td><td class="tr">'+fmtN(x.amt)+'</td><td class="tr">'+fmtN(x.vat)+'</td><td class="tr"><b>'+fmtN(x.tot)+'</b></td><td style="font-size:11px;color:#64748b">'+esc(x.at||'')+'</td><td>'
+    +L.map(x=>'<tr><td><b>'+esc(x.pn)+'</b></td><td><a href="'+esc(x.url)+'" target="_blank">#'+x.rid+'</a>'+(x.pd?' <small>'+esc(x.pd)+'</small>':'')+(x.pdesc?'<div style="font-size:11px;color:#64748b;max-width:220px;white-space:normal">'+esc(x.pdesc)+'</div>':'')+'</td><td>'+esc(x.ti||'—')+(x.how==='tax invoice'?'<div><span class="pill p-amber" title="This payment was typed in with the claim\'s tax invoice no (not picked from the claim card)">by tax invoice</span></div>':'')+'</td><td>'+esc(x.bd||'—')+'</td><td>'+esc(x.ref||'—')+'</td><td class="tr">'+fmtN(x.amt)+'</td><td class="tr">'+fmtN(x.vat)+'</td><td class="tr"><b>'+fmtN(x.tot)+'</b></td><td style="font-size:11px;color:#64748b">'+esc(x.at||'')+'</td><td>'
       +(x.can?'<button type="button" class="stl-del" data-perm-btn="Delete" onclick="stlDel('+id+',\''+x.page+'\','+x.id+','+x.ack+','+x.tot+',\''+esc(x.pn).replace(/'/g,'')+'\')"><i class="fa-solid fa-trash"></i> Delete</button>':(x.page==='dal'?'<small style="color:#94a3b8">change on its page</small>':'<small style="color:#94a3b8">no right</small>'))+(x.ack?' <span class="pill p-blue" title="Also in Acknowledgment">Ack</span>':'')+'</td></tr>').join('')+'</tbody></table></div>'
     :'<div style="padding:22px;text-align:center;color:#64748b">This claim is not settled on any payment yet.</div>';
   document.getElementById('stlB').innerHTML=h; }
