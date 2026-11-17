@@ -1016,6 +1016,9 @@ if (isset($conn) && $conn) {
                     <a href="ymsbot_settings.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'ymsbot_settings.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-robot"></i><span>YMS Bot Settings</span>
                     </a>
+                    <a href="ql_settings.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'ql_settings.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-bolt"></i><span>Quick Shortcuts Settings</span>
+                    </a>
                     <a href="company_letterhead.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'company_letterhead.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Letter Head</span>
                     </a>
