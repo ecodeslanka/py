@@ -97,8 +97,8 @@ $ages = []; $openC = []; $ovd = []; $OB = [];   // OB = per outlet: open, overdu
         LEFT JOIN routes r2 ON r2.route_code = lsid_route.route_code
         WHERE fsd.updated = 1
         HAVING bal > 0.01");
-    $MCt = ['out' => 0, 'cih' => 0, 'ret' => 0];   // Market Credit Report totals
-    while ($q && ($x = mysqli_fetch_assoc($q))) { $b = (float)$x['bal']; if ($b <= 0.01) continue; $MCt['out'] += $b; $c = strtoupper(trim($x['t_code'])); $age = (int)floor((time() - strtotime($x['delivery_date'])) / 86400);
+    $MCt = ['out' => 0, 'cih' => 0, 'ret' => 0]; $MY = [];   // own totals / per customer [outstanding, cheques in hand, returned]
+    while ($q && ($x = mysqli_fetch_assoc($q))) { $b = (float)$x['bal']; if ($b <= 0.01) continue; $MCt['out'] += $b; $c = strtoupper(trim($x['t_code'])); $MY[$c][0] = ($MY[$c][0] ?? 0) + $b; $age = (int)floor((time() - strtotime($x['delivery_date'])) / 86400);
         $k = $age <= 7 ? 0 : ($age <= 14 ? 1 : ($age <= 21 ? 2 : ($age <= 30 ? 3 : ($age <= 120 ? 4 : 5)))); $ch = $chOf($c); $ages[$ch][$k] = ($ages[$ch][$k] ?? 0) + $b; $o = &$OB[$c]; if (!$o) $o = ['open' => 0, 'ovd' => 0, 'ages' => array_fill(0, 6, 0), 'bills' => 0, 'old' => 0]; $o['open'] += $b; $o['ages'][$k] += $b; $o['bills']++; $o['bl'][] = [trim((string)$x['invoice_num']), $x['delivery_date'], round($b, 2), $age, $age > (int)($cust[$c]['d'] ?? 0) ? 1 : 0]; if ($age > $o['old']) $o['old'] = $age; if ($age > (int)($cust[$c]['d'] ?? 0)) $o['ovd'] += $b; unset($o); $openC[$ch] = ($openC[$ch] ?? 0) + $b;
         $d = (int)($cust[$c]['d'] ?? 0); if ($age > $d) $ovd[$ch] = ($ovd[$ch] ?? 0) + $b; } }
 /* ── cheques not realised — the Market Credit Report rule: cheques in hand (pending, to be banked, deposited, sent back net of the settled part)
@@ -122,12 +122,49 @@ $q = new ArrayIterator($chqRows);
 foreach ($q as $x) { $st = strtolower(trim((string)$x['status'])); $face = max(0, (float)$x['face']);
     if ($x['kind'] === 'cih') { if ($st === 'sent_back') { if ((int)$x['sbs']) continue; $amt = max(0, $face - (float)$x['sbp']); if ($amt <= 0.01) continue; } else $amt = $face; $MCt['cih'] += $amt; }
     else { if ((int)$x['rs']) continue; $amt = max(0, $face - (float)$x['rp']); if ($amt <= 0.01) continue; $MCt['ret'] += $amt; }
-    if ($amt <= 0) continue; $c = strtoupper(trim((string)$x['c'])); $d = (int)($cust[$c]['d'] ?? 0); $age = ($x['delivery_date'] && $x['cheque_date']) ? (int)round((strtotime($x['cheque_date']) - strtotime($x['delivery_date'])) / 86400) : null;
+    if ($amt <= 0) continue; $c = strtoupper(trim((string)$x['c'])); $MY[$c][$x['kind'] === 'cih' ? 1 : 2] = ($MY[$c][$x['kind'] === 'cih' ? 1 : 2] ?? 0) + $amt; $d = (int)($cust[$c]['d'] ?? 0); $age = ($x['delivery_date'] && $x['cheque_date']) ? (int)round((strtotime($x['cheque_date']) - strtotime($x['delivery_date'])) / 86400) : null;
     $past = $x['cheque_date'] ? (int)floor((time() - strtotime($x['cheque_date'])) / 86400) : null;
     $why = in_array($st, ['returned', 'bounced', 'sent_back'], true) ? ucfirst(str_replace('_', ' ', $st)) : (($age !== null && $d > 0 && $age > $d) ? 'Cheque date ' . $age . ' d after delivery (policy ' . $d . ' d)' : (($past !== null && $past > 7) ? 'Cheque date passed ' . $past . ' d ago' : ''));
     $o = &$CQ[$c]; if (!$o) $o = ['v' => 0, 'n' => 0, 'ov' => 0, 'on' => 0, 'l' => []]; $o['v'] += $amt; $o['n']++; if ($why !== '') { $o['ov'] += $amt; $o['on']++; }
     $o['l'][] = ['no' => (string)$x['cheque_no'], 'cd' => $x['cheque_date'], 'dd' => $x['delivery_date'], 'inv' => (string)$x['invoice_num'], 'st' => $st === '' ? 'pending' : $st, 'bank' => (string)$x['bank_code'], 'amt' => round($amt, 2), 'age' => $age, 'od' => $why]; unset($o);
     $ch = $chOf($c); $chq[$ch] = ($chq[$ch] ?? 0) + $amt; if ($why !== '') $chqO[$ch] = ($chqO[$ch] ?? 0) + $amt; }
+
+/* ── the LIVE Market Credit Report is the reference: its print view is read on this server (with the viewer's own login) and its per-customer
+   Outstanding / Cheques in hand / Returned figures are used for the market credit, so this report always shows the same values as that report,
+   whatever version of it is installed. Cached for 10 minutes (?mcrefresh=1 reloads). If it cannot be read, this report's own calculation is used. */
+function cp_live_market_credit($force) {
+    $cf = sys_get_temp_dir() . '/cp_mcr_' . md5(__DIR__ . '|' . session_id()) . '.json';
+    if (!$force && is_file($cf) && filemtime($cf) > time() - 600 && ($j = json_decode((string)@file_get_contents($cf), true))) return $j;
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
+    $dir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
+    $url = ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . $dir . '/market_credit_report.php?printview=1&hide_zero=1';
+    if (session_status() === PHP_SESSION_ACTIVE) session_write_close();   // the report opens the same session
+    $html = false; $err = '';
+    if (function_exists('curl_init')) { $ch = curl_init($url); curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 120, CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0, CURLOPT_HTTPHEADER => ['Cookie: ' . ($_SERVER['HTTP_COOKIE'] ?? '')]]);
+        $html = curl_exec($ch); $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); if ($html === false || $code !== 200) { $err = 'HTTP ' . $code . ' ' . curl_error($ch); $html = false; } curl_close($ch); }
+    else { $html = @file_get_contents($url, false, stream_context_create(['http' => ['header' => 'Cookie: ' . ($_SERVER['HTTP_COOKIE'] ?? ''), 'timeout' => 120], 'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]])); if ($html === false) $err = 'could not open the report'; }
+    $out = ['ok' => false, 'err' => $err, 'url' => $url, 'at' => date('Y-m-d H:i:s'), 'rows' => [], 'tot' => null];
+    if ($html !== false) {
+        $num = function ($t) { $t = html_entity_decode(strip_tags($t), ENT_QUOTES, 'UTF-8'); return preg_match('/(\(?)(-?)\s*(\d[\d,]*(?:\.\d+)?)/', $t, $m) ? ((float)str_replace(',', '', $m[3])) * (($m[1] === '(' || $m[2] === '-') ? -1 : 1) : 0.0; };   // "Rs. 12,345.67" / "—" 
+        if (preg_match_all('#<tr class="cust-hdr[^"]*">(.*?)</tr>#s', $html, $m)) foreach ($m[1] as $tr) {
+            if (!preg_match_all('#<td[^>]*>(.*?)</td>#s', $tr, $td) || count($td[1]) < 7) continue; $c = $td[1]; $n = count($c);
+            $tc = strtoupper(trim(html_entity_decode(strip_tags($c[1]), ENT_QUOTES, 'UTF-8'))); if ($tc === '') continue;
+            $v = [$num($c[$n - 4]), $num($c[$n - 3]), $num($c[$n - 2])]; $o = &$out['rows'][$tc]; $o = $o ? [$o[0] + $v[0], $o[1] + $v[1], $o[2] + $v[2]] : $v; unset($o); }
+        if (preg_match('#<tfoot>(.*?)</tfoot>#s', $html, $f) && preg_match_all('#<td[^>]*>(.*?)</td>#s', $f[1], $td) && count($td[1]) >= 5) { $c = $td[1]; $n = count($c); $out['tot'] = [$num($c[$n - 4]), $num($c[$n - 3]), $num($c[$n - 2]), $num($c[$n - 1])]; }
+        $out['ok'] = $out['rows'] || $out['tot'] !== null; if (!$out['ok']) $out['err'] = 'the report opened but no customer rows were found (login or permission page?)'; }
+    if ($out['ok']) @file_put_contents($cf, json_encode($out));
+    return $out;
+}
+$LIVE = isset($_GET['ajax']) && $_GET['ajax'] === 'drill' ? cp_live_market_credit(false) : cp_live_market_credit(isset($_GET['mcrefresh']));
+$OWN = $MCt; $MCsrc = 'own';
+if ($LIVE['ok'] && $LIVE['rows']) {
+    $MCsrc = 'live'; $openC = []; $chq = []; $MCt = ['out' => 0, 'cih' => 0, 'ret' => 0];
+    foreach ($LIVE['rows'] as $c => [$o1, $o2, $o3]) { $ch = $chOf($c); $openC[$ch] = ($openC[$ch] ?? 0) + $o1; $chq[$ch] = ($chq[$ch] ?? 0) + $o2 + $o3; $MCt['out'] += $o1; $MCt['cih'] += $o2; $MCt['ret'] += $o3; }
+}
+/* customers whose market credit differs between the live report and this report's own calculation (shown in the check panel) */
+$DIFF = []; if ($MCsrc === 'live') { foreach (array_unique(array_merge(array_keys($LIVE['rows']), array_keys($MY))) as $c) { $l = $LIVE['rows'][$c] ?? [0, 0, 0]; $m = $MY[$c] ?? [0, 0, 0]; $m += [0, 0, 0]; ksort($m);
+        $d = ($l[0] + $l[1] + $l[2]) - ($m[0] + $m[1] + $m[2]); if (abs($d) >= 1 || abs($l[0] - $m[0]) >= 1) $DIFF[] = ['c' => $c, 'n' => $cust[$c]['nm'] ?? '', 'l' => $l, 'm' => [$m[0], $m[1], $m[2]], 'd' => $d]; }
+    usort($DIFF, fn($a, $b) => abs($b['d']) <=> abs($a['d'])); }
 
 /* policy facts per sub channel (customers) */
 $pol = []; foreach ($cust as $c => $x) { $ch = $x['ch'] !== '' ? $x['ch'] : 'Unclassified'; $p = &$pol[$ch]; if (!$p) $p = ['n' => 0, 'credit' => 0, 'days' => 0, 'over' => 0];
@@ -163,7 +200,7 @@ if (($_GET['ajax'] ?? '') === 'drill') {
     $sub = (string)($_GET['sub'] ?? ''); $grp = (string)($_GET['grp'] ?? ''); $colk = (string)($_GET['col'] ?? 'n');
     $subsIn = $sub !== '' ? [$sub] : array_values(array_map(fn($x) => $x['sub'], array_filter($rows, fn($x) => $grp === '' || $x['grp'] === $grp)));
     $in = array_flip($subsIn); $codes = [];
-    foreach ($sales as $c => $v) if (isset($in[$chOf($c)])) $codes[$c] = 1; foreach ($OB as $c => $v) if (isset($in[$chOf($c)])) $codes[$c] = 1; foreach ($CQ as $c => $v) if (isset($in[$chOf($c)])) $codes[$c] = 1;
+    foreach ($sales as $c => $v) if (isset($in[$chOf($c)])) $codes[$c] = 1; foreach ($OB as $c => $v) if (isset($in[$chOf($c)])) $codes[$c] = 1; foreach ($CQ as $c => $v) if (isset($in[$chOf($c)])) $codes[$c] = 1; if ($MCsrc === 'live') foreach ($LIVE['rows'] as $c => $v) if (isset($in[$chOf($c)])) $codes[$c] = 1;
     foreach ($cust as $c => $x) if (isset($in[$chOf($c)]) && in_array($x['pm'], ['credit', 'cheque'], true)) $codes[$c] = 1;
     /* bill dates of the open invoices, and each outlet's last bill / last delivery date (both invoice sources) */
     $bd = []; $inv = []; foreach (array_keys($codes) as $c) foreach (($OB[$c]['bl'] ?? []) as $bb) if ($bb[0] !== '') $inv[$bb[0]] = 1;
@@ -177,9 +214,9 @@ if (($_GET['ajax'] ?? '') === 'drill') {
     foreach (array_keys($codes) as $c) { $cu = $cust[$c] ?? null; $mo = $MO[$c] ?? []; $ob = $OB[$c] ?? ['open' => 0, 'ovd' => 0, 'ages' => array_fill(0, 6, 0), 'bills' => 0, 'old' => 0];
         $ch = $chOf($c); $mp = $SUB[$ch][1] ?? ''; $mx = preg_match('/(\d+)\s*$/', (string)$mp, $mm) ? (int)$mm[1] : null; $pm = $cu['pm'] ?? ''; $d = (int)($cu['d'] ?? 0); $credit = in_array($pm, ['credit', 'cheque'], true);
         $out[] = ['c' => $c, 'n' => ($cu['nm'] ?? '') ?: ($mo['n'] ?? ''), 'rep' => $mo['rep'] ?? '', 'b' => $mo['b'] ?? '', 'sub' => $ch, 'grp' => $SUB[$ch][0] ?? 'Other', 'pay' => $pm === '' ? '—' : ucfirst($pm), 'days' => $credit ? $d : null, 'mp' => $mp,
-            'over' => ($credit && $mx !== null && $d > $mx) ? 1 : 0, 'sales' => round($sales[$c] ?? 0, 2), 'avg' => $nCyc > 0 ? round(($sales[$c] ?? 0) / $nCyc, 2) : 0, 'open' => round($ob['open'], 2), 'ovd' => round($ob['ovd'], 2), 'bills' => $ob['bills'], 'old' => $ob['old'],
+            'over' => ($credit && $mx !== null && $d > $mx) ? 1 : 0, 'sales' => round($sales[$c] ?? 0, 2), 'avg' => $nCyc > 0 ? round(($sales[$c] ?? 0) / $nCyc, 2) : 0, 'open' => round($MCsrc === 'live' ? ($LIVE['rows'][$c][0] ?? 0) : $ob['open'], 2), 'ovd' => round($ob['ovd'], 2), 'bills' => $ob['bills'], 'old' => $ob['old'],
             'a0' => round($ob['ages'][0], 2), 'a1' => round($ob['ages'][1], 2), 'a2' => round($ob['ages'][2], 2), 'a3' => round($ob['ages'][3], 2), 'a4' => round($ob['ages'][4], 2), 'a5' => round($ob['ages'][5], 2),
-            'viol' => $mo['viol'] ?? 0, 'risk' => $mo['risk'] ?? null, 'band' => $mo['band'] ?? '', 'cs' => $mo['cs'] ?? '', 'cl' => $mo['cl'] ?? 0, 'credit' => $credit ? 1 : 0, 'chq' => round($CQ[$c]['v'] ?? 0, 2), 'chqn' => $CQ[$c]['n'] ?? 0, 'chqo' => round($CQ[$c]['ov'] ?? 0, 2), 'mc' => round(($ob['open'] ?? 0) + ($CQ[$c]['v'] ?? 0), 2), 'cql' => $CQ[$c]['l'] ?? [],
+            'viol' => $mo['viol'] ?? 0, 'risk' => $mo['risk'] ?? null, 'band' => $mo['band'] ?? '', 'cs' => $mo['cs'] ?? '', 'cl' => $mo['cl'] ?? 0, 'credit' => $credit ? 1 : 0, 'chq' => round($MCsrc === 'live' ? (($LIVE['rows'][$c][1] ?? 0) + ($LIVE['rows'][$c][2] ?? 0)) : ($CQ[$c]['v'] ?? 0), 2), 'chqn' => $CQ[$c]['n'] ?? 0, 'chqo' => round($CQ[$c]['ov'] ?? 0, 2), 'mc' => round($MCsrc === 'live' ? array_sum($LIVE['rows'][$c] ?? [0]) : (($ob['open'] ?? 0) + ($CQ[$c]['v'] ?? 0)), 2), 'cql' => $CQ[$c]['l'] ?? [],
             'lbd' => $LB[$c][0] ?? null, 'ldd' => $LB[$c][1] ?? null,
             'bl' => array_map(fn($bb) => ['i' => $bb[0], 'bd' => $bd[$bb[0]] ?? null, 'dd' => $bb[1], 'bal' => $bb[2], 'age' => $bb[3], 'od' => $bb[4]], $ob['bl'] ?? [])]; usort($out[count($out) - 1]['bl'], fn($a, $b) => strcmp((string)$a['dd'], (string)$b['dd']));
         $f1 = $out[count($out) - 1]['bl'][0] ?? null; $out[count($out) - 1]['obd'] = $f1['bd'] ?? null; $out[count($out) - 1]['odd2'] = $f1['dd'] ?? null; }
@@ -289,11 +326,23 @@ $qs = fn($a) => '?' . http_build_query(array_merge(['pt' => $pt, 'py' => $py, 'p
       <td class="dr"<?= $dc('viol') ?>><?= $x['viol'] ?: '<span class="z">0</span>' ?></td></tr>
   <?php endforeach; ?></tbody>
   <tfoot><tr><td class="l" colspan="2">TOTAL <small style="font-weight:600;opacity:.75">· click a total for every outlet</small></td><td class="dr" data-grp="" data-col="n"><?= $f0($T['n']) ?></td><td><?= $f0($totAvg) ?></td><td><?= $f0($totAvg) ?></td><td>100%</td><td><?= $f0($allocT) ?></td><td>100%</td><td class="dr" data-grp="" data-col="credit"><?= $f0($T['credit']) ?></td><td></td><td class="dr" data-grp="" data-col="open"><?= $f0($T['open']) ?></td><td class="dr" data-grp="" data-col="ovd"><?= $f0($T['ovd']) ?></td><td class="dr" data-grp="" data-col="chq"><?= $f0($T['chq']) ?></td><td class="dr" data-grp="" data-col="chqo"><?= $f0($T['chqo']) ?></td><td class="dr" data-grp="" data-col="mc"><?= $f0($T['mc']) ?></td><td><?= $allocT > 0 ? number_format($T['mc'] / $allocT * 100, 0) . '%' : '' ?></td><td><?= $f0($T['viol']) ?></td></tr></tfoot></table></div>
-  <div class="card" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:18px;align-items:center;font-size:13px"><b style="color:#1e3a8a"><i class="fa-solid fa-scale-balanced"></i> Market Credit Report check</b>
+  <div class="card" style="margin-top:12px;font-size:13px"><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center"><b style="color:#1e3a8a"><i class="fa-solid fa-scale-balanced"></i> Market Credit Report check</b>
     <span>Outstanding <b><?= number_format($MCt['out'], 2) ?></b></span><span>+ Cheques in hand <b><?= number_format($MCt['cih'], 2) ?></b></span><span>+ Returned cheques <b><?= number_format($MCt['ret'], 2) ?></b></span>
-    <span>= Total Market Credit <b style="color:#b91c1c"><?= number_format($MCt['out'] + $MCt['cih'] + $MCt['ret'], 2) ?></b></span><?php $dif = round($T['mc'] - ($MCt['out'] + $MCt['cih'] + $MCt['ret']), 2); ?>
-    <span class="pill" style="background:<?= abs($dif) < 1 ? '#dcfce7' : '#fee2e2' ?>;color:<?= abs($dif) < 1 ? '#166534' : '#991b1b' ?>"><?= abs($dif) < 1 ? 'Same as this table' : 'Table differs by ' . number_format($dif, 2) ?></span>
+    <span>= Total Market Credit <b style="color:#b91c1c"><?= number_format($MCt['out'] + $MCt['cih'] + $MCt['ret'], 2) ?></b></span>
+    <?php if ($MCsrc === 'live'): $lt = $LIVE['tot']; $ok = $lt === null || abs(($MCt['out'] + $MCt['cih'] + $MCt['ret']) - $lt[3]) < 1; ?>
+      <span class="pill" style="background:<?= $ok ? '#dcfce7' : '#fee2e2' ?>;color:<?= $ok ? '#166534' : '#991b1b' ?>"><i class="fa-solid fa-<?= $ok ? 'circle-check' : 'triangle-exclamation' ?>"></i> Taken from the live Market Credit Report<?= $lt !== null ? ($ok ? ' — totals agree' : ' — report total ' . number_format($lt[3], 2)) : '' ?> · read <?= pl_h(date('d M H:i', strtotime($LIVE['at']))) ?></span>
+      <a href="<?= pl_h($qs(['mcrefresh' => 1])) ?>" style="color:#1e3a8a;font-weight:700"><i class="fa-solid fa-rotate"></i> Re-read now</a>
+    <?php else: ?>
+      <span class="pill" style="background:#fef3c7;color:#92400e" title="<?= pl_h($LIVE['err'] . ' · ' . $LIVE['url']) ?>"><i class="fa-solid fa-triangle-exclamation"></i> Live Market Credit Report could not be read (<?= pl_h($LIVE['err']) ?>) — this report's own calculation is shown</span>
+    <?php endif; ?>
     <a href="market_credit_report.php?hide_zero=1" target="_blank" style="margin-left:auto;color:#1e3a8a;font-weight:700">Open Market Credit Report <i class="fa-solid fa-arrow-up-right-from-square"></i></a></div>
+    <?php if ($MCsrc === 'live'): $od = $OWN['out'] + $OWN['cih'] + $OWN['ret']; ?>
+    <details style="margin-top:10px"<?= $DIFF ? '' : '' ?>><summary style="cursor:pointer;font-weight:700;color:#475569">This report's own calculation: Outstanding <?= number_format($OWN['out'], 2) ?> · Cheques in hand <?= number_format($OWN['cih'], 2) ?> · Returned <?= number_format($OWN['ret'], 2) ?> · Total <?= number_format($od, 2) ?>
+      — <?= $DIFF ? '<span style="color:#b91c1c">' . count($DIFF) . ' customer(s) differ from the Market Credit Report (click to see)</span>' : '<span style="color:#166534">same for every customer</span>' ?></summary>
+      <?php if ($DIFF): ?><div class="tw" style="margin-top:8px;max-height:420px"><table style="font-size:12px"><thead><tr><th class="l">HUL</th><th class="l">Customer</th><th>MCR outstanding</th><th>Own outstanding</th><th>MCR cheques in hand</th><th>Own cheques in hand</th><th>MCR returned</th><th>Own returned</th><th>Difference (MCR − own)</th></tr></thead><tbody>
+        <?php foreach (array_slice($DIFF, 0, 300) as $d): ?><tr><td class="l"><b><?= pl_h($d['c']) ?></b></td><td class="l"><?= pl_h($d['n']) ?></td><?php for ($i = 0; $i < 3; $i++): $bad = abs($d['l'][$i] - $d['m'][$i]) >= 1; ?><td style="<?= $bad ? 'background:#fef2f2;font-weight:700' : '' ?>"><?= number_format($d['l'][$i], 2) ?></td><td style="<?= $bad ? 'background:#fef2f2;font-weight:700' : '' ?>"><?= number_format($d['m'][$i], 2) ?></td><?php endfor; ?><td style="color:<?= $d['d'] > 0 ? '#b91c1c' : '#1d4ed8' ?>;font-weight:800"><?= number_format($d['d'], 2) ?></td></tr><?php endforeach; ?>
+      </tbody></table></div><?php endif; ?></details>
+    <?php endif; ?></div>
 </div>
 <div class="plm pl" id="drM" style="padding:0"><div class="bx" style="max-width:1400px;height:92vh"><div class="hd" style="background:linear-gradient(120deg,#0c4a6e,#0369a1 55%,#0ea5e9)"><div><b id="drT" style="font-size:18px">Outlets</b><div id="drS" style="font-size:12.5px;opacity:.85"></div></div><button type="button" data-close>&times;</button></div>
   <div class="bd" style="padding:12px 16px;display:flex;flex-direction:column;gap:10px;flex:1;overflow:hidden"><div class="kp" id="drK" style="margin:0"></div>
