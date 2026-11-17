@@ -200,6 +200,51 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_unlist' 
 }
 function rbac_btn_slug_cc($t) { return trim(preg_replace('/[^a-z0-9]+/', '_', strtolower(html_entity_decode($t))), '_'); }
 
+/* ══ SETTLEMENTS of one claim certificate on every claim page — list, and delete one (the same as that page's own delete) ══ */
+$CC_STL = [   // page => [settlement table, payment-record column, payment-record table, acknowledgment source, page name, deletes a document file]
+    'sscl_vat'     => ['sscl_vat_settlements', 'sv_id',    'sscl_vat',            'ssclvat', 'SSCL & VAT',            true],
+    'muthupalasa'  => ['dn_settlements',       'dn_id',    'debit_note',          'dn',      'Muthupalasa BP Claims', false],
+    'promoters'    => ['pscl_settlements',     'pscl_id',  'promoters_salary_cl', 'pscl',    'Promoters Salary',      false],
+    'sr_incentive' => ['sricc_settlements',    'sricc_id', 'sr_incentive_cc',     'sricc',   'SR Incentive',          false],
+];
+$CC_PAGE = ['sscl_vat' => 'sscl_vat', 'muthupalasa' => 'debit_note', 'promoters' => 'promoters_salary_cl', 'sr_incentive' => 'sr_incentive_cc', 'dal' => 'dal'];
+function cc_cols($conn, $t) { static $m = []; if (isset($m[$t])) return $m[$t]; $o = []; $r = yms_q($conn, "SHOW COLUMNS FROM `$t`"); while ($r && ($x = mysqli_fetch_assoc($r))) $o[$x['Field']] = 1; return $m[$t] = $o; }
+if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_settlements') {
+    ob_start(); header('Content-Type: application/json');
+    $cid = intval($_REQUEST['id'] ?? 0); $out = []; $ackOk = cc_sv_has($conn, 'dl_cheque_acknowledgments');
+    $claim = $cid ? mysqli_fetch_assoc(yms_q($conn, "SELECT id, tax_invoice_no, customer_code, customer_name, claim_type, claim_description, actual_amount, vat_amount, total_amount FROM claim_cert_items WHERE id = $cid")) : null;
+    foreach ($CC_STL as $k => [$tb, $pk, $pt, $src, $pn, $doc]) {
+        if (!cc_sv_has($conn, $tb)) continue; $C = cc_cols($conn, $tb); $P = cc_sv_has($conn, $pt) ? cc_cols($conn, $pt) : [];
+        $pDate = isset($P['paid_date']) ? 'p.paid_date' : (isset($P['entry_date']) ? 'p.entry_date' : 'NULL');
+        $pDesc = isset($P['description']) ? 'p.description' : (isset($P['tax_type']) ? 'p.tax_type' : (isset($P['category']) ? 'p.category' : (isset($P['entity']) ? 'p.entity' : "''")));
+        $sel = "s.id, s.$pk AS rid, " . (isset($C['tax_invoice_no']) ? 's.tax_invoice_no' : "''") . " AS ti, " . (isset($C['banking_date']) ? 's.banking_date' : 'NULL') . " AS bd, " . (isset($C['bank_ref']) ? 's.bank_ref' : "''") . " AS ref, "
+             . (isset($C['amount']) ? 'COALESCE(s.amount,0)' : '0') . " AS amt, " . (isset($C['vat_amount']) ? 'COALESCE(s.vat_amount,0)' : '0') . " AS vat, " . (isset($C['total_amount']) ? 'COALESCE(s.total_amount, s.amount, 0)' : 'COALESCE(s.amount,0)') . " AS tot, "
+             . (isset($C['created_at']) ? 's.created_at' : 'NULL') . " AS at, " . ($P ? "$pDate AS pd, $pDesc AS pdesc" : "NULL AS pd, '' AS pdesc")
+             . ($ackOk ? ", (SELECT COUNT(*) FROM dl_cheque_acknowledgments a WHERE a.source = '$src' AND a.source_settlement_id = s.id) AS ack" : ", 0 AS ack");
+        $r = yms_q($conn, "SELECT $sel FROM `$tb` s " . ($P ? "LEFT JOIN `$pt` p ON p.id = s.$pk " : '') . "WHERE s.claim_cert_item_id = $cid ORDER BY s.id");
+        while ($r && ($x = mysqli_fetch_assoc($r))) $out[] = ['page' => $k, 'pn' => $pn, 'url' => $pt . '.php', 'id' => (int)$x['id'], 'rid' => (int)$x['rid'], 'ti' => $x['ti'], 'bd' => $x['bd'], 'ref' => $x['ref'], 'amt' => round((float)$x['amt'], 2), 'vat' => round((float)$x['vat'], 2),
+            'tot' => round((float)$x['tot'], 2), 'at' => $x['at'], 'pd' => $x['pd'], 'pdesc' => $x['pdesc'], 'ack' => (int)$x['ack'], 'can' => cc_sv_can($conn, $k) && cc_sv_btn('delete')]; }
+    if (cc_sv_has($conn, 'dl_confirmed_payments')) {   // Drivers & Loyalty: shown, but changed on its own page
+        $D = cc_cols($conn, 'dl_confirmed_payments'); $f = fn($c, $d) => isset($D[$c]) ? $c : $d;   // only the columns this version has
+        $r = yms_q($conn, "SELECT id, " . $f('dl_record_id', 'id') . " AS rid, " . $f('tax_invoice_no', "''") . " AS ti, " . $f('banking_date', 'NULL') . " AS bd, COALESCE(" . $f('actual_amount', '0') . ",0) AS amt, COALESCE(" . $f('vat_amount', '0') . ",0) AS vat, COALESCE(" . $f('total_amount', '0') . ",0) AS tot, " . $f('confirmed_at', 'NULL') . " AS at FROM dl_confirmed_payments WHERE claim_item_id = $cid");
+        while ($r && ($x = mysqli_fetch_assoc($r))) $out[] = ['page' => 'dal', 'pn' => 'Drivers & Loyalty', 'url' => 'dal.php', 'id' => (int)$x['id'], 'rid' => (int)$x['rid'], 'ti' => $x['ti'], 'bd' => $x['bd'], 'ref' => '', 'amt' => round((float)$x['amt'], 2), 'vat' => round((float)$x['vat'], 2), 'tot' => round((float)$x['tot'], 2), 'at' => $x['at'], 'pd' => null, 'pdesc' => '', 'ack' => 0, 'can' => false]; }
+    ob_end_clean(); echo json_encode(['success' => true, 'claim' => $claim, 'rows' => $out]); exit;
+}
+if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_settle_delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    ob_start(); header('Content-Type: application/json');
+    $fail = function ($m) { ob_end_clean(); echo json_encode(['success' => false, 'message' => $m]); exit; };
+    $k = (string)($_POST['page'] ?? ''); $sid = intval($_POST['sid'] ?? 0); if (!isset($CC_STL[$k]) || !$sid) $fail('Nothing to delete.');
+    [$tb, $pk, $pt, $src, $pn, $doc] = $CC_STL[$k];
+    if (!function_exists('rbac_can')) @include_once __DIR__ . '/rbac.php';
+    if (function_exists('rbac_can') && !(rbac_can('delete', $pt) || rbac_can('edit', $pt))) $fail('You do not have the right to delete payments on the ' . $pn . ' page.');
+    if (!cc_sv_btn('delete')) $fail('Permission blocked: you are not allowed to use the Delete button.');
+    $C = cc_cols($conn, $tb); $row = mysqli_fetch_assoc(yms_q($conn, "SELECT * FROM `$tb` WHERE id = $sid")); if (!$row) $fail('That settlement no longer exists.');
+    if ($doc && !empty($row['document_path']) && is_file($row['document_path'])) @unlink($row['document_path']);   // as the page itself does
+    if (cc_sv_has($conn, 'dl_cheque_acknowledgments')) yms_q($conn, "DELETE FROM dl_cheque_acknowledgments WHERE source = '$src' AND source_settlement_id = $sid");
+    $ok = yms_q($conn, "DELETE FROM `$tb` WHERE id = $sid AND $pk = " . (int)$row[$pk]);
+    ob_end_clean(); echo json_encode(['success' => (bool)$ok, 'message' => $ok ? 'Deleted: ' . number_format((float)($row['total_amount'] ?? $row['amount'] ?? 0), 2) . ' removed from ' . $pn . ' payment #' . (int)$row[$pk] . '.' : 'Could not delete.']); exit;
+}
+
 /* ── AJAX: get_report_data (paginated) ── */
 if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'get_report_data') {
     ob_start(); header('Content-Type: application/json');
@@ -532,6 +577,7 @@ include 'header.php';
 </div>
 
 <div id="toast"></div>
+<div id="stlM" class="stl-bg" onclick="if(event.target===this)this.classList.remove('open')"><div class="stl-box"><div class="stl-hd"><div><b id="stlT">Settlements</b><div id="stlS" style="font-size:12px;opacity:.85"></div></div><button type="button" onclick="document.getElementById('stlM').classList.remove('open')">&times;</button></div><div class="stl-bd" id="stlB"></div></div></div>
 
 <style>
 /*m*/.svm{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;z-index:9000;padding:14px}.svm.open{display:flex}
@@ -543,6 +589,14 @@ include 'header.php';
 .prev-table input[type=checkbox],#svAll{appearance:auto!important;-webkit-appearance:checkbox!important;display:inline-block!important;opacity:1!important;visibility:visible!important;position:static!important;width:16px!important;height:16px!important;margin:0!important;cursor:pointer;accent-color:#0d9488}
 .sv-menu{position:fixed;z-index:9500;background:#fff;border:1.5px solid #99f6e4;border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.18);padding:5px;display:flex;flex-direction:column;min-width:220px}
 .sv-menu button{display:flex;gap:8px;align-items:center;border:none;background:none;text-align:left;padding:8px 10px;border-radius:7px;font:700 12.5px 'Segoe UI',system-ui,sans-serif;color:#134e4a;cursor:pointer}.sv-menu button:hover{background:#f0fdfa}.sv-menu small{font-weight:500;color:#94a3b8}
+.stl-bg{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;z-index:9000;padding:14px}.stl-bg.open{display:flex}
+.stl-box{background:#fff;border-radius:16px;width:min(1100px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.35);font-family:'Segoe UI',system-ui,sans-serif}
+.stl-hd{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:14px 18px;color:#fff;background:linear-gradient(120deg,#1e3a5f,#2563eb)}.stl-hd b{font-size:16px}.stl-hd button{background:rgba(255,255,255,.18);border:none;color:#fff;font-size:22px;width:36px;height:36px;border-radius:10px;cursor:pointer}
+.stl-bd{padding:14px 18px;overflow:auto}.stl-k{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:10px}.stl-k span{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:7px 11px}
+.stl-t{width:100%;border-collapse:collapse;font-size:12.5px}.stl-t th{background:#0f172a;color:#e2e8f0;padding:8px 9px;text-align:left;font-size:11px;white-space:nowrap}.stl-t td{padding:8px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}.stl-t .tr{text-align:right}
+.stl-del{border:1.5px solid #fca5a5;background:#fff;color:#b91c1c;border-radius:8px;padding:4px 10px;font-weight:800;font-size:11.5px;cursor:pointer;white-space:nowrap}.stl-del:hover{background:#fef2f2}
+.sv-stl{display:inline-flex;gap:5px;align-items:center;border:1.5px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:8px;padding:3px 9px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}.sv-stl:hover{background:#dbeafe}
+#repBody tr.cc-row{cursor:pointer}
 .sv-rev{display:inline-flex;gap:4px;align-items:center;border:1.5px solid #fca5a5;background:#fff;color:#b91c1c;border-radius:7px;padding:2px 8px;font-size:10.5px;font-weight:800;cursor:pointer}.sv-rev:hover{background:#fef2f2}
 .sv-btn.o{background:linear-gradient(135deg,#64748b,#94a3b8)}
 .sv-btn{display:inline-flex;gap:5px;align-items:center;border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:800;cursor:pointer;background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;white-space:nowrap}.sv-btn:hover{filter:brightness(1.1)}
@@ -555,6 +609,7 @@ function svFull(r){ return parseFloat(r.sv_settled||0)>0 && parseFloat(r.total_a
 function svCanSend(r){ return !r.sv_dest && !svFull(r); }
 function svCell(r){
   let h='';
+  if((r.sv_pays||[]).length) h+='<button type="button" class="sv-stl" onclick="event.stopPropagation();svStl('+r.id+')" title="Show the payments this claim is settled on — delete one here"><i class="fa-solid fa-list"></i> Settlements ('+(r.sv_pays||[]).length+')</button> ';
   (r.sv_pays||[]).forEach(p=>{ const pg=esc(SVD[p.d]||p.d); h+='<span class="pill '+(svFull(r)?'p-green':'p-amber')+'" title="Matched on '+pg+' payment #'+p.id+' — to undo, remove that payment line on the '+pg+' page">'+(svFull(r)?'<i class="fa-solid fa-circle-check"></i> Matched':'Partly matched')+' · '+pg+' #'+p.id+(p.pd?' ('+esc(p.pd)+')':'')+' · '+fmtN(p.amt)+'</span> '; });
   if(r.sv_ack>0) h+='<span class="pill p-blue">Ack #'+r.sv_ack+'</span> ';
   if(r.sv_dest && !svFull(r)) h+='<span class="pill p-teal" title="Sent '+esc(r.sv_listed)+' — pick it on the '+esc(SVD[r.sv_dest]||r.sv_dest)+' page when entering the payment"><i class="fa-solid fa-list-check"></i> In '+esc(SVD[r.sv_dest]||r.sv_dest)+' list</span> '
@@ -579,6 +634,23 @@ async function svList(ids,via,dest){
   const other=dest==='sscl_vat'?ids.filter(id=>SVROWS[id]&&SVROWS[id].sv_tax!=1).length:0;
   if(!confirm('Send '+ids.length+' claim(s) to the '+SVD[dest]+' list?'+(other?'\n\n'+other+' of them are not SSCL / VAT claim types.':'')+'\n\nThey will appear on the '+SVD[dest]+' page to pick when you enter the payment.')) return;
   try{ const d=await svPost({ajax_action:'sv_list',ids:JSON.stringify(ids),via:via||'row',dest:dest}); showToast(d.message); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
+/* settlements window */
+function svStl(id){ const r=SVROWS[id]||{}; const m=document.getElementById('stlM'); m.classList.add('open');
+  document.getElementById('stlT').textContent='Settlements — '+(r.tax_invoice_no||('#'+id)); document.getElementById('stlS').textContent=(r.customer_code||'')+' '+(r.customer_name||'')+' · '+(r.claim_type||'');
+  document.getElementById('stlB').innerHTML='<div style="padding:24px;text-align:center;color:#64748b"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+  fetch('customer_claim_report.php?ajax_action=sv_settlements&id='+id,{credentials:'same-origin'}).then(x=>x.json()).then(d=>{ if(!d.success) throw new Error(d.message||'Load failed'); stlDraw(id,d); }).catch(e=>{ document.getElementById('stlB').innerHTML='<div style="padding:18px;color:#dc2626">'+esc(e.message)+'</div>'; }); }
+function stlDraw(id,d){ const c=d.claim||{}, L=d.rows||[], tot=L.reduce((a,x)=>a+x.tot,0), ct=parseFloat(c.total_amount||0);
+  let h='<div class="stl-k"><span>Claim total <b>'+fmtN(ct)+'</b></span><span>Actual '+fmtN(c.actual_amount)+' · VAT '+fmtN(c.vat_amount)+'</span><span>Settled <b style="color:#15803d">'+fmtN(tot)+'</b></span><span>Balance <b style="color:'+(ct-tot>0.004?'#b91c1c':'#15803d')+'">'+fmtN(ct-tot)+'</b></span></div>';
+  if(c.claim_description) h+='<div style="font-size:12px;color:#475569;margin:-4px 0 10px">'+esc(c.claim_description)+'</div>';
+  h+=L.length?'<div style="overflow:auto"><table class="stl-t"><thead><tr><th>Page</th><th>Payment</th><th>Tax invoice</th><th>Banking date</th><th>Bank ref</th><th class="tr">Amount</th><th class="tr">VAT</th><th class="tr">Total</th><th>Added</th><th></th></tr></thead><tbody>'
+    +L.map(x=>'<tr><td><b>'+esc(x.pn)+'</b></td><td><a href="'+esc(x.url)+'" target="_blank">#'+x.rid+'</a>'+(x.pd?' <small>'+esc(x.pd)+'</small>':'')+(x.pdesc?'<div style="font-size:11px;color:#64748b;max-width:220px;white-space:normal">'+esc(x.pdesc)+'</div>':'')+'</td><td>'+esc(x.ti||'—')+'</td><td>'+esc(x.bd||'—')+'</td><td>'+esc(x.ref||'—')+'</td><td class="tr">'+fmtN(x.amt)+'</td><td class="tr">'+fmtN(x.vat)+'</td><td class="tr"><b>'+fmtN(x.tot)+'</b></td><td style="font-size:11px;color:#64748b">'+esc(x.at||'')+'</td><td>'
+      +(x.can?'<button type="button" class="stl-del" data-perm-btn="Delete" onclick="stlDel('+id+',\''+x.page+'\','+x.id+','+x.ack+','+x.tot+',\''+esc(x.pn).replace(/'/g,'')+'\')"><i class="fa-solid fa-trash"></i> Delete</button>':(x.page==='dal'?'<small style="color:#94a3b8">change on its page</small>':'<small style="color:#94a3b8">no right</small>'))+(x.ack?' <span class="pill p-blue" title="Also in Acknowledgment">Ack</span>':'')+'</td></tr>').join('')+'</tbody></table></div>'
+    :'<div style="padding:22px;text-align:center;color:#64748b">This claim is not settled on any payment yet.</div>';
+  document.getElementById('stlB').innerHTML=h; }
+async function stlDel(id,page,sid,ack,tot,pn){
+  if(!confirm('Delete this settlement?\n\n'+fmtN(tot)+' on '+pn+' will be removed'+(ack?' — and its Acknowledgment entry too':'')+'.\nThe claim becomes unsettled for this amount.')) return;
+  try{ const d=await svPost({ajax_action:'sv_settle_delete',page:page,sid:sid}); showToast(d.message); svStl(id); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
+document.getElementById('repBody').addEventListener('click',e=>{ if(e.target.closest('button,a,input,label,select,.sv-menu')) return; const tr=e.target.closest('tr.cc-row'); if(tr) svStl(+tr.dataset.id); });
 async function svUnlist(id,ti){
   const r=SVROWS[id]; if(!confirm('Reverse — take claim '+ti+' off the '+(SVD[r&&r.sv_dest]||'')+' list?')) return;
   try{ const d=await svPost({ajax_action:'sv_unlist',id:id}); showToast(d.message); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
@@ -730,7 +802,7 @@ async function loadReport(page){
     let h = '';
     d.rows.forEach((r, i) => {
       SVROWS[r.id] = r;
-      h += '<tr data-id="' + r.id + '">' +
+      h += '<tr data-id="' + r.id + '" class="cc-row" title="Click to see the settlements of this claim">' +
         '<td style="text-align:center">' + (svCanSend(r) ? '<input type="checkbox" class="svChk" value="' + r.id + '" title="Select to send to SSCL &amp; VAT">' : '<i class="fa-solid fa-circle-check" style="color:#16a34a" title="Already matched on SSCL &amp; VAT"></i>') + '</td>' +
         '<td style="font-family:monospace;font-size:11px;color:var(--muted);">' + ((( _curPage-1)*per)+i+1) + '</td>' +
         '<td><span class="pill p-violet">' + esc(r.customer_code||'—') + '</span> <span style="font-size:11px;color:var(--muted);">' + esc(r.customer_name||'') + '</span></td>' +
