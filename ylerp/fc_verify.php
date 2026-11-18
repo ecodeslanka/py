@@ -131,7 +131,7 @@ if (isset($_GET['export'])) {
     $s->set(2, 1, 'Cheques: ' . count($rows) . '   ·   Verified: ' . $nv . '   ·   Not verified: ' . (count($rows) - $nv) . '   ·   Scan uploaded: ' . $nu . '   ·   Not uploaded: ' . (count($rows) - $nu)
         . '   ·   Total Rs. ' . number_format(array_sum(array_column($rows, 'amount')), 2) . '   ·   Generated ' . date('d M Y H:i') . ' by ' . fcv_user(), ['i' => 1, 'color' => '6B7280']);
     $s->merge(2, 1, 2, 13);
-    foreach (['#', 'Received date', 'Cheque no', 'Cheque date', 'Customer', 'T code', 'SR', 'Bank', 'Amount', 'Status', 'Verified', 'Front scan', 'Back scan'] as $i => $h) $s->set(4, $i + 1, $h, $H);
+    foreach (['#', 'Received date', 'Cheque no', 'Cheque date', 'Customer', 'T code', 'SR', 'Bank', 'Amount', 'Status', 'Verified', 'Front scan', 'Back scan', 'Cheque pay mode'] as $i => $h) $s->set(4, $i + 1, $h, $H);
     $r = 5; $n = 1;
     foreach ($rows as $x) {
         $bg = ($r % 2) ? ['bg' => 'F3F4F6'] : [];
@@ -141,10 +141,11 @@ if (isset($_GET['export'])) {
         $s->set($r, 11, $x['verified'] ? 'Verified' : 'Not verified', ['border' => 1, 'h' => 'center', 'b' => 1, 'color' => $x['verified'] ? '15803D' : 'B91C1C'] + $bg);
         $s->set($r, 12, $x['front'] !== '' ? 'Uploaded' : 'Not uploaded', ['border' => 1, 'h' => 'center', 'color' => $x['front'] !== '' ? '15803D' : 'B91C1C'] + $bg);
         $s->set($r, 13, $x['back'] !== '' ? 'Uploaded' : 'Not uploaded', ['border' => 1, 'h' => 'center', 'color' => $x['back'] !== '' ? '15803D' : 'B91C1C'] + $bg);
+        $cm = strtolower(trim((string)$x['cheque_mode'])); $s->set($r, 14, in_array($cm, ['payee_only', 'payee only', 'payee', 'account payee', 'a/c payee'], true) ? 'Payee Only' : (in_array($cm, ['cash', 'bearer', 'open'], true) ? 'Cash / Bearer' : (strpos($cm, 'third') !== false || strpos($cm, '3rd') !== false ? '3rd Party Cash' : ($cm === '' ? 'Not set' : ucwords(str_replace('_', ' ', $cm))))), ['border' => 1, 'h' => 'center'] + $bg);
         $r++;
     }
-    foreach ([5, 14, 14, 14, 34, 10, 10, 26, 16, 14, 14, 14, 14] as $i => $w) $s->widths[$i + 1] = $w;
-    $s->freeze = [4, 0]; $s->filter = 'A4:M' . max(5, $r - 1);
+    foreach ([5, 14, 14, 14, 34, 10, 10, 26, 16, 14, 14, 14, 14, 16] as $i => $w) $s->widths[$i + 1] = $w;
+    $s->freeze = [4, 0]; $s->filter = 'A4:N' . max(5, $r - 1);
     $tmp = tempnam(sys_get_temp_dir(), 'fv'); $X->save($tmp);
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -217,7 +218,11 @@ include 'header.php';
 .fcm .pane .ph .st { font-size:10.5px; font-weight:700; padding:1px 8px; border-radius:99px; } .fcm .pane .ph .st.ok { background:#14532d; color:#bbf7d0; } .fcm .pane .ph .st.no { background:#7f1d1d; color:#fecaca; }
 .fcm .pane .ph button { border:1px solid #475569; background:#334155; color:#f1f5f9; border-radius:6px; font-size:12px; font-weight:700; min-width:30px; height:26px; padding:0 8px; cursor:pointer; }
 .fcm .pane .ph button:hover { background:#475569; }
-.fcm .pane .pv { flex:1; min-height:0; overflow:auto; display:flex; align-items:center; justify-content:center; padding:6px; }
+.fcm .pane .pv { flex:1; min-height:0; overflow:auto; display:flex; align-items:center; justify-content:center; padding:6px; position:relative; }
+/* the cheque's pay mode stamped large on the scan */
+.fcm .stamp { position:absolute; top:14px; left:50%; transform:translateX(-50%) rotate(-4deg); z-index:3; pointer-events:none; padding:8px 26px; border:4px solid; border-radius:12px; font-size:clamp(20px,2.6vw,36px); font-weight:900; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; background:rgba(255,255,255,.88); box-shadow:0 6px 18px rgba(0,0,0,.35); }
+.fcm .stamp.m-payee { color:#15803d; border-color:#15803d; } .fcm .stamp.m-cash { color:#b91c1c; border-color:#b91c1c; } .fcm .stamp.m-third { color:#c2410c; border-color:#c2410c; } .fcm .stamp.m-none { color:#475569; border-color:#94a3b8; font-size:clamp(14px,1.6vw,20px); }
+.fcm .stamp small { display:block; font-size:.38em; letter-spacing:.12em; text-align:center; opacity:.8; margin-top:-2px; }
 .fcm .pane .pv img { width:100%; height:100%; object-fit:contain; transition:transform .15s; cursor:zoom-in; display:block; border-radius:4px; background:#fff; }
 .fcm .pane .pv img.zm { width:auto; height:auto; max-width:none; max-height:none; object-fit:initial; }
 .fcm .pane .none { color:#94a3b8; text-align:center; font-weight:600; } .fcm .pane .none i { font-size:42px; display:block; margin-bottom:8px; color:#475569; }
@@ -274,7 +279,7 @@ include 'header.php';
     <div class="card wrap" id="fcvListCard">
         <div class="empty" id="fcvEmpty">Loading cheques…</div>
         <table class="t" id="fcvTable" style="display:none">
-            <thead><tr><th>#</th><th>Received</th><th>Cheque No</th><th>Cheque Date</th><th>Customer</th><th>Bank</th><th class="num">Amount</th><th>Status</th><th>Front</th><th>Back</th><th>Verified</th></tr></thead>
+            <thead><tr><th>#</th><th>Received</th><th>Cheque No</th><th>Cheque Date</th><th>Customer</th><th>Bank</th><th class="num">Amount</th><th>Pay mode</th><th>Status</th><th>Front</th><th>Back</th><th>Verified</th></tr></thead>
             <tbody id="fcvBody"></tbody>
         </table>
     </div>
@@ -341,7 +346,7 @@ include 'header.php';
     rows.forEach(function(r,i){
       h+='<tr data-i="'+i+'"><td>'+(i+1)+'</td><td>'+fdate(r.received_date)+'</td><td><span class="strong">'+esc(r.cheque_no)+'</span>'+(r.is_sampath?' <span class="badge y">Sampath</span>':'')+'</td>'
         +'<td>'+fdate(r.cheque_date)+'</td><td>'+esc(r.customer_name||'—')+(r.t_code?'<br><span class="muted">'+esc(r.t_code)+'</span>':'')+'</td>'
-        +'<td>'+esc((r.bank_code||'')+' '+(r.bank_name||''))+'</td><td class="num">Rs. '+money(r.amount)+'</td><td><span class="badge s">'+esc(String(r.status||'').replace(/_/g,' '))+'</span></td>'
+        +'<td>'+esc((r.bank_code||'')+' '+(r.bank_name||''))+'</td><td class="num">Rs. '+money(r.amount)+'</td><td>'+(function(){ var cm=chqMode(r.cheque_mode); return '<span class="badge '+({'m-payee':'g','m-cash':'r','m-third':'a'}[cm[1]]||'s')+'">'+esc(cm[0])+'</span>'; })()+'</td><td><span class="badge s">'+esc(String(r.status||'').replace(/_/g,' '))+'</span></td>'
         +'<td data-c="f">'+scanBadge(r.front)+'</td><td data-c="b">'+scanBadge(r.back)+'</td><td data-c="v">'+(r.verified?'<span class="badge g">Verified</span>':'<span class="badge r">Not verified</span>')+'</td></tr>';
     });
     b.innerHTML=h;
@@ -356,10 +361,18 @@ include 'header.php';
     $('mList').innerHTML=h;
   }
   $('mList').addEventListener('click',function(e){ var li=e.target.closest('.li'); if(li) show(parseInt(li.dataset.i,10)); });
-  function pane(id, side, path){
+  /* cheque pay mode (cheques.cheque_mode) — same groups as the Cheque Mode Report */
+  function chqMode(raw){ var m=String(raw||'').trim().toLowerCase();
+    if(['payee_only','payee only','payee','account_payee','a/c payee','ac payee','order','account payee'].indexOf(m)>=0) return ['Payee Only','m-payee'];
+    if(['cash','bearer','open','bearer / cash'].indexOf(m)>=0) return ['Cash / Bearer','m-cash'];
+    if(['third_party_cash','third party cash','3rd party','third_party','third party'].indexOf(m)>=0) return ['3rd Party Cash','m-third'];
+    if(!m) return ['Mode not set','m-none'];
+    return [String(raw).replace(/_/g,' '),'m-none']; }
+  function pane(id, side, path, mode){
     var el=$(id); rot[side]=0; zm[side]=1;
     var st=$(side==='front'?'stFront':'stBack'); st.textContent=path?'Uploaded':'Missing'; st.className='st '+(path?'ok':'no');
-    el.innerHTML = path ? '<img src="'+esc(path)+'" alt="'+side+'" data-side="'+side+'">' : '<div class="none"><i class="fa-regular fa-image"></i>No '+side+' scan uploaded</div>';
+    var cm=chqMode(mode), stamp=side==='front'?'<div class="stamp '+cm[1]+'" title="Cheque pay mode saved for this cheque">'+esc(cm[0])+'<small>cheque mode</small></div>':'';
+    el.innerHTML = stamp + (path ? '<img src="'+esc(path)+'" alt="'+side+'" data-side="'+side+'">' : '<div class="none"><i class="fa-regular fa-image"></i>No '+side+' scan uploaded</div>');
   }
   function show(i){
     if(i<0||i>=rows.length) return;
@@ -367,14 +380,14 @@ include 'header.php';
     $('mTitle').textContent='Cheque '+(r.cheque_no||'');
     $('mCnt').textContent=(i+1)+' / '+rows.length;
     $('mPrev').disabled=(i===0); $('mNext').disabled=(i===rows.length-1);
-    pane('pvFront','front',r.front); pane('pvBack','back',r.back);
+    pane('pvFront','front',r.front,r.cheque_mode); pane('pvBack','back',r.back);
     $('mDet').innerHTML='<div class="amt">Rs. '+money(r.amount)+'</div>'
       +(r.verified?'<span class="badge g">Verified</span>':'<span class="badge r">Not verified</span>')+' '+(r.is_sampath?'<span class="badge y">Sampath</span>':'')
       +'<dl><dt>Cheque no</dt><dd>'+esc(r.cheque_no)+'</dd><dt>Cheque date</dt><dd>'+fdate(r.cheque_date)+'</dd><dt>Received date</dt><dd>'+fdate(r.received_date)+'</dd>'
       +'<dt>Customer</dt><dd>'+esc(r.customer_name||'—')+'</dd><dt>T code</dt><dd>'+esc(r.t_code||'—')+'</dd><dt>SR code</dt><dd>'+esc(r.sr_code||'—')+'</dd>'
       +'<dt>Bank</dt><dd>'+esc(((r.bank_code||'')+' '+(r.bank_name||'')).trim()||'—')+'</dd><dt>Branch</dt><dd>'+esc(((r.branch_code||'')+' '+(r.branch_name||'')).trim()||'—')+'</dd>'
       +'<dt>Status</dt><dd style="text-transform:capitalize">'+esc(String(r.status||'—').replace(/_/g,' '))+'</dd>'
-      +(r.cheque_mode?'<dt>Mode</dt><dd>'+esc(r.cheque_mode)+'</dd>':'')+(r.sampath_description?'<dt>Sampath description</dt><dd>'+esc(r.sampath_description)+'</dd>':'')
+      +'<dt>Cheque pay mode</dt><dd><b>'+esc(chqMode(r.cheque_mode)[0])+'</b></dd>'+(r.sampath_description?'<dt>Sampath description</dt><dd>'+esc(r.sampath_description)+'</dd>':'')
       +'<dt>Scans</dt><dd>Front: '+(r.front?'Uploaded':'Missing')+' · Back: '+(r.back?'Uploaded':'Missing')+'</dd></dl>';
     var cb=$('mVer'), nb=$('mNver'); cb.disabled=nb.disabled=!CAN_EDIT; cb.title=nb.title=CAN_EDIT?'':'Permission blocked';
     $('mMsg').textContent=''; $('mMsg').className='msg';

@@ -2181,7 +2181,7 @@ if (isset($conn) && $conn) {
                     
                     
                              <a href="credit_bill_scan_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'credit_bill_scan_report.php') ? 'active' : ''; ?>">
-                        <i class="fa-solid fa-images"></i><span>Credit Bill Upload Report</span>
+                        <i class="fa-solid fa-file-circle-check"></i><span>Credit Bill FC Verify</span>
                     </a>
                     
                     <a href="emergency_credit_bill_upload_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'emergency_credit_bill_upload_report.php') ? 'active' : ''; ?>">
