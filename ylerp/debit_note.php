@@ -464,6 +464,110 @@ function _get_dn_ack_ids($conn, $dn_id) {
 
 ensure_dn_tables($conn);
 
+/* ═════════ Payment Settlement Report: every payment with the claims it settles (?view=settlement_report) ═════════ */
+if (($_GET['view'] ?? '') === 'settlement_report') {
+    if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
+    ensure_dn_tables($conn);
+    $rf = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['from'] ?? '') ? $_GET['from'] : '';
+    $rt = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['to'] ?? '') ? $_GET['to'] : '';
+    $rq = trim((string)($_GET['q'] ?? '')); $rs = in_array($_GET['st'] ?? '', ['full', 'part', 'none', 'unlinked'], true) ? $_GET['st'] : '';
+    $w = ['1=1']; if ($rf) $w[] = "p.paid_date >= '$rf'"; if ($rt) $w[] = "p.paid_date <= '$rt'";
+    if ($rq !== '') { $e = mysqli_real_escape_string($conn, $rq); $w[] = "(p.description LIKE '%$e%' OR p.category LIKE '%$e%' OR CAST(p.id AS CHAR) = '$e' OR p.id IN (SELECT s.dn_id FROM dn_settlements s LEFT JOIN claim_cert_items ci ON ci.id = s.claim_cert_item_id WHERE s.tax_invoice_no LIKE '%$e%' OR s.bank_ref LIKE '%$e%' OR ci.tax_invoice_no LIKE '%$e%' OR ci.customer_code LIKE '%$e%' OR ci.customer_name LIKE '%$e%'))"; }
+    $pays = []; $r = mysqli_query($conn, "SELECT p.* FROM debit_note p WHERE " . implode(' AND ', $w) . " ORDER BY p.paid_date DESC, p.id DESC LIMIT 2000");
+    while ($r && ($x = mysqli_fetch_assoc($r))) { $x['lines'] = []; $pays[(int)$x['id']] = $x; }
+    if ($pays) { $in = implode(',', array_keys($pays));
+        $hasRA = mysqli_num_rows(mysqli_query($conn, "SHOW COLUMNS FROM dn_settlements LIKE 'received_amount'")) > 0;
+        $am = $hasRA ? 'COALESCE(NULLIF(s.amount,0), s.received_amount, 0)' : 'COALESCE(s.amount,0)';
+        $ackOk = mysqli_num_rows(mysqli_query($conn, "SHOW TABLES LIKE 'dl_cheque_acknowledgments'")) > 0;
+        $r = mysqli_query($conn, "SELECT s.id, s.dn_id, s.claim_cert_item_id AS cid, s.tax_invoice_no, s.entity, s.banking_date, s.bank_ref, s.claim_description, s.claim_reference, $am AS amt, COALESCE(s.vat_amount,0) AS vat,
+                                         COALESCE(NULLIF(s.total_amount,0), $am + COALESCE(s.vat_amount,0)) AS tot, ci.tax_invoice_no AS c_ti, ci.customer_code, ci.customer_name, ci.claim_description AS c_desc, ci.total_amount AS c_tot, ci.banking_date AS c_bd"
+                                 . ($ackOk ? ", (SELECT COUNT(*) FROM dl_cheque_acknowledgments a WHERE a.source = 'dn' AND a.source_settlement_id = s.id) AS ack" : ', 0 AS ack') . "
+                                  FROM dn_settlements s LEFT JOIN claim_cert_items ci ON ci.id = s.claim_cert_item_id WHERE s.dn_id IN ($in) ORDER BY s.id");
+        while ($r && ($x = mysqli_fetch_assoc($r))) { $x['kind'] = 'line'; $pays[(int)$x['dn_id']]['lines'][] = $x; }
+        if ($ackOk) {   // claims sent to Acknowledgment straight from the claim card (no payment line)
+            $r = mysqli_query($conn, "SELECT a.confirmed_payment_id AS dn_id, a.claim_item_id AS cid, ci.tax_invoice_no, ci.entity, ci.banking_date, '' AS bank_ref, ci.claim_description, '' AS claim_reference, COALESCE(ci.actual_amount,0) AS amt, COALESCE(ci.vat_amount,0) AS vat, COALESCE(ci.total_amount,0) AS tot,
+                                             ci.tax_invoice_no AS c_ti, ci.customer_code, ci.customer_name, ci.claim_description AS c_desc, ci.total_amount AS c_tot, ci.banking_date AS c_bd, 1 AS ack
+                                      FROM dl_cheque_acknowledgments a LEFT JOIN claim_cert_items ci ON ci.id = a.claim_item_id WHERE a.source = 'dn_claim' AND a.confirmed_payment_id IN ($in)");
+            while ($r && ($x = mysqli_fetch_assoc($r))) { $x['kind'] = 'ack'; $x['id'] = 0; $pays[(int)$x['dn_id']]['lines'][] = $x; } }
+    }
+    $T = ['n' => 0, 'pay' => 0.0, 'set' => 0.0, 'lines' => 0, 'unl' => 0];
+    foreach ($pays as $id => &$p) { $p['set'] = round(array_sum(array_map(fn($l) => (float)$l['tot'], $p['lines'])), 2); $p['tot'] = round((float)($p['total_amount'] ?? 0), 2); $p['bal'] = round($p['tot'] - $p['set'], 2);
+        $p['unl'] = count(array_filter($p['lines'], fn($l) => $l['kind'] === 'line' && (int)$l['cid'] <= 0));
+        $p['st'] = !$p['lines'] ? 'none' : (abs($p['bal']) <= 0.5 ? 'full' : 'part');
+        if ($rs === 'unlinked' ? !$p['unl'] : ($rs !== '' && $p['st'] !== $rs)) { unset($pays[$id]); continue; }
+        $T['n']++; $T['pay'] += $p['tot']; $T['set'] += $p['set']; $T['lines'] += count($p['lines']); $T['unl'] += $p['unl']; } unset($p);
+
+    if (!empty($_GET['export']) && class_exists('ZipArchive') && is_file(__DIR__ . '/rbac_xlsx.php')) {
+        require_once __DIR__ . '/rbac_xlsx.php'; $X = new MiniXlsx(); $sh = $X->sheet('Payment Settlements');
+        $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '312E81', 'border' => 1, 'wrap' => 1, 'h' => 'center']; $N = ['border' => 1, 'h' => 'right', 'nf' => 4];
+        $sh->set(1, 1, 'Muthupalasa BP Claims — Payment Settlement Report' . ($rf || $rt ? ' (' . ($rf ?: '…') . ' to ' . ($rt ?: '…') . ')' : ''), ['b' => 1, 'sz' => 14]);
+        foreach (['Payment #', 'Paid Date', 'Category', 'Description', 'Payment Total', 'Line', 'Tax Invoice', 'Customer', 'Claim Description', 'Claim Total', 'Settled Amount', 'VAT', 'Settled Total', 'Banking Date', 'Bank Ref', 'Linked', 'Acknowledgment'] as $i => $h) $sh->set(3, $i + 1, $h, $H);
+        $row = 4;
+        foreach ($pays as $p) {
+            $L = $p['lines'] ?: [null];
+            foreach ($L as $j => $l) {
+                $v = [$p['id'], $p['paid_date'], $p['category'], $p['description'], $j === 0 ? $p['tot'] : '', $l ? $j + 1 : '', $l ? ($l['c_ti'] ?: $l['tax_invoice_no']) : '', $l ? trim(($l['customer_code'] ?? '') . ' ' . ($l['customer_name'] ?? '')) : '',
+                      $l ? ($l['c_desc'] ?: $l['claim_description']) : '(no settlements)', $l ? (float)$l['c_tot'] : '', $l ? (float)$l['amt'] : '', $l ? (float)$l['vat'] : '', $l ? (float)$l['tot'] : '', $l ? ($l['banking_date'] ?: $l['c_bd']) : '', $l ? $l['bank_ref'] : '',
+                      $l ? ($l['kind'] === 'ack' ? 'Sent to Ack from claim card' : ((int)$l['cid'] > 0 ? 'Yes' : 'NOT LINKED')) : '', $l ? ((int)$l['ack'] ? 'Sent' : '') : ''];
+                foreach ($v as $i => $val) $sh->set($row, $i + 1, $val ?? '', in_array($i, [4, 9, 10, 11, 12], true) && $val !== '' ? $N : ['border' => 1] + ($i === 15 && $val === 'NOT LINKED' ? ['b' => 1, 'color' => 'B45309'] : []));
+                $row++; }
+            $sh->set($row, 4, 'Payment #' . $p['id'] . ' — settled ' . number_format($p['set'], 2) . ' · balance ' . number_format($p['bal'], 2), ['b' => 1, 'bg' => 'EEF2FF', 'border' => 1]); $sh->set($row, 5, $p['tot'], $N + ['b' => 1, 'bg' => 'EEF2FF']); $sh->set($row, 13, $p['set'], $N + ['b' => 1, 'bg' => 'EEF2FF']); $row++; }
+        $sh->set($row, 4, 'TOTAL — ' . $T['n'] . ' payments', ['b' => 1, 'bg' => 'FDE68A', 'border' => 1]); $sh->set($row, 5, round($T['pay'], 2), $N + ['b' => 1, 'bg' => 'FDE68A']); $sh->set($row, 13, round($T['set'], 2), $N + ['b' => 1, 'bg' => 'FDE68A']);
+        foreach ([10, 12, 18, 30, 14, 6, 18, 26, 40, 14, 14, 12, 14, 12, 16, 16, 14] as $i => $wd) $sh->widths[$i + 1] = $wd; $sh->freeze = [3, 0];
+        $tmp = tempnam(sys_get_temp_dir(), 'dn'); $X->save($tmp); while (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="Muthupalasa_Payment_Settlements_' . date('Ymd_His') . '.xlsx"'); header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
+    }
+    include 'header.php';
+    $h = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); $f2 = fn($v) => number_format((float)$v, 2);
+    $qs = http_build_query(array_filter(['view' => 'settlement_report', 'from' => $rf, 'to' => $rt, 'q' => $rq, 'st' => $rs]));
+    ?>
+<style>
+.dsr{font-family:'Inter',system-ui,sans-serif;color:#0f172a}.dsr .hd{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}.dsr .hd h2{margin:0;font-size:21px;flex:1}
+.dsr .b{display:inline-flex;gap:6px;align-items:center;border:1px solid #d1d5db;background:#fff;color:#111827;border-radius:8px;padding:8px 14px;font-weight:700;font-size:13px;text-decoration:none;cursor:pointer}.dsr .b.k{background:#000;color:#fff;border-color:#000}.dsr .b.g{background:#059669;color:#fff;border-color:#059669}
+.dsr form.f{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;margin-bottom:12px}.dsr form.f input,.dsr form.f select{border:1px solid #d1d5db;border-radius:7px;padding:7px 9px;font-size:13px}
+.dsr .kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}.dsr .kp div{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px}.dsr .kp span{display:block;font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase}.dsr .kp b{font-size:18px}
+.dsr .pc{background:#fff;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:12px;overflow:hidden}.dsr .ph{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e5e7eb;cursor:pointer}
+.dsr .ph .id{font-weight:800;color:#312e81}.dsr .ph .ds{flex:1;min-width:200px;font-size:13px;color:#374151}.dsr .ph .m{font-size:12px;color:#6b7280}.dsr .ph .m b{color:#111827;font-size:13.5px}
+.dsr .tag{display:inline-block;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:800}.dsr .t-full{background:#dcfce7;color:#166534}.dsr .t-part{background:#fef3c7;color:#92400e}.dsr .t-none{background:#f1f5f9;color:#64748b}.dsr .t-unl{background:#fee2e2;color:#991b1b}.dsr .t-ack{background:#dbeafe;color:#1e40af}
+.dsr table{width:100%;border-collapse:collapse;font-size:12.5px}.dsr th{background:#fafafa;text-align:left;padding:7px 9px;font-size:11px;color:#4b5563;border-bottom:1px solid #e5e7eb;white-space:nowrap}.dsr td{padding:7px 9px;border-bottom:1px solid #f3f4f6;vertical-align:top}.dsr .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dsr tr.unl td{background:#fff7ed}.dsr .sm{font-size:11px;color:#6b7280}.dsr .ft td{background:#eef2ff;font-weight:800}
+</style>
+<div class="dsr">
+  <div class="hd"><h2><i class="fa-solid fa-list-check"></i> Muthupalasa BP Claims — Payment Settlement Report</h2>
+    <a class="b" href="debit_note.php"><i class="fa-solid fa-arrow-left"></i> Back to payments</a>
+    <a class="b g" href="debit_note.php?<?= $h($qs) ?>&export=1" data-no-loader><i class="fa-solid fa-file-excel"></i> Excel</a></div>
+  <form class="f" method="get"><input type="hidden" name="view" value="settlement_report">
+    <label>Paid from <input type="date" name="from" value="<?= $h($rf) ?>"></label><label>to <input type="date" name="to" value="<?= $h($rt) ?>"></label>
+    <input type="search" name="q" value="<?= $h($rq) ?>" placeholder="Payment #, description, tax invoice, customer, bank ref…" style="flex:1;min-width:240px">
+    <select name="st"><option value="">All payments</option><?php foreach (['full' => 'Fully settled', 'part' => 'Partly settled', 'none' => 'No settlements', 'unlinked' => 'Has lines not linked to a claim'] as $k => $lb): ?><option value="<?= $k ?>" <?= $rs === $k ? 'selected' : '' ?>><?= $lb ?></option><?php endforeach; ?></select>
+    <button class="b k" type="submit"><i class="fa-solid fa-filter"></i> Show</button><a class="b" href="debit_note.php?view=settlement_report">Clear</a></form>
+  <div class="kp"><div><span>Payments</span><b><?= number_format($T['n']) ?></b></div><div><span>Payment total</span><b>Rs. <?= $f2($T['pay']) ?></b></div><div><span>Settlement lines total</span><b style="color:#166534">Rs. <?= $f2($T['set']) ?></b></div>
+    <div><span>Balance not assigned</span><b style="color:<?= $T['pay'] - $T['set'] > 0.5 ? '#b45309' : '#166534' ?>">Rs. <?= $f2($T['pay'] - $T['set']) ?></b></div><div><span>Claim lines</span><b><?= number_format($T['lines']) ?></b></div><div><span>Lines not linked</span><b style="color:<?= $T['unl'] ? '#b91c1c' : '#166534' ?>"><?= number_format($T['unl']) ?></b></div></div>
+  <?php if (!$pays): ?><div class="pc" style="padding:28px;text-align:center;color:#6b7280">No payments for these filters.</div><?php endif; ?>
+  <?php foreach ($pays as $p): ?>
+  <div class="pc">
+    <div class="ph" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">
+      <span class="id">#<?= (int)$p['id'] ?></span><span class="m"><?= $h($p['paid_date'] ?: '—') ?></span>
+      <span class="ds"><b><?= $h($p['category'] ?: '') ?></b> <?= $h($p['description'] ?: '') ?></span>
+      <span class="m">Payment <b>Rs. <?= $f2($p['tot']) ?></b></span><span class="m">Settled <b style="color:#166534">Rs. <?= $f2($p['set']) ?></b></span><span class="m">Balance <b style="color:<?= abs($p['bal']) > 0.5 ? '#b45309' : '#166534' ?>">Rs. <?= $f2($p['bal']) ?></b></span>
+      <span class="tag t-<?= $p['st'] ?>"><?= ['full' => 'Fully settled', 'part' => 'Partly settled', 'none' => 'No settlements'][$p['st']] ?></span><?php if ($p['unl']): ?><span class="tag t-unl"><?= $p['unl'] ?> not linked</span><?php endif; ?>
+      <span class="m"><?= count($p['lines']) ?> claim line(s)</span>
+      <a class="b" style="padding:4px 10px;font-size:12px" href="debit_note.php?open_pay=<?= (int)$p['id'] ?>" target="_blank" data-no-loader onclick="event.stopPropagation()"><i class="fa-solid fa-up-right-from-square"></i> Open</a></div>
+    <div><?php if ($p['lines']): ?><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Tax invoice</th><th>Customer</th><th>Claim description</th><th class="r">Claim total</th><th class="r">Amount</th><th class="r">VAT</th><th class="r">Settled total</th><th>Banking date</th><th>Bank ref</th><th>Status</th></tr></thead><tbody>
+      <?php foreach ($p['lines'] as $j => $l): $un = $l['kind'] === 'line' && (int)$l['cid'] <= 0; ?>
+      <tr class="<?= $un ? 'unl' : '' ?>"><td><?= $j + 1 ?></td><td><b><?= $h($l['c_ti'] ?: ($l['tax_invoice_no'] ?: '—')) ?></b><?php if ($l['c_ti'] && $l['tax_invoice_no'] && strcasecmp(trim($l['c_ti']), trim($l['tax_invoice_no']))): ?><div class="sm">typed: <?= $h($l['tax_invoice_no']) ?></div><?php endif; ?></td>
+        <td><?= $h($l['customer_code'] ?? '') ?><div class="sm"><?= $h($l['customer_name'] ?? '') ?></div></td><td style="max-width:320px"><?= $h($l['c_desc'] ?: $l['claim_description']) ?><?= $l['claim_reference'] ? '<div class="sm">Ref ' . $h($l['claim_reference']) . '</div>' : '' ?></td>
+        <td class="r"><?= $l['c_tot'] !== null ? $f2($l['c_tot']) : '—' ?></td><td class="r"><?= $f2($l['amt']) ?></td><td class="r"><?= $f2($l['vat']) ?></td><td class="r"><b><?= $f2($l['tot']) ?></b></td><td><?= $h($l['banking_date'] ?: ($l['c_bd'] ?? '—')) ?></td><td><?= $h($l['bank_ref'] ?: '—') ?></td>
+        <td><?= $l['kind'] === 'ack' ? '<span class="tag t-ack">Sent to Ack from claim card</span>' : ($un ? '<span class="tag t-unl" title="Open the payment and use Link to claim">Not linked to a claim</span>' : '<span class="tag t-full">Linked</span>') ?><?= $l['kind'] === 'line' && (int)$l['ack'] ? ' <span class="tag t-ack">Ack</span>' : '' ?></td></tr>
+      <?php endforeach; ?>
+      <tr class="ft"><td colspan="7" class="r">Payment #<?= (int)$p['id'] ?> — settled</td><td class="r"><?= $f2($p['set']) ?></td><td colspan="3">of <?= $f2($p['tot']) ?> · balance <?= $f2($p['bal']) ?></td></tr></tbody></table></div>
+    <?php else: ?><div style="padding:14px;color:#6b7280">No claims are settled on this payment yet. <a href="debit_note.php?open_pay=<?= (int)$p['id'] ?>" target="_blank" data-no-loader>Open it to add settlements</a>.</div><?php endif; ?></div>
+  </div>
+  <?php endforeach; ?>
+</div>
+<?php include 'footer.php'; exit;
+}
+
 $filter_date_from = isset($_GET['filter_date_from']) ? mysqli_real_escape_string($conn,$_GET['filter_date_from']) : '';
 $filter_date_to   = isset($_GET['filter_date_to'])   ? mysqli_real_escape_string($conn,$_GET['filter_date_to'])   : '';
 $filter_category  = isset($_GET['filter_category'])  ? mysqli_real_escape_string($conn,$_GET['filter_category'])  : '';
@@ -739,6 +843,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <h2 class="page-title"><i class="fa-solid fa-file-invoice"></i> Muthupalasa BP Claims</h2>
       <p class="page-subtitle">Manage debit note claims and settlements against Muthupalasa BP Claims</p>
     </div>
+    <a class="btn btn-light" href="debit_note.php?view=settlement_report" title="Every payment with the claims it settles"><i class="fa-solid fa-list-check"></i> Payment Settlement Report</a>
     <button class="btn btn-primary" onclick="openAddModal()"><i class="fa-solid fa-plus"></i> Add New Entry</button>
   </div>
 </div>
