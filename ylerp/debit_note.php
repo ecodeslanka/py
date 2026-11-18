@@ -302,6 +302,45 @@ if (isset($_GET['action'])) {
         echo json_encode(['success'=>true,'claims'=>$out]); exit;
     }
 
+    // ── Bulk: propose a claim for each chosen payment line (tax invoice first, else the same amount + entity) ──
+    if ($action === 'auto_link_preview' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $ids = array_filter(array_map('intval', json_decode($_POST['sids'] ?? '[]', true) ?: []));
+        if (!$ids) { echo json_encode(['success'=>false,'message'=>'Select payment lines first.']); exit; }
+        mysqli_query($conn, "CREATE TABLE IF NOT EXISTS claim_cert_send_list (claim_cert_item_id INT NOT NULL PRIMARY KEY, dest VARCHAR(20) NOT NULL, sent_by VARCHAR(100) NULL, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, KEY k_dest (dest))");
+        $norm = fn($t) => preg_replace('/[^a-z0-9]/', '', strtolower((string)$t));
+        $C = []; $r = mysqli_query($conn, "SELECT ci.id, ci.tax_invoice_no, ci.entity, ci.customer_code, ci.claim_description, ci.actual_amount, ci.total_amount,
+                    COALESCE((SELECT SUM(COALESCE(NULLIF(ds.total_amount,0), ds.amount)) FROM dn_settlements ds WHERE ds.claim_cert_item_id = ci.id),0) AS settled
+                 FROM claim_cert_items ci WHERE ci.claim_type = 'Muthupalasa BP Claims' OR ci.id IN (SELECT claim_cert_item_id FROM claim_cert_send_list WHERE dest = 'muthupalasa')");
+        while ($r && ($x = mysqli_fetch_assoc($r))) { $x['n'] = $norm($x['tax_invoice_no']); $x['open'] = (float)$x['total_amount'] - (float)$x['settled']; $C[(int)$x['id']] = $x; }
+        $L = []; $r = mysqli_query($conn, "SELECT id, dn_id, claim_cert_item_id AS cur, tax_invoice_no, entity, COALESCE(NULLIF(total_amount,0), amount) AS tot, amount FROM dn_settlements WHERE id IN (" . implode(',', $ids) . ") ORDER BY id");
+        while ($r && ($x = mysqli_fetch_assoc($r))) $L[] = $x;
+        foreach ($L as $x) if ((int)$x['cur'] && isset($C[(int)$x['cur']])) $C[(int)$x['cur']]['open'] += (float)$x['tot'];   // a line being re-linked frees its old claim
+        $out = [];
+        foreach ($L as $x) {
+            $t = (float)$x['tot']; $a = (float)$x['amount']; $en = strtolower(trim((string)$x['entity'])); $n = $norm($x['tax_invoice_no']); $pick = null; $how = '';
+            $okEn = fn($c) => $en === '' || strtolower(trim((string)$c['entity'])) === $en;
+            if ($n !== '') { $m = array_filter($C, fn($c) => $c['n'] === $n && $okEn($c));
+                if (count($m) > 1) { $mm = array_filter($m, fn($c) => abs($c['total_amount'] - $t) < 0.01 || abs($c['actual_amount'] - $a) < 0.01 || $c['open'] >= $t - 0.01); if ($mm) $m = $mm; }
+                if ($m) { $pick = reset($m); $how = 'tax invoice'; } }
+            if (!$pick) { $m = array_filter($C, fn($c) => (abs($c['total_amount'] - $t) < 0.01 || abs($c['actual_amount'] - $a) < 0.01 || abs($c['open'] - $t) < 0.01) && $c['open'] >= $t - 0.01 && $okEn($c));
+                if (count($m) === 1) { $pick = reset($m); $how = 'same amount'; } elseif (count($m) > 1) $how = count($m) . ' claims with this amount — link it by hand'; }
+            if ($pick) $C[(int)$pick['id']]['open'] -= $t;   // do not give the same open amount twice
+            $cur = (int)$x['cur'];
+            $out[] = ['sid' => (int)$x['id'], 'dn' => (int)$x['dn_id'], 'ti' => $x['tax_invoice_no'], 'tot' => round($t, 2), 'cur' => $cur, 'cur_ti' => $cur && isset($C[$cur]) ? $C[$cur]['tax_invoice_no'] : '',
+                      'cid' => $pick ? (int)$pick['id'] : 0, 'c_ti' => $pick['tax_invoice_no'] ?? '', 'c_desc' => $pick['claim_description'] ?? '', 'c_tot' => $pick ? round((float)$pick['total_amount'], 2) : 0, 'how' => $how, 'same' => $pick && (int)$pick['id'] === $cur]; }
+        echo json_encode(['success'=>true,'rows'=>$out]); exit;
+    }
+    // ── Bulk: save many line → claim links at once ──
+    if ($action === 'link_many' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $pairs = json_decode($_POST['pairs'] ?? '[]', true) ?: []; $n = 0;
+        foreach ($pairs as $pr) { $sid = (int)($pr['sid'] ?? 0); $cid = (int)($pr['cid'] ?? 0); if (!$sid || !$cid) continue;
+            $ci = mysqli_fetch_assoc(mysqli_query($conn, "SELECT tax_invoice_no, entity FROM claim_cert_items WHERE id=$cid")); if (!$ci) continue;
+            $row = mysqli_fetch_assoc(mysqli_query($conn, "SELECT tax_invoice_no, entity FROM dn_settlements WHERE id=$sid")); if (!$row) continue;
+            $set = "claim_cert_item_id=$cid" . (trim((string)$row['tax_invoice_no']) === '' ? ", tax_invoice_no='" . mysqli_real_escape_string($conn, $ci['tax_invoice_no']) . "'" : '') . (trim((string)$row['entity']) === '' ? ", entity='" . mysqli_real_escape_string($conn, (string)$ci['entity']) . "'" : '');
+            if (mysqli_query($conn, "UPDATE dn_settlements SET $set WHERE id=$sid")) { $n++; @mysqli_query($conn, "UPDATE dl_cheque_acknowledgments SET claim_item_id=$cid WHERE source='dn' AND source_settlement_id=$sid"); } }
+        echo json_encode(['success'=>true,'message'=>"$n payment line(s) linked to claim certificates."]); exit;
+    }
+
     // ── Link a payment line to a claim certificate (a line entered without picking the claim) ──
     if ($action === 'link_claim' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $sid = intval($_POST['sid'] ?? 0); $dn_id = intval($_POST['dn_id'] ?? 0); $cid = intval($_POST['claim_cert_item_id'] ?? 0);
@@ -550,7 +589,8 @@ if (($_GET['view'] ?? '') === 'settlement_report') {
 .dsr .ph .id{font-weight:800;color:#312e81}.dsr .ph .ds{flex:1;min-width:200px;font-size:13px;color:#374151}.dsr .ph .m{font-size:12px;color:#6b7280}.dsr .ph .m b{color:#111827;font-size:13.5px}
 .dsr .tag{display:inline-block;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:800}.dsr .t-full{background:#dcfce7;color:#166534}.dsr .t-part{background:#fef3c7;color:#92400e}.dsr .t-none{background:#f1f5f9;color:#64748b}.dsr .t-unl{background:#fee2e2;color:#991b1b}.dsr .t-ack{background:#dbeafe;color:#1e40af}
 .dsr table{width:100%;border-collapse:collapse;font-size:12.5px}.dsr th{background:#fafafa;text-align:left;padding:7px 9px;font-size:11px;color:#4b5563;border-bottom:1px solid #e5e7eb;white-space:nowrap}.dsr td{padding:7px 9px;border-bottom:1px solid #f3f4f6;vertical-align:top}.dsr .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-.dsr tr.unl td{background:#fff7ed}.dsr .sm{font-size:11px;color:#6b7280}.dsr .ft td{background:#eef2ff;font-weight:800}
+.dsr tr.unl td{background:#fff7ed}.dsr .bulk{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:8px 12px;margin-bottom:12px}.dsr .b:disabled{opacity:.45;cursor:not-allowed}
+.dsr .dsrC{width:16px;height:16px;cursor:pointer}.dsr .sm{font-size:11px;color:#6b7280}.dsr .ft td{background:#eef2ff;font-weight:800}
 </style>
 <div class="dsr">
   <div class="hd"><h2><i class="fa-solid fa-list-check"></i> Muthupalasa BP Claims — Payment Settlement Report</h2>
@@ -564,6 +604,11 @@ if (($_GET['view'] ?? '') === 'settlement_report') {
     <button class="b k" type="submit"><i class="fa-solid fa-filter"></i> Show</button><a class="b" href="debit_note.php?view=settlement_report">Clear</a></form>
   <div class="kp"><div><span>Payments</span><b><?= number_format($T['n']) ?></b></div><div><span>Payment total</span><b>Rs. <?= $f2($T['pay']) ?></b></div><div><span>Settlement lines total</span><b style="color:#166534">Rs. <?= $f2($T['set']) ?></b></div>
     <div><span>Balance not assigned</span><b style="color:<?= $T['pay'] - $T['set'] > 0.5 ? '#b45309' : '#166534' ?>">Rs. <?= $f2($T['pay'] - $T['set']) ?></b></div><div><span>Claim lines</span><b><?= number_format($T['lines']) ?></b></div><div><span>Lines not linked</span><b style="color:<?= $T['unl'] ? '#b91c1c' : '#166534' ?>"><?= number_format($T['unl']) ?></b></div></div>
+  <div class="bulk" id="dsrBulk"><b id="dsrBulkN">0 lines selected</b>
+    <button type="button" class="b" onclick="dsrSelAll(false)"><i class="fa-solid fa-square-check"></i> Select every line shown</button><button type="button" class="b" onclick="dsrSelAll(true)"><i class="fa-solid fa-link-slash"></i> Select lines not linked</button>
+    <button type="button" class="b g" id="dsrAutoBtn" onclick="dsrAuto()" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Auto link selected</button>
+    <button type="button" class="b k" id="dsrOneBtn" onclick="dsrPickMany(this)" disabled><i class="fa-solid fa-link"></i> Link selected to one claim</button>
+    <button type="button" class="b" onclick="dsrSelNone()">Clear</button></div>
   <?php if (!$pays): ?><div class="pc" style="padding:28px;text-align:center;color:#6b7280">No payments for these filters.</div><?php endif; ?>
   <?php foreach ($pays as $p): ?>
   <div class="pc">
@@ -574,21 +619,23 @@ if (($_GET['view'] ?? '') === 'settlement_report') {
       <span class="tag t-<?= $p['st'] ?>"><?= ['full' => 'Fully settled', 'part' => 'Partly settled', 'none' => 'No settlements'][$p['st']] ?></span><?php if ($p['unl']): ?><span class="tag t-unl"><?= $p['unl'] ?> not linked</span><?php endif; ?>
       <span class="m"><?= $rd !== '' && count($p['lines']) !== $p['all_n'] ? count($p['lines']) . ' of ' . $p['all_n'] . ' claim lines (description filter)' : count($p['lines']) . ' claim line(s)' ?></span>
       <a class="b" style="padding:4px 10px;font-size:12px" href="debit_note.php?open_pay=<?= (int)$p['id'] ?>" target="_blank" data-no-loader onclick="event.stopPropagation()"><i class="fa-solid fa-up-right-from-square"></i> Open</a></div>
-    <div><?php if ($p['lines']): ?><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Tax invoice</th><th>Customer</th><th>Claim description</th><th class="r">Claim total</th><th class="r">Amount</th><th class="r">VAT</th><th class="r">Settled total</th><th>Banking date</th><th>Bank ref</th><th>Status</th><th></th></tr></thead><tbody>
+    <div><?php if ($p['lines']): ?><div style="overflow-x:auto"><table><thead><tr><th style="width:26px"><input type="checkbox" title="Select every line of this payment" onclick="this.closest('table').querySelectorAll('.dsrC').forEach(c=>c.checked=this.checked);dsrSync()"></th><th>#</th><th>Tax invoice</th><th>Customer</th><th>Claim description</th><th class="r">Claim total</th><th class="r">Amount</th><th class="r">VAT</th><th class="r">Settled total</th><th>Banking date</th><th>Bank ref</th><th>Status</th><th></th></tr></thead><tbody>
       <?php foreach ($p['lines'] as $j => $l): $un = $l['kind'] === 'line' && (int)$l['cid'] <= 0; ?>
-      <tr class="<?= $un ? 'unl' : '' ?>"><td><?= $j + 1 ?></td><td><b><?= $h($l['c_ti'] ?: ($l['tax_invoice_no'] ?: '—')) ?></b><?php if ($l['c_ti'] && $l['tax_invoice_no'] && strcasecmp(trim($l['c_ti']), trim($l['tax_invoice_no']))): ?><div class="sm">typed: <?= $h($l['tax_invoice_no']) ?></div><?php endif; ?></td>
+      <tr class="<?= $un ? 'unl' : '' ?>"><td><?php if ($l['kind'] === 'line'): ?><input type="checkbox" class="dsrC" value="<?= (int)$l['id'] ?>" data-unl="<?= $un ? 1 : 0 ?>" onchange="dsrSync()"><?php endif; ?></td><td><?= $j + 1 ?></td><td><b><?= $h($l['c_ti'] ?: ($l['tax_invoice_no'] ?: '—')) ?></b><?php if ($l['c_ti'] && $l['tax_invoice_no'] && strcasecmp(trim($l['c_ti']), trim($l['tax_invoice_no']))): ?><div class="sm">typed: <?= $h($l['tax_invoice_no']) ?></div><?php endif; ?></td>
         <td><?= $h($l['customer_code'] ?? '') ?><div class="sm"><?= $h($l['customer_name'] ?? '') ?></div></td><td style="max-width:320px"><?= $h($l['c_desc'] ?: $l['claim_description']) ?><?= $l['claim_reference'] ? '<div class="sm">Ref ' . $h($l['claim_reference']) . '</div>' : '' ?></td>
         <td class="r"><?= $l['c_tot'] !== null ? $f2($l['c_tot']) : '—' ?></td><td class="r"><?= $f2($l['amt']) ?></td><td class="r"><?= $f2($l['vat']) ?></td><td class="r"><b><?= $f2($l['tot']) ?></b></td><td><?= $h($l['banking_date'] ?: ($l['c_bd'] ?? '—')) ?></td><td><?= $h($l['bank_ref'] ?: '—') ?></td>
         <td><?= $l['kind'] === 'ack' ? '<span class="tag t-ack">Sent to Ack from claim card</span>' : ($un ? '<span class="tag t-unl" title="Open the payment and use Link to claim">Not linked to a claim</span>' : '<span class="tag t-full">Linked</span>') ?><?= $l['kind'] === 'line' && (int)$l['ack'] ? ' <span class="tag t-ack">Ack</span>' : '' ?></td>
         <td style="white-space:nowrap"><?php if ($l['kind'] === 'line'): ?><button type="button" class="b" style="padding:3px 9px;font-size:11.5px" onclick="dsrPick(this,<?= (int)$p['id'] ?>,<?= (int)$l['id'] ?>,<?= (float)$l['tot'] ?>,'link')"><i class="fa-solid fa-link"></i> <?= $un ? 'Link claim' : 'Change' ?></button><?php if (!$un): ?> <button type="button" class="b" style="padding:3px 9px;font-size:11.5px" onclick="dsrUnlink(<?= (int)$p['id'] ?>,<?= (int)$l['id'] ?>)" title="Remove the claim link (the payment line stays)"><i class="fa-solid fa-link-slash"></i></button><?php endif; ?><?php endif; ?></td></tr>
       <?php endforeach; ?>
-      <tr class="ft"><td colspan="7" class="r">Payment #<?= (int)$p['id'] ?> — settled<?= $rd !== '' && count($p['lines']) !== $p['all_n'] ? ' (these lines ' . $f2($p['set']) . ')' : '' ?></td><td class="r"><?= $f2($p['set_all']) ?></td><td colspan="4">of <?= $f2($p['tot']) ?> · balance <?= $f2($p['bal']) ?>
+      <tr class="ft"><td colspan="8" class="r">Payment #<?= (int)$p['id'] ?> — settled<?= $rd !== '' && count($p['lines']) !== $p['all_n'] ? ' (these lines ' . $f2($p['set']) . ')' : '' ?></td><td class="r"><?= $f2($p['set_all']) ?></td><td colspan="4">of <?= $f2($p['tot']) ?> · balance <?= $f2($p['bal']) ?>
         <button type="button" class="b g" style="padding:3px 10px;font-size:11.5px;margin-left:8px" onclick="dsrPick(this,<?= (int)$p['id'] ?>,0,<?= max(0, (float)$p['bal']) ?>,'add')"><i class="fa-solid fa-plus"></i> Add claim</button></td></tr></tbody></table></div>
     <?php else: ?><div style="padding:14px;color:#6b7280"><?= $p['all_n'] ? 'No claim lines with this description on this payment.' : 'No claims are settled on this payment yet.' ?>
       <button type="button" class="b g" style="padding:4px 11px;font-size:12px;margin-left:8px" onclick="dsrPick(this,<?= (int)$p['id'] ?>,0,<?= max(0, (float)$p['bal']) ?>,'add')"><i class="fa-solid fa-plus"></i> Add claim</button></div><?php endif; ?></div>
   </div>
   <?php endforeach; ?>
 </div>
+<div id="dsrAm" style="display:none;position:fixed;inset:0;z-index:2147482000;background:rgba(15,23,42,.5);align-items:flex-start;justify-content:center;padding:50px 12px" onclick="if(event.target===this)this.style.display='none'">
+  <div class="dsr" style="background:#fff;border-radius:14px;width:min(1000px,100%);padding:16px 18px;box-shadow:0 30px 60px -20px rgba(0,0,0,.5)"><h3 style="margin:0 0 8px"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto link to claim certificates</h3><div id="dsrAmB"></div></div></div>
 <div id="dsrPk" style="display:none;position:fixed;z-index:2147483000;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 20px 40px -12px rgba(0,0,0,.35);width:min(620px,94vw);padding:12px">
   <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b id="dsrPkT" style="flex:1">Pick the claim</b><button type="button" class="b" style="padding:2px 9px" onclick="dsrClose()">×</button></div>
   <input type="search" id="dsrPkQ" placeholder="Tax invoice, claim description, customer or amount…" style="width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:7px 9px;font-size:13px" oninput="clearTimeout(window._dsrT);window._dsrT=setTimeout(dsrLoad,300)">
@@ -612,6 +659,7 @@ async function dsrLoad(){ const L=document.getElementById('dsrPkL'); L.innerHTML
       :'<div style="padding:10px;color:#6b7280">No Muthupalasa claims found.</div>';
   }catch(e){ L.innerHTML='<div style="padding:10px;color:#dc2626">'+dsrE(e.message)+'</div>'; } }
 function dsrSel(i){ const c=_dsr.claims[i], F=document.getElementById('dsrPkF'); _dsr.c=c; F.style.display='flex';
+  if(_dsr.mode==='many'){ F.innerHTML='<span style="flex:1">Link all '+_dsr.sids.length+' selected line(s) to <b>'+dsrE(c.tax_invoice_no)+'</b>?</span><button type="button" class="b g" onclick="dsrLinkMany(_dsr.sids.map(s=>({sid:s,cid:_dsr.c.id})))"><i class="fa-solid fa-link"></i> Link all</button>'; return; }
   if(_dsr.mode==='link'){ F.innerHTML='<span style="flex:1">Link to <b>'+dsrE(c.tax_invoice_no)+'</b>?</span><button type="button" class="b g" onclick="dsrSave()"><i class="fa-solid fa-link"></i> Link</button>'; return; }
   const vr=parseFloat(c.total_amount)?(parseFloat(c.vat_amount)||0)/parseFloat(c.total_amount):0, tot=Math.max(0,c.open>0.004?c.open:c.total_amount);   // amount incl. VAT, as on the payment form
   F.innerHTML='<span>Add <b>'+dsrE(c.tax_invoice_no)+'</b> — amount incl. VAT</span><input id="dsrAmt" type="number" step="0.01" value="'+tot.toFixed(2)+'" style="width:130px;border:1px solid #cbd5e1;border-radius:7px;padding:6px">'
@@ -625,7 +673,25 @@ async function dsrSave(vr){ const c=_dsr.c, fd=new FormData(); let url;
 async function dsrUnlink(dn,sid){ if(!confirm('Remove the claim link from this payment line?\n\nThe line stays on the payment; the claim becomes open again.')) return;
   const fd=new FormData(); fd.append('sid',sid); fd.append('dn_id',dn); fd.append('claim_cert_item_id',0);
   try{ const d=await (await fetch('debit_note.php?action=link_claim',{method:'POST',body:fd,credentials:'same-origin'})).json(); if(!d.success) throw new Error(d.message||'Failed'); location.reload(); }catch(e){ alert(e.message); } }
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') dsrClose(); });
+function dsrSelected(){ return [...document.querySelectorAll('.dsrC:checked')].map(c=>+c.value); }
+function dsrSync(){ const n=dsrSelected().length; document.getElementById('dsrBulkN').textContent=n+' line'+(n===1?'':'s')+' selected'; document.getElementById('dsrAutoBtn').disabled=!n; document.getElementById('dsrOneBtn').disabled=!n; }
+function dsrSelAll(onlyUnl){ document.querySelectorAll('.dsrC').forEach(c=>c.checked=!onlyUnl||c.dataset.unl==='1'); dsrSync(); }
+function dsrSelNone(){ document.querySelectorAll('.dsrC,.dsr thead input').forEach(c=>c.checked=false); dsrSync(); }
+function dsrPickMany(btn){ const ids=dsrSelected(); if(!ids.length) return; dsrPick(btn,0,0,0,'many'); _dsr.sids=ids; document.getElementById('dsrPkT').textContent='Link '+ids.length+' selected line(s) to one claim'; }
+/* auto: preview the proposed claim for every selected line, then save the ticked ones */
+async function dsrAuto(){ const ids=dsrSelected(); if(!ids.length) return; const fd=new FormData(); fd.append('sids',JSON.stringify(ids));
+  const M=document.getElementById('dsrAm'); M.style.display='flex'; const B=document.getElementById('dsrAmB'); B.innerHTML='<div style="padding:16px;color:#6b7280">Finding the claims…</div>';
+  try{ const d=await (await fetch('debit_note.php?action=auto_link_preview',{method:'POST',body:fd,credentials:'same-origin'})).json(); if(!d.success) throw new Error(d.message);
+    const ok=d.rows.filter(x=>x.cid&&!x.same).length;
+    B.innerHTML='<div style="margin-bottom:8px;color:#374151">'+ok+' of '+d.rows.length+' line(s) can be linked. Untick any you do not want.</div><div style="overflow:auto;max-height:55vh"><table><thead><tr><th></th><th>Payment</th><th>Line tax invoice</th><th class="r">Line total</th><th>Now</th><th>→ Claim</th><th class="r">Claim total</th><th>Found by</th></tr></thead><tbody>'
+      +d.rows.map(x=>'<tr style="background:'+(x.cid&&!x.same?'#f0fdf4':'#fafafa')+'"><td>'+(x.cid&&!x.same?'<input type="checkbox" class="dsrA" checked data-sid="'+x.sid+'" data-cid="'+x.cid+'">':'')+'</td><td>#'+x.dn+'</td><td>'+dsrE(x.ti||'—')+'</td><td class="r">'+dsrN(x.tot)+'</td><td>'+(x.cur?dsrE(x.cur_ti||('#'+x.cur)):'<span style="color:#b45309">not linked</span>')+'</td>'
+        +'<td>'+(x.cid?'<b>'+dsrE(x.c_ti)+'</b><div style="font-size:11px;color:#6b7280">'+dsrE((x.c_desc||'').slice(0,60))+'</div>':'<span style="color:#9ca3af">no match</span>')+'</td><td class="r">'+(x.cid?dsrN(x.c_tot):'')+'</td><td style="font-size:11.5px">'+(x.same?'already linked':dsrE(x.how||'—'))+'</td></tr>').join('')+'</tbody></table></div>'
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button type="button" class="b" onclick="document.getElementById(\'dsrAm\').style.display=\'none\'">Cancel</button><button type="button" class="b g" onclick="dsrAutoSave()" '+(ok?'':'disabled')+'><i class="fa-solid fa-link"></i> Link the ticked lines</button></div>';
+  }catch(e){ B.innerHTML='<div style="padding:16px;color:#dc2626">'+dsrE(e.message)+'</div>'; } }
+async function dsrAutoSave(){ const pairs=[...document.querySelectorAll('.dsrA:checked')].map(c=>({sid:+c.dataset.sid,cid:+c.dataset.cid})); if(!pairs.length) return; await dsrLinkMany(pairs); }
+async function dsrLinkMany(pairs){ const fd=new FormData(); fd.append('pairs',JSON.stringify(pairs));
+  try{ const d=await (await fetch('debit_note.php?action=link_many',{method:'POST',body:fd,credentials:'same-origin'})).json(); if(!d.success) throw new Error(d.message||'Failed'); alert(d.message); location.reload(); }catch(e){ alert(e.message); } }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ dsrClose(); document.getElementById('dsrAm').style.display='none'; } });
 </script>
 <?php include 'footer.php'; exit;
 }
