@@ -220,9 +220,9 @@ include 'header.php';
 .fcm .pane .ph button:hover { background:#475569; }
 .fcm .pane .pv { flex:1; min-height:0; overflow:auto; display:flex; align-items:center; justify-content:center; padding:6px; position:relative; }
 /* the cheque's pay mode stamped large on the scan */
-.fcm .stamp { position:absolute; top:14px; left:50%; transform:translateX(-50%) rotate(-4deg); z-index:3; pointer-events:none; padding:8px 26px; border:4px solid; border-radius:12px; font-size:clamp(20px,2.6vw,36px); font-weight:900; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; background:rgba(255,255,255,.88); box-shadow:0 6px 18px rgba(0,0,0,.35); }
-.fcm .stamp.m-payee { color:#15803d; border-color:#15803d; } .fcm .stamp.m-cash { color:#b91c1c; border-color:#b91c1c; } .fcm .stamp.m-third { color:#c2410c; border-color:#c2410c; } .fcm .stamp.m-none { color:#475569; border-color:#94a3b8; font-size:clamp(14px,1.6vw,20px); }
-.fcm .stamp small { display:block; font-size:.38em; letter-spacing:.12em; text-align:center; opacity:.8; margin-top:-2px; }
+.fcm .stamp { position:absolute; top:12px; right:12px; z-index:3; pointer-events:none; padding:6px 16px; border:3px solid; border-left-width:10px; border-radius:10px; font-size:clamp(16px,1.7vw,24px); font-weight:900; letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; background:rgba(255,255,255,.95); box-shadow:0 4px 14px rgba(0,0,0,.35); text-align:right; }   /* at the side: does not cover the cheque */
+.fcm .stamp.m-payee { color:#15803d; border-color:#15803d; } .fcm .stamp.m-cash { color:#b91c1c; border-color:#b91c1c; } .fcm .stamp.m-third { color:#c2410c; border-color:#c2410c; } .fcm .stamp.m-none { color:#475569; border-color:#94a3b8; font-size:clamp(13px,1.3vw,17px); }
+.fcm .stamp small { display:block; font-size:.45em; letter-spacing:.12em; opacity:.8; margin-top:-1px; }
 .fcm .pane .pv img { width:100%; height:100%; object-fit:contain; transition:transform .15s; cursor:zoom-in; display:block; border-radius:4px; background:#fff; }
 .fcm .pane .pv img.zm { width:auto; height:auto; max-width:none; max-height:none; object-fit:initial; }
 .fcm .pane .none { color:#94a3b8; text-align:center; font-weight:600; } .fcm .pane .none i { font-size:42px; display:block; margin-bottom:8px; color:#475569; }
