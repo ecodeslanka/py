@@ -196,7 +196,7 @@ function rf_row($p, $perms, $R, $occ, $menu_label, $sub = false, $ro = false) {
                 <div class="rb-btnlist">
                     <?php foreach ($pbtns as $bk => $bl): ?>
                         <label><input type="checkbox" name="btn[<?php echo htmlspecialchars($page); ?>][<?php echo htmlspecialchars($bk); ?>]" value="1"
-                            <?php echo (!isset($sv[$bk]) || $sv[$bk]) ? 'checked' : ''; ?> <?php echo $ro ? 'disabled' : ''; ?>> <?php echo htmlspecialchars($bl); ?></label>
+                            <?php echo (isset($sv[$bk]) ? $sv[$bk] : (!function_exists('rbac_btn_default') || rbac_btn_default($page, $bk))) ? 'checked' : ''; ?> <?php echo $ro ? 'disabled' : ''; ?>> <?php echo htmlspecialchars($bl); ?><?php if (function_exists('rbac_btn_default') && !rbac_btn_default($page, $bk)): ?> <small style="color:#b45309;font-weight:700" title="Off for every role until ticked here — admin always has it">(admin only by default)</small><?php endif; ?></label>
                     <?php endforeach; ?>
                     <?php if (!$ro): ?><span class="rb-btnall"><a href="#" onclick="btnAll(this,1);return false">all</a> · <a href="#" onclick="btnAll(this,0);return false">none</a></span><?php endif; ?>
                 </div></details>

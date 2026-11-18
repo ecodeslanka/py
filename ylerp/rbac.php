@@ -42,6 +42,23 @@ if (!defined('RBAC_NO_ROLE_FULL_ACCESS')) define('RBAC_NO_ROLE_FULL_ACCESS', fal
  * 'child_page' => ['parent_page', 'right']   right = view | create | edit | delete
  * Pages not in the sidebar and not listed here are only login-protected.
  */
+/* Buttons that are not plain HTML buttons of a menu page (they live on a related page, or are drawn later) — shown in the
+   role form under that menu page: menu page => [key => label]. */
+$GLOBALS['RBAC_EXTRA_BUTTONS'] = [
+    'field_summary_list' => [
+        'fs_verify'         => 'Verify (View Field Summary)',
+        'fs_reverse_verify' => 'Reverse / Undo Verify (View Field Summary)',
+        'fs_open_close'     => 'Open / Close lock (View Field Summary)',
+    ],
+];
+/* Buttons that are OFF until a role is given them (unticked by default in the role form; admin / full access always has them).
+   Every other button is on until a role is unticked. */
+$GLOBALS['RBAC_BTN_DEFAULT_DENY'] = [
+    'field_summary_list' => ['fs_verify', 'fs_reverse_verify', 'fs_open_close'],
+];
+/** default of a button for a role that has no saved choice: true = allowed */
+function rbac_btn_default($page, $key) { return !in_array($key, $GLOBALS['RBAC_BTN_DEFAULT_DENY'][strtolower((string)$page)] ?? [], true); }
+
 $GLOBALS['RBAC_RELATED_PAGES'] = [
     // Users / roles
     'role_form'            => ['role', 'view'],       // add / edit right is checked inside the page
@@ -928,6 +945,12 @@ function rbac_btn_slug($t) {
 
 /** ['export_excel' => 'Export Excel', ...] for one menu page, read from its file */
 function rbac_page_buttons($page) {
+    $page = strtolower($page);
+    $b = rbac_page_buttons_found($page);
+    foreach ($GLOBALS['RBAC_EXTRA_BUTTONS'][$page] ?? [] as $k => $l) $b[$k] = $l;
+    return $b;
+}
+function rbac_page_buttons_found($page) {
     static $memo = [];
     $page = strtolower($page);
     if (isset($memo[$page])) return $memo[$page];
@@ -1009,8 +1032,21 @@ function rbac_btn_can($key, $page = null) {
     static $mine = null;
     if ($mine === null) $mine = rbac_role_buttons($ctx['role_id']);
     $target = rbac_resolve($page ?: rbac_current_page())[0] ?? null;
-    if ($target === null) return true;
-    return !isset($mine[strtolower($target)][$key]) || $mine[strtolower($target)][$key] === 1;
+    if ($target === null) return rbac_btn_default($page ?: rbac_current_page(), $key);
+    $t = strtolower($target);
+    return isset($mine[$t][$key]) ? $mine[$t][$key] === 1 : rbac_btn_default($t, $key);   // no saved choice: the button's default
+}
+
+/** stop a request (JSON or text) when the signed-in user may not use this button — call it in the page's action handler */
+function rbac_btn_require($key, $page = null, $label = '') {
+    if (rbac_btn_can($key, $page)) return;
+    $msg = 'Permission blocked: you are not allowed to use ' . ($label !== '' ? '"' . $label . '"' : 'this button') . '. Ask an admin to give your role this button (Users → Roles → Buttons on this page).';
+    while (ob_get_level()) ob_end_clean();
+    http_response_code(403);
+    $json = (stripos($_SERVER['HTTP_ACCEPT'] ?? '', 'json') !== false) || !empty($_SERVER['HTTP_X_REQUESTED_WITH']) || $_SERVER['REQUEST_METHOD'] === 'POST';
+    if ($json) { header('Content-Type: application/json'); echo json_encode(['success' => false, 'ok' => false, 'message' => $msg, 'error' => $msg, 'msg' => $msg]); }
+    else echo htmlspecialchars($msg);
+    exit;
 }
 
 /** keys the signed-in user may NOT use on the current page (sent to the browser script) */
@@ -1022,6 +1058,7 @@ function rbac_btn_denied() {
     $mine = rbac_role_buttons($ctx['role_id']);
     $d = [];
     foreach ($mine[strtolower($target)] ?? [] as $k => $a) if (!$a) $d[] = $k;
+    foreach ($GLOBALS['RBAC_BTN_DEFAULT_DENY'][strtolower($target)] ?? [] as $k) if (!isset($mine[strtolower($target)][$k]) && !in_array($k, $d, true)) $d[] = $k;   // off until given
     return $d;
 }
 
