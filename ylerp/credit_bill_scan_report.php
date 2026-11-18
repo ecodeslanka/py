@@ -200,6 +200,13 @@ include 'header.php';
 .cbm .pv img { width:100%; height:100%; object-fit:contain; cursor:zoom-in; display:block; border-radius:4px; background:#fff; transition:transform .15s; } .cbm .pv img.zm { width:auto; height:auto; max-width:none; max-height:none; object-fit:initial; }
 .cbm .pv iframe { width:100%; height:100%; border:0; background:#fff; border-radius:4px; }
 .cbm .none { color:#94a3b8; text-align:center; font-weight:600; } .cbm .none i { font-size:46px; display:block; margin-bottom:8px; color:#475569; }
+/* magnifier lens (as Credit Bill Summary → Verify) */
+.cbm .lens { position:absolute; width:170px; height:170px; border-radius:50%; border:2px solid rgba(255,255,255,.75); box-shadow:0 0 0 1px rgba(0,0,0,.35),0 6px 26px rgba(0,0,0,.55); pointer-events:none; display:none; z-index:4; transform:translate(-50%,-50%); background-repeat:no-repeat; background-color:#fff; }
+.cbm .lens::before, .cbm .lens::after { content:''; position:absolute; background:rgba(220,38,38,.35); pointer-events:none; }
+.cbm .lens::before { width:1px; height:30%; left:50%; top:35%; } .cbm .lens::after { height:1px; width:30%; top:50%; left:35%; }
+.cbm .pv.mag-on img { cursor:none; }
+.cbm .zbar { display:inline-flex; align-items:center; gap:6px; margin-left:6px; color:#e2e8f0; font-size:11.5px; font-weight:700; }
+.cbm .zbar input[type=range] { width:90px; accent-color:#60a5fa; } .cbm .ph button.on { background:#2563eb; border-color:#60a5fa; }
 .cbm .thumbs { display:flex; gap:8px; overflow-x:auto; flex-shrink:0; } .cbm .thumbs img, .cbm .thumbs span { width:64px; height:48px; object-fit:cover; border-radius:6px; border:2px solid transparent; cursor:pointer; background:#fff; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; }
 .cbm .thumbs .on { border-color:#60a5fa; }
 /* the customer's pay mode stamped large on the invoice */
@@ -262,7 +269,7 @@ include 'header.php';
         <div class="body">
             <div class="lst" id="mList"></div>
             <div class="imgs">
-                <div class="ph"><span class="lb" id="mImgLb">Invoice scan</span><button type="button" data-z="-1" title="Zoom out">−</button><button type="button" data-z="1" title="Zoom in">+</button><button type="button" data-z="0" title="Fit">Fit</button><button type="button" id="mRot" title="Rotate">⟳</button><a id="mOpen" href="#" target="_blank" data-no-loader style="color:#93c5fd;font-size:12px;font-weight:700;margin-left:6px">Open file ↗</a></div>
+                <div class="ph"><span class="lb" id="mImgLb">Invoice scan</span><button type="button" data-z="-1" title="Zoom out">−</button><button type="button" data-z="1" title="Zoom in">+</button><button type="button" data-z="0" title="Fit">Fit</button><button type="button" id="mRot" title="Rotate">⟳</button><button type="button" id="mMag" class="on" title="Magnifier on / off (M)">🔍 Magnifier</button><span class="zbar" id="mZbar"><input type="range" id="mMagZ" min="1.5" max="6" step="0.5" value="3" title="Magnifier zoom"><span id="mMagL">3×</span></span><a id="mOpen" href="#" target="_blank" data-no-loader style="color:#93c5fd;font-size:12px;font-weight:700;margin-left:6px">Open file ↗</a></div>
                 <div class="pv" id="mPv"></div>
                 <div class="thumbs" id="mThumbs"></div>
             </div>
@@ -274,7 +281,7 @@ include 'header.php';
             <button class="vb pd" id="mPend" type="button" title="Back to pending (not checked)">Pending</button>
             <label class="auto"><input type="checkbox" id="mAuto" checked> go to the next bill after marking</label>
             <span class="msg" id="mMsg"></span>
-            <span class="hint">← → previous / next · V = verified · N = not verified · click the scan to zoom · Esc closes</span>
+            <span class="hint">← → previous / next · V = verified · N = not verified · move over the scan to magnify (M on / off) · click to open full size · Esc closes</span>
         </div>
     </div>
     <div class="zoomov" id="zoomOv"><img id="zoomImg" alt=""></div>
@@ -327,8 +334,29 @@ include 'header.php';
     if(img>=L.length) img=0; var p=L[img].p;
     $('mPv').innerHTML=stamp+(isPdf(p)?'<iframe src="'+esc(p)+'"></iframe>':'<img src="'+esc(p)+'" alt="Invoice scan">');
     $('mOpen').href=p; $('mOpen').style.display=''; $('mImgLb').textContent='Invoice scan '+(img+1)+' / '+L.length;
+    magUi();
     $('mThumbs').innerHTML=L.length>1?L.map(function(x,i){ return isPdf(x.p)?'<span data-t="'+i+'" class="'+(i===img?'on':'')+'">PDF</span>':'<img data-t="'+i+'" src="'+esc(x.p)+'" class="'+(i===img?'on':'')+'" alt="">'; }).join(''):'';
   }
+  /* ── magnifier lens ── */
+  var magOn=true, magZ=3, LENS=170;
+  try{ var _m=localStorage.getItem('cbvMag'); if(_m==='0') magOn=false; var _z=parseFloat(localStorage.getItem('cbvMagZ')); if(_z>=1.5&&_z<=6) magZ=_z; }catch(e){}
+  function magUi(){ $('mMag').classList.toggle('on',magOn); $('mZbar').style.display=magOn?'':'none'; $('mMagZ').value=magZ; $('mMagL').textContent=magZ+'×'; $('mPv').classList.toggle('mag-on',magOn); if(!magOn){ var l=$('mPv').querySelector('.lens'); if(l) l.style.display='none'; } }
+  $('mMag').onclick=function(){ magOn=!magOn; try{ localStorage.setItem('cbvMag',magOn?'1':'0'); }catch(e){} magUi(); };
+  $('mMagZ').oninput=function(){ magZ=parseFloat(this.value); $('mMagL').textContent=magZ+'×'; try{ localStorage.setItem('cbvMagZ',magZ); }catch(e){} };
+  function lensEl(){ var l=$('mPv').querySelector('.lens'); if(!l){ l=document.createElement('div'); l.className='lens'; $('mPv').appendChild(l); } return l; }
+  $('mPv').addEventListener('mousemove',function(e){
+    var im=$('mPv').querySelector('img'), l=lensEl();
+    if(!magOn||!im||rot!==0||!im.naturalWidth){ l.style.display='none'; return; }
+    var r=im.getBoundingClientRect(), dw=r.width, dh=r.height, ox=r.left, oy=r.top;
+    if(!im.classList.contains('zm')){ var sc=Math.min(r.width/im.naturalWidth, r.height/im.naturalHeight); dw=im.naturalWidth*sc; dh=im.naturalHeight*sc; ox=r.left+(r.width-dw)/2; oy=r.top+(r.height-dh)/2; }   // object-fit: contain
+    var px=e.clientX-ox, py=e.clientY-oy;
+    if(px<0||py<0||px>dw||py>dh){ l.style.display='none'; return; }
+    var pr=$('mPv').getBoundingClientRect();
+    l.style.display='block'; l.style.left=(e.clientX-pr.left+$('mPv').scrollLeft)+'px'; l.style.top=(e.clientY-pr.top+$('mPv').scrollTop)+'px';
+    l.style.backgroundImage='url("'+im.src.replace(/"/g,'\\"')+'")'; l.style.backgroundSize=(dw*magZ)+'px '+(dh*magZ)+'px';
+    l.style.backgroundPosition=(-(px*magZ-LENS/2))+'px '+(-(py*magZ-LENS/2))+'px';
+  });
+  $('mPv').addEventListener('mouseleave',function(){ var l=$('mPv').querySelector('.lens'); if(l) l.style.display='none'; });
   $('mThumbs').addEventListener('click',function(e){ var t=e.target.closest('[data-t]'); if(t){ img=parseInt(t.dataset.t,10); drawImg(); } });
   function show(i){
     if(i<0||i>=rows.length) return; cur=i; img=0; var r=rows[i], m=pm(r);
@@ -349,6 +377,7 @@ include 'header.php';
   document.addEventListener('keydown',function(e){ if(!$('cbm').classList.contains('open')) return;
     if(e.key==='Escape'){ if($('zoomOv').classList.contains('open')) $('zoomOv').classList.remove('open'); else closeM(); }
     else if(e.key==='ArrowLeft'){ e.preventDefault(); show(cur-1); } else if(e.key==='ArrowRight'){ e.preventDefault(); show(cur+1); }
+    else if(e.key==='m'||e.key==='M'){ $('mMag').click(); }
     else if((e.key==='v'||e.key==='V')&&CAN_EDIT){ setVerify('1'); } else if((e.key==='n'||e.key==='N')&&CAN_EDIT){ setVerify('0'); } });
   function pImg(){ return document.querySelector('#mPv img'); }
   $('mRot').onclick=function(){ var im=pImg(); if(!im) return; rot=(rot+90)%360; im.style.transform='rotate('+rot+'deg)'; };
