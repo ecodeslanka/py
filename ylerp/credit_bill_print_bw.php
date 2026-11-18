@@ -19,6 +19,7 @@ if ($f_date)  $w[] = "fs.delivery_date = '"  . mysqli_real_escape_string($conn,$
 if ($f_as_at) $w[] = "fs.delivery_date <= '" . mysqli_real_escape_string($conn,$f_as_at) . "'";
 if ($f_tbd === '1') $w[] = "fsd.to_be_delivery = 1";
 if ($f_tbd === '0') $w[] = "fsd.to_be_delivery = 0";
+$f_ag = cbf_aging_read(); foreach (cbf_aging_where($conn, $f_ag, $f_as_at) as $__c) $w[] = $__c;   // Credit Aging Report filters
 $where_sql = implode(' AND ', $w);
 
 $pay_filter = $f_as_at
@@ -117,6 +118,7 @@ if ($f_date)          $fl[] = 'Delivery: '.date('d M Y',strtotime($f_date));
 if ($f_as_at)         $fl[] = 'As At: '.date('d M Y',strtotime($f_as_at));
 if ($f_amt_min !== '') $fl[] = 'Bal >= '.number_format(floatval($f_amt_min),2);
 if ($f_amt_max !== '') $fl[] = 'Bal <= '.number_format(floatval($f_amt_max),2);
+foreach (cbf_aging_labels($f_ag) as $__l) $fl[] = htmlspecialchars($__l);
 if (empty($fl))       $fl[] = 'All Records';
 $filter_str = implode('  |  ', $fl);
 ?>

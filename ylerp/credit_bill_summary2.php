@@ -193,6 +193,7 @@ if (isset($_GET['printview'])) {
     if ($f_as_at) $pv_where[] = "fs.delivery_date <= '". mysqli_real_escape_string($conn,$f_as_at) . "'";
     if ($f_tbd === '1') $pv_where[] = "fsd.to_be_delivery = 1";
     if ($f_tbd === '0') $pv_where[] = "fsd.to_be_delivery = 0";
+    $f_ag = cbf_aging_read(); foreach (cbf_aging_where($conn, $f_ag, $f_as_at) as $__c) $pv_where[] = $__c;   // Credit Aging Report filters
     $pv_where_sql = implode(' AND ', $pv_where);
 
     $pv_pay_date_filter = $f_as_at
@@ -355,6 +356,7 @@ th:nth-child(13){width:48px;}th:nth-child(14){width:52px;}
     <div class="rpt-meta">
         <?php if($f_route): ?><span><strong>Route:</strong> <?php echo htmlspecialchars($f_route); ?></span><?php endif; ?>
         <?php if($f_sr):    ?><span><strong>SR Code:</strong> <?php echo htmlspecialchars(implode(', ', $f_sr)); ?></span><?php endif; ?>
+        <?php foreach(cbf_aging_labels($f_ag) as $__l): ?><span><?php echo htmlspecialchars($__l); ?></span><?php endforeach; ?>
         <?php if($f_ld): ?><span><strong>Loading Date:</strong> <?php echo htmlspecialchars(implode(', ', $f_ld)); ?></span><?php endif; ?>
         <?php if($f_dp): ?><span><strong>Delivery Person:</strong> <?php echo htmlspecialchars(implode(', ', $f_dp)); ?></span><?php endif; ?>
         <?php if($f_date):  ?><span><strong>Delivery Date:</strong> <?php echo date('d M Y',strtotime($f_date)); ?></span><?php endif; ?>
@@ -363,7 +365,7 @@ th:nth-child(13){width:48px;}th:nth-child(14){width:52px;}
         <?php if($f_tbd === '0'): ?><span><strong>To Be Delivery:</strong> No Only</span><?php endif; ?>
         <?php if($f_amt_min !== ''): ?><span><strong>Balance Min:</strong> Rs. <?php echo number_format(floatval($f_amt_min),2); ?></span><?php endif; ?>
         <?php if($f_amt_max !== ''): ?><span><strong>Balance Max:</strong> Rs. <?php echo number_format(floatval($f_amt_max),2); ?></span><?php endif; ?>
-        <?php if(!$f_route && !$f_sr && !$f_ld && !$f_dp && !$f_date && !$f_as_at && $f_tbd === '' && $f_amt_min === '' && $f_amt_max === ''): ?><span><strong>Scope:</strong> All Records</span><?php endif; ?>
+        <?php if(!$f_route && !$f_sr && !$f_ld && !$f_dp && !cbf_aging_labels($f_ag) && !$f_date && !$f_as_at && $f_tbd === '' && $f_amt_min === '' && $f_amt_max === ''): ?><span><strong>Scope:</strong> All Records</span><?php endif; ?>
         <span><strong>Printed:</strong> <?php echo date('d M Y, H:i'); ?></span>
     </div>
     <div class="rpt-summary">
@@ -535,6 +537,7 @@ if ($f_date)  $where[] = "fs.delivery_date = '" . mysqli_real_escape_string($con
 if ($f_as_at) $where[] = "fs.delivery_date <= '". mysqli_real_escape_string($conn,$f_as_at) . "'";
 if ($f_tbd === '1') $where[] = "fsd.to_be_delivery = 1";
 if ($f_tbd === '0') $where[] = "fsd.to_be_delivery = 0";
+$f_ag = cbf_aging_read(); foreach (cbf_aging_where($conn, $f_ag, $f_as_at) as $__c) $where[] = $__c;   // Credit Aging Report filters: pay mode · credit type · age range · policy exceeded
 $where_sql = implode(' AND ',$where);
 
 $pay_date_filter = $f_as_at
@@ -1196,6 +1199,29 @@ body.modal-open{overflow:hidden !important;}
                         <option value="0" <?php echo $f_tbd==='0' ? 'selected':''; ?>>&#10003; No — Not Pending</option>
                     </select>
                 </div>
+                <!-- ★ Credit Aging Report filters ★ -->
+                <div class="fg">
+                    <label><i class="fa-solid fa-tag"></i> Credit Type</label>
+                    <select name="credit_type">
+                        <option value="">— All —</option>
+                        <option value="special" <?php echo $f_ag['ct']==='special'?'selected':''; ?>>Special (credit request)</option>
+                        <option value="normal"  <?php echo $f_ag['ct']==='normal'?'selected':''; ?>>Normal</option>
+                    </select>
+                </div>
+                <div class="fg" style="grid-column:span 2">
+                    <label><i class="fa-solid fa-wallet"></i> Pay Mode <small style="font-weight:500;color:#9ca3af">(tick one or more)</small></label>
+                    <div class="cbf-chk"><?php foreach (['credit'=>'Credit','cheque'=>'Cheque','cash'=>'Cash','cwd'=>'Cheques will delay','none'=>'Not set'] as $__k=>$__v): ?>
+                        <label><input type="checkbox" name="pay_mode[]" value="<?php echo $__k; ?>" <?php echo in_array($__k,$f_ag['pm'],true)?'checked':''; ?>> <?php echo $__v; ?></label><?php endforeach; ?></div>
+                </div>
+                <div class="fg" style="grid-column:span 2">
+                    <label><i class="fa-solid fa-hourglass-half"></i> Age Range <small style="font-weight:500;color:#9ca3af">(days from delivery)</small></label>
+                    <div class="cbf-chk"><?php foreach (['1-7','8-14','15-21','22-28','29-35','35+'] as $__a): ?>
+                        <label><input type="checkbox" name="age_range[]" value="<?php echo $__a; ?>" <?php echo in_array($__a,$f_ag['age'],true)?'checked':''; ?>> <?php echo $__a; ?></label><?php endforeach; ?></div>
+                </div>
+                <div class="fg">
+                    <label><i class="fa-solid fa-triangle-exclamation"></i> Policy</label>
+                    <label class="cbf-chk" style="cursor:pointer"><input type="checkbox" name="exceed_only" value="1" <?php echo $f_ag['exceed']?'checked':''; ?>> Policy exceeded only</label>
+                </div>
             </div>
             <div class="fg" style="flex-direction:row;gap:8px;align-items:flex-end;">
                 <button type="submit" class="btn btn-primary" id="searchBtn" style="flex:1;">
@@ -1290,7 +1316,7 @@ body.modal-open{overflow:hidden !important;}
         <?php if($f_tbd === '0'): ?><span>TBD:</span> No Only &nbsp;<?php endif; ?>
         <?php if($f_amt_min !== ''): ?><span>Bal Min:</span> Rs.<?php echo number_format(floatval($f_amt_min),2); ?> &nbsp;<?php endif; ?>
         <?php if($f_amt_max !== ''): ?><span>Bal Max:</span> Rs.<?php echo number_format(floatval($f_amt_max),2); ?> &nbsp;<?php endif; ?>
-        <?php if(!$f_route && !$f_sr && !$f_ld && !$f_dp && !$f_date && !$f_as_at && $f_tbd === '' && $f_amt_min === '' && $f_amt_max === ''): ?><span>Scope:</span> All Records &nbsp;<?php endif; ?>
+        <?php if(!$f_route && !$f_sr && !$f_ld && !$f_dp && !cbf_aging_labels($f_ag) && !$f_date && !$f_as_at && $f_tbd === '' && $f_amt_min === '' && $f_amt_max === ''): ?><span>Scope:</span> All Records &nbsp;<?php endif; ?>
         &nbsp;|&nbsp; <span>Total:</span> <?php echo $total_count; ?> invoices
         &nbsp;|&nbsp; <span>Net:</span> Rs.&nbsp;<?php echo number_format($t_net,2); ?>
         &nbsp;|&nbsp; <span>Cash:</span> Rs.&nbsp;<?php echo number_format($t_cash,2); ?>
@@ -1309,6 +1335,7 @@ body.modal-open{overflow:hidden !important;}
             <span class="pill pill-violet" id="visibleCount"><?php echo $total_count; ?> rows</span>
             <?php if($f_route): ?><span class="pill pill-blue">Route: <?php echo htmlspecialchars($f_route); ?></span><?php endif; ?>
             <?php if($f_sr): ?><span class="pill pill-violet">SR: <?php echo htmlspecialchars(implode(', ', $f_sr)); ?></span><?php endif; ?>
+            <?php foreach(cbf_aging_labels($f_ag) as $__l): ?><span class="pill" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa"><?php echo htmlspecialchars($__l); ?></span><?php endforeach; ?>
             <?php if($f_ld): ?><span class="pill" style="background:#f0fdfa;color:#0f766e;border:1px solid #99f6e4">Loading: <?php echo htmlspecialchars(implode(', ', array_map(fn($d)=>date('d M Y',strtotime($d)),$f_ld))); ?></span><?php endif; ?>
             <?php if($f_dp): ?><span class="pill" style="background:#fdf2f8;color:#9d174d;border:1px solid #fbcfe8">Delivery person: <?php echo htmlspecialchars(implode(', ', $f_dp)); ?></span><?php endif; ?>
             <?php if($f_date): ?><span class="pill pill-green"><?php echo date('d M Y',strtotime($f_date)); ?></span><?php endif; ?>
@@ -1317,7 +1344,7 @@ body.modal-open{overflow:hidden !important;}
             <?php if($f_amt_max !== ''): ?><span class="pill" style="background:#fef9c3;color:#854d0e;"><i class="fa-solid fa-coins" style="font-size:9px;"></i> Max: Rs.<?php echo number_format(floatval($f_amt_max),2); ?></span><?php endif; ?>
             <?php if($f_tbd === '1'): ?><span class="pill" style="background:#ede9fe;color:#4c1d95;"><i class="fa-solid fa-truck" style="font-size:9px;"></i> TBD: Yes</span><?php endif; ?>
             <?php if($f_tbd === '0'): ?><span class="pill" style="background:#f0fdf4;color:#166534;"><i class="fa-solid fa-circle-check" style="font-size:9px;"></i> TBD: No</span><?php endif; ?>
-            <?php if(!$f_route && !$f_sr && !$f_ld && !$f_dp && !$f_date && !$f_as_at && $f_tbd === '' && $f_amt_min === '' && $f_amt_max === ''): ?><span class="pill" style="background:#fef9c3;color:#854d0e;">All Records</span><?php endif; ?>
+            <?php if(!$f_route && !$f_sr && !$f_ld && !$f_dp && !cbf_aging_labels($f_ag) && !$f_date && !$f_as_at && $f_tbd === '' && $f_amt_min === '' && $f_amt_max === ''): ?><span class="pill" style="background:#fef9c3;color:#854d0e;">All Records</span><?php endif; ?>
         </div>
         <div class="legend">
             <div class="legend-item"><div class="ldot ldot-y"></div> Special Credit</div>
@@ -1638,6 +1665,7 @@ body.modal-open{overflow:hidden !important;}
 const PAGE_AS_AT = <?php echo $f_as_at ? json_encode($f_as_at) : 'null'; ?>;
 
 let loadingDates = <?php echo json_encode($f_ld); ?>;
+(function(){ const st=document.createElement('style'); st.textContent='.fg .cbf-chk{display:flex!important;flex-wrap:wrap;gap:6px 14px;align-items:center;min-height:37px;font-size:12.5px!important;text-transform:none!important;letter-spacing:0!important}.fg .cbf-chk label,.fg label.cbf-chk{display:inline-flex!important;flex-direction:row!important;gap:6px;align-items:center;width:auto!important;margin:0!important;font-size:12.5px!important;font-weight:600!important;color:#374151!important;cursor:pointer;text-transform:none!important;letter-spacing:0!important;white-space:nowrap}.fg .cbf-chk input{width:15px!important;height:15px!important;margin:0!important;flex:0 0 auto}'; document.head.appendChild(st); })();
 function formatLoadingDateDisplay(d){ const p=d.split('-'); if(p.length!==3) return d; const m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return parseInt(p[2],10)+' '+m[parseInt(p[1],10)-1]+' '+p[0]; }
 function renderLoadingDateChips(){ const c=document.getElementById('loadingDateChips'), h=document.getElementById('loadingDateHiddenInputs'); if(!c||!h) return; c.innerHTML=''; h.innerHTML='';
   loadingDates.forEach((d,i)=>{ const chip=document.createElement('span'); chip.style.cssText='display:inline-flex;align-items:center;gap:5px;background:#f0fdfa;border:1px solid #99f6e4;color:#0f766e;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700;white-space:nowrap;';
