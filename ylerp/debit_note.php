@@ -1741,4 +1741,17 @@ function updateTableRow(pid,t){
   }
 }
 </script>
+<script>
+/* opened from the Customer Claim Report (?open_pay=ID): show that payment and open its settlements */
+(function(){ var id=parseInt(new URLSearchParams(location.search).get('open_pay')||0,10); if(!id) return;
+  window.addEventListener('load',function(){ setTimeout(function(){
+    var b=document.getElementById('settlebtn-'+id);
+    if(b){ var tr=b.closest('tr'); if(tr){ tr.scrollIntoView({block:'center'}); tr.style.outline='3px solid #f59e0b'; tr.style.background='#fffbeb'; } b.click(); return; }
+    /* not in the list (a filter hides it): open it straight from the record */
+    fetch(location.pathname+'?action=get&id='+id,{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+      if(d&&d.success&&d.data&&typeof openSettle==='function') openSettle(id, parseFloat(d.data.total_amount||d.data.amount_with_vat||d.data.amount||0)||0);
+      else alert('Payment #'+id+' was not found on this page.'); }).catch(function(){ alert('Payment #'+id+' could not be opened.'); });
+  },300); });
+})();
+</script>
 <?php include 'footer.php'; ?>
