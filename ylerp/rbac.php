@@ -54,8 +54,18 @@ $GLOBALS['RBAC_EXTRA_BUTTONS'] = [
 /* Buttons that are OFF until a role is given them (unticked by default in the role form; admin / full access always has them).
    Every other button is on until a role is unticked. */
 $GLOBALS['RBAC_BTN_DEFAULT_DENY'] = [
-    'field_summary_list' => ['fs_verify', 'fs_reverse_verify', 'fs_open_close'],
+    'field_summary_list' => ['fs_open_close'],   // Verify and Undo Verify are ON for every role (untick a role to take them away)
 ];
+/* one-time: the first version had Verify / Undo Verify OFF by default, so roles saved then got them as "off" — give them back */
+function rbac_fix_fs_verify_defaults() {
+    static $done = false; if ($done) return; $done = true;
+    if (!function_exists('rbac_q')) return;
+    @rbac_q("CREATE TABLE IF NOT EXISTS rbac_migrations (name VARCHAR(80) PRIMARY KEY, done_at DATETIME DEFAULT CURRENT_TIMESTAMP)");
+    $r = @rbac_q("SELECT 1 FROM rbac_migrations WHERE name = 'fs_verify_default_on' LIMIT 1");
+    if ($r && mysqli_num_rows($r) > 0) return;
+    @rbac_q("DELETE FROM role_page_buttons WHERE page = 'field_summary_list' AND btn_key IN ('fs_verify','fs_reverse_verify') AND allowed = 0");
+    @rbac_q("INSERT IGNORE INTO rbac_migrations (name) VALUES ('fs_verify_default_on')");
+}
 /** default of a button for a role that has no saved choice: true = allowed */
 function rbac_btn_default($page, $key) { return !in_array($key, $GLOBALS['RBAC_BTN_DEFAULT_DENY'][strtolower((string)$page)] ?? [], true); }
 
@@ -1019,6 +1029,7 @@ function rbac_all_buttons() {
 
 /** page => [key => 0/1] explicitly saved for one role */
 function rbac_role_buttons($role_id) {
+    rbac_fix_fs_verify_defaults();
     $out = [];
     $res = @rbac_q("SELECT page, btn_key, allowed FROM role_page_buttons WHERE role_id = " . intval($role_id));
     while ($res && ($r = mysqli_fetch_assoc($res))) $out[strtolower($r['page'])][$r['btn_key']] = (int)$r['allowed'];
