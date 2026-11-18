@@ -195,12 +195,13 @@ function cc_settlements($conn, array $ids) {
             $cid = null; $how = 'claim';
             if (!empty($x['claim_cert_item_id']) && in_array((int)$x['claim_cert_item_id'], $ids, true)) $cid = (int)$x['claim_cert_item_id'];
             elseif (isset($x['source_type']) && $x['source_type'] === 'claim_item' && in_array((int)$x['source_id'], $ids, true)) { $cid = (int)$x['source_id']; $how = 'source'; }
-            elseif (empty($x['claim_cert_item_id'])) { $sa = (float)($x['amount'] ?? $x['received_amount'] ?? 0); $st = (float)($x['total_amount'] ?? 0) ?: $sa + (float)($x['vat_amount'] ?? 0);
+            elseif (empty($x['claim_cert_item_id'])) { $sa = (float)($x['amount'] ?? 0) ?: (float)($x['received_amount'] ?? 0); $st = (float)($x['total_amount'] ?? 0) ?: $sa + (float)($x['vat_amount'] ?? 0);
                 $cid = $byTi($x['tax_invoice_no'] ?? '', $x['entity'] ?? '', $sa, $st); if ($cid === null && !empty($x['claim_reference'])) $cid = $byTi($x['claim_reference'], $x['entity'] ?? '', $sa, $st); $how = 'tax invoice'; }
             if (!$cid) continue;
             $dalRow = $k === 'sscl_vat' && empty($x['sv_id']) && !empty($x['entry_id']);   // a Drivers & Loyalty line kept in the same table
             $rid = $dalRow ? (int)$x['entry_id'] : (int)($x[$pk] ?? 0); $pp = $dalRow ? ($P2[$rid] ?? []) : ($P1[$rid] ?? []);
-            $amt = (float)($x['amount'] ?? $x['received_amount'] ?? 0); $vat = (float)($x['vat_amount'] ?? 0); $tot = (float)($x['total_amount'] ?? 0); if ($tot <= 0) $tot = $amt + $vat;
+            $amt = (float)($x['amount'] ?? 0); if ($amt <= 0) $amt = (float)($x['received_amount'] ?? 0);   // old lines keep the money in received_amount
+            $vat = (float)($x['vat_amount'] ?? 0); $tot = (float)($x['total_amount'] ?? 0); if ($tot <= 0) $tot = $amt + $vat;
             $res[$cid][] = ['page' => $dalRow ? 'dal' : $k, 'pn' => $dalRow ? 'Drivers & Loyalty' : $pn, 'url' => ($dalRow ? 'dal' : $pt) . '.php', 'id' => (int)$x['id'], 'rid' => $rid,
                 'ti' => $x['tax_invoice_no'] ?? ($x['reference_no'] ?? ''), 'bd' => $x['banking_date'] ?? null, 'ref' => $x['bank_ref'] ?? ($x['claim_reference'] ?? ''), 'amt' => round($amt, 2), 'vat' => round($vat, 2), 'tot' => round($tot, 2),
                 'at' => $x['created_at'] ?? ($x['settled_at'] ?? null), 'pd' => $pp['pd'] ?? null, 'pdesc' => $pp['pdesc'] ?? '', 'ack' => ($src && isset($acks[$src . ':' . $x['id']])) ? 1 : 0, 'how' => $how, 'del' => $del && !$dalRow]; } }
@@ -310,13 +311,14 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_candidat
         if (!cc_sv_has($conn, $tb)) continue; $C = cc_cols($conn, $tb); if (!isset($C['claim_cert_item_id'])) continue;
         $w = [$all ? "COALESCE(s.claim_cert_item_id,0) <> $cid" : "COALESCE(s.claim_cert_item_id,0) = 0"];
         if (isset($C['entry_id'])) $w[] = "NOT (COALESCE(s.$pk,0) = 0 AND COALESCE(s.entry_id,0) > 0)";   // Drivers & Loyalty lines kept in the SSCL & VAT table
-        $tot = isset($C['total_amount']) ? 'COALESCE(NULLIF(s.total_amount,0), s.amount + COALESCE(s.vat_amount,0))' : 's.amount';
+        $am = isset($C['received_amount']) ? 'COALESCE(NULLIF(s.amount,0), s.received_amount, 0)' : 'COALESCE(s.amount,0)';
+        $tot = isset($C['total_amount']) ? "COALESCE(NULLIF(s.total_amount,0), $am + COALESCE(s.vat_amount,0))" : $am;
         if ($q !== '') { $e = mysqli_real_escape_string($conn, $q); $n = (float)str_replace(',', '', $q);
-            $w[] = "(s.tax_invoice_no LIKE '%$e%'" . (isset($C['bank_ref']) ? " OR s.bank_ref LIKE '%$e%'" : '') . (isset($C['claim_description']) ? " OR s.claim_description LIKE '%$e%'" : '') . ($n > 0 ? " OR ABS(s.amount - $n) < 0.01 OR ABS($tot - $n) < 0.01" : '') . ")"; }
-        else $w[] = "(" . ($ti !== '' ? "TRIM(s.tax_invoice_no) LIKE '%$ti%' OR " : '') . "ABS($tot - $ct) < 0.01 OR ABS(s.amount - $ca) < 0.01)";   // suggestions: same tax invoice or the same amount
+            $w[] = "(s.tax_invoice_no LIKE '%$e%'" . (isset($C['bank_ref']) ? " OR s.bank_ref LIKE '%$e%'" : '') . (isset($C['claim_description']) ? " OR s.claim_description LIKE '%$e%'" : '') . ($n > 0 ? " OR ABS($am - $n) < 0.01 OR ABS($tot - $n) < 0.01" : '') . ")"; }
+        else $w[] = "(" . ($ti !== '' ? "TRIM(s.tax_invoice_no) LIKE '%$ti%' OR " : '') . "ABS($tot - $ct) < 0.01 OR ABS($am - $ca) < 0.01)";   // suggestions: same tax invoice or the same amount
         $P = cc_sv_has($conn, $pt) ? cc_cols($conn, $pt) : []; $pd = isset($P['paid_date']) ? 'p.paid_date' : (isset($P['entry_date']) ? 'p.entry_date' : 'NULL');
         $r = yms_q($conn, "SELECT s.id, s.$pk AS rid, s.tax_invoice_no AS ti, " . (isset($C['entity']) ? 's.entity' : "''") . " AS en, " . (isset($C['banking_date']) ? 's.banking_date' : 'NULL') . " AS bd, " . (isset($C['bank_ref']) ? 's.bank_ref' : "''") . " AS ref,
-                                  COALESCE(s.amount,0) AS amt, " . (isset($C['vat_amount']) ? 'COALESCE(s.vat_amount,0)' : '0') . " AS vat, $tot AS tot, COALESCE(s.claim_cert_item_id,0) AS cur, ci.tax_invoice_no AS cur_ti, " . ($P ? $pd : 'NULL') . " AS pd
+                                  $am AS amt, " . (isset($C['vat_amount']) ? 'COALESCE(s.vat_amount,0)' : '0') . " AS vat, $tot AS tot, COALESCE(s.claim_cert_item_id,0) AS cur, ci.tax_invoice_no AS cur_ti, " . ($P ? $pd : 'NULL') . " AS pd
                            FROM `$tb` s LEFT JOIN claim_cert_items ci ON ci.id = s.claim_cert_item_id " . ($P ? "LEFT JOIN `$pt` p ON p.id = s.$pk " : '') . "WHERE " . implode(' AND ', $w) . " ORDER BY s.id DESC LIMIT 60");
         while ($r && ($x = mysqli_fetch_assoc($r))) $out[] = ['page' => $k, 'pn' => $pn, 'sid' => (int)$x['id'], 'rid' => (int)$x['rid'], 'ti' => $x['ti'], 'en' => $x['en'], 'bd' => $x['bd'], 'ref' => $x['ref'], 'pd' => $x['pd'],
             'amt' => round((float)$x['amt'], 2), 'vat' => round((float)$x['vat'], 2), 'tot' => round((float)$x['tot'], 2), 'cur' => (int)$x['cur'], 'cur_ti' => (string)$x['cur_ti'],

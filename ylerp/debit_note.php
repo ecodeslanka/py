@@ -279,12 +279,26 @@ if (isset($_GET['action'])) {
 
     if ($action === 'get_settlements') {
         $dn_id = intval($_GET['dn_id'] ?? 0);
-        $res   = mysqli_query($conn, "SELECT * FROM dn_settlements WHERE dn_id=$dn_id ORDER BY id");
+        $res   = mysqli_query($conn, "SELECT s.*, ci.tax_invoice_no AS linked_ti, ci.customer_code AS linked_cc, ci.total_amount AS linked_total
+                                         FROM dn_settlements s LEFT JOIN claim_cert_items ci ON ci.id = s.claim_cert_item_id WHERE s.dn_id=$dn_id ORDER BY s.id");
         $data  = [];
         while ($r = mysqli_fetch_assoc($res)) $data[] = $r;
         $totals  = _dn_settle_totals($conn, $dn_id);
         $ack_ids = _get_dn_ack_ids($conn, $dn_id);
         echo json_encode(['success'=>true,'data'=>$data,'totals'=>$totals,'ack_ids'=>$ack_ids]);
+        exit;
+    }
+
+    // ── Link a payment line to a claim certificate (a line entered without picking the claim) ──
+    if ($action === 'link_claim' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $sid = intval($_POST['sid'] ?? 0); $dn_id = intval($_POST['dn_id'] ?? 0); $cid = intval($_POST['claim_cert_item_id'] ?? 0);
+        $row = $sid ? mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM dn_settlements WHERE id=$sid AND dn_id=$dn_id LIMIT 1")) : null;
+        $ci  = $cid ? mysqli_fetch_assoc(mysqli_query($conn, "SELECT id, tax_invoice_no, entity FROM claim_cert_items WHERE id=$cid LIMIT 1")) : null;
+        if (!$row || ($cid && !$ci)) { echo json_encode(['success'=>false,'message'=>'Payment line or claim not found.']); exit; }
+        $set = $cid ? "claim_cert_item_id=$cid" . (trim((string)$row['tax_invoice_no']) === '' ? ", tax_invoice_no='" . mysqli_real_escape_string($conn, $ci['tax_invoice_no']) . "'" : '') . (trim((string)$row['entity']) === '' ? ", entity='" . mysqli_real_escape_string($conn, (string)$ci['entity']) . "'" : '') : 'claim_cert_item_id=NULL';
+        $ok = mysqli_query($conn, "UPDATE dn_settlements SET $set WHERE id=$sid");
+        if ($ok && $cid) mysqli_query($conn, "UPDATE dl_cheque_acknowledgments SET claim_item_id=$cid WHERE source='dn' AND source_settlement_id=$sid");   // its Acknowledgment entry follows
+        echo json_encode(['success'=>(bool)$ok,'message'=>$ok?($cid?'Linked to claim '.$ci['tax_invoice_no'].'.':'Claim link removed.'):mysqli_error($conn)]);
         exit;
     }
 
@@ -714,6 +728,9 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   .cc-ack-btn{margin-right:0;margin-bottom:6px}
   .cc-partial-badge{margin-left:0}
 }
+.sp-link{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}.spl-ok{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700}
+.spl-no{background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700}.spl-btn{border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer}
+.spl-go{background:#059669;color:#fff;border-color:#059669}.spl-pick{width:100%;gap:6px;align-items:center;margin-top:4px}.spl-pick select{flex:1;min-width:0;font-size:12px;padding:4px;border:1px solid #cbd5e1;border-radius:6px}
 </style>
 
 <div class="page-header">
@@ -1360,6 +1377,20 @@ function filterClaims(q){
   });
 }
 
+/* link a payment line to one of the claims of this window (same tax invoice / same amount first) */
+function spLinkPick(sid){
+  const box=document.getElementById('spl-'+sid); if(box.style.display!=='none'){ box.style.display='none'; return; }
+  const card=document.getElementById('sp-'+sid), ti=(card.querySelector('.sp-inv')?.textContent||'').trim().toLowerCase(), tot=parseFloat((card.querySelector('.sp-tot')?.textContent||'0').replace(/,/g,''))||0;
+  const L=(_allClaims||[]).map(c=>{ const same=(c.tax_invoice_no||'').trim().toLowerCase()===ti, amt=Math.abs(parseFloat(c.total_amount||0)-tot)<0.01||Math.abs(parseFloat(c.actual_amount||0)-tot)<0.01; return {c:c,s:(same?2:0)+(amt?1:0)}; })
+    .sort((a,b)=>b.s-a.s).slice(0,60);
+  box.innerHTML='<select id="spls-'+sid+'"><option value="">— pick the claim —</option>'+L.map(x=>'<option value="'+x.c.id+'">'+(x.s>=2?'★ ':x.s?'≈ ':'')+eh(x.c.tax_invoice_no||'—')+' · '+eh(x.c.entity||'')+' · '+fN(x.c.total_amount)+' · '+eh((x.c.claim_description||'').slice(0,40))+'</option>').join('')+'</select>'
+    +'<button class="spl-btn spl-go" onclick="spLinkSave('+sid+')"><i class="fa-solid fa-check"></i> Save</button>'+(card.querySelector('.spl-ok')?'<button class="spl-btn" onclick="spLinkSave('+sid+',true)"><i class="fa-solid fa-link-slash"></i> Remove link</button>':'');
+  box.style.display='flex'; }
+async function spLinkSave(sid,remove){
+  const cid=remove?0:parseInt(document.getElementById('spls-'+sid).value||0); if(!remove&&!cid){ toast('Pick the claim first','warn'); return; }
+  const fd=new FormData(); fd.append('sid',sid); fd.append('dn_id',_pid); fd.append('claim_cert_item_id',cid);
+  try{ const d=await (await fetch('debit_note.php?action=link_claim',{method:'POST',body:fd})).json(); if(!d.success) throw new Error(d.message||'Failed');
+    toast(d.message); openSettle(_pid,_invTotal); }catch(e){ toast(e.message,'err'); } }
 function pickClaim(el){
   if(el.dataset.fully==='1') return;
   document.querySelectorAll('.claim-card.selected').forEach(c=>c.classList.remove('selected'));
@@ -1489,6 +1520,12 @@ function renderPayments(list){
         ${p.bank_ref?`<span style="font-family:monospace;background:#f8fafc;border:1px solid #e2e8f0;border-radius:3px;padding:1px 5px">${eh(p.bank_ref)}</span>`:''}
         ${p.claim_reference?`<span class="claim-pill">${eh(p.claim_reference)}</span>`:''}
       </div>
+      <div class="sp-link">${parseInt(p.claim_cert_item_id||0)>0
+        ?`<span class="spl-ok" title="This payment line settles this claim certificate (it shows on the Customer Claim Report)"><i class="fa-solid fa-link"></i> Claim ${eh(p.linked_ti||('#'+p.claim_cert_item_id))}${p.linked_cc?' · '+eh(p.linked_cc):''}</span>
+          <button class="spl-btn" onclick="spLinkPick(${p.id})" title="Link this line to another claim"><i class="fa-solid fa-pen"></i> Change</button>`
+        :`<span class="spl-no" title="Entered without picking a claim — the claim stays open in the list and the Customer Claim Report cannot count it"><i class="fa-solid fa-link-slash"></i> Not linked to a claim</span>
+          <button class="spl-btn" onclick="spLinkPick(${p.id})"><i class="fa-solid fa-link"></i> Link to claim</button>`}
+        <div class="spl-pick" id="spl-${p.id}" style="display:none"></div></div>
       ${p.claim_description?`<div class="sp-desc" title="${eh(p.claim_description)}">${eh(p.claim_description.slice(0,70))}</div>`:''}
       <div class="sp-actions">
         ${isAcked
