@@ -298,6 +298,56 @@ if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_settle_d
     ob_end_clean(); echo json_encode(['success' => (bool)$ok, 'message' => $ok ? 'Deleted: ' . number_format((float)($row['total_amount'] ?? $row['amount'] ?? 0), 2) . ' removed from ' . $pn . ' payment #' . (int)$row[$pk] . '.' : 'Could not delete.']); exit;
 }
 
+/* ── link / unlink a payment line to a claim certificate (the payment pages count a line by its claim_cert_item_id) ── */
+if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'sv_candidates') {
+    ob_start(); header('Content-Type: application/json');
+    $cid = intval($_REQUEST['id'] ?? 0); $q = trim((string)($_REQUEST['q'] ?? '')); $all = !empty($_REQUEST['all']);
+    $c = $cid ? mysqli_fetch_assoc(yms_q($conn, "SELECT id, tax_invoice_no, entity, actual_amount, total_amount FROM claim_cert_items WHERE id = $cid")) : null;
+    if (!$c) { ob_end_clean(); echo json_encode(['success' => false, 'message' => 'Claim not found.']); exit; }
+    $ti = mysqli_real_escape_string($conn, trim((string)$c['tax_invoice_no'])); $ca = round((float)$c['actual_amount'], 2); $ct = round((float)$c['total_amount'], 2);
+    $out = [];
+    foreach ($CC_STL as $k => [$tb, $pk, $pt, $src, $pn]) {
+        if (!cc_sv_has($conn, $tb)) continue; $C = cc_cols($conn, $tb); if (!isset($C['claim_cert_item_id'])) continue;
+        $w = [$all ? "COALESCE(s.claim_cert_item_id,0) <> $cid" : "COALESCE(s.claim_cert_item_id,0) = 0"];
+        if (isset($C['entry_id'])) $w[] = "NOT (COALESCE(s.$pk,0) = 0 AND COALESCE(s.entry_id,0) > 0)";   // Drivers & Loyalty lines kept in the SSCL & VAT table
+        $tot = isset($C['total_amount']) ? 'COALESCE(NULLIF(s.total_amount,0), s.amount + COALESCE(s.vat_amount,0))' : 's.amount';
+        if ($q !== '') { $e = mysqli_real_escape_string($conn, $q); $n = (float)str_replace(',', '', $q);
+            $w[] = "(s.tax_invoice_no LIKE '%$e%'" . (isset($C['bank_ref']) ? " OR s.bank_ref LIKE '%$e%'" : '') . (isset($C['claim_description']) ? " OR s.claim_description LIKE '%$e%'" : '') . ($n > 0 ? " OR ABS(s.amount - $n) < 0.01 OR ABS($tot - $n) < 0.01" : '') . ")"; }
+        else $w[] = "(" . ($ti !== '' ? "TRIM(s.tax_invoice_no) LIKE '%$ti%' OR " : '') . "ABS($tot - $ct) < 0.01 OR ABS(s.amount - $ca) < 0.01)";   // suggestions: same tax invoice or the same amount
+        $P = cc_sv_has($conn, $pt) ? cc_cols($conn, $pt) : []; $pd = isset($P['paid_date']) ? 'p.paid_date' : (isset($P['entry_date']) ? 'p.entry_date' : 'NULL');
+        $r = yms_q($conn, "SELECT s.id, s.$pk AS rid, s.tax_invoice_no AS ti, " . (isset($C['entity']) ? 's.entity' : "''") . " AS en, " . (isset($C['banking_date']) ? 's.banking_date' : 'NULL') . " AS bd, " . (isset($C['bank_ref']) ? 's.bank_ref' : "''") . " AS ref,
+                                  COALESCE(s.amount,0) AS amt, " . (isset($C['vat_amount']) ? 'COALESCE(s.vat_amount,0)' : '0') . " AS vat, $tot AS tot, COALESCE(s.claim_cert_item_id,0) AS cur, ci.tax_invoice_no AS cur_ti, " . ($P ? $pd : 'NULL') . " AS pd
+                           FROM `$tb` s LEFT JOIN claim_cert_items ci ON ci.id = s.claim_cert_item_id " . ($P ? "LEFT JOIN `$pt` p ON p.id = s.$pk " : '') . "WHERE " . implode(' AND ', $w) . " ORDER BY s.id DESC LIMIT 60");
+        while ($r && ($x = mysqli_fetch_assoc($r))) $out[] = ['page' => $k, 'pn' => $pn, 'sid' => (int)$x['id'], 'rid' => (int)$x['rid'], 'ti' => $x['ti'], 'en' => $x['en'], 'bd' => $x['bd'], 'ref' => $x['ref'], 'pd' => $x['pd'],
+            'amt' => round((float)$x['amt'], 2), 'vat' => round((float)$x['vat'], 2), 'tot' => round((float)$x['tot'], 2), 'cur' => (int)$x['cur'], 'cur_ti' => (string)$x['cur_ti'],
+            'same' => abs((float)$x['tot'] - $ct) < 0.01 || abs((float)$x['amt'] - $ca) < 0.01, 'can' => cc_sv_can($conn, $k)]; }
+    usort($out, fn($a, $b) => ($b['same'] <=> $a['same']) ?: strcmp((string)$b['pd'], (string)$a['pd']));
+    ob_end_clean(); echo json_encode(['success' => true, 'rows' => array_slice($out, 0, 120)]); exit;
+}
+if (isset($_REQUEST['ajax_action']) && in_array($_REQUEST['ajax_action'], ['sv_link', 'sv_unlink'], true) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    ob_start(); header('Content-Type: application/json');
+    $fail = function ($m) { ob_end_clean(); echo json_encode(['success' => false, 'message' => $m]); exit; };
+    $link = $_REQUEST['ajax_action'] === 'sv_link';
+    $k = (string)($_POST['page'] ?? ''); $sid = intval($_POST['sid'] ?? 0); $cid = intval($_POST['cid'] ?? 0);
+    if (!isset($CC_STL[$k]) || !$sid || !$cid) $fail('Nothing to change.');
+    [$tb, $pk, $pt, $src, $pn] = $CC_STL[$k];
+    if (!cc_sv_can($conn, $k)) $fail('You do not have the right to change payments on the ' . $pn . ' page.');
+    if (!cc_sv_btn($link ? 'Link payment' : 'Unlink payment')) $fail('Permission blocked: you are not allowed to use this button.');
+    $row = mysqli_fetch_assoc(yms_q($conn, "SELECT * FROM `$tb` WHERE id = $sid")); if (!$row) $fail('That payment line no longer exists.');
+    if (!array_key_exists('claim_cert_item_id', $row)) $fail('This page cannot link payment lines to claims.');
+    $ci = mysqli_fetch_assoc(yms_q($conn, "SELECT id, tax_invoice_no FROM claim_cert_items WHERE id = $cid")); if (!$ci) $fail('Claim not found.');
+    if ($link) {
+        $ok = yms_q($conn, "UPDATE `$tb` SET claim_cert_item_id = $cid" . (trim((string)($row['tax_invoice_no'] ?? '')) === '' ? ", tax_invoice_no = '" . mysqli_real_escape_string($conn, (string)$ci['tax_invoice_no']) . "'" : '') . " WHERE id = $sid");
+        if ($ok && cc_sv_has($conn, 'dl_cheque_acknowledgments')) yms_q($conn, "UPDATE dl_cheque_acknowledgments SET claim_item_id = $cid WHERE source = '$src' AND source_settlement_id = $sid");   // keep its Acknowledgment entry on the same claim
+        $msg = 'Linked: ' . $pn . ' payment #' . (int)$row[$pk] . ' line (' . number_format((float)($row['total_amount'] ?? $row['amount'] ?? 0), 2) . ') now settles claim ' . $ci['tax_invoice_no'] . (!empty($row['claim_cert_item_id']) && (int)$row['claim_cert_item_id'] !== $cid ? ' (moved from claim #' . (int)$row['claim_cert_item_id'] . ')' : '') . '.';
+    } else {
+        if ((int)($row['claim_cert_item_id'] ?? 0) !== $cid) $fail('This line is not linked to this claim.');
+        $ok = yms_q($conn, "UPDATE `$tb` SET claim_cert_item_id = NULL WHERE id = $sid");
+        $msg = 'Unlinked: the ' . $pn . ' payment line stays, but no longer settles claim ' . $ci['tax_invoice_no'] . '.';
+    }
+    ob_end_clean(); echo json_encode(['success' => (bool)$ok, 'message' => $ok ? $msg : 'Could not save.']); exit;
+}
+
 /* ── AJAX: get_report_data (paginated) ── */
 if (isset($_REQUEST['ajax_action']) && $_REQUEST['ajax_action'] === 'get_report_data') {
     ob_start(); header('Content-Type: application/json');
@@ -648,6 +698,9 @@ include 'header.php';
 .stl-bd{padding:14px 18px;overflow:auto}.stl-k{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:10px}.stl-k span{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:7px 11px}
 .stl-t{width:100%;border-collapse:collapse;font-size:12.5px}.stl-t th{background:#0f172a;color:#e2e8f0;padding:8px 9px;text-align:left;font-size:11px;white-space:nowrap}.stl-t td{padding:8px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}.stl-t .tr{text-align:right}
 .stl-del{border:1.5px solid #fca5a5;background:#fff;color:#b91c1c;border-radius:8px;padding:4px 10px;font-weight:800;font-size:11.5px;cursor:pointer;white-space:nowrap}.stl-del:hover{background:#fef2f2}
+.stl-lnk{display:inline-flex;gap:5px;align-items:center;border:1.5px solid #a7f3d0;background:#ecfdf5;color:#047857;border-radius:8px;padding:4px 10px;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}.stl-unl{display:inline-flex;gap:5px;align-items:center;border:1.5px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:8px;padding:4px 10px;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}
+.stl-add{margin-top:14px;border:1.5px dashed #a7f3d0;border-radius:12px;padding:10px 12px;background:#f8fffb}.stl-addh{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.stl-addh small{color:#64748b;flex:1;min-width:200px}
+.stl-cbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}.stl-cbar input[type=search]{flex:1;min-width:240px;border:1.5px solid #cbd5e1;border-radius:9px;padding:7px 10px;font-size:12.5px}.stl-cbar label{font-size:12px;color:#475569;display:flex;gap:5px;align-items:center}
 .sv-stl{display:inline-flex;gap:5px;align-items:center;border:1.5px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:8px;padding:3px 9px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}.sv-stl:hover{background:#dbeafe}
 #repBody tr.cc-row{cursor:pointer}
 .sv-rev{display:inline-flex;gap:4px;align-items:center;border:1.5px solid #fca5a5;background:#fff;color:#b91c1c;border-radius:7px;padding:2px 8px;font-size:10.5px;font-weight:800;cursor:pointer}.sv-rev:hover{background:#fef2f2}
@@ -699,9 +752,27 @@ function stlDraw(id,d){ const c=d.claim||{}, L=d.rows||[], tot=L.reduce((a,x)=>a
   if(c.claim_description) h+='<div style="font-size:12px;color:#475569;margin:-4px 0 10px">'+esc(c.claim_description)+'</div>';
   h+=L.length?'<div style="overflow:auto"><table class="stl-t"><thead><tr><th>Page</th><th>Payment</th><th>Tax invoice</th><th>Banking date</th><th>Bank ref</th><th class="tr">Amount</th><th class="tr">VAT</th><th class="tr">Total</th><th>Added</th><th></th></tr></thead><tbody>'
     +L.map(x=>'<tr><td><b>'+esc(x.pn)+'</b></td><td><a href="'+esc(svPayUrl(x.page,x.rid))+'" target="_blank" data-no-loader title="Open this payment on the '+esc(x.pn)+' page">#'+x.rid+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a>'+(x.pd?' <small>'+esc(x.pd)+'</small>':'')+(x.pdesc?'<div style="font-size:11px;color:#64748b;max-width:220px;white-space:normal">'+esc(x.pdesc)+'</div>':'')+'</td><td>'+esc(x.ti||'—')+(x.how==='tax invoice'?'<div><span class="pill p-amber" title="This payment was typed in with the claim\'s tax invoice no (not picked from the claim card)">by tax invoice</span></div>':'')+(x.how==='direct ack'?'<div><span class="pill p-blue" title="Sent to Acknowledgment straight from this payment\'s claim card — no payment line. Undo with Reverse on that page.">sent to Ack from the claim card</span></div>':'')+'</td><td>'+esc(x.bd||'—')+'</td><td>'+esc(x.ref||'—')+'</td><td class="tr">'+fmtN(x.amt)+'</td><td class="tr">'+fmtN(x.vat)+'</td><td class="tr"><b>'+fmtN(x.tot)+'</b></td><td style="font-size:11px;color:#64748b">'+esc(x.at||'')+'</td><td>'
+      +(x.how==='tax invoice'&&SVLINK.includes(x.page)?'<button type="button" class="stl-lnk" data-perm-btn="Link payment" onclick="stlLink('+id+',\''+x.page+'\','+x.id+')" title="Save this claim on the payment line — the payment page then counts the claim as settled and hides it"><i class="fa-solid fa-link"></i> Link</button> ':'')
+      +(x.how==='claim'&&SVLINK.includes(x.page)?'<button type="button" class="stl-unl" data-perm-btn="Unlink payment" onclick="stlUnlink('+id+',\''+x.page+'\','+x.id+')" title="Take this payment line off this claim (the line itself stays)"><i class="fa-solid fa-link-slash"></i> Unlink</button> ':'')
       +(x.can?'<button type="button" class="stl-del" data-perm-btn="Delete" onclick="stlDel('+id+',\''+x.page+'\','+x.id+','+x.ack+','+x.tot+',\''+esc(x.pn).replace(/'/g,'')+'\')"><i class="fa-solid fa-trash"></i> Delete</button>':(x.page==='dal'?'<small style="color:#94a3b8">change on its page</small>':'<small style="color:#94a3b8">no right</small>'))+(x.ack?' <span class="pill p-blue" title="Also in Acknowledgment">Ack</span>':'')+'</td></tr>').join('')+'</tbody></table></div>'
     :'<div style="padding:22px;text-align:center;color:#64748b">This claim is not settled on any payment yet.</div>';
+  h+='<div class="stl-add"><div class="stl-addh"><b><i class="fa-solid fa-link"></i> Link a payment line to this claim</b><small>a payment entered without picking this claim (it then counts as settled here and on the payment page)</small>'
+    +'<button type="button" class="stl-lnk" data-perm-btn="Link payment" onclick="stlCand('+id+')"><i class="fa-solid fa-plus"></i> Find payment lines</button></div><div id="stlCand"></div></div>';
   document.getElementById('stlB').innerHTML=h; }
+const SVLINK=['sscl_vat','muthupalasa','promoters','sr_incentive'];
+async function stlCand(id){ const box=document.getElementById('stlCand'); const q=(document.getElementById('stlQ')||{}).value||'', all=(document.getElementById('stlAll')||{}).checked?1:0;
+  box.innerHTML='<div class="stl-cbar"><input id="stlQ" type="search" placeholder="Tax invoice, bank ref, description or amount… (empty = suggestions: same tax invoice / same amount)" value="'+esc(q)+'" onkeydown="if(event.key===\'Enter\')stlCand('+id+')">'
+    +'<label><input type="checkbox" id="stlAll" '+(all?'checked':'')+' onchange="stlCand('+id+')"> also lines linked to other claims</label><button type="button" class="stl-lnk" onclick="stlCand('+id+')"><i class="fa-solid fa-magnifying-glass"></i> Search</button></div><div id="stlCR" style="padding:14px;color:#64748b"><i class="fa-solid fa-spinner fa-spin"></i> Searching…</div>';
+  try{ const d=await (await fetch('customer_claim_report.php?ajax_action=sv_candidates&id='+id+'&q='+encodeURIComponent(q)+'&all='+all,{credentials:'same-origin'})).json(); if(!d.success) throw new Error(d.message);
+    document.getElementById('stlCR').outerHTML=d.rows.length?'<div style="overflow:auto;max-height:340px"><table class="stl-t"><thead><tr><th>Page</th><th>Payment</th><th>Tax invoice</th><th>Entity</th><th>Bank ref</th><th class="tr">Amount</th><th class="tr">VAT</th><th class="tr">Total</th><th>Now on</th><th></th></tr></thead><tbody>'
+      +d.rows.map(x=>'<tr'+(x.same?' style="background:#f0fdf4"':'')+'><td><b>'+esc(x.pn)+'</b></td><td><a href="'+esc(svPayUrl(x.page,x.rid))+'" target="_blank" data-no-loader>#'+x.rid+'</a>'+(x.pd?' <small>'+esc(x.pd)+'</small>':'')+'</td><td>'+esc(x.ti||'—')+'</td><td>'+esc(x.en||'—')+'</td><td>'+esc(x.ref||'—')+'</td><td class="tr">'+fmtN(x.amt)+'</td><td class="tr">'+fmtN(x.vat)+'</td><td class="tr"><b>'+fmtN(x.tot)+'</b>'+(x.same?'<div><span class="pill p-green">same amount</span></div>':'')+'</td>'
+        +'<td>'+(x.cur?'<span class="pill p-amber">claim '+esc(x.cur_ti||('#'+x.cur))+'</span>':'<small style="color:#94a3b8">no claim</small>')+'</td><td>'+(x.can?'<button type="button" class="stl-lnk" data-perm-btn="Link payment" onclick="stlLink('+id+',\''+x.page+'\','+x.sid+','+(x.cur?1:0)+')"><i class="fa-solid fa-link"></i> '+(x.cur?'Move here':'Link')+'</button>':'<small style="color:#94a3b8">no right</small>')+'</td></tr>').join('')+'</tbody></table></div>'
+      :'<div style="padding:14px;color:#64748b">No payment lines found'+(q?' for “'+esc(q)+'”':' with this tax invoice or amount — search by bank ref or amount, or tick “also lines linked to other claims”')+'.</div>';
+  }catch(e){ const el=document.getElementById('stlCR'); if(el) el.innerHTML='<span style="color:#dc2626">'+esc(e.message)+'</span>'; } }
+async function stlLink(id,page,sid,moving){ if(moving&&!confirm('This payment line is linked to another claim. Move it to this claim?')) return;
+  try{ const d=await svPost({ajax_action:'sv_link',page:page,sid:sid,cid:id}); showToast(d.message); svStl(id); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
+async function stlUnlink(id,page,sid){ if(!confirm('Unlink this payment line from this claim?\n\nThe payment line stays on its page; the claim becomes unsettled for this amount and shows again on the payment page to pick.')) return;
+  try{ const d=await svPost({ajax_action:'sv_unlink',page:page,sid:sid,cid:id}); showToast(d.message); svStl(id); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
 async function stlDel(id,page,sid,ack,tot,pn){
   if(!confirm('Delete this settlement?\n\n'+fmtN(tot)+' on '+pn+' will be removed'+(ack?' — and its Acknowledgment entry too':'')+'.\nThe claim becomes unsettled for this amount.')) return;
   try{ const d=await svPost({ajax_action:'sv_settle_delete',page:page,sid:sid}); showToast(d.message); svStl(id); loadReport(_curPage); }catch(e){ showToast(e.message,'err'); } }
