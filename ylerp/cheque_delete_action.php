@@ -33,16 +33,13 @@ if (!$r) cdel_out(false, 'Could not read the cheque: ' . mysqli_error($conn));
 $chq = mysqli_fetch_assoc($r);
 if (!$chq) cdel_out(false, 'This cheque is not there any more (maybe already deleted).');
 
-/* stop when the cheque is already used */
-$st = strtolower(trim($chq['status'] ?? ''));
-$blocked = ['deposited', 'realized', 'realised', 'cleared', 'returned', 'return', 'settled'];
-if (in_array($st, $blocked, true)) cdel_out(false, 'Cheque ' . $chq['cheque_no'] . ' is "' . $chq['status'] . '". Only a cheque that is not deposited / realized / returned can be deleted. Change its status first.');
+/* any status can be deleted; settlement payments / return charges of the cheque are kept and noted in the log */
 $links = [];
 foreach (['cheque_settlement_payments' => 'settlement payments', 'cheque_sb_settlement_payments' => 'sent-back settlement payments', 'cheque_return_charges' => 'return charges'] as $t => $lbl) {
     $n = cdel_count($conn, $t, "cheque_id = $cid");
     if ($n) $links[] = "$n $lbl";
 }
-if ($links) cdel_out(false, 'Cheque ' . $chq['cheque_no'] . ' has ' . implode(', ', $links) . '. Remove those first, then delete the cheque.');
+if ($links) $reason .= ' [status was ' . ($chq['status'] ?? '') . '; kept: ' . implode(', ', $links) . ']';
 
 $user = $_SESSION['username'] ?? $_SESSION['user_name'] ?? $_SESSION['full_name'] ?? $_SESSION['name'] ?? (isset($_SESSION['user_id']) ? 'User #' . $_SESSION['user_id'] : 'system');
 $u  = mysqli_real_escape_string($conn, $user);

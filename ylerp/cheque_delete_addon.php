@@ -45,7 +45,7 @@ if (!$cdel_allowed) return;
 <script>
 (function(){
   /* Delete Cheque: (1) red Delete button next to Edit on every row, (2) in the View window, (3) in the Verify window */
-  const BLOCK = ['deposited','realized','realised','cleared','returned','return','settled'];
+  const BLOCK = [];   // every status can be deleted
   let cur = null;
   function info(id){
     const tr = document.getElementById('row-' + id), d = tr ? tr.dataset : {};
@@ -101,7 +101,7 @@ if (!$cdel_allowed) return;
   window.cdelOpen = function(c){
     if (c) cur = c;
     if (!cur || !cur.id) return;
-    document.getElementById('cdelInfo').innerHTML = 'Cheque No: <b>' + esc(cur.no || ('#' + cur.id)) + '</b><br>Customer: <b>' + esc(cur.cust || '—') + '</b><br>Amount: <b>Rs. ' + esc(cur.amt || '—') + '</b><br><span style="color:#b91c1c">This removes the cheque from the register. A copy is kept for the record.</span>';
+    document.getElementById('cdelInfo').innerHTML = 'Cheque No: <b>' + esc(cur.no || ('#' + cur.id)) + '</b><br>Customer: <b>' + esc(cur.cust || '—') + '</b><br>Amount: <b>Rs. ' + esc(cur.amt || '—') + '</b><br>Status: <b>' + esc(cur.status || '—') + '</b>' + (['deposited','cleared','realized','returned'].includes(cur.status) ? '<br><b style="color:#b45309">⚠ This cheque is ' + esc(cur.status) + ' — check the bank / return records after deleting.</b>' : '') + '<br><span style="color:#b91c1c">This removes the cheque from the register. A copy is kept for the record.</span>';
     document.getElementById('cdelReason').value = '';
     document.getElementById('cdelErr').style.display = 'none';
     document.getElementById('cdelModal').classList.add('open');
