@@ -344,6 +344,22 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'settings_save') {
         to auto-match the OUTSTANDING amount rather than the full
         claim total.
 ══════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════
+   AJAX: claim_items — the claim certificates behind one row's Claim Total (banking date + entity)
+══════════════════════════════════════════════════════════ */
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'claim_items') {
+    header('Content-Type: application/json');
+    $bd = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['bdate'] ?? '') ? $_GET['bdate'] : '';
+    if ($bd === '') { echo json_encode(['ok' => false, 'msg' => 'No date']); exit; }
+    $en = (string)($_GET['entity'] ?? ''); $ene = mysqli_real_escape_string($conn, $en);
+    $ew = !empty($_GET['entity_null']) ? 'entity IS NULL' : "entity = '$ene'";   // the same group as the table row
+    $r = mysqli_query($conn, "SELECT id, customer_code, customer_name, claim_type, tax_invoice_no, invoice_date, claim_description,
+                                     COALESCE(actual_amount,0) AS actual_amount, COALESCE(vat_amount,0) AS vat_amount, COALESCE(total_amount,0) AS total_amount
+                              FROM claim_cert_items WHERE DATE(banking_date) = '$bd' AND $ew ORDER BY claim_type, customer_code, id");
+    $items = []; while ($r && ($x = mysqli_fetch_assoc($r))) $items[] = $x;
+    echo json_encode(['ok' => true, 'items' => $items]); exit;
+}
+
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
     header('Content-Type: application/json');
     ob_start();
@@ -2468,7 +2484,7 @@ function renderTable(claims){
       '<td style="font-family:var(--mono);font-size:12px;font-weight:700;white-space:nowrap;">'+esc(fmtDate(c.bdate))+'</td>'+
       '<td>'+entityChip+'</td>'+
       '<td style="text-align:center;font-weight:800;color:var(--blue);">'+(c.claim_count||0)+'</td>'+
-      '<td style="text-align:right;"><span class="amt" style="font-size:13px;">LKR '+fmtN(claimTot)+'</span></td>'+
+      '<td style="text-align:right;"><a href="#" class="amt ci-link" style="font-size:13px;" title="Show the claims in this total" onclick="showClaimItems('+idx+');return false;">LKR '+fmtN(claimTot)+' <i class="fa-solid fa-list" style="font-size:10px;opacity:.6"></i></a></td>'+
       bankCell+
       tallyHtml+
       actionHtml+
@@ -2501,6 +2517,38 @@ function applyFilters(){
   if(!visible&&!existing){const tr=document.createElement('tr');tr.className='no-results-row';tr.innerHTML='<td colspan="13">No records match the current filter / search.</td>';tbody.appendChild(tr);}
   else if(visible&&existing)existing.remove();
 }
+
+/* ── click a Claim Total: the claim certificates behind it ── */
+async function showClaimItems(idx){
+  const c=_claims[idx]; if(!c) return;
+  let m=document.getElementById('ciModal');
+  if(!m){ m=document.createElement('div'); m.id='ciModal'; m.className='ci-ov'; m.onclick=e=>{ if(e.target===m) m.classList.remove('open'); };
+    m.innerHTML='<div class="ci-box"><div class="ci-hd"><div><b id="ciT"></b><div id="ciS" style="font-size:12px;opacity:.85"></div></div><button type="button" onclick="document.getElementById(\'ciModal\').classList.remove(\'open\')">&times;</button></div><div class="ci-bd" id="ciB"></div></div>';
+    document.body.appendChild(m); }
+  document.getElementById('ciT').textContent='Claims — '+fmtDate(c.bdate)+(c.entity?' · '+c.entity:'');
+  document.getElementById('ciS').textContent=(c.claim_count||0)+' claim(s) · Claim total LKR '+fmtN(c.claim_total);
+  document.getElementById('ciB').innerHTML='<div style="padding:20px;color:#6b7280">Loading…</div>'; m.classList.add('open');
+  try{
+    const r=await fetch(_page+'?ajax=claim_items&bdate='+encodeURIComponent(c.bdate)+'&entity='+encodeURIComponent(c.entity||'')+(c.entity===null?'&entity_null=1':''),{credentials:'same-origin'});
+    const d=await r.json(); if(!d.ok) throw new Error(d.msg||'Failed');
+    const L=d.items||[], by={}; let ta=0,tv=0,tt=0;
+    L.forEach(x=>{ const k=x.claim_type||'(no type)'; by[k]=by[k]||{n:0,t:0}; by[k].n++; by[k].t+=parseFloat(x.total_amount); ta+=parseFloat(x.actual_amount); tv+=parseFloat(x.vat_amount); tt+=parseFloat(x.total_amount); });
+    let h='<div class="ci-types">'+Object.keys(by).map(k=>'<span><b>'+esc(k)+'</b> · '+by[k].n+' · LKR '+fmtN(by[k].t)+'</span>').join('')+'</div>';
+    h+='<div style="overflow:auto"><table class="ci-t"><thead><tr><th>#</th><th>Claim type</th><th>Customer</th><th>Tax invoice</th><th>Invoice date</th><th>Description</th><th class="r">Actual</th><th class="r">VAT</th><th class="r">Total</th></tr></thead><tbody>'
+      +L.map((x,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc(x.claim_type||'—')+'</td><td>'+esc(x.customer_code||'')+'<div style="font-size:11px;color:#6b7280">'+esc(x.customer_name||'')+'</div></td><td>'+esc(x.tax_invoice_no||'—')+'</td><td style="white-space:nowrap">'+esc(fmtDate(x.invoice_date))+'</td><td style="max-width:340px">'+esc(x.claim_description||'')+'</td>'
+        +'<td class="r">'+fmtN(x.actual_amount)+'</td><td class="r">'+fmtN(x.vat_amount)+'</td><td class="r"><b>'+fmtN(x.total_amount)+'</b></td></tr>').join('')
+      +'</tbody><tfoot><tr><td colspan="6" class="r">Total ('+L.length+' claims)</td><td class="r">'+fmtN(ta)+'</td><td class="r">'+fmtN(tv)+'</td><td class="r">'+fmtN(tt)+'</td></tr></tfoot></table></div>';
+    document.getElementById('ciB').innerHTML=L.length?h:'<div style="padding:20px;color:#6b7280">No claims found.</div>';
+  }catch(e){ document.getElementById('ciB').innerHTML='<div style="padding:20px;color:#dc2626">'+esc(e.message)+'</div>'; }
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const m=document.getElementById('ciModal'); if(m) m.classList.remove('open'); } });
+(function(){ const st=document.createElement('style'); st.textContent='.ci-link{cursor:pointer;text-decoration:none;border-bottom:1px dashed currentColor}.ci-link:hover{color:#1d4ed8}'
+  +'.ci-ov{position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.55);display:none;align-items:flex-start;justify-content:center;padding:40px 14px;overflow:auto}.ci-ov.open{display:flex}'
+  +'.ci-box{background:#fff;border-radius:14px;width:min(1150px,100%);box-shadow:0 24px 60px rgba(0,0,0,.4);overflow:hidden;font-size:13px;color:#111827}'
+  +'.ci-hd{display:flex;align-items:center;gap:10px;padding:12px 16px;background:linear-gradient(90deg,#1e3a8a,#2563eb);color:#fff}.ci-hd>div{flex:1}.ci-hd button{width:32px;height:32px;border:none;border-radius:50%;background:#dc2626;color:#fff;font-size:18px;cursor:pointer}'
+  +'.ci-bd{padding:14px 16px}.ci-types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}.ci-types span{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:99px;padding:3px 10px;font-size:12px}'
+  +'.ci-t{width:100%;border-collapse:collapse}.ci-t th{background:#f1f5f9;text-align:left;font-size:11px;color:#475569;padding:7px 8px;white-space:nowrap}.ci-t td{padding:7px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top}.ci-t .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.ci-t tfoot td{background:#eef2ff;font-weight:800}';
+  document.head.appendChild(st); })();
 
 loadAccounts();
 </script>
