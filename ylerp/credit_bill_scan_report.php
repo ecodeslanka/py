@@ -9,8 +9,9 @@
  *  • Shows whether the bill scan is uploaded (credit_bill_images) and whether it is verified.
  *  • Click a bill → LARGE viewer with the invoice scan(s), zoom / rotate, Previous / Next (← → keys) and the
  *    customer's PAY MODE stamped large on the invoice.
- *  • Verified / Not verified saves field_summary_details.bill_verified — the same flag the Credit Bill Summary
- *    Verify window uses (1 = verified, 0 = not verified, empty = pending) — and is logged in credit_bill_verify_logs.
+ *  • FC Verified / Not FC verified is the FC check only: it is saved in credit_bill_fc_verify (who, when) and logged
+ *    in credit_bill_verify_logs. It does NOT change the bill (field_summary_details.bill_verified — the Credit Bill
+ *    Summary Verify flag stays as it is and is only shown here).
  *    Needs the Edit right on this page.
  *  • Export Excel of the loaded range.
  * ─────────────────────────────────────────────────────────────────────
@@ -38,6 +39,9 @@ cbv_q($conn, "CREATE TABLE IF NOT EXISTS credit_bill_images (
   file_type VARCHAR(100) NULL, file_size INT NULL, uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_det (field_summary_detail_id), INDEX idx_cr (credit_request_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 if (!cbv_col($conn, 'field_summary_details', 'bill_verified')) cbv_q($conn, "ALTER TABLE field_summary_details ADD COLUMN `bill_verified` TINYINT(1) NULL DEFAULT NULL");
+/* the FC check — kept apart from the bill (never changes field_summary_details.bill_verified) */
+cbv_q($conn, "CREATE TABLE IF NOT EXISTS credit_bill_fc_verify (
+  detail_id INT NOT NULL PRIMARY KEY, fc_status TINYINT(1) NOT NULL DEFAULT 1, fc_by VARCHAR(100) NULL, fc_at DATETIME NULL, INDEX (fc_status)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 cbv_q($conn, "CREATE TABLE IF NOT EXISTS credit_bill_verify_logs (
   id INT AUTO_INCREMENT PRIMARY KEY, detail_id INT NOT NULL, old_value VARCHAR(10) NULL, new_value VARCHAR(10) NULL,
   note VARCHAR(255) NULL, created_by VARCHAR(100) NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, INDEX (detail_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -51,10 +55,10 @@ function cbv_load($conn, $from, $to, $verify, $scan, $scope, $pmode, $q) {
     $sr  = $hasLs ? 'COALESCE(ls.sp, fs.sr_code)' : 'fs.sr_code'; $rt = $hasLs ? 'COALESCE(ls.rc, fs.route)' : 'fs.route';
     $w = ["fsd.updated = 1", "fs.delivery_date BETWEEN '" . mysqli_real_escape_string($conn, $from) . "' AND '" . mysqli_real_escape_string($conn, $to) . "'"];
     if ($scope !== 'all') $w[] = "$bal > 0.004";
-    if ($verify === 'yes') $w[] = "fsd.bill_verified = 1";
-    if ($verify === 'no')  $w[] = "fsd.bill_verified = 0";
-    if ($verify === 'pending') $w[] = "fsd.bill_verified IS NULL";
-    if ($verify === 'notyes') $w[] = "COALESCE(fsd.bill_verified,0) = 0";
+    if ($verify === 'yes') $w[] = "fv.fc_status = 1";                    // the FC check (not the bill's own flag)
+    if ($verify === 'no')  $w[] = "fv.fc_status = 0";
+    if ($verify === 'pending') $w[] = "fv.detail_id IS NULL";
+    if ($verify === 'notyes') $w[] = "COALESCE(fv.fc_status,0) = 0";
     if ($scan === 'yes') $w[] = "img.n > 0";
     if ($scan === 'no')  $w[] = "COALESCE(img.n,0) = 0";
     $pm = "LOWER(TRIM(COALESCE(c.payment_mode,'')))";
@@ -66,7 +70,7 @@ function cbv_load($conn, $from, $to, $verify, $scan, $scope, $pmode, $q) {
     $sql = "SELECT fsd.id, fsd.invoice_num, fsd.t_code, fs.delivery_date, $sr AS sr_code, $rt AS route,
                    COALESCE(NULLIF(fsd.customer_name,''), c.shop_name, fsd.t_code) AS customer_name,
                    $net AS net, COALESCE(pay.t,0) AS paid, " . ($hasCn ? 'COALESCE(cn.t,0)' : '0') . " AS cn, $bal AS balance,
-                   fsd.bill_verified AS verified, COALESCE(img.n,0) AS n_img,
+                   fsd.bill_verified AS verified, fv.fc_status AS fc, fv.fc_by, fv.fc_at, COALESCE(img.n,0) AS n_img,
                    $pm AS pay_mode, COALESCE(c.credit_days,0) AS credit_days, " . ($cwd ? 'COALESCE(c.cheques_will_delay,0)' : '0') . " AS cwd,
                    DATEDIFF(CURDATE(), fs.delivery_date) AS age
             FROM field_summary_details fsd
@@ -77,6 +81,7 @@ function cbv_load($conn, $from, $to, $verify, $scan, $scope, $pmode, $q) {
             LEFT JOIN (SELECT field_summary_detail_id, SUM(amount) AS t FROM invoice_payments WHERE is_reversed = 0 GROUP BY field_summary_detail_id) pay ON pay.field_summary_detail_id = fsd.id
             " . ($hasCn ? "LEFT JOIN (SELECT field_summary_detail_id, SUM(amount) AS t FROM credit_notes WHERE is_deleted = 0 GROUP BY field_summary_detail_id) cn ON cn.field_summary_detail_id = fsd.id" : '') . "
             LEFT JOIN (SELECT field_summary_detail_id, COUNT(*) AS n FROM credit_bill_images GROUP BY field_summary_detail_id) img ON img.field_summary_detail_id = fsd.id
+            LEFT JOIN credit_bill_fc_verify fv ON fv.detail_id = fsd.id
             WHERE " . implode(' AND ', $w) . "
             ORDER BY fs.delivery_date ASC, $rt, fsd.invoice_num LIMIT 3000";
     $rows = []; $ids = [];
@@ -84,7 +89,7 @@ function cbv_load($conn, $from, $to, $verify, $scan, $scope, $pmode, $q) {
     while ($r && ($x = mysqli_fetch_assoc($r))) {
         foreach (['net', 'paid', 'cn', 'balance'] as $k) $x[$k] = round((float)$x[$k], 2);
         $x['id'] = (int)$x['id']; $x['n_img'] = (int)$x['n_img']; $x['credit_days'] = (int)$x['credit_days']; $x['cwd'] = (int)$x['cwd']; $x['age'] = (int)$x['age'];
-        $x['verified'] = $x['verified'] === null ? null : (int)$x['verified']; $x['imgs'] = [];
+        $x['verified'] = $x['verified'] === null ? null : (int)$x['verified']; $x['fc'] = $x['fc'] === null ? null : (int)$x['fc']; $x['imgs'] = [];
         $rows[$x['id']] = $x; if ($x['n_img']) $ids[] = $x['id'];
     }
     foreach (array_chunk($ids, 800) as $part) {
@@ -119,11 +124,15 @@ if (($_POST['action'] ?? '') === 'update_verify') {
     if (!cbv_can_edit()) { http_response_code(403); echo json_encode(['success' => false, 'error' => 'Permission blocked: you cannot edit records here.']); exit; }
     $id = intval($_POST['detail_id'] ?? 0); $v = (string)($_POST['value'] ?? '');
     if (!$id || !in_array($v, ['1', '0', ''], true)) { echo json_encode(['success' => false, 'error' => 'Invalid bill.']); exit; }
-    $o = cbv_q($conn, "SELECT bill_verified FROM field_summary_details WHERE id = $id LIMIT 1"); $old = $o ? (mysqli_fetch_row($o)[0] ?? null) : null;
-    if (!cbv_q($conn, "UPDATE field_summary_details SET bill_verified = " . ($v === '' ? 'NULL' : (int)$v) . " WHERE id = $id")) { echo json_encode(['success' => false, 'error' => 'Could not save.']); exit; }
-    $u = mysqli_real_escape_string($conn, cbv_user()); $lab = $v === '1' ? 'Verified' : ($v === '0' ? 'Not verified' : 'Pending');
-    cbv_q($conn, "INSERT INTO credit_bill_verify_logs (detail_id, old_value, new_value, note, created_by) VALUES ($id, " . ($old === null ? 'NULL' : "'" . (int)$old . "'") . ", " . ($v === '' ? 'NULL' : "'$v'") . ", 'Marked $lab (Credit Bill FC Verify)', '$u')");
-    echo json_encode(['success' => true, 'value' => $v === '' ? null : (int)$v]); exit;
+    /* FC check only — the bill (field_summary_details.bill_verified) is NOT changed */
+    $o = cbv_q($conn, "SELECT fc_status FROM credit_bill_fc_verify WHERE detail_id = $id LIMIT 1"); $old = ($o && ($x = mysqli_fetch_row($o))) ? $x[0] : null;
+    $u = mysqli_real_escape_string($conn, cbv_user()); $now = date('Y-m-d H:i:s');
+    $ok = $v === '' ? cbv_q($conn, "DELETE FROM credit_bill_fc_verify WHERE detail_id = $id")
+                    : cbv_q($conn, "INSERT INTO credit_bill_fc_verify (detail_id, fc_status, fc_by, fc_at) VALUES ($id, " . (int)$v . ", '$u', '$now') ON DUPLICATE KEY UPDATE fc_status = VALUES(fc_status), fc_by = VALUES(fc_by), fc_at = VALUES(fc_at)");
+    if (!$ok) { echo json_encode(['success' => false, 'error' => 'Could not save.']); exit; }
+    $lab = $v === '1' ? 'FC Verified' : ($v === '0' ? 'Not FC verified' : 'FC check cleared');
+    cbv_q($conn, "INSERT INTO credit_bill_verify_logs (detail_id, old_value, new_value, note, created_by) VALUES ($id, " . ($old === null ? 'NULL' : "'" . (int)$old . "'") . ", " . ($v === '' ? 'NULL' : "'$v'") . ", 'Marked $lab (Credit Bill FC Verify - bill not changed)', '$u')");
+    echo json_encode(['success' => true, 'value' => $v === '' ? null : (int)$v, 'by' => cbv_user(), 'at' => $now]); exit;
 }
 
 /* ═══════════════ EXCEL ═══════════════ */
@@ -135,16 +144,17 @@ if (isset($_GET['export'])) {
     $X = new MiniXlsx(); $s = $X->sheet('Credit Bill FC Verify');
     $H = ['b' => 1, 'color' => 'FFFFFF', 'bg' => '1E3A8A', 'h' => 'center', 'border' => 1, 'wrap' => 1];
     $s->set(1, 1, 'Credit Bill FC Verify — delivered ' . date('d M Y', strtotime($from)) . ' to ' . date('d M Y', strtotime($to)) . ($scope === 'all' ? ' (all bills)' : ' (outstanding bills)'), ['b' => 1, 'sz' => 15]);
-    $nv = count(array_filter($rows, fn($r) => $r['verified'] === 1)); $nu = count(array_filter($rows, fn($r) => $r['n_img'] > 0));
-    $s->set(2, 1, 'Bills: ' . count($rows) . ' · Verified: ' . $nv . ' · Scan uploaded: ' . $nu . ' · Balance Rs. ' . number_format(array_sum(array_column($rows, 'balance')), 2) . ' · ' . date('d M Y H:i') . ' by ' . cbv_user(), ['i' => 1, 'color' => '6B7280']);
-    foreach (['#', 'Delivery date', 'Invoice no', 'Customer', 'T code', 'Route', 'SR', 'Pay mode', 'Credit days', 'Net value', 'Paid', 'Credit notes', 'Balance', 'Scans', 'Verified'] as $i => $h) $s->set(4, $i + 1, $h, $H);
+    $nv = count(array_filter($rows, fn($r) => $r['fc'] === 1)); $nu = count(array_filter($rows, fn($r) => $r['n_img'] > 0));
+    $s->set(2, 1, 'Bills: ' . count($rows) . ' · FC verified: ' . $nv . ' · Scan uploaded: ' . $nu . ' · Balance Rs. ' . number_format(array_sum(array_column($rows, 'balance')), 2) . ' · ' . date('d M Y H:i') . ' by ' . cbv_user(), ['i' => 1, 'color' => '6B7280']);
+    foreach (['#', 'Delivery date', 'Invoice no', 'Customer', 'T code', 'Route', 'SR', 'Pay mode', 'Credit days', 'Net value', 'Paid', 'Credit notes', 'Balance', 'Scans', 'FC check', 'FC by', 'FC at', 'Bill verified (Summary)'] as $i => $h) $s->set(4, $i + 1, $h, $H);
     $PM = ['credit' => 'Credit', 'cheque' => 'Cheque', 'cash' => 'Cash', '' => 'Not set'];
     $r = 5; foreach ($rows as $n => $x) {
         $v = [$n + 1, $x['delivery_date'], $x['invoice_num'], $x['customer_name'], $x['t_code'], $x['route'], $x['sr_code'], ($x['cwd'] ? 'Cheques will delay' : ($PM[$x['pay_mode']] ?? ucfirst($x['pay_mode']))), $x['credit_days'], $x['net'], $x['paid'], $x['cn'], $x['balance'], $x['n_img'] ? $x['n_img'] . ' uploaded' : 'Not uploaded',
+              $x['fc'] === 1 ? 'FC Verified' : ($x['fc'] === 0 ? 'Not FC verified' : 'Not checked'), (string)$x['fc_by'], (string)$x['fc_at'],
               $x['verified'] === 1 ? 'Verified' : ($x['verified'] === 0 ? 'Not verified' : 'Pending')];
-        foreach ($v as $i => $val) $s->set($r, $i + 1, $val ?? '', ['border' => 1] + (in_array($i, [9, 10, 11, 12], true) ? ['h' => 'right', 'nf' => 4] : []) + ($i === 14 ? ['b' => 1, 'color' => $x['verified'] === 1 ? '15803D' : ($x['verified'] === 0 ? 'B91C1C' : 'B45309')] : []));
+        foreach ($v as $i => $val) $s->set($r, $i + 1, $val ?? '', ['border' => 1] + (in_array($i, [9, 10, 11, 12], true) ? ['h' => 'right', 'nf' => 4] : []) + ($i === 14 ? ['b' => 1, 'color' => $x['fc'] === 1 ? '15803D' : ($x['fc'] === 0 ? 'B91C1C' : 'B45309')] : []));
         $r++; }
-    foreach ([5, 12, 14, 30, 10, 10, 8, 16, 10, 14, 14, 14, 14, 14, 13] as $i => $w) $s->widths[$i + 1] = $w; $s->freeze = [4, 0]; $s->filter = 'A4:O' . max(5, $r - 1);
+    foreach ([5, 12, 14, 30, 10, 10, 8, 16, 10, 14, 14, 14, 14, 14, 15, 16, 18, 16] as $i => $w) $s->widths[$i + 1] = $w; $s->freeze = [4, 0]; $s->filter = 'A4:R' . max(5, $r - 1);
     $tmp = tempnam(sys_get_temp_dir(), 'cbv'); $X->save($tmp); while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); header('Content-Disposition: attachment; filename="credit_bill_fc_verify_' . $from . '_to_' . $to . '.xlsx"');
     header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
@@ -233,7 +243,7 @@ include 'header.php';
             <div class="fld"><label for="cFrom">Delivery date from</label><input type="date" id="cFrom" name="date_from" value="<?= cbv_h($f_from) ?>" required></div>
             <div class="fld"><label for="cTo">Delivery date to</label><input type="date" id="cTo" name="date_to" value="<?= cbv_h($f_to) ?>" required></div>
             <div class="fld"><label>Bills</label><select name="scope"><option value="open"<?= $f_scope === 'open' ? ' selected' : '' ?>>Outstanding only</option><option value="all"<?= $f_scope === 'all' ? ' selected' : '' ?>>All credit bills</option></select></div>
-            <div class="fld"><label>Show</label><select name="verify"><?php foreach (['all' => 'All', 'notyes' => 'Not verified + pending', 'pending' => 'Pending', 'no' => 'Not verified', 'yes' => 'Verified'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_verify === $k ? ' selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
+            <div class="fld"><label>FC check</label><select name="verify"><?php foreach (['all' => 'All', 'notyes' => 'Not FC verified + not checked', 'pending' => 'Not checked', 'no' => 'Not FC verified', 'yes' => 'FC verified'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_verify === $k ? ' selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
             <div class="fld"><label>Scan</label><select name="scan"><?php foreach (['all' => 'All', 'yes' => 'Uploaded', 'no' => 'Not uploaded'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_scan === $k ? ' selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
             <div class="fld"><label>Pay mode</label><select name="pay_mode"><?php foreach (['' => 'All', 'credit' => 'Credit', 'cheque' => 'Cheque', 'cash' => 'Cash', 'cwd' => 'Cheques will delay', 'none' => 'Not set'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_pmode === $k ? ' selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
             <div class="fld"><label>Search</label><input type="search" name="q" value="<?= cbv_h($f_q) ?>" placeholder="Invoice, customer, T code, route, SR" maxlength="100"></div>
@@ -245,9 +255,9 @@ include 'header.php';
 
     <section class="kpis">
         <div class="kpi"><div class="l">Bills loaded</div><div class="v" id="kTot">0</div></div>
-        <div class="kpi g"><div class="l">Verified</div><div class="v" id="kVer">0</div></div>
-        <div class="kpi r"><div class="l">Not verified</div><div class="v" id="kNver">0</div></div>
-        <div class="kpi a"><div class="l">Pending</div><div class="v" id="kPen">0</div></div>
+        <div class="kpi g"><div class="l">FC verified</div><div class="v" id="kVer">0</div></div>
+        <div class="kpi r"><div class="l">Not FC verified</div><div class="v" id="kNver">0</div></div>
+        <div class="kpi a"><div class="l">Not checked</div><div class="v" id="kPen">0</div></div>
         <div class="kpi r"><div class="l">Scan not uploaded</div><div class="v" id="kNo">0</div></div>
         <div class="kpi"><div class="l">Balance</div><div class="v" id="kBal" style="font-size:16px">Rs. 0.00</div></div>
     </section>
@@ -255,7 +265,7 @@ include 'header.php';
     <div class="card wrap">
         <div class="empty" id="cbvEmpty">Loading bills…</div>
         <table class="t" id="cbvTable" style="display:none">
-            <thead><tr><th>#</th><th>Delivery</th><th>Invoice</th><th>Customer</th><th>Route · SR</th><th>Pay mode</th><th class="num">Net value</th><th class="num">Balance</th><th>Scan</th><th>Verified</th></tr></thead>
+            <thead><tr><th>#</th><th>Delivery</th><th>Invoice</th><th>Customer</th><th>Route · SR</th><th>Pay mode</th><th class="num">Net value</th><th class="num">Balance</th><th>Scan</th><th>FC check</th><th>Bill verified</th></tr></thead>
             <tbody id="cbvBody"></tbody>
         </table>
     </div>
@@ -276,12 +286,12 @@ include 'header.php';
             <div class="det" id="mDet"></div>
         </div>
         <div class="foot">
-            <button class="vb v" id="mVer" type="button">✔ Verified</button>
-            <button class="vb nv" id="mNver" type="button">✖ Not verified</button>
-            <button class="vb pd" id="mPend" type="button" title="Back to pending (not checked)">Pending</button>
+            <button class="vb v" id="mVer" type="button" title="FC check only — the bill is not changed">✔ FC Verified</button>
+            <button class="vb nv" id="mNver" type="button" title="FC check only — the bill is not changed">✖ Not FC verified</button>
+            <button class="vb pd" id="mPend" type="button" title="Clear the FC check (not checked)">Clear</button>
             <label class="auto"><input type="checkbox" id="mAuto" checked> go to the next bill after marking</label>
             <span class="msg" id="mMsg"></span>
-            <span class="hint">← → previous / next · V = verified · N = not verified · move over the scan to magnify (M on / off) · click to open full size · Esc closes</span>
+            <span class="hint">FC check only — the bill is not changed · ← → previous / next · V = FC verified · N = not verified · move over the scan to magnify (M on / off) · click to open full size · Esc closes</span>
         </div>
     </div>
     <div class="zoomov" id="zoomOv"><img id="zoomImg" alt=""></div>
@@ -299,7 +309,8 @@ include 'header.php';
   /* customer pay mode: [label, stamp class, badge class] */
   function pm(r){ if(r.cwd) return ['Cheques will delay','p-cwd','a'];
     return {credit:['Credit','p-credit','b'],cheque:['Cheque','p-cheque','p'],cash:['Cash','p-cash','r']}[r.pay_mode]||(r.pay_mode?[r.pay_mode,'p-none','s']:['Pay mode not set','p-none','s']); }
-  function vb(v){ return v===1?'<span class="badge g">Verified</span>':(v===0?'<span class="badge r">Not verified</span>':'<span class="badge a">Pending</span>'); }
+  function vb(v){ return v===1?'<span class="badge g">Verified</span>':(v===0?'<span class="badge r">Not verified</span>':'<span class="badge a">Pending</span>'); }   /* the bill's own flag (Credit Bill Summary) */
+  function fb(r,small){ return (r.fc===1?'<span class="badge b">✔ FC Verified</span>':(r.fc===0?'<span class="badge r">Not FC verified</span>':'<span class="badge s">Not checked</span>'))+(small&&r.fc_by?'<div class="muted">'+esc(r.fc_by)+(r.fc_at?' · '+fdate(String(r.fc_at).slice(0,10)):'')+'</div>':''); }
   function vcol(v){ return v===1?'#16a34a':(v===0?'#dc2626':'#f59e0b'); }
   function isPdf(p){ return /\.pdf($|\?)/i.test(p||''); }
 
@@ -312,7 +323,7 @@ include 'header.php';
     }).catch(function(){ $('cbvEmpty').textContent='Connection problem — try again.'; });
     $('cbvExport').href='credit_bill_scan_report.php?export=1&'+qs();
   }
-  function kpis(){ var v=0,n=0,p=0,u=0,b=0; rows.forEach(function(r){ if(r.verified===1) v++; else if(r.verified===0) n++; else p++; if(!r.n_img) u++; b+=r.balance; });
+  function kpis(){ var v=0,n=0,p=0,u=0,b=0; rows.forEach(function(r){ if(r.fc===1) v++; else if(r.fc===0) n++; else p++; if(!r.n_img) u++; b+=r.balance; });
     $('kTot').textContent=rows.length; $('kVer').textContent=v; $('kNver').textContent=n; $('kPen').textContent=p; $('kNo').textContent=u; $('kBal').textContent='Rs. '+money(b); }
   function renderList(){
     if(!rows.length){ $('cbvTable').style.display='none'; $('cbvEmpty').style.display='block'; $('cbvEmpty').textContent='No credit bills for this delivery date range and filter.'; return; }
@@ -320,12 +331,12 @@ include 'header.php';
     $('cbvBody').innerHTML=rows.map(function(r,i){ var m=pm(r);
       return '<tr data-i="'+i+'"><td>'+(i+1)+'</td><td>'+fdate(r.delivery_date)+'<div class="muted">'+r.age+' days</div></td><td><b>'+esc(r.invoice_num)+'</b></td><td>'+esc(r.customer_name||'—')+'<div class="muted">'+esc(r.t_code||'')+'</div></td>'
         +'<td>'+esc(r.route||'—')+'<div class="muted">'+esc(r.sr_code||'')+'</div></td><td><span class="badge '+m[2]+'">'+esc(m[0])+'</span>'+(r.credit_days?'<div class="muted">'+r.credit_days+' days</div>':'')+'</td>'
-        +'<td class="num">'+money(r.net)+'</td><td class="num"><b>'+money(r.balance)+'</b></td><td>'+(r.n_img?'<span class="badge g">'+r.n_img+' uploaded</span>':'<span class="badge r">Missing</span>')+'</td><td data-c="v">'+vb(r.verified)+'</td></tr>'; }).join('');
+        +'<td class="num">'+money(r.net)+'</td><td class="num"><b>'+money(r.balance)+'</b></td><td>'+(r.n_img?'<span class="badge g">'+r.n_img+' uploaded</span>':'<span class="badge r">Missing</span>')+'</td><td data-c="v">'+fb(r,1)+'</td><td>'+vb(r.verified)+'</td></tr>'; }).join('');
   }
   $('cbvBody').addEventListener('click',function(e){ var tr=e.target.closest('tr'); if(tr) openAt(parseInt(tr.dataset.i,10)); });
 
   /* ── viewer ── */
-  function buildModalList(){ $('mList').innerHTML=rows.map(function(r,i){ return '<div class="li" data-i="'+i+'"><span class="d" style="background:'+vcol(r.verified)+'"></span><div><div class="n">'+esc(r.invoice_num)+' · Rs. '+money(r.balance)+'</div><div class="s">'+esc(r.customer_name||'—')+' · '+fdate(r.delivery_date)+(r.n_img?'':' · <b style="color:#dc2626">no scan</b>')+'</div></div></div>'; }).join(''); }
+  function buildModalList(){ $('mList').innerHTML=rows.map(function(r,i){ return '<div class="li" data-i="'+i+'"><span class="d" style="background:'+vcol(r.fc)+'" title="FC check"></span><div><div class="n">'+esc(r.invoice_num)+' · Rs. '+money(r.balance)+'</div><div class="s">'+esc(r.customer_name||'—')+' · '+fdate(r.delivery_date)+(r.n_img?'':' · <b style="color:#dc2626">no scan</b>')+'</div></div></div>'; }).join(''); }
   $('mList').addEventListener('click',function(e){ var li=e.target.closest('.li'); if(li) show(parseInt(li.dataset.i,10)); });
   function drawImg(){
     var r=rows[cur], L=r.imgs||[], m=pm(r); rot=0; zm=1;
@@ -362,10 +373,12 @@ include 'header.php';
     if(i<0||i>=rows.length) return; cur=i; img=0; var r=rows[i], m=pm(r);
     $('mTitle').textContent='Invoice '+(r.invoice_num||''); $('mCnt').textContent=(i+1)+' / '+rows.length; $('mPrev').disabled=i===0; $('mNext').disabled=i===rows.length-1;
     drawImg();
-    $('mDet').innerHTML='<div class="amt">Rs. '+money(r.balance)+'<small>balance · net Rs. '+money(r.net)+'</small></div>'+vb(r.verified)+' <span class="badge '+m[2]+'">'+esc(m[0])+'</span>'
+    $('mDet').innerHTML='<div class="amt">Rs. '+money(r.balance)+'<small>balance · net Rs. '+money(r.net)+'</small></div>'+fb(r)+' <span class="badge '+m[2]+'">'+esc(m[0])+'</span>'
       +'<dl><dt>Invoice no</dt><dd>'+esc(r.invoice_num)+'</dd><dt>Delivery date</dt><dd>'+fdate(r.delivery_date)+' · '+r.age+' days ago</dd><dt>Customer</dt><dd>'+esc(r.customer_name||'—')+'</dd><dt>T code</dt><dd>'+esc(r.t_code||'—')+'</dd>'
       +'<dt>Pay mode</dt><dd>'+esc(m[0])+(r.credit_days?' · '+r.credit_days+' credit days':'')+'</dd><dt>Route · SR</dt><dd>'+esc(r.route||'—')+' · '+esc(r.sr_code||'—')+'</dd>'
       +'<dt>Net value</dt><dd>Rs. '+money(r.net)+'</dd><dt>Paid</dt><dd>Rs. '+money(r.paid)+'</dd><dt>Credit notes</dt><dd>Rs. '+money(r.cn)+'</dd><dt>Balance</dt><dd>Rs. '+money(r.balance)+'</dd>'
+      +'<dt>FC check</dt><dd>'+(r.fc===1?'<b style="color:#1d4ed8">FC Verified</b>':(r.fc===0?'<b style="color:#b91c1c">Not FC verified</b>':'Not checked yet'))+(r.fc_by?'<br><span style="font-weight:500;color:#6b7280">by '+esc(r.fc_by)+(r.fc_at?' · '+esc(r.fc_at):'')+'</span>':'')+'</dd>'
+      +'<dt>Bill verified (Credit Bill Summary)</dt><dd>'+vb(r.verified)+' <span style="font-weight:500;color:#6b7280">— not changed here</span></dd>'
       +'<dt>Scans</dt><dd>'+(r.n_img?r.n_img+' uploaded'+(r.imgs[0]&&r.imgs[0].at?' · '+esc(r.imgs[0].at):''):'Not uploaded')+'</dd></dl>';
     $('mVer').disabled=$('mNver').disabled=$('mPend').disabled=!CAN_EDIT; $('mMsg').textContent=''; $('mMsg').className='msg';
     [].forEach.call($('mList').children,function(li){ li.classList.toggle('on',parseInt(li.dataset.i,10)===i); }); var on=$('mList').querySelector('.li.on'); if(on) on.scrollIntoView({block:'nearest'});
@@ -391,10 +404,10 @@ include 'header.php';
     $('mMsg').className='msg'; $('mMsg').textContent='Saving…';
     fetch('credit_bill_scan_report.php',{method:'POST',body:fd,credentials:'same-origin'}).then(function(x){ return x.json().catch(function(){ return null; }); }).then(function(res){
       if(!res||!res.success){ $('mMsg').className='msg err'; $('mMsg').textContent=(res&&res.error)||'Could not save.'; return; }
-      r.verified=res.value; kpis();
-      var td=document.querySelector('#cbvBody tr[data-i="'+at+'"] [data-c="v"]'); if(td) td.innerHTML=vb(r.verified);
-      var d=$('mList').querySelector('.li[data-i="'+at+'"] .d'); if(d) d.style.background=vcol(r.verified);
-      var txt=r.verified===1?'Marked verified':(r.verified===0?'Marked not verified':'Back to pending');
+      r.fc=res.value; r.fc_by=res.value===null?'':(res.by||''); r.fc_at=res.value===null?'':(res.at||''); kpis();   // the bill's own Verified is not touched
+      var td=document.querySelector('#cbvBody tr[data-i="'+at+'"] [data-c="v"]'); if(td) td.innerHTML=fb(r,1);
+      var d=$('mList').querySelector('.li[data-i="'+at+'"] .d'); if(d) d.style.background=vcol(r.fc);
+      var txt=r.fc===1?'Marked FC verified (log only — bill not changed)':(r.fc===0?'Marked not FC verified':'FC check cleared');
       if($('mAuto').checked&&at<rows.length-1&&val!==''){ show(at+1); } else show(at);
       $('mMsg').className='msg ok'; $('mMsg').textContent=txt+(cur!==at?' — '+rows[at].invoice_num:'');
     }).catch(function(){ $('mMsg').className='msg err'; $('mMsg').textContent='Connection problem — try again.'; });
