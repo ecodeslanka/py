@@ -1020,12 +1020,39 @@ function rbac_page_buttons_found($page) {
 /** [page => [key => label]] for every menu page that has buttons */
 function rbac_all_buttons() {
     $out = [];
+    $linked = rbac_linked_pages();
     foreach (rbac_menu_pages() as $page => $info) {
+        $page = strtolower($page);
         $b = rbac_page_buttons($page);
-        if ($b) $out[strtolower($page)] = $b;
+        /* buttons of the pages opened from inside this page (view / edit / … pages that follow its rights):
+           saved under this page as "<linked page>__<button>" and shown as a sub-branch in the role form */
+        foreach ($linked[$page] ?? [] as $child) foreach (rbac_page_buttons_found($child) as $k => $l) $b[$child . '__' . $k] = $l;
+        if ($b) $out[$page] = $b;
     }
     return $out;
 }
+
+/** [menu page => [linked page, …]] — pages that are not in the menu and follow a menu page's rights (cached by the file list) */
+function rbac_linked_pages() {
+    static $map = null;
+    if ($map !== null) return $map;
+    $files = glob(__DIR__ . '/*.php') ?: [];
+    $sig = count($files) . ':' . @filemtime(__FILE__) . ':' . @filemtime(__DIR__ . '/header.php') . ':' . @filemtime(__DIR__);
+    $cache = rtrim(sys_get_temp_dir(), '/\\') . '/yms_rbac_linked_' . md5(__DIR__) . '.json';
+    if (is_file($cache) && ($c = json_decode((string)@file_get_contents($cache), true)) && ($c['s'] ?? '') === $sig) return $map = $c['m'];
+    $menu = rbac_menu_pages(); $map = [];
+    foreach ($files as $f) {
+        $p = strtolower(basename($f, '.php'));
+        if (isset($menu[$p]) || !preg_match('/^[a-z0-9_\-]+$/', $p) || in_array($p, $GLOBALS['RBAC_ALWAYS_ALLOWED'] ?? [], true)) continue;
+        $t = rbac_resolve($p)[0] ?? null;
+        if ($t !== null && ($t = strtolower($t)) !== $p && isset($menu[$t])) $map[$t][] = $p;
+    }
+    foreach ($map as &$l) sort($l); unset($l);
+    @file_put_contents($cache, json_encode(['s' => $sig, 'm' => $map]));
+    return $map;
+}
+/** "view_field_summary" → "View Field Summary" */
+function rbac_page_title($p) { return ucwords(str_replace(['_', '-'], ' ', (string)$p)); }
 
 /** page => [key => 0/1] explicitly saved for one role */
 function rbac_role_buttons($role_id) {
@@ -1042,9 +1069,11 @@ function rbac_btn_can($key, $page = null) {
     if ($ctx['full'] || !$ctx['enforced'] || !$ctx['role_id']) return true;
     static $mine = null;
     if ($mine === null) $mine = rbac_role_buttons($ctx['role_id']);
-    $target = rbac_resolve($page ?: rbac_current_page())[0] ?? null;
-    if ($target === null) return rbac_btn_default($page ?: rbac_current_page(), $key);
+    $cur = strtolower(preg_replace('/\.php$/i', '', $page ?: rbac_current_page()));
+    $target = rbac_resolve($cur)[0] ?? null;
+    if ($target === null) return rbac_btn_default($cur, $key);
     $t = strtolower($target);
+    if ($cur !== $t && isset($mine[$t][$cur . '__' . $key])) return $mine[$t][$cur . '__' . $key] === 1;   // a button of a linked page (sub-branch in the role form)
     return isset($mine[$t][$key]) ? $mine[$t][$key] === 1 : rbac_btn_default($t, $key);   // no saved choice: the button's default
 }
 
@@ -1068,9 +1097,14 @@ function rbac_btn_denied() {
     if ($target === null) return [];
     $mine = rbac_role_buttons($ctx['role_id']);
     $d = [];
-    foreach ($mine[strtolower($target)] ?? [] as $k => $a) if (!$a) $d[] = $k;
+    $cur = strtolower(rbac_current_page()); $pre = $cur . '__';
+    foreach ($mine[strtolower($target)] ?? [] as $k => $a) {
+        if ($a) continue;
+        if (strpos($k, '__') === false) $d[] = $k;                                   // a button of the menu page
+        elseif ($cur !== strtolower($target) && strpos($k, $pre) === 0) $d[] = substr($k, strlen($pre));   // a button of THIS linked page
+    }
     foreach ($GLOBALS['RBAC_BTN_DEFAULT_DENY'][strtolower($target)] ?? [] as $k) if (!isset($mine[strtolower($target)][$k]) && !in_array($k, $d, true)) $d[] = $k;   // off until given
-    return $d;
+    return array_values(array_unique($d));
 }
 
 /** server side: a denied Export / Print / Download button also stops the request itself, not just the button */

@@ -194,9 +194,13 @@ function rf_row($p, $perms, $R, $occ, $menu_label, $sub = false, $ro = false) {
         <?php if ($pbtns): $sv = $btn_saved[strtolower($page)] ?? []; ?>
             <details class="rb-btns"><summary><i class="fa-solid fa-computer-mouse"></i> Buttons on this page <span data-bcnt></span></summary>
                 <div class="rb-btnlist">
-                    <?php foreach ($pbtns as $bk => $bl): ?>
+                    <?php $__grp = []; foreach ($pbtns as $bk => $bl) { $__c = strpos($bk, '__') !== false ? substr($bk, 0, strpos($bk, '__')) : ''; $__grp[$__c][$bk] = $bl; }
+                    foreach ($__grp as $__child => $__list): ?>
+                        <?php if ($__child !== ''): ?><div class="rb-sub"><i class="fa-solid fa-turn-up fa-rotate-90"></i> <b><?php echo htmlspecialchars(function_exists('rbac_page_title') ? rbac_page_title($__child) : $__child); ?></b> <code><?php echo htmlspecialchars($__child); ?>.php</code> <small>opened from this page</small></div><?php endif; ?>
+                        <?php foreach ($__list as $bk => $bl): ?>
                         <label><input type="checkbox" name="btn[<?php echo htmlspecialchars($page); ?>][<?php echo htmlspecialchars($bk); ?>]" value="1"
                             <?php echo (isset($sv[$bk]) ? $sv[$bk] : (!function_exists('rbac_btn_default') || rbac_btn_default($page, $bk))) ? 'checked' : ''; ?> <?php echo $ro ? 'disabled' : ''; ?>> <?php echo htmlspecialchars($bl); ?><?php if (function_exists('rbac_btn_default') && !rbac_btn_default($page, $bk)): ?> <small style="color:#b45309;font-weight:700" title="Off for every role until ticked here — admin always has it">(admin only by default)</small><?php endif; ?></label>
+                        <?php endforeach; ?>
                     <?php endforeach; ?>
                     <?php if (!$ro): ?><span class="rb-btnall"><a href="#" onclick="btnAll(this,1);return false">all</a> · <a href="#" onclick="btnAll(this,0);return false">none</a></span><?php endif; ?>
                 </div></details>
@@ -222,6 +226,7 @@ include 'header.php';
 .rb-btns[open] summary{background:#ede9fe}
 .rb-btnlist{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 10px;margin-top:6px;border:1px dashed #c4b5fd;border-radius:8px;background:#faf9ff}
 .rb-btnlist label{display:inline-flex;align-items:center;gap:5px;font-weight:500;cursor:pointer;white-space:nowrap}
+.rb-sub{flex-basis:100%;margin-top:6px;padding:5px 8px;border-left:3px solid #8b5cf6;background:#f5f3ff;border-radius:0 6px 6px 0;color:#4c1d95;font-size:12px}.rb-sub code{font-size:11px;color:#6b7280}.rb-sub small{color:#7c3aed;margin-left:4px}
 .rb-btnall{margin-left:auto;color:#6b7280} .rb-btnall a{color:#6d28d9;font-weight:600}
 </style>
 <div class="rb <?php echo $role['full_access'] ? 'rb-is-full' : ''; ?>" id="rbRoot">
