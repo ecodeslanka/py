@@ -349,6 +349,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'settings_save') {
 ══════════════════════════════════════════════════════════ */
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
     header('Content-Type: application/json');
+    @set_time_limit(300); @ignore_user_abort(true);   // a long run must not be cut half way
+    if (session_status() === PHP_SESSION_ACTIVE) session_write_close();   // do not hold the user's other pages
     ob_start();
     $ulr_cfg    = ulr_cfg($conn);
     $account_id = (int)$ulr_cfg['account'];
@@ -420,9 +422,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
     $bank_by_credit = [];
     $bank_by_debit  = [];
     foreach ($bank_rows as $br) {
-        /* skip a bank row that a saved reconcile already uses — the saved reconciles are the truth,
-           not the row's 'reconciled' flag (it can stay set after a reconcile was removed) */
+        /* auto match stays careful: skip a bank row a saved reconcile uses, and a row flagged reconciled
+           (it may have been reconciled before the reconcile log existed) — such a row can still be picked by hand */
         if (isset($already_used_bank_ids[$br['id']])) continue;
+        if (!empty($br['reconciled'])) continue;
 
         $desc_upper = strtoupper($br['description'] ?? '');
         $is_unilever = false;
@@ -532,12 +535,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
                          '$ctypes_e', '$custs_e', $applied_amt, '$bref_e')"
                 );
 
-                $col_check = mysqli_query($conn,
-                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                     WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='claim_cert_items'
-                     AND COLUMN_NAME IN ('bank_ref','reconcile_log_id','reconciled_at')");
-                $existing_cols = [];
-                while ($cc = mysqli_fetch_assoc($col_check)) $existing_cols[] = $cc['COLUMN_NAME'];
+                if (!isset($existing_cols) || !is_array($existing_cols)) { $existing_cols = [];   // read once per run
+                    $col_check = mysqli_query($conn, "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='claim_cert_items' AND COLUMN_NAME IN ('bank_ref','reconcile_log_id','reconciled_at')");
+                    while ($col_check && ($cc = mysqli_fetch_assoc($col_check))) $existing_cols[] = $cc['COLUMN_NAME']; }
                 $set_parts = [];
                 if (in_array('bank_ref',         $existing_cols)) $set_parts[] = "bank_ref='$bref_e'";
                 if (in_array('reconcile_log_id', $existing_cols)) $set_parts[] = "reconcile_log_id=$log_id";
@@ -1818,8 +1819,11 @@ async function runReconcile(){
   document.getElementById('loadingSpinner').style.display='';
   clearResults();
   try{
-    const res=await fetch(_page+'?ajax=reconcile&account_id='+_accountId);
-    const data=await res.json();
+    let res;
+    try{ res=await fetch(_page+'?ajax=reconcile&account_id='+_accountId,{credentials:'same-origin'}); }
+    catch(ne){ throw new Error('The connection to the server dropped while reconciling (it may have taken too long). Click Reload to try again — matches already saved are kept.'); }
+    const raw=await res.text(); let data;
+    try{ data=JSON.parse(raw); }catch(pe){ const m=raw.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim(); throw new Error('The server answered '+(res.status>=400?'HTTP '+res.status+' ':'')+'without data'+(m?': '+m.slice(0,240):' (you may need to log in again)')); }
     if(!data.ok)throw new Error(data.msg||'Failed');
     _claims=data.claims||[];
     _allBankRows=data.bank_rows||[];
