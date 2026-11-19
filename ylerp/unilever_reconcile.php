@@ -108,6 +108,9 @@ function ulr_claims_src($conn) {
                  y.total_amount, y.actual_amount, y.vat_amount, y.claim_type, y.customer_code, y.customer_name, y.tax_invoice_no, y.invoice_date, y.claim_description, y.src
              FROM ($src) y";
     if (ulr_try($conn, "SELECT COUNT(*) FROM ($fill) z")) $src = $fill;
+    /* Damage claims are not part of the Claim Total (they are settled on the Damaged Claim page, not by bank deposit) —
+       the same rule as the certificate import: "Damage" in the claim type or the description */
+    $src = "SELECT * FROM ($src) w WHERE NOT (COALESCE(w.claim_type,'') LIKE '%damage%' OR COALESCE(w.claim_description,'') LIKE '%damage%')";
     return $src;
 }
 
