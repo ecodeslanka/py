@@ -24,6 +24,7 @@
  */
 if (session_status() === PHP_SESSION_NONE) session_start();
 include_once 'config.php';
+if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);   // a database error returns false here (the server is set to throw) — the page checks the results itself
 
 /* ══════════════════════════════════════════════════════════
    SHARED: Known Unilever bank-statement description sets
@@ -51,9 +52,9 @@ function ulr_claims_src($conn) {
     $src = "SELECT ci.id, DATE(ci.banking_date) AS bdate, ci.entity, ci.total_amount, ci.actual_amount, ci.vat_amount, ci.claim_type, ci.customer_code, ci.customer_name,
                    ci.tax_invoice_no, ci.invoice_date, ci.claim_description, 'certificate' AS src
             FROM claim_cert_items ci WHERE ci.banking_date IS NOT NULL AND ci.banking_date <> ''";
-    $t = @mysqli_query($conn, "SHOW TABLES LIKE 'dl_confirmed_payments'");
+    try { $t = @mysqli_query($conn, "SHOW TABLES LIKE 'dl_confirmed_payments'"); } catch (Throwable $e) { $t = false; }
     if ($t && mysqli_num_rows($t) > 0) {
-        $C = []; $cr = @mysqli_query($conn, "SHOW COLUMNS FROM dl_confirmed_payments"); while ($cr && ($x = mysqli_fetch_assoc($cr))) $C[strtolower($x['Field'])] = 1;
+        $C = []; try { $cr = @mysqli_query($conn, "SHOW COLUMNS FROM dl_confirmed_payments"); } catch (Throwable $e) { $cr = false; } while ($cr && ($x = mysqli_fetch_assoc($cr))) $C[strtolower($x['Field'])] = 1;
         if (isset($C['claim_item_id'], $C['banking_date'])) {          // only the columns this table has
             $d = fn($c, $ci, $txt = false) => isset($C[$c]) ? ($txt ? "COALESCE(NULLIF(dcp.$c,''), $ci)" : "COALESCE(dcp.$c, $ci)") : $ci;
             $dn = fn($c, $ci) => isset($C[$c]) ? "COALESCE(NULLIF(dcp.$c,0), $ci)" : $ci;
@@ -64,7 +65,7 @@ function ulr_claims_src($conn) {
                    " . $d('tax_invoice_no', 'ci.tax_invoice_no', true) . ", " . $d('invoice_date', 'ci.invoice_date') . ", " . $d('claim_description', 'ci.claim_description', true) . ", 'drivers & loyalty'
             FROM dl_confirmed_payments dcp LEFT JOIN claim_cert_items ci ON ci.id = dcp.claim_item_id
             WHERE dcp.banking_date IS NOT NULL AND (ci.id IS NULL OR ci.banking_date IS NULL OR ci.banking_date = '')";
-            $ok = @mysqli_query($conn, "SELECT COUNT(*) FROM ($src$dal) z");   // if it cannot be read, keep the certificates only
+            try { $ok = @mysqli_query($conn, "SELECT COUNT(*) FROM ($src$dal) z"); } catch (Throwable $e) { $ok = false; }   // if it cannot be read, keep the certificates only
             if ($ok) $src .= $dal;
         }
     }
@@ -406,6 +407,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
          FROM (" . ulr_claims_src($conn) . ") z
          GROUP BY bdate, entity
          ORDER BY bdate ASC, entity ASC");   /* certificates + Drivers & Loyalty confirmed claims */
+    if (!$q) { ob_end_clean(); echo json_encode(['ok'=>false,'msg'=>'Could not read the claims: '.mysqli_error($conn)]); exit; }
     $claims = [];
     while ($r = mysqli_fetch_assoc($q)) $claims[] = $r;
 
@@ -1762,10 +1764,17 @@ function showToast(msg,type){
 }
 
 let _ulrAccounts={}, _ulrTypes={}, _ulrSaved={account:0,type:''};
+/* read a server answer as JSON; when it is an error page, show what the server said */
+async function ulrJson(res){
+  const raw=await res.text();
+  try{ return JSON.parse(raw); }
+  catch(e){ const m=raw.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi,' ').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
+    throw new Error('The server answered '+(res.status>=400?'HTTP '+res.status+' ':'')+'with an error'+(m?': '+m.slice(0,260):' (empty — you may need to log in again)')); }
+}
 async function loadAccounts(){
   try{
     const res=await fetch(_page+'?ajax=settings_get');
-    const data=await res.json();
+    const data=await ulrJson(res);
     _ulrTypes=data.types||{};
     _ulrAccounts={};
     const sel=document.getElementById('accountSelect');
@@ -1815,7 +1824,7 @@ async function saveSettings(showMsg){
   if(acc===_ulrSaved.account && bt===_ulrSaved.type){ if(showMsg) showToast('Settings already saved','info'); return true; }
   try{
     const res=await fetch(_page+'?ajax=settings_save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:acc,bank_type:bt})});
-    const data=await res.json();
+    const data=await ulrJson(res);
     if(!data.ok) throw new Error(data.msg||'Save failed');
     _ulrSaved={account:acc,type:bt};
     document.getElementById('saveSettingsBtn').classList.remove('dirty');
@@ -1857,7 +1866,7 @@ async function runReconcile(){
   clearResults();
   try{
     const res=await fetch(_page+'?ajax=reconcile&account_id='+_accountId);
-    const data=await res.json();
+    const data=await ulrJson(res);
     if(!data.ok)throw new Error(data.msg||'Failed');
     _claims=data.claims||[];
     _allBankRows=data.bank_rows||[];
@@ -1957,7 +1966,7 @@ async function runAiVerify(){
 
   try{
     const res=await fetch(_page+'?ajax=ai_verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unmatched_claims:unmatchedClaims,unmatched_bank_rows:unusedBankRows})});
-    const data=await res.json();
+    const data=await ulrJson(res);
     if(!data.ok)throw new Error(data.msg||'AI failed');
 
     _aiCombos=data.combos||[];
@@ -2053,7 +2062,7 @@ async function saveAiModal(){
   }));
   try{
     const res=await fetch(_page+'?ajax=save_reconcile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:_accountId,reconcile,description:document.getElementById('aiModalDesc').value.trim()})});
-    const data=await res.json(); if(!data.ok) throw new Error(data.msg||'Save failed');
+    const data=await ulrJson(res); if(!data.ok) throw new Error(data.msg||'Save failed');
     /* the saved combinations become "saved"; the unticked ones go back to unmatched */
     const savedIdx=new Set(), liveAll=aiComboLive();
     live.forEach(({c})=>c.claim_indices.forEach(ix=>savedIdx.add(ix)));
@@ -2122,7 +2131,7 @@ async function executeSave(){
 
   try{
     const res=await fetch(_page+'?ajax=save_reconcile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:_accountId,reconcile,description:desc})});
-    const data=await res.json();
+    const data=await ulrJson(res);
     if(!data.ok) throw new Error(data.msg||'Save failed');
     closeSaveModal();
     showToast('Saved '+data.saved+' reconciliation record(s) successfully!','');
@@ -2184,7 +2193,7 @@ async function loadBankTxns(){
   tbody.innerHTML='<tr><td colspan="7" style="padding:20px;text-align:center;"><span class="spinner"></span></td></tr>';
   try{
     const res=await fetch(_page+'?ajax=bank_transactions&account_id='+_accountId+'&search='+search+'&amount='+amt);
-    const data=await res.json();
+    const data=await ulrJson(res);
     const rows=data.rows||[];
     if(!rows.length){
       tbody.innerHTML='<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--muted);font-size:12px;font-style:italic;">No matching UNILEVER transactions found.</td></tr>';
@@ -2282,7 +2291,7 @@ async function saveManualReconcile(){
       bank_ref:_mrSelectedTxn.ref||'',
       claim_line:{bdate:c.bdate,entity:c.entity,claim_total:parseFloat(c.claim_total||0),claim_count:parseInt(c.claim_count||1),claim_types:c.claim_types||'',customers:c.customers||''},
     })});
-    const data=await res.json();
+    const data=await ulrJson(res);
     if(!data.ok) throw new Error(data.msg||'Save failed');
 
     /* Append this new reconcile entry onto the claim's list (it may now be
@@ -2340,7 +2349,7 @@ async function deleteReconEntry(claimIdx,logId){
 
   try{
     const res=await fetch(_page+'?ajax=delete_manual_reconcile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({log_id:logId})});
-    const data=await res.json();
+    const data=await ulrJson(res);
     if(!data.ok) throw new Error(data.msg||'Delete failed');
 
     const removed=(c.recon_entries||[]).find(en=>en.log_id===logId);
@@ -2558,7 +2567,7 @@ async function showClaimItems(idx){
   document.getElementById('ciB').innerHTML='<div style="padding:20px;color:#6b7280">Loading…</div>'; m.classList.add('open');
   try{
     const r=await fetch(_page+'?ajax=claim_items&bdate='+encodeURIComponent(c.bdate)+'&entity='+encodeURIComponent(c.entity||'')+(c.entity===null?'&entity_null=1':''),{credentials:'same-origin'});
-    const d=await r.json(); if(!d.ok) throw new Error(d.msg||'Failed');
+    const d=await ulrJson(r); if(!d.ok) throw new Error(d.msg||'Failed');
     const L=d.items||[], by={}; let ta=0,tv=0,tt=0;
     L.forEach(x=>{ const k=x.claim_type||'(no type)'; by[k]=by[k]||{n:0,t:0}; by[k].n++; by[k].t+=parseFloat(x.total_amount); ta+=parseFloat(x.actual_amount); tv+=parseFloat(x.vat_amount); tt+=parseFloat(x.total_amount); });
     let h='<div class="ci-types">'+Object.keys(by).map(k=>'<span><b>'+esc(k)+'</b> · '+by[k].n+' · LKR '+fmtN(by[k].t)+'</span>').join('')+'</div>';
