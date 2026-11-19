@@ -44,29 +44,60 @@ $UNILEVER_DESC_SETS = [
 $UNILEVER_DESC_SETS = array_values(array_unique($UNILEVER_DESC_SETS));
 
 /** The claims that make up a row's Claim Total (banking date + entity):
- *   • claim certificates that have a banking date, and
- *   • Drivers & Loyalty claims confirmed on the Drivers & Loyalty page with a banking date there, when the
- *     certificate itself has no banking date (each claim counted once). */
+ *   • claim certificates that have a banking date (Weekly Activities, Drivers, Loyalty … every claim type), and
+ *   • Drivers & Loyalty claims whose certificate has no banking date: the banking date is taken from where the
+ *     Drivers & Loyalty page saved it — dl_confirmed_payments, or its lines in sscl_vat_settlements (entry_id) —
+ *     linked by claim id, by source (claim_item) or by tax invoice. Each claim is counted once (earliest date).
+ *   A part that cannot be read on this server is left out, the rest still works. */
+function ulr_has($conn, $t) { try { $r = @mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $t) . "'"); } catch (Throwable $e) { $r = false; } return $r && mysqli_num_rows($r) > 0; }
+function ulr_cols($conn, $t) { $C = []; try { $r = @mysqli_query($conn, "SHOW COLUMNS FROM `$t`"); } catch (Throwable $e) { $r = false; } while ($r && ($x = mysqli_fetch_assoc($r))) $C[strtolower($x['Field'])] = 1; return $C; }
+function ulr_try($conn, $sql) { try { return @mysqli_query($conn, $sql) ? true : false; } catch (Throwable $e) { return false; } }
 function ulr_claims_src($conn) {
     static $src = null; if ($src !== null) return $src;
-    $src = "SELECT ci.id, DATE(ci.banking_date) AS bdate, ci.entity, ci.total_amount, ci.actual_amount, ci.vat_amount, ci.claim_type, ci.customer_code, ci.customer_name,
-                   ci.tax_invoice_no, ci.invoice_date, ci.claim_description, 'certificate' AS src
-            FROM claim_cert_items ci WHERE ci.banking_date IS NOT NULL AND ci.banking_date <> ''";
-    try { $t = @mysqli_query($conn, "SHOW TABLES LIKE 'dl_confirmed_payments'"); } catch (Throwable $e) { $t = false; }
-    if ($t && mysqli_num_rows($t) > 0) {
-        $C = []; try { $cr = @mysqli_query($conn, "SHOW COLUMNS FROM dl_confirmed_payments"); } catch (Throwable $e) { $cr = false; } while ($cr && ($x = mysqli_fetch_assoc($cr))) $C[strtolower($x['Field'])] = 1;
-        if (isset($C['claim_item_id'], $C['banking_date'])) {          // only the columns this table has
-            $d = fn($c, $ci, $txt = false) => isset($C[$c]) ? ($txt ? "COALESCE(NULLIF(dcp.$c,''), $ci)" : "COALESCE(dcp.$c, $ci)") : $ci;
-            $dn = fn($c, $ci) => isset($C[$c]) ? "COALESCE(NULLIF(dcp.$c,0), $ci)" : $ci;
-            $dal = " UNION ALL
-            SELECT dcp.claim_item_id, DATE(dcp.banking_date), " . $d('entity', 'ci.entity', true) . ",
-                   " . $dn('total_amount', 'ci.total_amount') . ", " . $dn('actual_amount', 'ci.actual_amount') . ", " . $d('vat_amount', 'ci.vat_amount') . ",
-                   COALESCE(NULLIF(ci.claim_type,''), " . (isset($C['claim_type']) ? 'dcp.claim_type' : "'Drivers & Loyalty'") . "), " . $d('customer_code', 'ci.customer_code', true) . ", " . $d('customer_name', 'ci.customer_name', true) . ",
-                   " . $d('tax_invoice_no', 'ci.tax_invoice_no', true) . ", " . $d('invoice_date', 'ci.invoice_date') . ", " . $d('claim_description', 'ci.claim_description', true) . ", 'drivers & loyalty'
-            FROM dl_confirmed_payments dcp LEFT JOIN claim_cert_items ci ON ci.id = dcp.claim_item_id
-            WHERE dcp.banking_date IS NOT NULL AND (ci.id IS NULL OR ci.banking_date IS NULL OR ci.banking_date = '')";
-            try { $ok = @mysqli_query($conn, "SELECT COUNT(*) FROM ($src$dal) z"); } catch (Throwable $e) { $ok = false; }   // if it cannot be read, keep the certificates only
-            if ($ok) $src .= $dal;
+    $cols = "ci.id, DATE(ci.banking_date) AS bdate, ci.entity, ci.total_amount, ci.actual_amount, ci.vat_amount, ci.claim_type, ci.customer_code, ci.customer_name,
+             ci.tax_invoice_no, ci.invoice_date, ci.claim_description";
+    $src = "SELECT $cols, 'certificate' AS src FROM claim_cert_items ci WHERE ci.banking_date IS NOT NULL AND ci.banking_date <> ''";
+    $U = fn($x) => "CONVERT($x USING utf8mb4) COLLATE utf8mb4_general_ci";   // no collation clash between tables
+
+    /* banking dates kept on the Drivers & Loyalty side, per claim id */
+    $parts = [];
+    if (ulr_has($conn, 'dl_confirmed_payments')) { $C = ulr_cols($conn, 'dl_confirmed_payments');
+        if (isset($C['claim_item_id'], $C['banking_date']))
+            $parts[] = "SELECT dcp.claim_item_id AS cid, DATE(dcp.banking_date) AS bd FROM dl_confirmed_payments dcp WHERE dcp.claim_item_id > 0 AND dcp.banking_date IS NOT NULL";
+    }
+    if (ulr_has($conn, 'sscl_vat_settlements')) { $C = ulr_cols($conn, 'sscl_vat_settlements');
+        if (isset($C['banking_date'], $C['entry_id'])) {
+            $dal = "COALESCE(s.entry_id,0) > 0" . (isset($C['sv_id']) ? " AND COALESCE(s.sv_id,0) = 0" : "") . " AND s.banking_date IS NOT NULL";   // a Drivers & Loyalty line
+            if (isset($C['claim_cert_item_id'])) $parts[] = "SELECT s.claim_cert_item_id, DATE(s.banking_date) FROM sscl_vat_settlements s WHERE $dal AND s.claim_cert_item_id > 0";
+            if (isset($C['source_type'], $C['source_id'])) $parts[] = "SELECT s.source_id, DATE(s.banking_date) FROM sscl_vat_settlements s WHERE $dal AND s.source_type = 'claim_item' AND s.source_id > 0";
+            if (isset($C['tax_invoice_no'])) {
+                $noId = isset($C['claim_cert_item_id']) ? " AND COALESCE(s.claim_cert_item_id,0) = 0" : "";
+                $ent  = isset($C['entity']) ? " AND (COALESCE(s.entity,'') = '' OR " . $U('ci2.entity') . " = " . $U('s.entity') . ")" : "";
+                $parts[] = "SELECT ci2.id, DATE(s.banking_date) FROM sscl_vat_settlements s JOIN claim_cert_items ci2
+                              ON " . $U('TRIM(LOWER(ci2.tax_invoice_no))') . " = " . $U('TRIM(LOWER(s.tax_invoice_no))') . " AND TRIM(COALESCE(s.tax_invoice_no,'')) <> ''$ent
+                            WHERE $dal$noId";
+            }
+        }
+    }
+    $parts = array_values(array_filter($parts, fn($p) => ulr_try($conn, "SELECT COUNT(*) FROM ($p) z")));   // keep only the parts this server can read
+    if ($parts) {
+        $add = " UNION ALL SELECT ci.id, d.bd, ci.entity, ci.total_amount, ci.actual_amount, ci.vat_amount, ci.claim_type, ci.customer_code, ci.customer_name,
+                   ci.tax_invoice_no, ci.invoice_date, ci.claim_description, 'drivers & loyalty'
+            FROM claim_cert_items ci JOIN (SELECT cid, MIN(bd) AS bd FROM (" . implode(" UNION ALL ", $parts) . ") u GROUP BY cid) d ON d.cid = ci.id
+            WHERE ci.banking_date IS NULL OR ci.banking_date = ''";
+        if (ulr_try($conn, "SELECT COUNT(*) FROM ($src$add) z")) $src .= $add;
+    }
+
+    /* Drivers & Loyalty confirmed payments that point at no certificate: their own amounts */
+    if (ulr_has($conn, 'dl_confirmed_payments')) { $C = ulr_cols($conn, 'dl_confirmed_payments');
+        if (isset($C['claim_item_id'], $C['banking_date'], $C['total_amount'])) {
+            $t = fn($c) => isset($C[$c]) ? $U("dcp.$c") : "NULL"; $n = fn($c) => isset($C[$c]) ? "dcp.$c" : "0";
+            $orph = " UNION ALL SELECT dcp.claim_item_id, DATE(dcp.banking_date), " . $t('entity') . ", dcp.total_amount, " . $n('actual_amount') . ", " . $n('vat_amount') . ",
+                       " . (isset($C['claim_type']) ? "COALESCE(" . $t('claim_type') . ", 'Drivers & Loyalty')" : "'Drivers & Loyalty'") . ", " . $t('customer_code') . ", " . $t('customer_name') . ",
+                       " . $t('tax_invoice_no') . ", " . (isset($C['invoice_date']) ? 'dcp.invoice_date' : 'NULL') . ", " . $t('claim_description') . ", 'drivers & loyalty'
+                FROM dl_confirmed_payments dcp LEFT JOIN claim_cert_items ci ON ci.id = dcp.claim_item_id
+                WHERE dcp.banking_date IS NOT NULL AND ci.id IS NULL";
+            if (ulr_try($conn, "SELECT COUNT(*) FROM ($src$orph) z")) $src .= $orph;
         }
     }
     return $src;
