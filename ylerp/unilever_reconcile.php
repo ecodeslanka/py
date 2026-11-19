@@ -39,6 +39,8 @@ $UNILEVER_DESC_SETS = [
     'UNILEVER SRI LANKA LTD',
     'UNILEVER LANKA CONSUMER LTD',
     'UNILEVER LIPTON CEYLON LIMITED',
+    /* banks shorten the payer name ("UNILEVER SRI LANKA LTD-CR", "UNILEVER LANKA CONS", "ULCL …") — any of these words is a Unilever payment */
+    'UNILEVER', 'ULCL', 'USLL',
 ];
 $UNILEVER_DESC_SETS = array_values(array_unique($UNILEVER_DESC_SETS));
 
@@ -219,7 +221,8 @@ function ulr_over_check($conn, $bank_txn_id, $bank_field, $apply_total, array $l
         $bde = mysqli_real_escape_string($conn, $bd); $ene = mysqli_real_escape_string($conn, $en);
         $tq = mysqli_query($conn, "SELECT COALESCE(SUM(total_amount),0) FROM claim_cert_items WHERE DATE(banking_date) = '$bde' AND COALESCE(entity,'') = '$ene'");
         $total = $tq ? round((float)mysqli_fetch_row($tq)[0], 2) : 0.0;
-        $pq = mysqli_query($conn, "SELECT COALESCE(SUM(cert_amount),0) FROM unilever_reconcile_claim_lines WHERE DATE(banking_date) = '$bde' AND COALESCE(entity,'') = '$ene'");
+        $pq = mysqli_query($conn, "SELECT COALESCE(SUM(cl.cert_amount),0) FROM unilever_reconcile_claim_lines cl JOIN unilever_reconcile_log l ON l.id = cl.log_id JOIN bank_statement_transactions t ON t.id = l.bank_txn_id
+                                   WHERE DATE(cl.banking_date) = '$bde' AND COALESCE(cl.entity,'') = '$ene'");
         $paid = $pq ? round((float)mysqli_fetch_row($pq)[0], 2) : 0.0;
         $seen[$key] = ($seen[$key] ?? 0) + $amt;                       // the same claim twice in one save
         $left = round($total - $paid, 2);
@@ -383,8 +386,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
          FROM unilever_reconcile_log l
          JOIN unilever_reconcile_claim_lines cl ON cl.log_id = l.id
          JOIN bank_statement_transactions t ON t.id = l.bank_txn_id
-         WHERE l.account_id = $account_id
-         ORDER BY l.reconciled_at ASC, l.id ASC");
+         ORDER BY l.reconciled_at ASC, l.id ASC");   /* every account: a claim reconciled to another account's bank row is reconciled (the over-apply check counts it too) */
     while ($lr = mysqli_fetch_assoc($qlog)) {
         $key = date('Y-m-d', strtotime($lr['banking_date'])) . '___' . $lr['entity'];
         $existing_recon[$key][] = $lr; /* APPEND — do not overwrite, a key can have many entries */
@@ -418,8 +420,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
     $bank_by_credit = [];
     $bank_by_debit  = [];
     foreach ($bank_rows as $br) {
-        /* Skip fully reconciled OR already assigned to a log entry */
-        if ($br['reconciled'] && !isset($already_used_bank_ids[$br['id']])) continue;
+        /* skip a bank row that a saved reconcile already uses — the saved reconciles are the truth,
+           not the row's 'reconciled' flag (it can stay set after a reconcile was removed) */
         if (isset($already_used_bank_ids[$br['id']])) continue;
 
         $desc_upper = strtoupper($br['description'] ?? '');
@@ -584,6 +586,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
                 ];
                 $claim['reconciled_total']  += $applied_amt;
                 $claim['remaining_balance']  = 0.0; /* exact match closes the outstanding amount */
+                $claim['match_status']       = 'manual-matched';   /* set it here: "continue 3" skips the status step below (it stayed 'unmatched') */
                 continue 3;
             }
             }
@@ -755,8 +758,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'bank_transactions') {
     global $UNILEVER_DESC_SETS;
     $desc_where = unilever_desc_where($conn, $UNILEVER_DESC_SETS, 't.description');
 
-    $where = "u.account_id=$account_id " . ulr_bank_scope_sql($conn, $ulr_cfg['type']) . " AND (t.reconciled=0 OR t.reconcile_balance>0)
-              AND (t.credit>0)
+    $where = "u.account_id=$account_id " . ulr_bank_scope_sql($conn, $ulr_cfg['type']) . "
+              AND (t.credit>0 OR t.debit>0)
+              AND (CASE WHEN t.credit>0 THEN t.credit ELSE t.debit END) - COALESCE(lg.ap,0) > 0.009
               AND ($desc_where)";
 
     if ($search) {
@@ -772,9 +776,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'bank_transactions') {
     $q = mysqli_query($conn,
         "SELECT t.id, t.transaction_date, t.description, t.credit, t.debit, t.balance,
                 t.reference, t.cheque_no, t.serial_no,
-                t.reconcile_balance, t.reconciled_amount
+                CASE WHEN lg.ap IS NULL THEN NULL ELSE ROUND((CASE WHEN t.credit>0 THEN t.credit ELSE t.debit END) - lg.ap, 2) END AS reconcile_balance,
+                COALESCE(lg.ap,0) AS reconciled_amount
          FROM bank_statement_transactions t
          JOIN bank_statement_uploads u ON t.upload_id=u.id
+         LEFT JOIN (SELECT bank_txn_id, SUM(claim_total) AS ap FROM unilever_reconcile_log GROUP BY bank_txn_id) lg ON lg.bank_txn_id = t.id
          WHERE $where
          ORDER BY t.transaction_date DESC
          LIMIT 100");
