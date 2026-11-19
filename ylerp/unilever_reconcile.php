@@ -416,6 +416,28 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'settings_save') {
 /* ══════════════════════════════════════════════════════════
    AJAX: claim_items — the claim certificates behind one row's Claim Total (banking date + entity)
 ══════════════════════════════════════════════════════════ */
+/* Drives & Loyalty check: every Drives & Loyalty claim of the Customer Claim certificates, and which Claim Total row it is in (or why not) */
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'dl_check') {
+    header('Content-Type: application/json');
+    $in = [];
+    $r = mysqli_query($conn, "SELECT id, bdate, entity FROM (" . ulr_claims_src($conn) . ") z");
+    while ($r && ($x = mysqli_fetch_assoc($r))) $in[(int)$x['id']] = $x;
+    $r = mysqli_query($conn, "SELECT ci.id, ci.claim_type, ci.customer_code, ci.customer_name, ci.tax_invoice_no, ci.invoice_date, ci.banking_date, ci.entity, ci.claim_description,
+                                     COALESCE(ci.total_amount,0) AS total_amount, ci.imported_at
+                              FROM claim_cert_items ci WHERE ci.claim_type LIKE '%Loyalty%' OR ci.claim_type LIKE '%Driv%'
+                              ORDER BY ci.banking_date IS NULL, ci.banking_date DESC, ci.id DESC LIMIT 1000");
+    if (!$r) { echo json_encode(['ok' => false, 'msg' => 'Could not read the claims: ' . mysqli_error($conn)]); exit; }
+    $rows = [];
+    while ($x = mysqli_fetch_assoc($r)) {
+        $g = $in[(int)$x['id']] ?? null;
+        $x['in_bdate'] = $g['bdate'] ?? null; $x['in_entity'] = $g['entity'] ?? null;
+        $x['why'] = $g ? 'Added to ' . $g['bdate'] . ($g['entity'] !== null && $g['entity'] !== '' ? ' · ' . $g['entity'] : '')
+                       : (empty($x['banking_date']) || $x['banking_date'] === '0000-00-00' ? 'NOT added — no Banking Date on the certificate line' : 'NOT added');
+        $rows[] = $x;
+    }
+    echo json_encode(['ok' => true, 'rows' => $rows]); exit;
+}
+
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'claim_items') {
     header('Content-Type: application/json');
     $bd = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['bdate'] ?? '') ? $_GET['bdate'] : '';
@@ -1547,6 +1569,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);}
     </select>
     <button class="btn-cancel-sm" id="saveSettingsBtn" onclick="saveSettings(true)" title="Save account + type as the default"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
     <span id="settingsInfo" style="font-size:11px;color:var(--muted);font-weight:600;"></span>
+    <button class="btn-cancel-sm" type="button" onclick="dlCheck()" title="Drives &amp; Loyalty Programs claims of the Customer Claim certificates — which Claim Total each is in"><i class="fa-solid fa-trophy"></i> Check Drives &amp; Loyalty</button>
     <button class="btn-run" id="runBtn" onclick="runReconcile()">
       <i class="fa-solid fa-arrows-rotate"></i> Reload
     </button>
@@ -2615,6 +2638,25 @@ async function showClaimItems(idx){
         +'<td class="r">'+fmtN(x.actual_amount)+'</td><td class="r">'+fmtN(x.vat_amount)+'</td><td class="r"><b>'+fmtN(x.total_amount)+'</b></td></tr>').join('')
       +'</tbody><tfoot><tr><td colspan="6" class="r">Total ('+L.length+' claims)</td><td class="r">'+fmtN(ta)+'</td><td class="r">'+fmtN(tv)+'</td><td class="r">'+fmtN(tt)+'</td></tr></tfoot></table></div>';
     document.getElementById('ciB').innerHTML=L.length?h:'<div style="padding:20px;color:#6b7280">No claims found.</div>';
+  }catch(e){ document.getElementById('ciB').innerHTML='<div style="padding:20px;color:#dc2626">'+esc(e.message)+'</div>'; }
+}
+async function dlCheck(){
+  let m=document.getElementById('ciModal');
+  if(!m){ m=document.createElement('div'); m.id='ciModal'; m.className='ci-ov'; m.onclick=e=>{ if(e.target===m) m.classList.remove('open'); };
+    m.innerHTML='<div class="ci-box"><div class="ci-hd"><div><b id="ciT"></b><div id="ciS" style="font-size:12px;opacity:.85"></div></div><button type="button" onclick="document.getElementById(\'ciModal\').classList.remove(\'open\')">&times;</button></div><div class="ci-bd" id="ciB"></div></div>';
+    document.body.appendChild(m); }
+  document.getElementById('ciT').textContent='Drives & Loyalty Programs — Customer Claim certificates';
+  document.getElementById('ciS').textContent='Which Claim Total (banking date · entity) each claim is in';
+  document.getElementById('ciB').innerHTML='<div style="padding:20px;color:#6b7280">Loading…</div>'; m.classList.add('open');
+  try{
+    const r=await fetch(_page+'?ajax=dl_check',{credentials:'same-origin'}); const d=await ulrJson(r); if(!d.ok) throw new Error(d.msg||'Failed');
+    const L=d.rows||[]; const inn=L.filter(x=>x.in_bdate), out=L.filter(x=>!x.in_bdate);
+    const sum=a=>a.reduce((t,x)=>t+parseFloat(x.total_amount||0),0);
+    let h='<div class="ci-types"><span><b>Total</b> · '+L.length+' · LKR '+fmtN(sum(L))+'</span><span style="background:#ecfdf5;border-color:#a7f3d0;color:#065f46"><b>Added</b> · '+inn.length+' · LKR '+fmtN(sum(inn))+'</span><span style="background:#fef2f2;border-color:#fecaca;color:#991b1b"><b>Not added</b> · '+out.length+' · LKR '+fmtN(sum(out))+'</span></div>';
+    h+='<div style="overflow:auto"><table class="ci-t"><thead><tr><th>#</th><th>Claim type</th><th>Customer</th><th>Tax invoice</th><th>Invoice date</th><th>Banking date</th><th>Entity</th><th class="r">Total</th><th>In Claim Total?</th></tr></thead><tbody>'
+      +L.map((x,i)=>'<tr'+(x.in_bdate?'':' style="background:#fef2f2"')+'><td>'+(i+1)+'</td><td>'+esc(x.claim_type||'—')+'</td><td>'+esc(x.customer_code||'')+'<div style="font-size:11px;color:#6b7280">'+esc(x.customer_name||'')+'</div></td><td>'+esc(x.tax_invoice_no||'—')+'</td><td style="white-space:nowrap">'+esc(fmtDate(x.invoice_date))+'</td><td style="white-space:nowrap"><b>'+esc(x.banking_date?fmtDate(x.banking_date):'— none —')+'</b></td><td>'+esc(x.entity===null?'(null)':(x.entity===''?'(blank)':x.entity))+'</td><td class="r"><b>'+fmtN(x.total_amount)+'</b></td><td style="font-weight:700;color:'+(x.in_bdate?'#047857':'#b91c1c')+'">'+esc(x.why)+'</td></tr>').join('')
+      +'</tbody></table></div>';
+    document.getElementById('ciB').innerHTML=L.length?h:'<div style="padding:20px;color:#b91c1c;font-weight:700">No Drives &amp; Loyalty claims found in the Customer Claim certificates (claim_cert_items). They were not imported — check the import of the certificate (rows without a Tax Invoice No or with the same Tax Invoice No + Entity are skipped).</div>';
   }catch(e){ document.getElementById('ciB').innerHTML='<div style="padding:20px;color:#dc2626">'+esc(e.message)+'</div>'; }
 }
 document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const m=document.getElementById('ciModal'); if(m) m.classList.remove('open'); } });
