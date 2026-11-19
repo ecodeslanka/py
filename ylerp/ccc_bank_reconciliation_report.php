@@ -20,7 +20,7 @@ $hasCC = cb_has($conn, 'claim_cert_items');
 $hasRec = cb_has($conn, 'unilever_reconcile_log') && cb_has($conn, 'unilever_reconcile_claim_lines');
 $ulrAcc = 0; $ulrBt = '';
 if (cb_has($conn, 'unilever_recon_settings')) { $sr = cb_q($conn, "SELECT bank_account_id, UPPER(bank_type) AS bt FROM unilever_recon_settings WHERE id = 1 LIMIT 1"); $sx = $sr ? mysqli_fetch_assoc($sr) : null; $ulrAcc = (int)($sx['bank_account_id'] ?? 0); $ulrBt = (string)($sx['bt'] ?? ''); }
-$ulrLogW = '1=1';   // the same reconcile entries Unilever Reconcile counts: every account, bank line still there
+$ulrLogW = $ulrAcc > 0 ? "l.account_id = $ulrAcc" : '1=1';   // the same reconcile entries Unilever Reconcile counts: its saved account, bank line still there
 $canRemove = function_exists('rbac_can') ? (bool)rbac_can('delete', 'unilever_reconcile') : true;   // removing a reconciled payment = a delete on Unilever Reconcile
 
 /* ═════════ detail of one banking date + entity ═════════ */
@@ -73,7 +73,7 @@ foreach ($groups as $g) {
     $rows[] = $g;
 }
 /* ═════════ rest of the bank: Unilever bank-statement credits (Unilever Reconcile Settings account / type) that are not fully reconciled ═════════ */
-$UL_DESC = ['UNILEVER LANKA CONSUMER LIMITED', 'UNILEVER SRI LANKA LIMITED', 'UNILEVER SRI LANKA LIMITED USLL', 'UNILEVER LANKA CONSUMER LIMITED ULCL', 'UNILEVER SRI LANKA LTD', 'UNILEVER LANKA CONSUMER LTD', 'UNILEVER LIPTON CEYLON LIMITED', 'UNILEVER', 'ULCL', 'USLL'];
+$UL_DESC = ['UNILEVER LANKA CONSUMER LIMITED', 'UNILEVER SRI LANKA LIMITED', 'UNILEVER SRI LANKA LIMITED USLL', 'UNILEVER LANKA CONSUMER LIMITED ULCL', 'UNILEVER SRI LANKA LTD', 'UNILEVER LANKA CONSUMER LTD', 'UNILEVER LIPTON CEYLON LIMITED'];
 $bank = []; $bankTot = ['n' => 0, 'credit' => 0.0, 'applied' => 0.0, 'left' => 0.0]; $bankCfg = ''; $bankErr = '';
 if (cb_has($conn, 'bank_statement_transactions') && cb_has($conn, 'bank_statement_uploads') && cb_has($conn, 'unilever_recon_settings')) {
     $acc = $ulrAcc; $bt = $ulrBt;
