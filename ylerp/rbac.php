@@ -50,6 +50,9 @@ $GLOBALS['RBAC_EXTRA_BUTTONS'] = [
         'fs_reverse_verify' => 'Reverse / Undo Verify (View Field Summary)',
         'fs_open_close'     => 'Open / Close lock (View Field Summary)',
     ],
+    'cheques' => [
+        'chq_delete'        => 'Delete Cheque (View cheque window)',
+    ],
 ];
 /* Buttons that are OFF until a role is given them (unticked by default in the role form; admin / full access always has them).
    Every other button is on until a role is unticked. */
@@ -115,6 +118,7 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     // Cheques
     'cheque_edit'          => ['cheques', 'edit'],
     'update_cheque_details'=> ['cheques', 'edit'],
+    'cheque_delete_action' => ['cheques', 'delete'],
     // Vehicles
     'view_vehicle'         => ['vehicles', 'view'],
     'vehicle_schedule_view'=> ['vehicle_schedule', 'view'],
