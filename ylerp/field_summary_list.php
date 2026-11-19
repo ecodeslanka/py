@@ -58,41 +58,55 @@ if ($txn_status === 'ok') {
     $txn_where = "WHERE total_rows = 0";
 }
 
-$summaries_result = mysqli_query($conn,
-    "SELECT * FROM (
+/* ── speed: the lookup columns need an index (added once, only when missing) ── */
+foreach ([['field_summary_details', 'field_summary_id'], ['invoice_payments', 'field_summary_detail_id'], ['loading_summary_import_details', 'bill_no']] as [$__t, $__c]) {
+    $__r = @mysqli_query($conn, "SHOW INDEX FROM `$__t` WHERE Column_name = '$__c'");
+    if ($__r && mysqli_num_rows($__r) === 0) @mysqli_query($conn, "ALTER TABLE `$__t` ADD INDEX `idx_$__c` (`$__c`)");
+}
+
+/* ── pages: 100 summaries a page by default (50 / 100 / 250 / all) ── */
+$per_page = isset($_GET['per']) && in_array($_GET['per'], ['50', '100', '250', 'all'], true) ? $_GET['per'] : '100';
+$page_no  = max(1, intval($_GET['p'] ?? 1));
+
+/* payments are added up ONCE per invoice (not one sub-query per invoice row) — same result as before */
+$summary_sql = "SELECT * FROM (
         SELECT fs.*,
                COUNT(fsd.id) AS total_rows,
                COALESCE(SUM(
                    CASE WHEN fsd.updated = 1 THEN 1
-                        WHEN COALESCE((
-                            SELECT SUM(ip.amount)
-                            FROM invoice_payments ip
-                            WHERE ip.field_summary_detail_id = fsd.id
-                        ), 0) >= fsd.adjust_net_value THEN 1
+                        WHEN COALESCE(pay.paid, 0) >= fsd.adjust_net_value THEN 1
                         ELSE 0 END
                ), 0) AS updated_rows
         FROM field_summary fs
         LEFT JOIN field_summary_details fsd ON fsd.field_summary_id = fs.id
+        LEFT JOIN (SELECT field_summary_detail_id, SUM(amount) AS paid FROM invoice_payments GROUP BY field_summary_detail_id) pay
+               ON pay.field_summary_detail_id = fsd.id
         $where
         GROUP BY fs.id
     ) AS sub
-    $txn_where
-    ORDER BY created_at DESC"
-);
+    $txn_where";
+$__cnt = mysqli_query($conn, "SELECT COUNT(*) FROM ($summary_sql) c");
+$total_summaries = $__cnt ? (int)(mysqli_fetch_row($__cnt)[0] ?? 0) : 0;
+$pages = $per_page === 'all' ? 1 : max(1, (int)ceil($total_summaries / (int)$per_page));
+if ($page_no > $pages) $page_no = $pages;
+$summaries_result = mysqli_query($conn, "$summary_sql ORDER BY created_at DESC" . ($per_page === 'all' ? '' : ' LIMIT ' . (int)$per_page . ' OFFSET ' . (($page_no - 1) * (int)$per_page)));
 
-// Build a map of field_summary_id => array of distinct SR codes from loading_summary_import_details
+/* SR codes from the loading summary — only for the summaries on this page */
 $sr_map = [];
-$sr_map_result = mysqli_query($conn,
+$__ids = [];
+if ($summaries_result) { while ($__x = mysqli_fetch_assoc($summaries_result)) $__ids[] = (int)$__x['id']; if ($__ids) mysqli_data_seek($summaries_result, 0); }
+$sr_map_result = $__ids ? mysqli_query($conn,
     "SELECT fsd.field_summary_id, lsi.sales_person_code
      FROM field_summary_details fsd
-     LEFT JOIN loading_summary_import_details lsi
+     INNER JOIN field_summary fsx ON fsx.id = fsd.field_summary_id
+     INNER JOIN loading_summary_import_details lsi
             ON lsi.bill_no = fsd.invoice_num
-           AND lsi.delivery_date = (SELECT delivery_date FROM field_summary WHERE id = fsd.field_summary_id LIMIT 1)
-     WHERE lsi.sales_person_code IS NOT NULL
+           AND lsi.delivery_date = fsx.delivery_date
+     WHERE fsd.field_summary_id IN (" . implode(',', $__ids) . ")
+       AND lsi.sales_person_code IS NOT NULL
        AND lsi.sales_person_code != ''
      GROUP BY fsd.field_summary_id, lsi.sales_person_code
-     ORDER BY fsd.field_summary_id, lsi.sales_person_code"
-);
+     ORDER BY fsd.field_summary_id, lsi.sales_person_code") : false;
 if ($sr_map_result) {
     while ($sr_row = mysqli_fetch_assoc($sr_map_result)) {
         $fid = $sr_row['field_summary_id'];
@@ -100,6 +114,7 @@ if ($sr_map_result) {
         $sr_map[$fid][] = $sr_row['sales_person_code'];
     }
 }
+function fsl_url($over) { $q = array_merge($_GET, $over); foreach ($q as $k => $v) if ($v === '' || $v === null) unset($q[$k]); return 'field_summary_list.php?' . http_build_query($q); }
 
 $has_filter = ($date_from !== '' || $date_to !== '' || $search !== '' || $txn_status !== '' || $scan_status !== '' || $verify_status !== '');
 ?>
@@ -513,7 +528,7 @@ select.filter-input { cursor: pointer; min-width: 175px; }
                         }
                         echo implode(' &nbsp;·&nbsp; ', $parts);
                     ?>
-                    &nbsp;·&nbsp; <?php echo $summaries_result ? mysqli_num_rows($summaries_result) : 0; ?> result(s)
+                    &nbsp;·&nbsp; <?php echo number_format($total_summaries); ?> result(s)
                 </span>
             </div>
             <?php endif; ?>
@@ -718,6 +733,23 @@ select.filter-input { cursor: pointer; min-width: 175px; }
             <?php endif; ?>
             </tbody>
         </table>
+    </div>
+    <!-- pages -->
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:12px 4px 2px;font-size:13px;color:#6b7280;">
+        <span>Showing <?php echo $total_summaries ? number_format(($per_page === 'all' ? 0 : ($page_no - 1) * (int)$per_page) + 1) . '–' . number_format($per_page === 'all' ? $total_summaries : min($total_summaries, $page_no * (int)$per_page)) : 0; ?> of <?php echo number_format($total_summaries); ?> field summaries</span>
+        <span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+            <?php if ($pages > 1): $__from = max(1, $page_no - 3); $__to = min($pages, $page_no + 3); ?>
+                <?php if ($page_no > 1): ?><a class="btn btn-secondary" style="padding:5px 10px" href="<?php echo htmlspecialchars(fsl_url(['p' => $page_no - 1])); ?>">‹ Prev</a><?php endif; ?>
+                <?php if ($__from > 1): ?><a class="btn btn-secondary" style="padding:5px 10px" href="<?php echo htmlspecialchars(fsl_url(['p' => 1])); ?>">1</a><?php if ($__from > 2): ?>…<?php endif; endif; ?>
+                <?php for ($__i = $__from; $__i <= $__to; $__i++): ?><a class="btn <?php echo $__i === $page_no ? 'btn-primary' : 'btn-secondary'; ?>" style="padding:5px 10px" href="<?php echo htmlspecialchars(fsl_url(['p' => $__i])); ?>"><?php echo $__i; ?></a><?php endfor; ?>
+                <?php if ($__to < $pages): if ($__to < $pages - 1): ?>…<?php endif; ?><a class="btn btn-secondary" style="padding:5px 10px" href="<?php echo htmlspecialchars(fsl_url(['p' => $pages])); ?>"><?php echo $pages; ?></a><?php endif; ?>
+                <?php if ($page_no < $pages): ?><a class="btn btn-secondary" style="padding:5px 10px" href="<?php echo htmlspecialchars(fsl_url(['p' => $page_no + 1])); ?>">Next ›</a><?php endif; ?>
+            <?php endif; ?>
+            <label style="margin-left:8px">Per page
+                <select onchange="location.href=this.value" style="padding:4px 6px;border:1px solid #e5e5e5;border-radius:6px;">
+                    <?php foreach (['50', '100', '250', 'all'] as $__pp): ?><option value="<?php echo htmlspecialchars(fsl_url(['per' => $__pp, 'p' => ''])); ?>" <?php echo $per_page === $__pp ? 'selected' : ''; ?>><?php echo $__pp === 'all' ? 'All' : $__pp; ?></option><?php endforeach; ?>
+                </select></label>
+        </span>
     </div>
 </div>
 
