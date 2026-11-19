@@ -1,6 +1,7 @@
 <?php
 /**
  * cheque_delete_addon.php — adds a "Delete Cheque" button to the View cheque window of cheques.php
+ * Also adds a red Delete button next to Edit on each cheque row, and in the Verify window.
  * Put this ONE line in cheques.php, just before   include 'footer.php';
  *      <?php include 'cheque_delete_addon.php'; ?>
  * The delete itself is done by cheque_delete_action.php.
@@ -23,6 +24,8 @@ if (!$cdel_allowed) return;
 #cdelModal .cd-ft button{flex:1;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;font-size:13px}
 .vbtn-cdel{background:#dc2626!important;color:#fff!important;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;justify-content:center}
 .vbtn-cdel:hover{background:#b91c1c!important}
+.cdel-row-btn{background:#dc2626;color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;margin-left:4px;display:inline-flex;align-items:center;gap:4px}
+.cdel-row-btn:hover{background:#b91c1c}
 </style>
 <div id="cdelModal">
   <div class="cd-box">
@@ -41,29 +44,64 @@ if (!$cdel_allowed) return;
 </div>
 <script>
 (function(){
-  let cur = null;   // the cheque now open in the View window
-  const orig = window.openViewModal;
-  if (typeof orig === 'function') {
-    window.openViewModal = function(id, chequeNo, tcode, custName, amt){
-      cur = {id: id, no: chequeNo || '', cust: custName || '', amt: amt || ''};
-      const r = orig.apply(this, arguments);
-      addBtn();
-      return r;
-    };
+  /* Delete Cheque: (1) red Delete button next to Edit on every row, (2) in the View window, (3) in the Verify window */
+  const BLOCK = ['deposited','realized','realised','cleared','returned','return','settled'];
+  let cur = null;
+  function info(id){
+    const tr = document.getElementById('row-' + id), d = tr ? tr.dataset : {};
+    return {id: id, no: d.cheqno || d.chequeorig || '', cust: d.cust || '', amt: d.amt || '', status: (d.status || '').toLowerCase()};
   }
-  function addBtn(){
-    const foot = document.querySelector('#viewModal .viewmodal-foot');
-    if (!foot || document.getElementById('cdelBtn')) return;
+  function idFrom(onclick, fn){ const m = String(onclick || '').match(new RegExp(fn + '\\(\\s*[\'"]?(\\d+)')); return m ? m[1] : null; }
+  /* remember which cheque a window was opened for (works whatever way the page opens it) */
+  document.addEventListener('click', function(e){
+    const b = e.target.closest('[onclick]'); if (!b) return;
+    const oc = b.getAttribute('onclick');
+    const id = idFrom(oc, 'openViewModal') || idFrom(oc, 'openVerifyModal');
+    if (id) { cur = info(id); setTimeout(addModalBtns, 50); setTimeout(addModalBtns, 600); }
+  }, true);
+  ['openViewModal','openVerifyModal'].forEach(fn => {
+    const orig = window[fn];
+    if (typeof orig !== 'function') return;
+    window[fn] = function(id){ cur = info(id); const r = orig.apply(this, arguments); setTimeout(addModalBtns, 50); setTimeout(addModalBtns, 600); return r; };
+  });
+  function mkBtn(small){
     const b = document.createElement('button');
-    b.type = 'button'; b.id = 'cdelBtn'; b.className = 'vbtn vbtn-cdel';
-    b.innerHTML = '<i class="fa-solid fa-trash"></i> Delete Cheque';
-    b.onclick = cdelOpen;
-    foot.insertBefore(b, foot.firstChild);
+    b.type = 'button'; b.className = small ? 'cdel-row-btn' : 'vbtn vbtn-cdel cdel-modal-btn';
+    b.innerHTML = '<i class="fa-solid fa-trash"></i>' + (small ? ' Delete' : ' Delete Cheque');
+    return b;
   }
+  function addModalBtns(){
+    if (!cur) return;
+    const feet = [];
+    const vf = document.querySelector('#viewModal .viewmodal-foot'); if (vf) feet.push(vf);
+    const vc = document.querySelector('#verifyModal .vbtn-cancel'); if (vc && vc.parentElement) feet.push(vc.parentElement);
+    feet.forEach(f => {
+      let b = f.querySelector('.cdel-modal-btn');
+      if (!b) { b = mkBtn(false); b.onclick = () => cdelOpen(cur); f.insertBefore(b, f.firstChild); }
+      b.style.display = BLOCK.includes(cur.status) ? 'none' : '';
+    });
+  }
+  function addRowBtns(){
+    document.querySelectorAll('tr[id^="row-"]').forEach(tr => {
+      if (tr.querySelector('.cdel-row-btn')) return;
+      const id = tr.id.slice(4); if (!/^\d+$/.test(id)) return;
+      if (BLOCK.includes((tr.dataset.status || '').toLowerCase())) return;
+      const anchor = tr.querySelector('.edit-row-btn, .verify-btn, .view-verified-btn');
+      if (!anchor) return;
+      const b = mkBtn(true); b.title = 'Delete cheque';
+      b.onclick = (e) => { e.stopPropagation(); cdelOpen(info(id)); };
+      anchor.parentElement.appendChild(b);
+    });
+  }
+  let t = null;
+  new MutationObserver(() => { clearTimeout(t); t = setTimeout(addRowBtns, 120); }).observe(document.body, {childList:true, subtree:true});
+  document.addEventListener('DOMContentLoaded', addRowBtns); setTimeout(addRowBtns, 300); setTimeout(addRowBtns, 1500);
+
   function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  window.cdelOpen = function(){
+  window.cdelOpen = function(c){
+    if (c) cur = c;
     if (!cur || !cur.id) return;
-    document.getElementById('cdelInfo').innerHTML = 'Cheque No: <b>' + esc(cur.no) + '</b><br>Customer: <b>' + esc(cur.cust || '—') + '</b><br>Amount: <b>Rs. ' + esc(cur.amt || '—') + '</b><br><span style="color:#b91c1c">This removes the cheque from the register. A copy is kept for the record.</span>';
+    document.getElementById('cdelInfo').innerHTML = 'Cheque No: <b>' + esc(cur.no || ('#' + cur.id)) + '</b><br>Customer: <b>' + esc(cur.cust || '—') + '</b><br>Amount: <b>Rs. ' + esc(cur.amt || '—') + '</b><br><span style="color:#b91c1c">This removes the cheque from the register. A copy is kept for the record.</span>';
     document.getElementById('cdelReason').value = '';
     document.getElementById('cdelErr').style.display = 'none';
     document.getElementById('cdelModal').classList.add('open');
@@ -82,9 +120,10 @@ if (!$cdel_allowed) return;
       try { d = JSON.parse(raw); } catch(e) { throw new Error('Server error: ' + raw.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,250)); }
       if (!d.success) throw new Error(d.message || 'Could not delete.');
       cdelClose();
-      if (typeof closeViewModal === 'function') closeViewModal();
+      if (typeof closeViewModal === 'function') try { closeViewModal(); } catch(e) {}
+      if (typeof closeVerifyModal === 'function') try { closeVerifyModal(); } catch(e) {}
+      const tr = document.getElementById('row-' + cur.id); if (tr) tr.remove();
       if (typeof showToast === 'function') showToast('✓ ' + d.message, 'ok'); else alert(d.message);
-      setTimeout(() => location.reload(), 900);
     } catch(e) {
       err.textContent = e.message; err.style.display = 'block';
     } finally { go.disabled = false; go.innerHTML = '<i class="fa-solid fa-trash"></i> Delete'; }
