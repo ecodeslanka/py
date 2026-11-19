@@ -100,6 +100,14 @@ function ulr_claims_src($conn) {
             if (ulr_try($conn, "SELECT COUNT(*) FROM ($src$orph) z")) $src .= $orph;
         }
     }
+    /* a claim with no entity (e.g. a Drives & Loyalty Programs line left blank) joins the entity of its banking date,
+       when that date has only one entity — so it is added to that date + entity Claim Total */
+    $fill = "SELECT y.id, y.bdate, COALESCE(NULLIF(TRIM(y.entity),''),
+                 (SELECT MIN(e.entity) FROM claim_cert_items e WHERE e.banking_date IS NOT NULL AND DATE(e.banking_date) = y.bdate AND TRIM(COALESCE(e.entity,'')) <> ''
+                  HAVING COUNT(DISTINCT TRIM(e.entity)) = 1), y.entity) AS entity,
+                 y.total_amount, y.actual_amount, y.vat_amount, y.claim_type, y.customer_code, y.customer_name, y.tax_invoice_no, y.invoice_date, y.claim_description, y.src
+             FROM ($src) y";
+    if (ulr_try($conn, "SELECT COUNT(*) FROM ($fill) z")) $src = $fill;
     return $src;
 }
 
