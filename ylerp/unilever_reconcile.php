@@ -42,6 +42,35 @@ $UNILEVER_DESC_SETS = [
 ];
 $UNILEVER_DESC_SETS = array_values(array_unique($UNILEVER_DESC_SETS));
 
+/** The claims that make up a row's Claim Total (banking date + entity):
+ *   • claim certificates that have a banking date, and
+ *   • Drivers & Loyalty claims confirmed on the Drivers & Loyalty page with a banking date there, when the
+ *     certificate itself has no banking date (each claim counted once). */
+function ulr_claims_src($conn) {
+    static $src = null; if ($src !== null) return $src;
+    $src = "SELECT ci.id, DATE(ci.banking_date) AS bdate, ci.entity, ci.total_amount, ci.actual_amount, ci.vat_amount, ci.claim_type, ci.customer_code, ci.customer_name,
+                   ci.tax_invoice_no, ci.invoice_date, ci.claim_description, 'certificate' AS src
+            FROM claim_cert_items ci WHERE ci.banking_date IS NOT NULL AND ci.banking_date <> ''";
+    $t = @mysqli_query($conn, "SHOW TABLES LIKE 'dl_confirmed_payments'");
+    if ($t && mysqli_num_rows($t) > 0) {
+        $C = []; $cr = @mysqli_query($conn, "SHOW COLUMNS FROM dl_confirmed_payments"); while ($cr && ($x = mysqli_fetch_assoc($cr))) $C[strtolower($x['Field'])] = 1;
+        if (isset($C['claim_item_id'], $C['banking_date'])) {          // only the columns this table has
+            $d = fn($c, $ci, $txt = false) => isset($C[$c]) ? ($txt ? "COALESCE(NULLIF(dcp.$c,''), $ci)" : "COALESCE(dcp.$c, $ci)") : $ci;
+            $dn = fn($c, $ci) => isset($C[$c]) ? "COALESCE(NULLIF(dcp.$c,0), $ci)" : $ci;
+            $dal = " UNION ALL
+            SELECT dcp.claim_item_id, DATE(dcp.banking_date), " . $d('entity', 'ci.entity', true) . ",
+                   " . $dn('total_amount', 'ci.total_amount') . ", " . $dn('actual_amount', 'ci.actual_amount') . ", " . $d('vat_amount', 'ci.vat_amount') . ",
+                   COALESCE(NULLIF(ci.claim_type,''), " . (isset($C['claim_type']) ? 'dcp.claim_type' : "'Drivers & Loyalty'") . "), " . $d('customer_code', 'ci.customer_code', true) . ", " . $d('customer_name', 'ci.customer_name', true) . ",
+                   " . $d('tax_invoice_no', 'ci.tax_invoice_no', true) . ", " . $d('invoice_date', 'ci.invoice_date') . ", " . $d('claim_description', 'ci.claim_description', true) . ", 'drivers & loyalty'
+            FROM dl_confirmed_payments dcp LEFT JOIN claim_cert_items ci ON ci.id = dcp.claim_item_id
+            WHERE dcp.banking_date IS NOT NULL AND (ci.id IS NULL OR ci.banking_date IS NULL OR ci.banking_date = '')";
+            $ok = @mysqli_query($conn, "SELECT COUNT(*) FROM ($src$dal) z");   // if it cannot be read, keep the certificates only
+            if ($ok) $src .= $dal;
+        }
+    }
+    return $src;
+}
+
 function unilever_desc_where($conn, $sets, $col = 't.description') {
     $conditions = [];
     foreach ($sets as $pat) {
@@ -217,7 +246,7 @@ function ulr_over_check($conn, $bank_txn_id, $bank_field, $apply_total, array $l
         $bd = date('Y-m-d', strtotime($bd)); $key = $bd . '___' . $en;
         $amt = (float)($ln['cert_amount'] ?? $ln['claim_total'] ?? 0);
         $bde = mysqli_real_escape_string($conn, $bd); $ene = mysqli_real_escape_string($conn, $en);
-        $tq = mysqli_query($conn, "SELECT COALESCE(SUM(total_amount),0) FROM claim_cert_items WHERE DATE(banking_date) = '$bde' AND COALESCE(entity,'') = '$ene'");
+        $tq = mysqli_query($conn, "SELECT COALESCE(SUM(total_amount),0) FROM (" . ulr_claims_src($conn) . ") z WHERE bdate = '$bde' AND COALESCE(entity,'') = '$ene'");   /* the same Claim Total as the table */
         $total = $tq ? round((float)mysqli_fetch_row($tq)[0], 2) : 0.0;
         $pq = mysqli_query($conn, "SELECT COALESCE(SUM(cert_amount),0) FROM unilever_reconcile_claim_lines WHERE DATE(banking_date) = '$bde' AND COALESCE(entity,'') = '$ene'");
         $paid = $pq ? round((float)mysqli_fetch_row($pq)[0], 2) : 0.0;
@@ -353,9 +382,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'claim_items') {
     if ($bd === '') { echo json_encode(['ok' => false, 'msg' => 'No date']); exit; }
     $en = (string)($_GET['entity'] ?? ''); $ene = mysqli_real_escape_string($conn, $en);
     $ew = !empty($_GET['entity_null']) ? 'entity IS NULL' : "entity = '$ene'";   // the same group as the table row
-    $r = mysqli_query($conn, "SELECT id, customer_code, customer_name, claim_type, tax_invoice_no, invoice_date, claim_description,
+    $r = mysqli_query($conn, "SELECT id, customer_code, customer_name, claim_type, tax_invoice_no, invoice_date, claim_description, src,
                                      COALESCE(actual_amount,0) AS actual_amount, COALESCE(vat_amount,0) AS vat_amount, COALESCE(total_amount,0) AS total_amount
-                              FROM claim_cert_items WHERE DATE(banking_date) = '$bd' AND $ew ORDER BY claim_type, customer_code, id");
+                              FROM (" . ulr_claims_src($conn) . ") z WHERE bdate = '$bd' AND $ew ORDER BY src, claim_type, customer_code, id");
     $items = []; while ($r && ($x = mysqli_fetch_assoc($r))) $items[] = $x;
     echo json_encode(['ok' => true, 'items' => $items]); exit;
 }
@@ -370,14 +399,13 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'reconcile') {
 
     /* --- Step 1: Load all claim groups --- */
     $q = mysqli_query($conn,
-        "SELECT DATE(banking_date) AS bdate, entity,
+        "SELECT bdate, entity,
             SUM(total_amount) AS claim_total, COUNT(*) AS claim_count,
             GROUP_CONCAT(DISTINCT claim_type ORDER BY claim_type SEPARATOR ', ') AS claim_types,
             GROUP_CONCAT(DISTINCT customer_code ORDER BY customer_code SEPARATOR ', ') AS customers
-         FROM claim_cert_items
-         WHERE banking_date IS NOT NULL AND banking_date <> ''
-         GROUP BY DATE(banking_date), entity
-         ORDER BY bdate ASC, entity ASC");
+         FROM (" . ulr_claims_src($conn) . ") z
+         GROUP BY bdate, entity
+         ORDER BY bdate ASC, entity ASC");   /* certificates + Drivers & Loyalty confirmed claims */
     $claims = [];
     while ($r = mysqli_fetch_assoc($q)) $claims[] = $r;
 
@@ -2535,7 +2563,7 @@ async function showClaimItems(idx){
     L.forEach(x=>{ const k=x.claim_type||'(no type)'; by[k]=by[k]||{n:0,t:0}; by[k].n++; by[k].t+=parseFloat(x.total_amount); ta+=parseFloat(x.actual_amount); tv+=parseFloat(x.vat_amount); tt+=parseFloat(x.total_amount); });
     let h='<div class="ci-types">'+Object.keys(by).map(k=>'<span><b>'+esc(k)+'</b> · '+by[k].n+' · LKR '+fmtN(by[k].t)+'</span>').join('')+'</div>';
     h+='<div style="overflow:auto"><table class="ci-t"><thead><tr><th>#</th><th>Claim type</th><th>Customer</th><th>Tax invoice</th><th>Invoice date</th><th>Description</th><th class="r">Actual</th><th class="r">VAT</th><th class="r">Total</th></tr></thead><tbody>'
-      +L.map((x,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc(x.claim_type||'—')+'</td><td>'+esc(x.customer_code||'')+'<div style="font-size:11px;color:#6b7280">'+esc(x.customer_name||'')+'</div></td><td>'+esc(x.tax_invoice_no||'—')+'</td><td style="white-space:nowrap">'+esc(fmtDate(x.invoice_date))+'</td><td style="max-width:340px">'+esc(x.claim_description||'')+'</td>'
+      +L.map((x,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc(x.claim_type||'—')+(x.src==='drivers & loyalty'?'<div><span style="font-size:10.5px;font-weight:700;color:#7c3aed;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:99px;padding:1px 7px" title="Banking date from the Drivers &amp; Loyalty page">Drivers &amp; Loyalty</span></div>':'')+'</td><td>'+esc(x.customer_code||'')+'<div style="font-size:11px;color:#6b7280">'+esc(x.customer_name||'')+'</div></td><td>'+esc(x.tax_invoice_no||'—')+'</td><td style="white-space:nowrap">'+esc(fmtDate(x.invoice_date))+'</td><td style="max-width:340px">'+esc(x.claim_description||'')+'</td>'
         +'<td class="r">'+fmtN(x.actual_amount)+'</td><td class="r">'+fmtN(x.vat_amount)+'</td><td class="r"><b>'+fmtN(x.total_amount)+'</b></td></tr>').join('')
       +'</tbody><tfoot><tr><td colspan="6" class="r">Total ('+L.length+' claims)</td><td class="r">'+fmtN(ta)+'</td><td class="r">'+fmtN(tv)+'</td><td class="r">'+fmtN(tt)+'</td></tr></tfoot></table></div>';
     document.getElementById('ciB').innerHTML=L.length?h:'<div style="padding:20px;color:#6b7280">No claims found.</div>';
