@@ -413,6 +413,8 @@ include 'header.php';
     }).catch(function(){ $('mMsg').className='msg err'; $('mMsg').textContent='Connection problem — try again.'; });
   }
   $('mVer').onclick=function(){ setVerify('1'); }; $('mNver').onclick=function(){ setVerify('0'); }; $('mPend').onclick=function(){ setVerify(''); };
+  try{ if(localStorage.getItem('cbvAuto')==='0') $('mAuto').checked=false; }catch(e){}
+  $('mAuto').onchange=function(){ try{ localStorage.setItem('cbvAuto',this.checked?'1':'0'); }catch(e){} };
 
   $('cbvForm').addEventListener('submit',function(e){ e.preventDefault(); history.replaceState(null,'','credit_bill_scan_report.php?'+qs()); load(); });
   [].forEach.call(document.querySelectorAll('#cbvChips a'),function(a){ a.onclick=function(){ $('cFrom').value=a.dataset.from; $('cTo').value=a.dataset.to; $('cbvForm').dispatchEvent(new Event('submit',{cancelable:true})); }; });

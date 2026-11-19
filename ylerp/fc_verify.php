@@ -326,8 +326,9 @@ include 'header.php';
             <div class="foot">
                 <button class="vb v" id="mVer" type="button" title="Mark the FC check only — the cheque itself is not changed">✔ FC Verified</button>
                 <button class="vb nv" id="mNver" type="button" title="Mark the FC check only — the cheque itself is not changed">✖ Not FC verified</button>
+                <label style="font-size:12px;color:#374151;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="mAuto" checked> go to the next cheque after marking</label>
                 <span class="msg" id="mMsg"></span>
-                <span class="hint">FC check only — the cheque is not changed · ← → previous / next · click an image to zoom · Esc closes</span>
+                <span class="hint">FC check only — the cheque is not changed · V = FC verified · N = not · ← → previous / next · click an image to zoom · Esc closes</span>
             </div>
         </div>
         <div class="zoomov" id="zoomOv"><img id="zoomImg" alt=""></div>
@@ -452,10 +453,16 @@ include 'header.php';
       r.fc=val; r.fc_by=res.by||''; r.fc_at=res.at||'';   // the cheque's own Verified is not touched
       var tr=document.querySelector('#fcvBody tr[data-i="'+cur+'"] [data-c="fc"]'); if(tr) tr.innerHTML=fcBadge(r,1);
       var d=$('mList').querySelector('.li[data-i="'+cur+'"] .d'); if(d) d.style.background=fcCol(r);
-      kpis(); var keep=cur; show(keep); $('mMsg').className='msg ok'; $('mMsg').textContent=val?'Marked FC verified (log only — cheque not changed)':'Marked not FC verified';
+      kpis(); var at=cur, txt=(val?'Marked FC verified (log only — cheque not changed)':'Marked not FC verified')+' — '+(r.cheque_no||'');
+      if($('mAuto').checked&&at<rows.length-1) show(at+1); else show(at);          /* straight to the next cheque */
+      $('mMsg').className='msg ok'; $('mMsg').textContent=txt;
     }).catch(function(){ $('mMsg').className='msg err'; $('mMsg').textContent='Connection problem — try again.'; });
   }
   $('mVer').onclick=function(){ setVerify(1); }; $('mNver').onclick=function(){ setVerify(0); };
+  try{ if(localStorage.getItem('fcvAuto')==='0') $('mAuto').checked=false; }catch(e){}
+  $('mAuto').onchange=function(){ try{ localStorage.setItem('fcvAuto',this.checked?'1':'0'); }catch(e){} };
+  document.addEventListener('keydown',function(e){ if(!$('fcm').classList.contains('open')||!CAN_EDIT||e.target.closest('input,select,textarea')) return;
+    if(e.key==='v'||e.key==='V'){ e.preventDefault(); setVerify(1); } else if(e.key==='n'||e.key==='N'){ e.preventDefault(); setVerify(0); } });
 
   /* ── form / quick ranges ── */
   $('fcvForm').addEventListener('submit',function(e){ e.preventDefault(); history.replaceState(null,'','fc_verify.php?'+qs()); load(); });
