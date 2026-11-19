@@ -8,7 +8,9 @@
  *  • Click any cheque → LARGE modal with the cheque images, details and a scrollable list of every cheque in the
  *    range on the left. Previous / Next (or ← → keys, or click another cheque in the list) moves to the next one
  *    without reloading.
- *  • Mark Verified / Not Verified inside the modal (needs the Edit right; saved immediately + written to cheque_logs).
+ *  • FC Verified / Not FC verified inside the modal (needs the Edit right). This does NOT change the cheque itself
+ *    (cheques.verified and the status stay as they are): it is saved only as the FC check in cheque_fc_verify
+ *    (who, when) and written to cheque_logs. The cheque's own Verified status is only shown.
  *  • Export Excel of the loaded range (needs only View).
  * ─────────────────────────────────────────────────────────────────────
  */
@@ -37,6 +39,12 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS cheque_logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP, created_by VARCHAR(100) DEFAULT 'system',
     INDEX (cheque_id), INDEX (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+/* the FC check — kept apart from the cheque (never changes cheques.verified or the status) */
+mysqli_query($conn, "CREATE TABLE IF NOT EXISTS cheque_fc_verify (
+    cheque_id INT NOT NULL PRIMARY KEY, fc_status TINYINT(1) NOT NULL DEFAULT 1,
+    fc_by VARCHAR(100) NULL, fc_at DATETIME NULL, INDEX (fc_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+function fcv_fc_filter() { $v = $_GET['fc'] ?? 'all'; return in_array($v, ['all', 'yes', 'no'], true) ? $v : 'all'; }
 
 /* ── shared loader: same filters for the screen and the Excel export ── */
 function fcv_load($conn, $from, $to, $verify, $scan, $status, $q) {
@@ -49,6 +57,9 @@ function fcv_load($conn, $from, $to, $verify, $scan, $status, $q) {
     if ($scan === 'yes')   $where[] = "($hasF OR $hasB)";
     if ($scan === 'no')    $where[] = "(NOT $hasF AND NOT $hasB)";
     if ($status !== '')    $where[] = "ch.status = '" . mysqli_real_escape_string($conn, $status) . "'";
+    $fc = fcv_fc_filter();
+    if ($fc === 'yes') $where[] = "fv.fc_status = 1";
+    if ($fc === 'no')  $where[] = "COALESCE(fv.fc_status,0) <> 1";
     if ($q !== '') {
         $e = mysqli_real_escape_string($conn, $q);
         $where[] = "(ch.cheque_no LIKE '%$e%' OR ch.t_code LIKE '%$e%' OR ch.bank_code LIKE '%$e%' OR ch.bank_name LIKE '%$e%'
@@ -60,8 +71,10 @@ function fcv_load($conn, $from, $to, $verify, $scan, $status, $q) {
                    COALESCE(NULLIF(fsd.customer_name,''), c.shop_name, NULLIF(ch.t_code,''),
                             CASE WHEN ch.sampath IS NOT NULL AND ch.sampath <> '' THEN CONCAT('Sampath Payment #', COALESCE(ch.sampath_payment_id,0)) END) AS customer_name,
                    (ch.sampath IS NOT NULL AND ch.sampath <> '') AS is_sampath, ch.sampath_description,
-                   COALESCE(ch.verified,0) AS verified, ch.cheque_front_image, ch.cheque_back_image
+                   COALESCE(ch.verified,0) AS verified, ch.cheque_front_image, ch.cheque_back_image,
+                   COALESCE(fv.fc_status,-1) AS fc, fv.fc_by, fv.fc_at
             FROM cheques ch
+            LEFT JOIN cheque_fc_verify fv ON fv.cheque_id = ch.id
             LEFT JOIN invoice_payments ip ON ip.id = ch.invoice_payment_id
             LEFT JOIN field_summary fs ON fs.id = ip.field_summary_id
             LEFT JOIN field_summary_details fsd ON fsd.id = ip.field_summary_detail_id
@@ -72,7 +85,7 @@ function fcv_load($conn, $from, $to, $verify, $scan, $status, $q) {
     $rows = [];
     $res = mysqli_query($conn, $sql);
     if ($res) while ($r = mysqli_fetch_assoc($res)) {
-        $r['id'] = (int)$r['id']; $r['amount'] = (float)$r['amount']; $r['verified'] = (int)$r['verified']; $r['is_sampath'] = (int)$r['is_sampath'];
+        $r['id'] = (int)$r['id']; $r['amount'] = (float)$r['amount']; $r['verified'] = (int)$r['verified']; $r['fc'] = (int)$r['fc']; $r['is_sampath'] = (int)$r['is_sampath'];
         $r['front'] = trim((string)$r['cheque_front_image']); $r['back'] = trim((string)$r['cheque_back_image']);
         unset($r['cheque_front_image'], $r['cheque_back_image']);
         $rows[] = $r;
@@ -105,13 +118,15 @@ if (($_POST['action'] ?? '') === 'update_verify') {          // 'update_*' → n
     $cid = intval($_POST['cheque_id'] ?? 0);
     $val = ($_POST['value'] ?? '') === '1' ? 1 : 0;
     if (!$cid) { echo json_encode(['success' => false, 'error' => 'Invalid cheque.']); exit; }
-    $o = mysqli_query($conn, "SELECT COALESCE(verified,0) FROM cheques WHERE id = $cid LIMIT 1");
-    $old = $o ? (int)(mysqli_fetch_row($o)[0] ?? 0) : 0;
-    if (!mysqli_query($conn, "UPDATE cheques SET verified = $val WHERE id = $cid")) { echo json_encode(['success' => false, 'error' => mysqli_error($conn)]); exit; }
-    $cu = mysqli_real_escape_string($conn, fcv_user());
+    /* FC check only: the cheque (verified flag, status) is NOT changed */
+    $o = mysqli_query($conn, "SELECT fc_status FROM cheque_fc_verify WHERE cheque_id = $cid LIMIT 1");
+    $old = ($o && ($x = mysqli_fetch_row($o))) ? (string)$x[0] : '';
+    $cu = mysqli_real_escape_string($conn, fcv_user()); $now = date('Y-m-d H:i:s');
+    if (!mysqli_query($conn, "INSERT INTO cheque_fc_verify (cheque_id, fc_status, fc_by, fc_at) VALUES ($cid, $val, '$cu', '$now')
+                              ON DUPLICATE KEY UPDATE fc_status = VALUES(fc_status), fc_by = VALUES(fc_by), fc_at = VALUES(fc_at)")) { echo json_encode(['success' => false, 'error' => mysqli_error($conn)]); exit; }
     mysqli_query($conn, "INSERT INTO cheque_logs (cheque_id, action, old_value, new_value, note, created_by)
-                         VALUES ($cid, 'verified', '$old', '$val', 'Marked " . ($val ? 'Verified' : 'Not Verified') . " (FC Verify)', '$cu')");
-    echo json_encode(['success' => true, 'value' => $val]);
+                         VALUES ($cid, 'fc_verified', '$old', '$val', 'Marked " . ($val ? 'FC Verified' : 'Not FC verified') . " (FC Verify - cheque not changed)', '$cu')");
+    echo json_encode(['success' => true, 'value' => $val, 'by' => fcv_user(), 'at' => $now]);
     exit;
 }
 
@@ -127,11 +142,11 @@ if (isset($_GET['export'])) {
     $s->set(1, 1, 'FC Verify — cheques received ' . date('d M Y', strtotime($from)) . ' to ' . date('d M Y', strtotime($to)), ['b' => 1, 'sz' => 16, 'color' => 'FFFFFF', 'bg' => '0F766E', 'indent' => 1]);
     for ($c = 2; $c <= 13; $c++) $s->set(1, $c, '', ['bg' => '0F766E']);
     $s->merge(1, 1, 1, 13); $s->heights[1] = 30;
-    $nv = count(array_filter($rows, fn($r) => $r['verified'])); $nu = count(array_filter($rows, fn($r) => $r['front'] !== '' || $r['back'] !== ''));
-    $s->set(2, 1, 'Cheques: ' . count($rows) . '   ·   Verified: ' . $nv . '   ·   Not verified: ' . (count($rows) - $nv) . '   ·   Scan uploaded: ' . $nu . '   ·   Not uploaded: ' . (count($rows) - $nu)
+    $nv = count(array_filter($rows, fn($r) => $r['verified'])); $nfc = count(array_filter($rows, fn($r) => $r['fc'] === 1)); $nu = count(array_filter($rows, fn($r) => $r['front'] !== '' || $r['back'] !== ''));
+    $s->set(2, 1, 'Cheques: ' . count($rows) . '   ·   Verified: ' . $nv . '   ·   Not verified: ' . (count($rows) - $nv) . '   ·   FC verified: ' . $nfc . '   ·   Scan uploaded: ' . $nu . '   ·   Not uploaded: ' . (count($rows) - $nu)
         . '   ·   Total Rs. ' . number_format(array_sum(array_column($rows, 'amount')), 2) . '   ·   Generated ' . date('d M Y H:i') . ' by ' . fcv_user(), ['i' => 1, 'color' => '6B7280']);
     $s->merge(2, 1, 2, 13);
-    foreach (['#', 'Received date', 'Cheque no', 'Cheque date', 'Customer', 'T code', 'SR', 'Bank', 'Amount', 'Status', 'Verified', 'Front scan', 'Back scan', 'Cheque pay mode'] as $i => $h) $s->set(4, $i + 1, $h, $H);
+    foreach (['#', 'Received date', 'Cheque no', 'Cheque date', 'Customer', 'T code', 'SR', 'Bank', 'Amount', 'Status', 'Cheque verified', 'Front scan', 'Back scan', 'Cheque pay mode', 'FC verified', 'FC by', 'FC at'] as $i => $h) $s->set(4, $i + 1, $h, $H);
     $r = 5; $n = 1;
     foreach ($rows as $x) {
         $bg = ($r % 2) ? ['bg' => 'F3F4F6'] : [];
@@ -141,11 +156,13 @@ if (isset($_GET['export'])) {
         $s->set($r, 11, $x['verified'] ? 'Verified' : 'Not verified', ['border' => 1, 'h' => 'center', 'b' => 1, 'color' => $x['verified'] ? '15803D' : 'B91C1C'] + $bg);
         $s->set($r, 12, $x['front'] !== '' ? 'Uploaded' : 'Not uploaded', ['border' => 1, 'h' => 'center', 'color' => $x['front'] !== '' ? '15803D' : 'B91C1C'] + $bg);
         $s->set($r, 13, $x['back'] !== '' ? 'Uploaded' : 'Not uploaded', ['border' => 1, 'h' => 'center', 'color' => $x['back'] !== '' ? '15803D' : 'B91C1C'] + $bg);
+        $s->set($r, 15, $x['fc'] === 1 ? 'FC Verified' : ($x['fc'] === 0 ? 'Not FC verified' : 'Not checked'), ['border' => 1, 'h' => 'center', 'b' => 1, 'color' => $x['fc'] === 1 ? '15803D' : 'B45309'] + $bg);
+        $s->set($r, 16, (string)$x['fc_by'], ['border' => 1] + $bg); $s->set($r, 17, (string)$x['fc_at'], ['border' => 1] + $bg);
         $cm = strtolower(trim((string)$x['cheque_mode'])); $s->set($r, 14, in_array($cm, ['payee_only', 'payee only', 'payee', 'account payee', 'a/c payee'], true) ? 'Payee Only' : (in_array($cm, ['cash', 'bearer', 'open'], true) ? 'Cash / Bearer' : (strpos($cm, 'third') !== false || strpos($cm, '3rd') !== false ? '3rd Party Cash' : ($cm === '' ? 'Not set' : ucwords(str_replace('_', ' ', $cm))))), ['border' => 1, 'h' => 'center'] + $bg);
         $r++;
     }
-    foreach ([5, 14, 14, 14, 34, 10, 10, 26, 16, 14, 14, 14, 14, 16] as $i => $w) $s->widths[$i + 1] = $w;
-    $s->freeze = [4, 0]; $s->filter = 'A4:N' . max(5, $r - 1);
+    foreach ([5, 14, 14, 14, 34, 10, 10, 26, 16, 14, 14, 14, 14, 16, 15, 16, 18] as $i => $w) $s->widths[$i + 1] = $w;
+    $s->freeze = [4, 0]; $s->filter = 'A4:Q' . max(5, $r - 1);
     $tmp = tempnam(sys_get_temp_dir(), 'fv'); $X->save($tmp);
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -180,7 +197,7 @@ include 'header.php';
 .fcv .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
 .fcv .chips a { padding:4px 11px; border:1px solid var(--line); border-radius:999px; font-size:12px; text-decoration:none; color:var(--muted); background:#fff; cursor:pointer; }
 .fcv .chips a.on { background:#111827; border-color:#111827; color:#fff; }
-.fcv .kpis { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-bottom:14px; }
+.fcv .kpis { display:grid; grid-template-columns:repeat(7,1fr); gap:10px; margin-bottom:14px; }
 .fcv .kpi { background:#fff; border:1px solid var(--line); border-radius:10px; padding:11px 13px; } .fcv .kpi .l { font-size:11px; font-weight:600; color:var(--muted); }
 .fcv .kpi .v { font-size:20px; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums; }
 .fcv .kpi.g .v { color:var(--green); } .fcv .kpi.r .v { color:var(--red); }
@@ -193,6 +210,7 @@ include 'header.php';
 .fcv .badge.g { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; } .fcv .badge.r { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
 .fcv .badge.a { background:#fffbeb; color:#b45309; border-color:#fde68a; } .fcv .badge.s { background:#f3f4f6; color:#374151; border-color:#e5e7eb; text-transform:capitalize; }
 .fcv .badge.y { background:#fef9c3; color:#854d0e; border-color:#fde047; }
+.fcv .badge.fc, .fcm .badge.fc { background:#ccfbf1; color:#0f766e; border-color:#5eead4; } .fcm .badge.a { background:#fffbeb; color:#b45309; border-color:#fde68a; } .fcm .badge.s { background:#f3f4f6; color:#374151; border-color:#e5e7eb; }
 .fcv .empty { padding:34px 16px; text-align:center; color:var(--muted); }
 /* ── large modal (moved to <body> by the script so it always sits above the site header / sidebar) ── */
 .fcm { display:none; position:fixed; inset:0; z-index:2147483000; background:rgba(15,23,42,.82); backdrop-filter:blur(3px); padding:1.2vh 1vw; font-family:'Inter',system-ui,sans-serif; font-size:13px; color:#111827; }
@@ -254,6 +272,8 @@ include 'header.php';
             <div class="fld"><label for="fcTo">Received date to</label><input type="date" id="fcTo" name="date_to" value="<?= fcv_h($f_to) ?>" required></div>
             <div class="fld"><label for="fcVer">Show</label><select id="fcVer" name="verify">
                 <?php foreach (['yes' => 'Verified cheques', 'no' => 'Not verified', 'all' => 'All cheques'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_verify === $k ? ' selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
+            <div class="fld"><label for="fcFc">FC check</label><select id="fcFc" name="fc">
+                <?php $f_fc = fcv_fc_filter(); foreach (['all' => 'All', 'no' => 'Not FC verified', 'yes' => 'FC verified'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_fc === $k ? ' selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
             <div class="fld"><label for="fcScan">Scan</label><select id="fcScan" name="scan">
                 <?php foreach (['all' => 'All', 'yes' => 'Uploaded', 'no' => 'Not uploaded'] as $k => $l): ?><option value="<?= $k ?>"<?= $f_scan === $k ? ' selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
             <div class="fld"><label for="fcSt">Cheque status</label><select id="fcSt" name="status"><option value="">All</option>
@@ -269,8 +289,9 @@ include 'header.php';
 
     <section class="kpis">
         <div class="kpi"><div class="l">Cheques loaded</div><div class="v" id="kTot">0</div></div>
-        <div class="kpi g"><div class="l">Verified</div><div class="v" id="kVer">0</div></div>
+        <div class="kpi g"><div class="l">Cheque verified</div><div class="v" id="kVer">0</div></div>
         <div class="kpi r"><div class="l">Not verified</div><div class="v" id="kNver">0</div></div>
+        <div class="kpi" style="border-color:#99f6e4;background:#f0fdfa"><div class="l">FC verified</div><div class="v" id="kFc" style="color:#0f766e">0</div></div>
         <div class="kpi g"><div class="l">Scan uploaded</div><div class="v" id="kUp">0</div></div>
         <div class="kpi r"><div class="l">Not uploaded</div><div class="v" id="kNo">0</div></div>
         <div class="kpi"><div class="l">Total amount</div><div class="v" id="kAmt" style="font-size:16px">Rs. 0.00</div></div>
@@ -279,7 +300,7 @@ include 'header.php';
     <div class="card wrap" id="fcvListCard">
         <div class="empty" id="fcvEmpty">Loading cheques…</div>
         <table class="t" id="fcvTable" style="display:none">
-            <thead><tr><th>#</th><th>Received</th><th>Cheque No</th><th>Cheque Date</th><th>Customer</th><th>Bank</th><th class="num">Amount</th><th>Pay mode</th><th>Status</th><th>Front</th><th>Back</th><th>Verified</th></tr></thead>
+            <thead><tr><th>#</th><th>Received</th><th>Cheque No</th><th>Cheque Date</th><th>Customer</th><th>Bank</th><th class="num">Amount</th><th>Pay mode</th><th>Status</th><th>Front</th><th>Back</th><th>Cheque verified</th><th>FC verified</th></tr></thead>
             <tbody id="fcvBody"></tbody>
         </table>
     </div>
@@ -303,10 +324,10 @@ include 'header.php';
                 <div class="det" id="mDet"></div>
             </div>
             <div class="foot">
-                <button class="vb v" id="mVer" type="button">✔ Verified</button>
-                <button class="vb nv" id="mNver" type="button">✖ Not verified</button>
+                <button class="vb v" id="mVer" type="button" title="Mark the FC check only — the cheque itself is not changed">✔ FC Verified</button>
+                <button class="vb nv" id="mNver" type="button" title="Mark the FC check only — the cheque itself is not changed">✖ Not FC verified</button>
                 <span class="msg" id="mMsg"></span>
-                <span class="hint">← → previous / next · click an image to zoom · Esc closes</span>
+                <span class="hint">FC check only — the cheque is not changed · ← → previous / next · click an image to zoom · Esc closes</span>
             </div>
         </div>
         <div class="zoomov" id="zoomOv"><img id="zoomImg" alt=""></div>
@@ -334,9 +355,13 @@ include 'header.php';
     $('fcvExport').href='fc_verify.php?export=1&'+qs();
   }
   function kpis(){
-    var v=0,u=0,a=0; rows.forEach(function(r){ if(r.verified) v++; if(r.front||r.back) u++; a+=r.amount; });
+    var v=0,u=0,a=0,f=0; rows.forEach(function(r){ if(r.verified) v++; if(r.fc===1) f++; if(r.front||r.back) u++; a+=r.amount; }); $('kFc').textContent=f;
     $('kTot').textContent=rows.length; $('kVer').textContent=v; $('kNver').textContent=rows.length-v; $('kUp').textContent=u; $('kNo').textContent=rows.length-u; $('kAmt').textContent='Rs. '+money(a);
   }
+  /* the FC check (separate from the cheque's own Verified) */
+  function fcBadge(r,small){ if(r.fc===1) return '<span class="badge fc">✔ FC Verified</span>'+(small&&r.fc_by?'<br><span class="muted">'+esc(r.fc_by)+(r.fc_at?' · '+fdate(String(r.fc_at).slice(0,10)):'')+'</span>':'');
+    if(r.fc===0) return '<span class="badge a">Not FC verified</span>'+(small&&r.fc_by?'<br><span class="muted">'+esc(r.fc_by)+'</span>':''); return '<span class="badge s">Not checked</span>'; }
+  function fcCol(r){ return r.fc===1?'#0f766e':(r.fc===0?'#f59e0b':'#cbd5e1'); }
   function scanBadge(p){ return p?'<span class="badge g">Uploaded</span>':'<span class="badge r">Missing</span>'; }
   function renderList(){
     var b=$('fcvBody'); b.innerHTML='';
@@ -347,7 +372,7 @@ include 'header.php';
       h+='<tr data-i="'+i+'"><td>'+(i+1)+'</td><td>'+fdate(r.received_date)+'</td><td><span class="strong">'+esc(r.cheque_no)+'</span>'+(r.is_sampath?' <span class="badge y">Sampath</span>':'')+'</td>'
         +'<td>'+fdate(r.cheque_date)+'</td><td>'+esc(r.customer_name||'—')+(r.t_code?'<br><span class="muted">'+esc(r.t_code)+'</span>':'')+'</td>'
         +'<td>'+esc((r.bank_code||'')+' '+(r.bank_name||''))+'</td><td class="num">Rs. '+money(r.amount)+'</td><td>'+(function(){ var cm=chqMode(r.cheque_mode); return '<span class="badge '+({'m-payee':'g','m-cash':'r','m-third':'a'}[cm[1]]||'s')+'">'+esc(cm[0])+'</span>'; })()+'</td><td><span class="badge s">'+esc(String(r.status||'').replace(/_/g,' '))+'</span></td>'
-        +'<td data-c="f">'+scanBadge(r.front)+'</td><td data-c="b">'+scanBadge(r.back)+'</td><td data-c="v">'+(r.verified?'<span class="badge g">Verified</span>':'<span class="badge r">Not verified</span>')+'</td></tr>';
+        +'<td data-c="f">'+scanBadge(r.front)+'</td><td data-c="b">'+scanBadge(r.back)+'</td><td data-c="v">'+(r.verified?'<span class="badge g">Verified</span>':'<span class="badge r">Not verified</span>')+'</td><td data-c="fc">'+fcBadge(r,1)+'</td></tr>';
     });
     b.innerHTML=h;
   }
@@ -356,7 +381,7 @@ include 'header.php';
   /* ── large viewer ── */
   function buildModalList(){
     var h=''; rows.forEach(function(r,i){
-      h+='<div class="li" data-i="'+i+'"><span class="d" style="background:'+(r.verified?'#16a34a':'#dc2626')+'"></span><div><div class="n">'+esc(r.cheque_no)+' · Rs. '+money(r.amount)+'</div><div class="s">'+esc(r.customer_name||'—')+' · '+fdate(r.received_date)+'</div></div></div>';
+      h+='<div class="li" data-i="'+i+'"><span class="d" style="background:'+fcCol(r)+'" title="FC check"></span><div><div class="n">'+esc(r.cheque_no)+' · Rs. '+money(r.amount)+'</div><div class="s">'+esc(r.customer_name||'—')+' · '+fdate(r.received_date)+'</div></div></div>';
     });
     $('mList').innerHTML=h;
   }
@@ -382,12 +407,14 @@ include 'header.php';
     $('mPrev').disabled=(i===0); $('mNext').disabled=(i===rows.length-1);
     pane('pvFront','front',r.front,r.cheque_mode); pane('pvBack','back',r.back);
     $('mDet').innerHTML='<div class="amt">Rs. '+money(r.amount)+'</div>'
-      +(r.verified?'<span class="badge g">Verified</span>':'<span class="badge r">Not verified</span>')+' '+(r.is_sampath?'<span class="badge y">Sampath</span>':'')
+      +fcBadge(r)+' '+(r.is_sampath?'<span class="badge y">Sampath</span>':'')
       +'<dl><dt>Cheque no</dt><dd>'+esc(r.cheque_no)+'</dd><dt>Cheque date</dt><dd>'+fdate(r.cheque_date)+'</dd><dt>Received date</dt><dd>'+fdate(r.received_date)+'</dd>'
       +'<dt>Customer</dt><dd>'+esc(r.customer_name||'—')+'</dd><dt>T code</dt><dd>'+esc(r.t_code||'—')+'</dd><dt>SR code</dt><dd>'+esc(r.sr_code||'—')+'</dd>'
       +'<dt>Bank</dt><dd>'+esc(((r.bank_code||'')+' '+(r.bank_name||'')).trim()||'—')+'</dd><dt>Branch</dt><dd>'+esc(((r.branch_code||'')+' '+(r.branch_name||'')).trim()||'—')+'</dd>'
       +'<dt>Status</dt><dd style="text-transform:capitalize">'+esc(String(r.status||'—').replace(/_/g,' '))+'</dd>'
-      +'<dt>Cheque pay mode</dt><dd><b>'+esc(chqMode(r.cheque_mode)[0])+'</b></dd>'+(r.sampath_description?'<dt>Sampath description</dt><dd>'+esc(r.sampath_description)+'</dd>':'')
+      +'<dt>Cheque pay mode</dt><dd><b>'+esc(chqMode(r.cheque_mode)[0])+'</b></dd>'
+      +'<dt>FC check</dt><dd>'+(r.fc===1?'<b style="color:#0f766e">FC Verified</b>':(r.fc===0?'<b style="color:#b45309">Not FC verified</b>':'Not checked yet'))+(r.fc_by?'<br><span style="font-weight:500;color:#6b7280">by '+esc(r.fc_by)+(r.fc_at?' · '+esc(r.fc_at):'')+'</span>':'')+'</dd>'
+      +'<dt>Cheque verified (system)</dt><dd>'+(r.verified?'Verified':'Not verified')+' <span style="font-weight:500;color:#6b7280">— not changed here</span></dd>'+(r.sampath_description?'<dt>Sampath description</dt><dd>'+esc(r.sampath_description)+'</dd>':'')
       +'<dt>Scans</dt><dd>Front: '+(r.front?'Uploaded':'Missing')+' · Back: '+(r.back?'Uploaded':'Missing')+'</dd></dl>';
     var cb=$('mVer'), nb=$('mNver'); cb.disabled=nb.disabled=!CAN_EDIT; cb.title=nb.title=CAN_EDIT?'':'Permission blocked';
     $('mMsg').textContent=''; $('mMsg').className='msg';
@@ -422,10 +449,10 @@ include 'header.php';
     $('mMsg').className='msg'; $('mMsg').textContent='Saving…';
     fetch('fc_verify.php',{method:'POST',body:fd,credentials:'same-origin'}).then(function(x){return x.json().catch(function(){return null;});}).then(function(res){
       if(!res||!res.success){ $('mMsg').className='msg err'; $('mMsg').textContent=(res&&res.error)||'Could not save.'; return; }
-      r.verified=val; $('mMsg').className='msg ok'; $('mMsg').textContent=val?'Marked verified':'Marked not verified';
-      var tr=document.querySelector('#fcvBody tr[data-i="'+cur+'"] [data-c="v"]'); if(tr) tr.innerHTML=val?'<span class="badge g">Verified</span>':'<span class="badge r">Not verified</span>';
-      var d=$('mList').querySelector('.li[data-i="'+cur+'"] .d'); if(d) d.style.background=val?'#16a34a':'#dc2626';
-      kpis(); var keep=cur; show(keep); $('mMsg').className='msg ok'; $('mMsg').textContent=val?'Marked verified':'Marked not verified';
+      r.fc=val; r.fc_by=res.by||''; r.fc_at=res.at||'';   // the cheque's own Verified is not touched
+      var tr=document.querySelector('#fcvBody tr[data-i="'+cur+'"] [data-c="fc"]'); if(tr) tr.innerHTML=fcBadge(r,1);
+      var d=$('mList').querySelector('.li[data-i="'+cur+'"] .d'); if(d) d.style.background=fcCol(r);
+      kpis(); var keep=cur; show(keep); $('mMsg').className='msg ok'; $('mMsg').textContent=val?'Marked FC verified (log only — cheque not changed)':'Marked not FC verified';
     }).catch(function(){ $('mMsg').className='msg err'; $('mMsg').textContent='Connection problem — try again.'; });
   }
   $('mVer').onclick=function(){ setVerify(1); }; $('mNver').onclick=function(){ setVerify(0); };
