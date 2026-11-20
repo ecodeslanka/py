@@ -1,7 +1,8 @@
 <?php
 /**
  * field_summary_verify.php — Field Summary Verify (works like Cheque FC Verify)
- * A list of field summaries; "Check" opens a large window with the summary's totals worked out the same way as
+ * A list of field summaries (same order as the Field Summary List); "Check" opens a large window with the uploaded
+ * field summary scan (magnifier, zoom, rotate) next to the summary's totals worked out the same way as
  * Edit Field Summary (active invoices only, payments of the delivery date), the SR subtotals and every invoice.
  * Verify / Undo Verify saves the same verify flag as View / Edit Field Summary (field_summary.is_verified + log),
  * then moves on to the next summary by itself. "Edit Field Summary" opens the edit page when something is wrong.
@@ -79,7 +80,7 @@ if (($_GET['ajax'] ?? '') === 'list') {
     if (($q = trim($_GET['q'] ?? '')) !== '') { $q = $e($q); $w[] = "(fs.field_summary_code LIKE '%$q%' OR fs.route LIKE '%$q%' OR fs.sr_code LIKE '%$q%' OR fs.delivery_person_raw_name LIKE '%$q%')"; }
     $C = fsvp_cols($conn, 'field_summary'); $sc = isset($C['scan_count']) ? 'fs.scan_count' : '0';
     $r = fsvp_q($conn, "SELECT fs.id, fs.field_summary_code code, fs.delivery_date, fs.route, fs.sr_code, fs.delivery_person_raw_name dp, $sc scans, COALESCE(fs.is_verified,0) v, fs.verified_at, fs.verified_by
-                        FROM field_summary fs WHERE " . implode(' AND ', $w) . " ORDER BY fs.delivery_date DESC, fs.id DESC LIMIT 500");
+                        FROM field_summary fs WHERE " . implode(' AND ', $w) . " ORDER BY fs.created_at DESC, fs.id DESC LIMIT 500");
     if (!$r) fsvp_json(['ok' => false, 'msg' => 'Could not read the field summaries: ' . mysqli_error($conn)]);
     $L = []; while ($x = mysqli_fetch_assoc($r)) $L[] = $x;
     $T = fsvp_totals($conn, array_column($L, 'id'));
@@ -115,10 +116,13 @@ if (($_GET['ajax'] ?? '') === 'detail') {
         $p = $pay[(int)$x['id']] ?? ['paid' => 0, 'cash' => 0]; $x['cash'] = round((float)$p['cash'], 2); $x['cheque'] = round((float)$p['paid'] - (float)$p['cash'], 2); $x['paid'] = round((float)$p['paid'], 2);
         $x['balance'] = round((float)$x['final'] - $x['paid'], 2); $x['done'] = ((int)$x['upd'] === 1 || $x['paid'] >= (float)$x['final']) ? 1 : 0; $rows[] = $x; }
     $T = fsvp_totals($conn, [$id]); $t = $T[$id] ?? null;
+    $scans = []; $hs = fsvp_q($conn, "SHOW TABLES LIKE 'field_summary_scans'");
+    if ($hs && mysqli_num_rows($hs)) { $r = fsvp_q($conn, "SELECT id, file_name, original_name, file_type, uploaded_at FROM field_summary_scans WHERE field_summary_id = $id ORDER BY uploaded_at, id");
+        while ($r && ($x = mysqli_fetch_assoc($r))) $scans[] = ['p' => 'uploads/field_summary_scans/' . rawurlencode($x['file_name']), 'name' => $x['original_name'], 'pdf' => $x['file_type'] === 'pdf' || preg_match('/\.pdf$/i', $x['file_name']), 'at' => $x['uploaded_at']]; }
     $log = []; $r = fsvp_q($conn, "SELECT action, done_by, done_at FROM field_summary_verify_log WHERE field_summary_id = $id ORDER BY id DESC LIMIT 20"); while ($r && ($x = mysqli_fetch_assoc($r))) $log[] = $x;
     fsvp_json(['ok' => true, 'fs' => ['id' => (int)$fs['id'], 'code' => $fs['field_summary_code'] ?? '', 'delivery_date' => $fs['delivery_date'] ?? '', 'route' => $fs['route'] ?? '', 'sr_code' => $fs['sr_code'] ?? '',
                'dp' => $fs['delivery_person_raw_name'] ?? '', 'vehicle' => $fs['vehicle_no'] ?? ($fs['vehicle'] ?? ''), 'scans' => (int)($fs['scan_count'] ?? 0), 'v' => (int)($fs['is_verified'] ?? 0), 'verified_at' => $fs['verified_at'] ?? null, 'verified_by' => $fs['verified_by'] ?? null],
-               't' => $t, 'rows' => $rows, 'log' => $log]);
+               't' => $t, 'rows' => $rows, 'log' => $log, 'scans' => $scans]);
 }
 
 include 'header.php';
@@ -149,8 +153,25 @@ include 'header.php';
 .fvm-hd{display:flex;align-items:center;gap:12px;padding:12px 16px;background:linear-gradient(90deg,#0f172a,#1e3a8a);color:#fff;flex-wrap:wrap}
 .fvm-hd .t{font-size:16px;font-weight:800}.fvm-hd .s{font-size:12px;opacity:.85}
 .fvm-hd .x{margin-left:auto;width:34px;height:34px;border:none;border-radius:50%;background:#dc2626;color:#fff;font-size:18px;cursor:pointer}
-.fvm-bd{padding:14px 16px;overflow:auto;flex:1}
-.tot{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px}
+.fvm-split{flex:1;display:flex;min-height:0}
+.fvm-bd{padding:12px 14px;overflow:auto;flex:1;min-width:0}
+.pvw{width:52%;flex-shrink:0;display:flex;flex-direction:column;background:#0f172a;border-right:1px solid #e5e7eb;min-height:0}
+.pvw .ph{display:flex;align-items:center;gap:5px;padding:6px 10px;background:#111827;color:#e5e7eb;font-size:12px;flex-wrap:wrap}
+.pvw .ph .lb{font-weight:800;margin-right:auto}
+.pvw .ph button,.pvw .ph a{background:#374151;color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;text-decoration:none}
+.pvw .ph button.on{background:#2563eb}
+.pv{flex:1;position:relative;overflow:auto;min-height:420px}
+.pv img{width:100%;height:100%;object-fit:contain;display:block;transition:transform .15s}
+.pv img.zm{width:auto;height:auto;max-width:none;object-fit:initial}
+.pv.mag-on img{cursor:none}
+.pv iframe{width:100%;height:100%;border:0;background:#fff;min-height:420px}
+.pv .none{color:#94a3b8;text-align:center;padding:80px 20px;font-size:14px}.pv .none i{font-size:46px;display:block;margin-bottom:10px}
+.pv .lens{position:absolute;width:170px;height:170px;border-radius:50%;border:2px solid rgba(255,255,255,.75);box-shadow:0 0 0 1px rgba(0,0,0,.35),0 6px 26px rgba(0,0,0,.55);pointer-events:none;display:none;z-index:4;transform:translate(-50%,-50%);background-repeat:no-repeat;background-color:#fff}
+.thumbs{display:flex;gap:6px;padding:6px;background:#111827;overflow-x:auto}
+.thumbs img,.thumbs span{height:54px;min-width:44px;border-radius:5px;border:2px solid transparent;cursor:pointer;object-fit:cover;background:#374151;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 6px}
+.thumbs .on{border-color:#3b82f6}
+@media (max-width:900px){.fvm-split{flex-direction:column}.pvw{width:100%;height:60vh}}
+.tot{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px;margin-bottom:12px}
 .tot div{border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px;background:#f8fafc}
 .tot span{display:block;font-size:10.5px;font-weight:800;color:#64748b;text-transform:uppercase}.tot b{font-size:15.5px}
 .tot .hl{background:#eff6ff;border-color:#bfdbfe}.tot .gr b{color:#15803d}.tot .rd b{color:#dc2626}
@@ -167,7 +188,7 @@ include 'header.php';
 </style>
 <div class="fv">
   <h2><i class="fa-solid fa-clipboard-check" style="color:#2563eb"></i> Field Summary Verify</h2>
-  <div class="sub">Check each field summary — totals as in Edit Field Summary, SR subtotals and invoices — then Verify; the next one opens by itself. Something wrong? Use <b>Edit Field Summary</b> in the window.</div>
+  <div class="sub">Check each field summary — the uploaded scan next to the totals (as in Edit Field Summary), SR subtotals and invoices — then Verify; the next one opens by itself. Something wrong? Use <b>Edit Field Summary</b> in the window.</div>
   <div class="fv-bar">
     <label>Delivery from<input type="date" id="fFrom"></label>
     <label>to<input type="date" id="fTo"></label>
@@ -182,7 +203,19 @@ include 'header.php';
 
 <div class="fvm" id="fvm"><div class="fvm-box">
   <div class="fvm-hd"><div><div class="t" id="mT">—</div><div class="s" id="mS"></div></div><span id="mStamp"></span><button class="x" onclick="closeM()" title="Close (Esc)">&times;</button></div>
-  <div class="fvm-bd" id="mB"></div>
+  <div class="fvm-split">
+    <div class="pvw">
+      <div class="ph"><span class="lb" id="mImgLb">Field summary scan</span>
+        <button type="button" onclick="zoom(-1)" title="Zoom out">−</button><button type="button" onclick="zoom(1)" title="Zoom in">+</button><button type="button" onclick="zoom(0)" title="Fit">Fit</button>
+        <button type="button" onclick="rotate()" title="Rotate"><i class="fa-solid fa-rotate-right"></i></button>
+        <button type="button" id="mMag" onclick="magToggle()" title="Magnifier (M)"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+        <span id="mZbar" style="display:inline-flex;align-items:center;gap:4px;font-size:11px"><input type="range" id="mMagZ" min="1.5" max="6" step="0.5" style="width:70px" oninput="magSet(this.value)"><b id="mMagL"></b></span>
+        <a id="mOpen" target="_blank" href="#" title="Open the file"><i class="fa-solid fa-up-right-from-square"></i></a></div>
+      <div class="pv" id="mPv"></div>
+      <div class="thumbs" id="mThumbs"></div>
+    </div>
+    <div class="fvm-bd" id="mB"></div>
+  </div>
   <div class="fvm-ft">
     <button class="fv-btn g" onclick="step(-1)" title="Previous (←)"><i class="fa-solid fa-chevron-left"></i> Prev</button>
     <button class="fv-btn g" onclick="step(1)" title="Next (→)">Next <i class="fa-solid fa-chevron-right"></i></button>
@@ -221,7 +254,7 @@ function closeM(){ fvm.classList.remove('open'); }
 function step(k){ if(CUR===null) return; const n=CUR+k; if(n<0||n>=ROWS.length){ alert(k>0?'This was the last one in the list.':'This is the first one.'); return; } openM(n); }
 async function openM(i){ CUR=i; const x=ROWS[i]; if(!x) return; draw(); fvm.classList.add('open');
   mT.textContent=x.code||('#'+x.id); mS.textContent=(x.delivery_date||'')+' · '+(x.route||'')+' · '+(x.dp||''); mPos.textContent=(i+1)+' / '+ROWS.length;
-  mEdit.href='edit_field_summary.php?id='+x.id; mView.href='view_field_summary.php?id='+x.id; mB.innerHTML='<div style="padding:30px;color:#6b7280">Loading…</div>'; stamp(x);
+  mEdit.href='edit_field_summary.php?id='+x.id; mView.href='view_field_summary.php?id='+x.id; mB.innerHTML='<div style="padding:30px;color:#6b7280">Loading…</div>'; mPv.innerHTML='<div class="none">Loading…</div>'; mThumbs.innerHTML=''; stamp(x);
   try{ const d=await J(await fetch(location.pathname+'?ajax=detail&id='+x.id)); if(!d.ok) throw new Error(d.msg); if(CUR!==i) return;
     x.v=d.fs.v; x.verified_at=d.fs.verified_at; x.verified_by=d.fs.verified_by; x.t=d.t||x.t; stamp(x); draw(); body(d); }
   catch(e){ mB.innerHTML='<div style="padding:20px;color:#b91c1c">'+esc(e.message)+'</div>'; } }
@@ -229,7 +262,32 @@ function stamp(x){ const v=Number(x.v)===1;
   mStamp.innerHTML=v?'<span class="vstamp" style="background:#dcfce7;color:#166534"><i class="fa-solid fa-circle-check"></i> VERIFIED'+(x.verified_by?' · '+esc(x.verified_by):'')+(x.verified_at?' · '+esc(x.verified_at):'')+'</span>':'<span class="vstamp" style="background:#fef3c7;color:#92400e">NOT VERIFIED</span>';
   mVer.style.display=v?'none':''; mVer.disabled=!CAN.v; mVer.title=CAN.v?'Verify (V)':'Your role cannot Verify';
   mUndo.style.display=v?'':'none'; mUndo.disabled=!CAN.u; mUndo.title=CAN.u?'Undo Verify':'Your role cannot Undo Verify'; }
-function body(d){ const t=d.t||{}, R=d.rows||[], A=R.filter(r=>Number(r.tbd)!==1), B=R.filter(r=>Number(r.tbd)===1);
+/* ── scan viewer (as Credit Bill FC Verify) ── */
+let SC=[], SI=0, ZM=false, ROT=0, magOn=true, magZ=3;
+try{ if(localStorage.getItem('fsvMag')==='0') magOn=false; const z=parseFloat(localStorage.getItem('fsvMagZ')); if(z>=1.5&&z<=6) magZ=z; }catch(e){}
+function magUi(){ mMag.classList.toggle('on',magOn); mZbar.style.display=magOn?'inline-flex':'none'; mMagZ.value=magZ; mMagL.textContent=magZ+'×'; mPv.classList.toggle('mag-on',magOn); if(!magOn){ const l=mPv.querySelector('.lens'); if(l) l.style.display='none'; } }
+function magToggle(){ magOn=!magOn; try{ localStorage.setItem('fsvMag',magOn?'1':'0'); }catch(e){} magUi(); }
+function magSet(v){ magZ=parseFloat(v); mMagL.textContent=magZ+'×'; try{ localStorage.setItem('fsvMagZ',magZ); }catch(e){} }
+function drawScan(){ ZM=false; ROT=0;
+  if(!SC.length){ mPv.innerHTML='<div class="none"><i class="fa-regular fa-image"></i>No field summary scan uploaded<br><small>Upload it on the Field Summary List (scan button)</small></div>'; mThumbs.innerHTML=''; mOpen.style.display='none'; mImgLb.textContent='Field summary scan'; return; }
+  if(SI>=SC.length) SI=0; const f=SC[SI];
+  mPv.innerHTML=f.pdf?'<iframe src="'+esc(f.p)+'"></iframe>':'<img src="'+esc(f.p)+'" alt="Field summary scan">';
+  mOpen.href=f.p; mOpen.style.display=''; mImgLb.textContent='Field summary scan '+(SI+1)+' / '+SC.length;
+  mThumbs.innerHTML=SC.length>1?SC.map((x,i)=>x.pdf?'<span data-t="'+i+'" class="'+(i===SI?'on':'')+'">PDF</span>':'<img data-t="'+i+'" src="'+esc(x.p)+'" class="'+(i===SI?'on':'')+'" alt="">').join(''):'';
+  magUi(); }
+function zoom(k){ const im=mPv.querySelector('img'); if(!im) return; if(k===0){ ZM=false; im.classList.remove('zm'); im.style.width=''; return; }
+  const w=ZM?im.getBoundingClientRect().width:mPv.clientWidth; ZM=true; im.classList.add('zm'); im.style.width=Math.max(200,w*(k>0?1.4:1/1.4))+'px'; }
+function rotate(){ const im=mPv.querySelector('img'); if(!im) return; ROT=(ROT+90)%360; im.style.transform='rotate('+ROT+'deg)'; }
+mThumbs.addEventListener('click',e=>{ const t=e.target.closest('[data-t]'); if(t){ SI=parseInt(t.dataset.t,10); drawScan(); } });
+mPv.addEventListener('mousemove',e=>{ const im=mPv.querySelector('img'); let l=mPv.querySelector('.lens'); if(!l){ l=document.createElement('div'); l.className='lens'; mPv.appendChild(l); }
+  if(!magOn||!im||ROT!==0||!im.naturalWidth){ l.style.display='none'; return; }
+  const r=im.getBoundingClientRect(); let dw=r.width, dh=r.height, ox=r.left, oy=r.top;
+  if(!im.classList.contains('zm')){ const sc=Math.min(r.width/im.naturalWidth, r.height/im.naturalHeight); dw=im.naturalWidth*sc; dh=im.naturalHeight*sc; ox=r.left+(r.width-dw)/2; oy=r.top+(r.height-dh)/2; }
+  const px=e.clientX-ox, py=e.clientY-oy; if(px<0||py<0||px>dw||py>dh){ l.style.display='none'; return; }
+  const pr=mPv.getBoundingClientRect(); l.style.display='block'; l.style.left=(e.clientX-pr.left+mPv.scrollLeft)+'px'; l.style.top=(e.clientY-pr.top+mPv.scrollTop)+'px';
+  l.style.backgroundImage='url("'+im.src.replace(/"/g,'\\"')+'")'; l.style.backgroundSize=(dw*magZ)+'px '+(dh*magZ)+'px'; l.style.backgroundPosition=(-(px*magZ-85))+'px '+(-(py*magZ-85))+'px'; });
+mPv.addEventListener('mouseleave',()=>{ const l=mPv.querySelector('.lens'); if(l) l.style.display='none'; });
+function body(d){ SC=d.scans||[]; SI=0; drawScan(); const t=d.t||{}, R=d.rows||[], A=R.filter(r=>Number(r.tbd)!==1), B=R.filter(r=>Number(r.tbd)===1);
   const c=(l,v,cls)=>'<div class="'+(cls||'')+'"><span>'+l+'</span><b>'+v+'</b></div>';
   let h='<div class="tot">'+c('Invoices',N(t.inv,0))+c('Net Inv. Amt',N(t.net))+c('Total Discount',N(t.dis))+c('Mkt-Rtn',N(t.mkt))+c('Dmg/Exp/Sh',N(t.dmg))+c('Cancelled',N(t.cancel))
     +c('Final B.V',N(t.final),'hl')+c('Ikea',N(t.ikea))+c('Short/Excess',N(t.short),Math.abs(t.short||0)>0.009?'rd':'')+c('Cash Paid',N(t.cash),'gr')+c('Cheque Paid',N(t.cheque),'gr')+c('Total Paid',N(t.paid),'gr hl')
@@ -238,7 +296,7 @@ function body(d){ const t=d.t||{}, R=d.rows||[], A=R.filter(r=>Number(r.tbd)!==1
   h+='<div class="chk">'+(notDone?'<span class="bad"><i class="fa-solid fa-xmark"></i> '+notDone+' invoice(s) not updated / not fully paid</span>':'<span class="ok"><i class="fa-solid fa-check"></i> All invoices updated</span>')
     +(Math.abs(t.balance||0)>0.009?'<span class="warn"><i class="fa-solid fa-triangle-exclamation"></i> Balance Rs. '+N(t.balance)+'</span>':'<span class="ok"><i class="fa-solid fa-check"></i> No balance</span>')
     +(Math.abs(t.short||0)>0.009?'<span class="warn"><i class="fa-solid fa-triangle-exclamation"></i> Short/Excess Rs. '+N(t.short)+'</span>':'')
-    +(d.fs.scans>0?'<span class="ok"><i class="fa-solid fa-image"></i> '+d.fs.scans+' scan(s)</span>':'<span class="warn"><i class="fa-solid fa-image"></i> No scan uploaded</span>')
+    +((d.scans||[]).length||d.fs.scans>0?'<span class="ok"><i class="fa-solid fa-image"></i> '+((d.scans||[]).length||d.fs.scans)+' scan(s)</span>':'<span class="warn"><i class="fa-solid fa-image"></i> No scan uploaded</span>')
     +(B.length?'<span class="warn"><i class="fa-solid fa-truck"></i> '+B.length+' To Be Delivery (not in the totals)</span>':'')+'</div>';
   /* invoices grouped by SR with subtotals, like the edit page */
   const cols=['net','dis','mkt','dmg','cancel','final','ikea','short','cash','cheque','paid','balance'];
@@ -260,7 +318,7 @@ async function doVerify(a){ const x=ROWS[CUR]; if(!x) return; if(a==='unverify'&
     if(a==='verify'&&mAuto.checked){ if(CUR<ROWS.length-1) setTimeout(()=>openM(CUR+1),350); else { alert('Verified. That was the last one in the list.'); } } }
   catch(e){ alert(e.message); } finally{ btn.disabled=false; stamp(x); } }
 document.addEventListener('keydown',e=>{ if(!fvm.classList.contains('open')) return; if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
-  if(e.key==='Escape') closeM(); else if(e.key==='ArrowRight') step(1); else if(e.key==='ArrowLeft') step(-1); else if((e.key==='v'||e.key==='V')&&mVer.style.display!=='none'&&!mVer.disabled) doVerify('verify'); });
+  if(e.key==='Escape') closeM(); else if(e.key==='ArrowRight') step(1); else if(e.key==='ArrowLeft') step(-1); else if(e.key==='m'||e.key==='M') magToggle(); else if((e.key==='v'||e.key==='V')&&mVer.style.display!=='none'&&!mVer.disabled) doVerify('verify'); });
 load();
 </script>
 <?php include 'footer.php'; ?>
