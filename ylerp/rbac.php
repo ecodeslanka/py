@@ -145,6 +145,9 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     'process_unloading_import' => ['unloading_import_history', 'create'],
     'process_reimport_unloading' => ['unloading_import_history', 'edit'],
     'unloading_reimport_logs' => ['unloading_import_history', 'view'],
+    'shortage'             => ['unloading_import_history', 'view'],   // Shortage view of an unloading import (shortage.php?id=…); its buttons show as a sub-branch of Unloading Import History
+    'shortage_detail'      => ['unloading_import_history', 'view'],
+    'shortage_summary'     => ['unloading_import_history', 'view'],
     'import_scheme_discount' => ['scheme_discount_receivable', 'create'],
     'scheme_import_history' => ['scheme_discount_receivable', 'view'],
     'invoice_wise_sales_upload' => ['invoice_wise_sales_history', 'create'],
