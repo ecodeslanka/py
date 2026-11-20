@@ -999,6 +999,9 @@ if (isset($conn) && $conn) {
                     <a href="send_back_cheque_reasons.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'send_back_cheque_reasons.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>SB Cheques Reasons</span>
                     </a>
+                    <a href="probation_extension_reasons.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'probation_extension_reasons.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-hourglass-half"></i><span>Probation Extension Reasons</span>
+                    </a>
                     <a href="company_bank_accounts.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'company_bank_accounts.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Company Bank Accounts</span>
                     </a>
