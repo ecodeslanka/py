@@ -1094,6 +1094,9 @@ if (isset($conn) && $conn) {
                         <a href="outlet_service_map.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'outlet_service_map.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-calendar"></i><span>Map Analysing</span>
                     </a>
+                    <a href="beat_route_map.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'beat_route_map.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-route"></i><span>Beat Route Map</span>
+                    </a>
                   
                 </div>
 
