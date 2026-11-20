@@ -59,7 +59,7 @@ if ($txn_status === 'ok') {
 }
 
 /* ── speed: the lookup columns need an index (added once, only when missing) ── */
-foreach ([['field_summary_details', 'field_summary_id'], ['invoice_payments', 'field_summary_detail_id'], ['loading_summary_import_details', 'bill_no']] as [$__t, $__c]) {
+foreach ([['field_summary_details', 'field_summary_id'], ['invoice_payments', 'field_summary_detail_id'], ['invoice_payments', 'field_summary_id'], ['loading_summary_import_details', 'bill_no'], ['field_summary', 'created_at'], ['field_summary', 'delivery_date']] as [$__t, $__c]) {
     $__r = @mysqli_query($conn, "SHOW INDEX FROM `$__t` WHERE Column_name = '$__c'");
     if ($__r && mysqli_num_rows($__r) === 0) @mysqli_query($conn, "ALTER TABLE `$__t` ADD INDEX `idx_$__c` (`$__c`)");
 }
@@ -85,11 +85,34 @@ $summary_sql = "SELECT * FROM (
         GROUP BY fs.id
     ) AS sub
     $txn_where";
-$__cnt = mysqli_query($conn, "SELECT COUNT(*) FROM ($summary_sql) c");
-$total_summaries = $__cnt ? (int)(mysqli_fetch_row($__cnt)[0] ?? 0) : 0;
-$pages = $per_page === 'all' ? 1 : max(1, (int)ceil($total_summaries / (int)$per_page));
-if ($page_no > $pages) $page_no = $pages;
-$summaries_result = mysqli_query($conn, "$summary_sql ORDER BY created_at DESC" . ($per_page === 'all' ? '' : ' LIMIT ' . (int)$per_page . ' OFFSET ' . (($page_no - 1) * (int)$per_page)));
+if ($txn_where === '') {
+    /* FAST PATH (no Transaction-status filter): count and page on field_summary alone, then total the invoices and
+       payments of THIS page's summaries only — the whole payments table is no longer added up on every load */
+    $__cnt = mysqli_query($conn, "SELECT COUNT(*) FROM field_summary fs $where");
+    $total_summaries = $__cnt ? (int)(mysqli_fetch_row($__cnt)[0] ?? 0) : 0;
+    $pages = $per_page === 'all' ? 1 : max(1, (int)ceil($total_summaries / (int)$per_page));
+    if ($page_no > $pages) $page_no = $pages;
+    $__pid = []; $__pq = mysqli_query($conn, "SELECT fs.id FROM field_summary fs $where ORDER BY fs.created_at DESC, fs.id DESC" . ($per_page === 'all' ? '' : ' LIMIT ' . (int)$per_page . ' OFFSET ' . (($page_no - 1) * (int)$per_page)));
+    while ($__pq && ($__x = mysqli_fetch_row($__pq))) $__pid[] = (int)$__x[0];
+    $__in = $__pid ? implode(',', $__pid) : '0';
+    $summaries_result = mysqli_query($conn, "SELECT fs.*,
+               COUNT(fsd.id) AS total_rows,
+               COALESCE(SUM(CASE WHEN fsd.updated = 1 THEN 1 WHEN COALESCE(pay.paid, 0) >= fsd.adjust_net_value THEN 1 ELSE 0 END), 0) AS updated_rows
+        FROM field_summary fs
+        LEFT JOIN field_summary_details fsd ON fsd.field_summary_id = fs.id
+        LEFT JOIN (SELECT ip.field_summary_detail_id, SUM(ip.amount) AS paid FROM invoice_payments ip
+                   INNER JOIN field_summary_details d2 ON d2.id = ip.field_summary_detail_id AND d2.field_summary_id IN ($__in)
+                   GROUP BY ip.field_summary_detail_id) pay ON pay.field_summary_detail_id = fsd.id
+        WHERE fs.id IN ($__in)
+        GROUP BY fs.id
+        ORDER BY fs.created_at DESC, fs.id DESC");
+} else {
+    $__cnt = mysqli_query($conn, "SELECT COUNT(*) FROM ($summary_sql) c");
+    $total_summaries = $__cnt ? (int)(mysqli_fetch_row($__cnt)[0] ?? 0) : 0;
+    $pages = $per_page === 'all' ? 1 : max(1, (int)ceil($total_summaries / (int)$per_page));
+    if ($page_no > $pages) $page_no = $pages;
+    $summaries_result = mysqli_query($conn, "$summary_sql ORDER BY created_at DESC" . ($per_page === 'all' ? '' : ' LIMIT ' . (int)$per_page . ' OFFSET ' . (($page_no - 1) * (int)$per_page)));
+}
 
 /* SR codes from the loading summary — only for the summaries on this page */
 $sr_map = [];

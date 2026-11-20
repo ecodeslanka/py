@@ -1431,6 +1431,9 @@ if (isset($conn) && $conn) {
                     <a href="field_summary_list.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'field_summary_list.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-truck-loading"></i><span>Field Summary List</span>
                     </a>
+                    <a href="field_summary_verify.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'field_summary_verify.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-clipboard-check"></i><span>Field Summary Verify</span>
+                    </a>
                     
                     
                     
