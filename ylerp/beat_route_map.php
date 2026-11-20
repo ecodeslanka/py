@@ -115,7 +115,9 @@ if (($_GET['ajax'] ?? '') === 'outlets') {
     if (!$up) brm_json(['ok' => false, 'msg' => 'Upload not found.']);
     $r = brm_q($conn, "SELECT * FROM beat_map_outlets WHERE upload_id=$id ORDER BY beat, outlet_name"); $L = [];
     while ($r && ($x = mysqli_fetch_assoc($r))) { unset($x['upload_id']); $L[] = $x; }
-    brm_json(['ok' => true, 'upload' => $up, 'outlets' => $L]);
+    $routes = []; $t = brm_q($conn, "SHOW TABLES LIKE 'routes'");   // ERP route of the same name (Beat Name = Route)
+    if ($t && mysqli_num_rows($t)) { $q = brm_q($conn, "SELECT route_code, route_name FROM routes"); while ($q && ($x = mysqli_fetch_assoc($q))) $routes[strtoupper(trim($x['route_name']))] = $x['route_code']; }
+    brm_json(['ok' => true, 'upload' => $up, 'outlets' => $L, 'routes' => $routes]);
 }
 
 $view = (int)($_GET['view'] ?? 0);
@@ -198,7 +200,7 @@ include 'header.php';
     <div style="font-size:11.5px;color:#6b7280;margin-top:8px">Reads the sheets <b>Mirror Visit Report</b> (outlet, beat, SR, servicing day) and <b>Ideal Vs Actual Service</b> (service level, GPS). Outlets with no GPS in the file take it from the Outlet Service Information upload.</div>
   </div>
   <div class="brm-card" style="padding:0;overflow:auto">
-    <table class="brm-t"><thead><tr><th>#</th><th>Name</th><th>File</th><th class="r">Outlets</th><th class="r">With GPS</th><th class="r">Beats</th><th class="r">Service compliance</th><th>Uploaded</th><th></th></tr></thead><tbody>
+    <table class="brm-t"><thead><tr><th>#</th><th>Name</th><th>File</th><th class="r">Outlets</th><th class="r">With GPS</th><th class="r">Routes (beats)</th><th class="r">Service compliance</th><th>Uploaded</th><th></th></tr></thead><tbody>
     <?php if (!$uploads): ?><tr><td colspan="9" style="text-align:center;color:#6b7280;padding:24px">No uploads yet.</td></tr><?php endif; ?>
     <?php foreach ($uploads as $i => $u): ?>
       <tr><td><?= $i + 1 ?></td><td><b><?= htmlspecialchars($u['title']) ?></b></td><td style="font-size:12px;color:#6b7280"><?= htmlspecialchars($u['file_name']) ?></td>
@@ -230,7 +232,7 @@ async function brmDel(id){ if(!confirm('Delete this upload and its outlets?')) r
       <a href="beat_route_map.php" class="brm-btn g" title="Back to uploads"><i class="fa-solid fa-arrow-left"></i></a>
       <div class="ttl"><i class="fa-solid fa-route" style="color:#2563eb"></i><div><?= htmlspecialchars($vu['title']) ?><small><?= htmlspecialchars($vu['file_name']) ?> · <?= htmlspecialchars($vu['created_at']) ?></small></div></div>
       <div class="bv-tabs">
-        <button class="bv-tab on" data-m="area" onclick="bvMode('area')">Areas<small>beat area + pins</small></button>
+        <button class="bv-tab on" data-m="area" onclick="bvMode('area')">Areas<small>route area + pins</small></button>
         <button class="bv-tab" data-m="route" onclick="bvMode('route')">Route<small id="tRoute">route lines</small></button>
         <button class="bv-tab" data-m="nogps" onclick="bvMode('nogps')">No GPS<small id="tNo">outlets</small></button>
       </div>
@@ -240,9 +242,9 @@ async function brmDel(id){ if(!confirm('Delete this upload and its outlets?')) r
     <div class="bv-kpi" id="bvKpi"></div>
     <div class="bv-body">
       <div class="bv-left">
-        <div class="bv-ltabs"><div class="bv-ltab on" data-l="beats" onclick="bvLeft('beats')">BEATS</div><div class="bv-ltab" data-l="det" onclick="bvLeft('det')">DETAILS</div></div>
-        <div class="bv-tools"><select id="fDay" onchange="bvFilter()"><option value="">All days</option></select><select id="fSr" onchange="bvFilter()"><option value="">All SRs</option></select><input id="fQ" placeholder="Search beat / outlet" oninput="bvFilter()"></div>
-        <div class="bv-all"><i class="fa-solid fa-eye" id="allEye" style="cursor:pointer" onclick="bvAll()"></i><span id="allTxt">Beats</span></div>
+        <div class="bv-ltabs"><div class="bv-ltab on" data-l="beats" onclick="bvLeft('beats')">ROUTES</div><div class="bv-ltab" data-l="det" onclick="bvLeft('det')">DETAILS</div></div>
+        <div class="bv-tools"><select id="fDay" onchange="bvFilter()"><option value="">All days</option></select><select id="fSr" onchange="bvFilter()"><option value="">All SRs</option></select><input id="fQ" placeholder="Search route / outlet" oninput="bvFilter()"></div>
+        <div class="bv-all"><i class="fa-solid fa-eye" id="allEye" style="cursor:pointer" onclick="bvAll()"></i><span id="allTxt">Routes</span></div>
         <div class="bv-list" id="bvList"></div>
         <div class="bv-list" id="bvDet" style="display:none"></div>
       </div>
@@ -275,7 +277,7 @@ async function bvLoad(){
     const ord=order(g); ord.forEach((o,j)=>o.seq=j+1); let dist=0; for(let j=1;j<ord.length;j++) dist+=km(ord[j-1],ord[j]);
     const cnt=f=>{ const m={}; L.forEach(o=>{ const v=(o[f]||'').trim(); if(v) m[v]=(m[v]||0)+1; }); return Object.entries(m).sort((a,b)=>b[1]-a[1]).map(x=>x[0]); };
     const act=L.filter(o=>parseFloat(o.actual_count||0)>0).length, imp=L.filter(o=>/^impact/i.test(o.impact||'')).length;
-    return {name:k,color:COLORS[i%COLORS.length],out:L,gps:ord,km:dist,days:cnt('service_day'),srs:cnt('sr_name'),srcodes:cnt('sr_code'),actual:act,impact:imp,no:i+1}; });
+    return {name:k,rcode:(d.routes||{})[k.trim().toUpperCase()]||'',color:COLORS[i%COLORS.length],out:L,gps:ord,km:dist,days:cnt('service_day'),srs:cnt('sr_name'),srcodes:cnt('sr_code'),actual:act,impact:imp,no:i+1}; });
   BEATS.forEach(b=>ON[b.name]=true);
   const days=[...new Set(OUT.map(o=>o.service_day).filter(Boolean))].sort(), srs=[...new Set(OUT.map(o=>o.sr_name).filter(Boolean))].sort();
   document.getElementById('fDay').innerHTML+=days.map(x=>'<option>'+esc(x)+'</option>').join(''); document.getElementById('fSr').innerHTML+=srs.map(x=>'<option>'+esc(x)+'</option>').join('');
@@ -285,18 +287,18 @@ function visBeats(){ const day=document.getElementById('fDay').value, sr=documen
   return BEATS.filter(b=>(!day||b.days.includes(day))&&(!sr||b.srs.includes(sr))&&(!q||b.name.toLowerCase().includes(q)||b.out.some(o=>(o.outlet_name||'').toLowerCase().includes(q)||(o.hul_code||'').toLowerCase().includes(q)))); }
 function bvFilter(){ bvList(); bvDraw(); bvKpi(); bvDetails(); }
 function bvList(){ const V=visBeats(), on=V.filter(b=>ON[b.name]).length;
-  document.getElementById('allTxt').textContent='Beats '+on+'/'+V.length; document.getElementById('allEye').className='fa-solid '+(on?'fa-eye':'fa-eye-slash');
+  document.getElementById('allTxt').textContent='Routes '+on+'/'+V.length; document.getElementById('allEye').className='fa-solid '+(on?'fa-eye':'fa-eye-slash');
   document.getElementById('bvList').innerHTML=V.map(b=>'<div class="bt'+(ON[b.name]?'':' off')+'" onclick="bvZoom(\''+encodeURIComponent(b.name)+'\')">'
     +'<i class="fa-solid '+(ON[b.name]?'fa-eye':'fa-eye-slash')+' eye" title="Show / hide" onclick="event.stopPropagation();bvEye(\''+encodeURIComponent(b.name)+'\')"></i>'
-    +'<div style="min-width:0;flex:1"><div style="display:flex;gap:6px;align-items:center"><span class="tag" style="background:'+b.color+'">Beat '+b.no+'</span><span class="nm" title="'+esc(b.name)+'">'+esc(b.name)+'</span><span class="cnt" title="Outlets">'+b.out.length+'</span></div>'
+    +'<div style="min-width:0;flex:1"><div style="display:flex;gap:6px;align-items:center"><span class="tag" style="background:'+b.color+'">Route '+b.no+'</span><span class="nm" title="Beat name: '+esc(b.name)+'">'+esc(b.name)+'</span>'+(b.rcode?'<span style="font-size:10.5px;color:#6b7280" title="ERP route code">'+esc(b.rcode)+'</span>':'')+'<span class="cnt" title="Outlets">'+b.out.length+'</span></div>'
     +'<div class="meta"><span title="SR"><i class="fa-solid fa-user"></i> '+esc((b.srs[0]||'—').slice(0,18))+'</span><span title="Servicing day"><i class="fa-regular fa-calendar"></i> '+esc(b.days.join(', ')||'—')+'</span></div>'
-    +'<div class="meta"><span title="Route length (straight line between outlets)"><i class="fa-solid fa-road"></i> '+fmt(b.km,1)+' km</span><span title="Outlets with GPS"><i class="fa-solid fa-location-dot"></i> '+b.gps.length+'/'+b.out.length+'</span>'+(b.actual?'<span title="Outlets serviced (Ideal vs Actual)"><i class="fa-solid fa-check"></i> '+b.actual+'</span>':'')+'</div></div></div>').join('')||'<div style="padding:16px;color:#6b7280">No beats.</div>'; }
+    +'<div class="meta"><span title="Route length (straight line between outlets)"><i class="fa-solid fa-road"></i> '+fmt(b.km,1)+' km</span><span title="Outlets with GPS"><i class="fa-solid fa-location-dot"></i> '+b.gps.length+'/'+b.out.length+'</span>'+(b.actual?'<span title="Outlets serviced (Ideal vs Actual)"><i class="fa-solid fa-check"></i> '+b.actual+'</span>':'')+'</div></div></div>').join('')||'<div style="padding:16px;color:#6b7280">No routes.</div>'; }
 function bvEye(n){ n=decodeURIComponent(n); ON[n]=!ON[n]; bvList(); bvDraw(); bvKpi(); }
 function bvAll(){ const V=visBeats(), any=V.some(b=>ON[b.name]); V.forEach(b=>ON[b.name]=!any); bvList(); bvDraw(); bvKpi(); }
 function bvZoom(n){ n=decodeURIComponent(n); const b=BEATS.find(x=>x.name===n); if(!b||!b.gps.length) return; if(!ON[n]){ ON[n]=true; bvList(); bvDraw(); bvKpi(); } if(MODE==='nogps') bvMode('area'); map.fitBounds(L.latLngBounds(b.gps.map(o=>[o.lat,o.lng])),{padding:[40,40],maxZoom:15}); }
 function bvFit(){ const P=visBeats().filter(b=>ON[b.name]).flatMap(b=>b.gps.map(o=>[o.lat,o.lng])); if(P.length) map.fitBounds(L.latLngBounds(P),{padding:[30,30]}); }
 function pop(o,b){ const row=(k,v)=>v!==null&&v!==undefined&&String(v).trim()!==''?'<tr><td>'+k+'</td><td>'+esc(v)+'</td></tr>':'';
-  return '<div class="pop"><b>'+esc(o.outlet_name||'—')+'</b><div style="font-size:11.5px;color:'+b.color+';font-weight:800">Beat '+b.no+' · '+esc(b.name)+(o.seq?' · stop '+o.seq:'')+'</div><table>'
+  return '<div class="pop"><b>'+esc(o.outlet_name||'—')+'</b><div style="font-size:11.5px;color:'+b.color+';font-weight:800">Route '+b.no+' · '+esc(b.name)+(b.rcode?' ('+esc(b.rcode)+')':'')+(o.seq?' · stop '+o.seq:'')+'</div><table>'
     +row('HUL code',o.hul_code)+row('Outlet code',o.outlet_code)+row('SR',(o.sr_code?o.sr_code+' — ':'')+(o.sr_name||''))+row('Servicing day',o.service_day)+row('Servicing PLG',o.servicing_plg)+row('Mirror',o.mirror_type)
     +row('Ideal',(o.ideal_plg||'')+(o.ideal_count!==null?' · '+fmt(o.ideal_count):''))+row('Actual',(o.actual_plg||'')+(o.actual_count!==null?' · '+fmt(o.actual_count):''))
     +row('Impact',o.impact)+row('Channel',o.channel_program&&o.channel_program!=='None'?o.channel_program:'')+row('Outlet type',o.outlet_type)+row('Address',o.address)+row('GPS',(o.gps_status||'')+(o.gps_src?' ('+o.gps_src+')':''))
@@ -322,7 +324,7 @@ async function bvDraw(){ if(!map) return; const my=++drawN; layer.clearLayers();
 function bvMode(m){ MODE=m; document.querySelectorAll('.bv-tab').forEach(t=>t.classList.toggle('on',t.dataset.m===m));
   const ng=document.getElementById('bvNg'); ng.style.display=m==='nogps'?'block':'none';
   if(m==='nogps'){ const V=visBeats(), L2=V.flatMap(b=>b.out.filter(o=>o.lat===null).map(o=>[b,o]));
-    ng.innerHTML='<div style="font-weight:800;margin-bottom:8px">Outlets without GPS — '+L2.length+'</div><table class="brm-t"><thead><tr><th>#</th><th>Beat</th><th>Outlet</th><th>HUL code</th><th>SR</th><th>Day</th><th>Address</th></tr></thead><tbody>'
+    ng.innerHTML='<div style="font-weight:800;margin-bottom:8px">Outlets without GPS — '+L2.length+'</div><table class="brm-t"><thead><tr><th>#</th><th>Route (beat)</th><th>Outlet</th><th>HUL code</th><th>SR</th><th>Day</th><th>Address</th></tr></thead><tbody>'
       +L2.map(([b,o],i)=>'<tr><td>'+(i+1)+'</td><td><span class="tag" style="background:'+b.color+';color:#fff;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:800">'+b.no+'</span> '+esc(b.name)+'</td><td>'+esc(o.outlet_name)+'</td><td>'+esc(o.hul_code)+'</td><td>'+esc(o.sr_name)+'</td><td>'+esc(o.service_day)+'</td><td style="font-size:12px">'+esc(o.address)+'</td></tr>').join('')+'</tbody></table>'; }
   bvDraw(); setTimeout(()=>map.invalidateSize(),50); }
 function bvLeft(t){ document.querySelectorAll('.bv-ltab').forEach(x=>x.classList.toggle('on',x.dataset.l===t)); document.getElementById('bvList').style.display=t==='beats'?'':'none'; document.getElementById('bvDet').style.display=t==='det'?'':'none'; }
@@ -330,17 +332,17 @@ function bvKpi(){ const V=visBeats(), S=V.filter(b=>ON[b.name]), out=S.reduce((t
   const srs=new Set(S.flatMap(b=>b.srcodes)); const no=V.reduce((t,b)=>t+b.out.filter(o=>o.lat===null).length,0);
   document.getElementById('tRoute').textContent=fmt(dist,1)+' km'; document.getElementById('tNo').textContent=no+' outlets';
   const k=(v,l)=>'<div><b>'+v+'</b><span>'+l+'</span></div>';
-  document.getElementById('bvKpi').innerHTML=k(S.length+' /'+V.length,'Beats shown')+k(fmt(out)+' /'+fmt(BV_UP.outlets),'Outlets')+k(fmt(gps),'With GPS')+k(srs.size,'SRs')+k(fmt(dist,1)+' km','Route length')+k(fmt(dist/Math.max(1,S.filter(b=>b.gps.length>1).length),1)+' km','Avg per beat (with GPS)')
+  document.getElementById('bvKpi').innerHTML=k(S.length+' /'+V.length,'Routes shown')+k(fmt(out)+' /'+fmt(BV_UP.outlets),'Outlets')+k(fmt(gps),'With GPS')+k(srs.size,'SRs')+k(fmt(dist,1)+' km','Route length')+k(fmt(dist/Math.max(1,S.filter(b=>b.gps.length>1).length),1)+' km','Avg per beat (with GPS)')
     +(BV_UP.compliance!==null?k(fmt(BV_UP.compliance,2)+'%','Service compliance ('+fmt(BV_UP.actual_ol)+'/'+fmt(BV_UP.reco_ol)+')'):'')+(act?k(fmt(act),'Serviced (Ideal vs Actual)'):''); }
 function bvDetails(){ const V=visBeats(); if(!V.length){ document.getElementById('bvDet').innerHTML=''; return; }
   const avg=V.reduce((t,b)=>t+b.out.length,0)/V.length, big=V.slice().sort((a,b)=>b.out.length-a.out.length)[0], small=V.slice().sort((a,b)=>a.out.length-b.out.length)[0], far=V.slice().sort((a,b)=>b.km-a.km)[0], nog=V.filter(b=>b.gps.length<b.out.length).sort((a,b)=>(b.out.length-b.gps.length)-(a.out.length-a.gps.length))[0];
   let h='<div class="bv-ai"><b><i class="fa-solid fa-wand-magic-sparkles"></i> Analysis</b><br>'
-    +'• '+V.length+' beats, avg <b>'+fmt(avg,0)+'</b> outlets per beat.<br>'
-    +'• Biggest beat: <b>'+esc(big.name)+'</b> ('+big.out.length+' outlets)'+(big.out.length>avg*1.4?' — think about splitting it.':'.')+'<br>'
-    +'• Smallest beat: <b>'+esc(small.name)+'</b> ('+small.out.length+' outlets)'+(small.out.length<avg*0.6?' — could be merged with a nearby beat.':'.')+'<br>'
+    +'• '+V.length+' routes (beats), avg <b>'+fmt(avg,0)+'</b> outlets per route.<br>'
+    +'• Biggest route: <b>'+esc(big.name)+'</b> ('+big.out.length+' outlets)'+(big.out.length>avg*1.4?' — think about splitting it.':'.')+'<br>'
+    +'• Smallest route: <b>'+esc(small.name)+'</b> ('+small.out.length+' outlets)'+(small.out.length<avg*0.6?' — could be merged with a nearby route.':'.')+'<br>'
     +'• Longest route: <b>'+esc(far.name)+'</b> ('+fmt(far.km,1)+' km straight line).<br>'
     +(nog?'• Most outlets without GPS: <b>'+esc(nog.name)+'</b> ('+(nog.out.length-nog.gps.length)+') — tag them to see the full route.':'• Every outlet has GPS.')+'</div>';
-  h+='<table class="bv-det"><thead><tr><th>Beat</th><th class="r">OL</th><th class="r">GPS</th><th class="r">km</th><th class="r">km/OL</th></tr></thead><tbody>'
+  h+='<table class="bv-det"><thead><tr><th>Route (beat)</th><th class="r">OL</th><th class="r">GPS</th><th class="r">km</th><th class="r">km/OL</th></tr></thead><tbody>'
     +V.map(b=>'<tr style="cursor:pointer" onclick="bvZoom(\''+encodeURIComponent(b.name)+'\')"><td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'+b.color+'"></span> '+esc(b.name)+'<div style="color:#6b7280">'+esc(b.srs[0]||'')+' · '+esc(b.days.join(','))+'</div></td><td class="r">'+b.out.length+'</td><td class="r">'+b.gps.length+'</td><td class="r">'+fmt(b.km,1)+'</td><td class="r">'+(b.gps.length>1?fmt(b.km/(b.gps.length-1),2):'—')+'</td></tr>').join('')+'</tbody></table>';
   document.getElementById('bvDet').innerHTML=h; }
 bvLoad();
