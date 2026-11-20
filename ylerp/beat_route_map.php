@@ -5,8 +5,8 @@
  *   • left: beats (colour, eye = show / hide, outlets, route km), Details tab with the numbers per beat
  *   • map tabs: Areas (beat area + numbered pins) · Route (the visiting line of each beat) · No GPS (outlets without a location)
  *   • click a pin for the outlet's details
- * Sheets read: "Mirror Visit Report" (every outlet: beat, SR, servicing day) and "Ideal Vs Actual Service"
- * (service level + GPS). Outlets without GPS in the file take it from the Outlet Service Information upload when it has the outlet.
+ * Outlets = the "Ideal Vs Actual Service" sheet (service level + GPS), grouped by its Beat Name (= the route);
+ * the "Mirror Visit Report" sheet only adds SR / servicing day / outlet code. Outlets without GPS in the file take it from the Outlet Service Information upload when it has the outlet.
  */
 include 'config.php';
 if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
@@ -56,16 +56,15 @@ if (($_POST['action'] ?? '') === 'upload') {
     $ideal  = $read($find('Ideal Vs Actual Service'));
     if (!$mirror && !$ideal) brm_json(['ok' => false, 'msg' => 'This file has no "Mirror Visit Report" or "Ideal Vs Actual Service" sheet. Upload the LeverEDGE Service Mix Report.']);
 
+    if (!$ideal) brm_json(['ok' => false, 'msg' => 'This file has no "Ideal Vs Actual Service" sheet. Upload the LeverEDGE Service Mix Report.']);
+    /* the outlets = the Ideal Vs Actual Service sheet, grouped by its Beat Name; the Mirror Visit Report only adds SR / day / outlet code */
+    $M = []; foreach ($mirror as $r) { $k = strtoupper($r['outlethulcode'] ?? ''); if ($k !== '') $M[$k] = $r; }
     $O = [];   // by HUL code
-    foreach ($mirror as $r) { $k = strtoupper($r['outlethulcode'] ?? ''); if ($k === '') continue;
-        $O[$k] = ['hul_code' => $r['outlethulcode'], 'outlet_code' => $r['outletcode'] ?? '', 'outlet_name' => $r['partyname'] ?? '', 'beat' => $r['beatname'] ?? '',
-                  'sr_code' => $r['rsspcode'] ?? '', 'sr_name' => trim($r['rsspname'] ?? ''), 'service_day' => $r['servicingday'] ?? '', 'servicing_plg' => $r['servicingplg'] ?? '', 'mirror_type' => $r['typeofmirror'] ?? ''] + ($O[$k] ?? []); }
-    foreach ($ideal as $r) { $k = strtoupper($r['outlethulcode'] ?? ''); if ($k === '') continue;
-        $x = $O[$k] ?? ['hul_code' => $r['outlethulcode'], 'outlet_name' => $r['outletname'] ?? '', 'beat' => $r['beatname'] ?? ''];
-        if (($x['beat'] ?? '') === '') $x['beat'] = $r['beatname'] ?? '';
-        if (($x['outlet_name'] ?? '') === '') $x['outlet_name'] = $r['outletname'] ?? '';
-        $x += ['ideal_plg' => $r['idealservicingplg'] ?? '', 'ideal_count' => $r['idealservicingcount'] ?? '', 'actual_plg' => $r['actualservicingplg'] ?? '', 'actual_count' => $r['actualservicecount'] ?? '',
-               'impact' => $r['impactoutlet'] ?? '', 'channel_program' => $r['channelprogram'] ?? '', 'address' => $r['address'] ?? '', 'outlet_type' => $r['outlettype'] ?? '', 'gps_status' => $r['gpstaggedstatus'] ?? ''];
+    foreach ($ideal as $r) { $k = strtoupper($r['outlethulcode'] ?? ''); if ($k === '') continue; $m = $M[$k] ?? [];
+        $x = ['hul_code' => $r['outlethulcode'], 'outlet_name' => ($r['outletname'] ?? '') ?: ($m['partyname'] ?? ''), 'beat' => ($r['beatname'] ?? '') ?: ($m['beatname'] ?? ''),
+              'outlet_code' => $m['outletcode'] ?? '', 'sr_code' => $m['rsspcode'] ?? '', 'sr_name' => trim($m['rsspname'] ?? ''), 'service_day' => $m['servicingday'] ?? '', 'servicing_plg' => $m['servicingplg'] ?? '', 'mirror_type' => $m['typeofmirror'] ?? '',
+              'ideal_plg' => $r['idealservicingplg'] ?? '', 'ideal_count' => $r['idealservicingcount'] ?? '', 'actual_plg' => $r['actualservicingplg'] ?? '', 'actual_count' => $r['actualservicecount'] ?? '',
+              'impact' => $r['impactoutlet'] ?? '', 'channel_program' => $r['channelprogram'] ?? '', 'address' => $r['address'] ?? '', 'outlet_type' => $r['outlettype'] ?? '', 'gps_status' => $r['gpstaggedstatus'] ?? ''];
         $la = brm_ll($r['outletlatitude'] ?? ''); $lo = brm_ll($r['outletlongitude'] ?? '');
         if ($la !== null && $lo !== null) { $x['lat'] = $la; $x['lng'] = $lo; $x['gps_src'] = 'report'; }
         $O[$k] = $x; }
@@ -197,7 +196,7 @@ include 'header.php';
       <button class="brm-btn p" id="upBtn"><i class="fa-solid fa-upload"></i> Upload</button>
       <span class="brm-msg" id="upMsg"></span>
     </form>
-    <div style="font-size:11.5px;color:#6b7280;margin-top:8px">Reads the sheets <b>Mirror Visit Report</b> (outlet, beat, SR, servicing day) and <b>Ideal Vs Actual Service</b> (service level, GPS). Outlets with no GPS in the file take it from the Outlet Service Information upload.</div>
+    <div style="font-size:11.5px;color:#6b7280;margin-top:8px">Imports the <b>Ideal Vs Actual Service</b> sheet, routes grouped by its <b>Beat Name</b>. SR and servicing day come from the <b>Mirror Visit Report</b> sheet. Outlets with no GPS in the file take it from the Outlet Service Information upload.</div>
   </div>
   <div class="brm-card" style="padding:0;overflow:auto">
     <table class="brm-t"><thead><tr><th>#</th><th>Name</th><th>File</th><th class="r">Outlets</th><th class="r">With GPS</th><th class="r">Routes (beats)</th><th class="r">Service compliance</th><th>Uploaded</th><th></th></tr></thead><tbody>
