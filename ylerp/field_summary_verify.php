@@ -147,20 +147,20 @@ include 'header.php';
 .badge{display:inline-flex;gap:4px;align-items:center;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:800}
 .badge.v{background:#dcfce7;color:#166534}.badge.n{background:#fef3c7;color:#92400e}
 /* modal */
-.fvm{position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.6);display:none;align-items:flex-start;justify-content:center;padding:14px;overflow:auto}
+.fvm{position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.7);display:none;align-items:stretch;justify-content:center;padding:8px;overflow:hidden}
 .fvm.open{display:flex}
-.fvm-box{background:#fff;border-radius:14px;width:min(1400px,100%);box-shadow:0 24px 60px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 28px)}
+.fvm-box{background:#fff;border-radius:12px;width:100%;height:calc(100vh - 16px);box-shadow:0 24px 60px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column}
 .fvm-hd{display:flex;align-items:center;gap:12px;padding:12px 16px;background:linear-gradient(90deg,#0f172a,#1e3a8a);color:#fff;flex-wrap:wrap}
 .fvm-hd .t{font-size:16px;font-weight:800}.fvm-hd .s{font-size:12px;opacity:.85}
 .fvm-hd .x{margin-left:auto;width:34px;height:34px;border:none;border-radius:50%;background:#dc2626;color:#fff;font-size:18px;cursor:pointer}
 .fvm-split{flex:1;display:flex;min-height:0}
 .fvm-bd{padding:12px 14px;overflow:auto;flex:1;min-width:0}
-.pvw{width:52%;flex-shrink:0;display:flex;flex-direction:column;background:#0f172a;border-right:1px solid #e5e7eb;min-height:0}
+.pvw{width:62%;flex-shrink:0;display:flex;flex-direction:column;background:#0f172a;border-right:1px solid #e5e7eb;min-height:0}
 .pvw .ph{display:flex;align-items:center;gap:5px;padding:6px 10px;background:#111827;color:#e5e7eb;font-size:12px;flex-wrap:wrap}
 .pvw .ph .lb{font-weight:800;margin-right:auto}
 .pvw .ph button,.pvw .ph a{background:#374151;color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;text-decoration:none}
 .pvw .ph button.on{background:#2563eb}
-.pv{flex:1;position:relative;overflow:auto;min-height:420px}
+.pv{flex:1;position:relative;overflow:auto;min-height:0}
 .pv img{width:100%;height:100%;object-fit:contain;display:block;transition:transform .15s}
 .pv img.zm{width:auto;height:auto;max-width:none;object-fit:initial}
 .pv.mag-on img{cursor:none}
@@ -171,7 +171,7 @@ include 'header.php';
 .thumbs img,.thumbs span{height:54px;min-width:44px;border-radius:5px;border:2px solid transparent;cursor:pointer;object-fit:cover;background:#374151;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 6px}
 .thumbs .on{border-color:#3b82f6}
 @media (max-width:900px){.fvm-split{flex-direction:column}.pvw{width:100%;height:60vh}}
-.tot{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px;margin-bottom:12px}
+.tot{display:grid;grid-template-columns:repeat(auto-fill,minmax(105px,1fr));gap:8px;margin-bottom:12px}
 .tot div{border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px;background:#f8fafc}
 .tot span{display:block;font-size:10.5px;font-weight:800;color:#64748b;text-transform:uppercase}.tot b{font-size:15.5px}
 .tot .hl{background:#eff6ff;border-color:#bfdbfe}.tot .gr b{color:#15803d}.tot .rd b{color:#dc2626}
@@ -230,6 +230,7 @@ include 'header.php';
 </div></div>
 
 <script>
+document.body.appendChild(document.getElementById('fvm'));   // on top of the page header / sidebar
 let ROWS=[], CUR=null, CAN={v:true,u:true};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const N=(v,d=2)=>Number(v||0).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -250,9 +251,9 @@ function draw(){ tb.innerHTML=ROWS.map((x,i)=>{ const t=x.t||{};
    +'<td class="r">'+N(t.inv,0)+'</td><td class="r">'+N(t.final)+'</td><td class="r">'+N(t.cash)+'</td><td class="r">'+N(t.cheque)+'</td><td class="r"><b>'+N(t.paid)+'</b></td><td class="r" style="color:'+(Math.abs(t.balance||0)>0.009?'#dc2626':'#15803d')+'"><b>'+N(t.balance)+'</b></td>'
    +'<td>'+(t.inv?N(t.done,0)+'/'+N(t.inv,0):'—')+'</td><td>'+(Number(x.v)===1?'<span class="badge v"><i class="fa-solid fa-circle-check"></i> Verified</span>':'<span class="badge n">Not verified</span>')+'</td>'
    +'<td><button class="fv-btn p" style="padding:5px 10px;font-size:12px" onclick="openM('+i+')"><i class="fa-solid fa-magnifying-glass"></i> Check</button></td></tr>'; }).join('')||'<tr><td colspan="15" style="padding:20px;color:#6b7280">No field summaries.</td></tr>'; }
-function closeM(){ fvm.classList.remove('open'); }
+function closeM(){ fvm.classList.remove('open'); document.body.style.overflow=''; }
 function step(k){ if(CUR===null) return; const n=CUR+k; if(n<0||n>=ROWS.length){ alert(k>0?'This was the last one in the list.':'This is the first one.'); return; } openM(n); }
-async function openM(i){ CUR=i; const x=ROWS[i]; if(!x) return; draw(); fvm.classList.add('open');
+async function openM(i){ CUR=i; const x=ROWS[i]; if(!x) return; draw(); fvm.classList.add('open'); document.body.style.overflow='hidden';
   mT.textContent=x.code||('#'+x.id); mS.textContent=(x.delivery_date||'')+' · '+(x.route||'')+' · '+(x.dp||''); mPos.textContent=(i+1)+' / '+ROWS.length;
   mEdit.href='edit_field_summary.php?id='+x.id; mView.href='view_field_summary.php?id='+x.id; mB.innerHTML='<div style="padding:30px;color:#6b7280">Loading…</div>'; mPv.innerHTML='<div class="none">Loading…</div>'; mThumbs.innerHTML=''; stamp(x);
   try{ const d=await J(await fetch(location.pathname+'?ajax=detail&id='+x.id)); if(!d.ok) throw new Error(d.msg); if(CUR!==i) return;
