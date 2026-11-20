@@ -185,12 +185,15 @@ function rf_row($p, $perms, $R, $occ, $menu_label, $sub = false, $ro = false) {
     $pbtns = (!isset($btn_done[$page])) ? ($all_btns[strtolower($page)] ?? []) : [];
     if ($pbtns) $btn_done[$page] = 1;
     $others = array_values(array_diff(array_unique($occ[$page] ?? []), [$menu_label]));
+    static $__lk = null; if ($__lk === null) $__lk = function_exists('rbac_linked_pages') ? rbac_linked_pages() : [];
+    $kids = $__lk[strtolower($page)] ?? [];   // pages opened from this page (no menu link of their own) — they follow this row's rights
     ob_start(); ?>
-    <tr class="pr<?php echo $sub ? ' sub' : ''; ?>" data-page="<?php echo htmlspecialchars($page); ?>" data-search="<?php echo htmlspecialchars(strtolower($p['label'] . ' ' . $page . ' ' . $menu_label)); ?>">
+    <tr class="pr<?php echo $sub ? ' sub' : ''; ?>" data-page="<?php echo htmlspecialchars($page); ?>" data-search="<?php echo htmlspecialchars(strtolower($p['label'] . ' ' . $page . ' ' . $menu_label . ' ' . implode(' ', $kids) . ' ' . implode(' ', array_map(fn($k) => str_replace('_', ' ', $k), $kids)))); ?>">
         <td><div class="pg"><i class="fa-solid <?php echo htmlspecialchars($p['icon'] ?: 'fa-file'); ?>"></i>
             <span><?php echo htmlspecialchars($p['label']); ?></span><code><?php echo htmlspecialchars($page); ?>.php</code>
             <?php if ($others): ?><span class="dup" title="Same page is also in: <?php echo htmlspecialchars(implode(', ', $others)); ?>"><i class="fa-solid fa-link"></i> also in <?php echo htmlspecialchars(implode(', ', $others)); ?></span><?php endif; ?>
         </div>
+        <?php if ($kids): ?><div class="rb-kids" title="Pages opened from this page. They have no menu link: they follow the rights ticked on this row, and their buttons are under 'Buttons on this page'."><i class="fa-solid fa-turn-up fa-rotate-90"></i> <?php foreach ($kids as $k): ?><span><?php echo htmlspecialchars(rbac_page_title($k)); ?> <code><?php echo htmlspecialchars($k); ?>.php</code></span><?php endforeach; ?></div><?php endif; ?>
         <?php if ($pbtns): $sv = $btn_saved[strtolower($page)] ?? []; ?>
             <details class="rb-btns"><summary><i class="fa-solid fa-computer-mouse"></i> Buttons on this page <span data-bcnt></span></summary>
                 <div class="rb-btnlist">
@@ -226,6 +229,7 @@ include 'header.php';
 .rb-btns[open] summary{background:#ede9fe}
 .rb-btnlist{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 10px;margin-top:6px;border:1px dashed #c4b5fd;border-radius:8px;background:#faf9ff}
 .rb-btnlist label{display:inline-flex;align-items:center;gap:5px;font-weight:500;cursor:pointer;white-space:nowrap}
+.rb-kids{margin:4px 0 0 26px;font-size:11.5px;color:#6d28d9;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}.rb-kids span{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:1px 7px}.rb-kids code{font-size:10.5px;color:#6b7280}
 .rb-sub{flex-basis:100%;margin-top:6px;padding:5px 8px;border-left:3px solid #8b5cf6;background:#f5f3ff;border-radius:0 6px 6px 0;color:#4c1d95;font-size:12px}.rb-sub code{font-size:11px;color:#6b7280}.rb-sub small{color:#7c3aed;margin-left:4px}
 .rb-btnall{margin-left:auto;color:#6b7280} .rb-btnall a{color:#6d28d9;font-weight:600}
 </style>
