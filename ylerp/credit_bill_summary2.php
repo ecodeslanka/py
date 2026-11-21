@@ -2360,11 +2360,14 @@ function closeBillModal(){
     _detailId=null; _modalData=null;
 }
 
+/* read a JSON reply; a permission block or a PHP error is shown with its own text instead of "Network error" */
+async function cbvJson(r){ const t=await r.text(); try{ const d=JSON.parse(t); if(!d.success&&!d.error&&d.message) d.error=d.message; return d; }
+  catch(e){ const m=t.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi,' ').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim(); throw new Error('Server answered'+(r.status>=400?' HTTP '+r.status:'')+(m?': '+m.slice(0,220):' nothing (log in again?)')); } }
 function loadModalData(detailId){
-    fetch('save_credit_bill_verify.php?action=load&detail_id='+detailId)
-    .then(r=>r.json())
-    .then(data=>{ if(!data.success){showBodyError(data.error||'Load failed');return;} _modalData=data; renderModal(data); })
-    .catch(()=>showBodyError('Network error'));
+    fetch('save_credit_bill_verify.php?action=load&detail_id='+detailId,{headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(cbvJson)
+    .then(data=>{ if(!data.success){showBodyError(data.error||data.message||'Load failed');return;} _modalData=data; renderModal(data); })
+    .catch(e=>showBodyError(e&&e.message?e.message:'Network error'));
 }
 
 function showBodyError(msg){
@@ -2514,8 +2517,8 @@ function doUpload(file) {
     if (prog) prog.style.display = 'flex';
     const fd = new FormData();
     fd.append('action', 'upload_bill'); fd.append('detail_id', _detailId); fd.append('bill_image', file);
-    fetch('save_credit_bill_verify.php', {method:'POST', body:fd})
-    .then(r => r.json())
+    fetch('save_credit_bill_verify.php', {method:'POST', body:fd, headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(cbvJson)
     .then(data => {
         if (prog) prog.style.display = 'none';
         if (data.success) {
@@ -2534,7 +2537,7 @@ function doUpload(file) {
             showToast('Bill uploaded successfully', 'success');
         } else showToast(data.error || 'Upload failed', 'error');
     })
-    .catch(() => { if (prog) prog.style.display = 'none'; showToast('Network error', 'error'); });
+    .catch(e => { if (prog) prog.style.display = 'none'; showToast(e && e.message ? e.message : 'Network error', 'error'); });
 }
 
 function switchBillImg(src, imgId) {
@@ -2548,8 +2551,8 @@ function switchBillImg(src, imgId) {
 function deleteBillImage(imgId) {
     if (!confirm('Delete this bill image?')) return;
     const fd = new FormData(); fd.append('action', 'delete_bill_image'); fd.append('image_id', imgId);
-    fetch('save_credit_bill_verify.php', {method:'POST', body:fd})
-    .then(r => r.json())
+    fetch('save_credit_bill_verify.php', {method:'POST', body:fd, headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(cbvJson)
     .then(data => {
         if (data.success) {
             const thumb = document.getElementById('billthumb-' + imgId);
@@ -2561,7 +2564,8 @@ function deleteBillImage(imgId) {
             updateTableBillCount(-1);
             showToast('Image deleted', 'success');
         } else showToast(data.error || 'Delete failed', 'error');
-    });
+    })
+    .catch(e => showToast(e && e.message ? e.message : 'Network error', 'error'));
 }
 
 function updateTableBillCount(delta) {
@@ -2576,8 +2580,8 @@ function updateTableBillCount(delta) {
 function setDetailVerify(verified) {
     const fd = new FormData();
     fd.append('action', 'set_detail_verify'); fd.append('detail_id', _detailId); fd.append('verified', verified);
-    fetch('save_credit_bill_verify.php', {method:'POST', body:fd})
-    .then(r => r.json())
+    fetch('save_credit_bill_verify.php', {method:'POST', body:fd, headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(cbvJson)
     .then(data => {
         if (data.success) {
             const vbtn=document.getElementById('vbtn-main'), uvbtn=document.getElementById('uvbtn-main'), disp=document.getElementById('cvStatusDisplay');
@@ -2585,7 +2589,8 @@ function setDetailVerify(verified) {
             else { uvbtn?.classList.add('active-u'); vbtn?.classList.remove('active-v'); if (disp) disp.innerHTML=`<span class="bm-verify-status is-unverified"><i class="fa-solid fa-circle-xmark"></i> Not Verified</span>`; showToast('Bill marked as Not Verified', 'error'); }
             updateTableVerifyBadge(verified);
         } else showToast(data.error || 'Update failed', 'error');
-    });
+    })
+    .catch(e => showToast(e && e.message ? e.message : 'Network error', 'error'));
 }
 
 function updateTableVerifyBadge(status) {

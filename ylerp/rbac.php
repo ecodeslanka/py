@@ -72,6 +72,10 @@ function rbac_fix_fs_verify_defaults() {
 /** default of a button for a role that has no saved choice: true = allowed */
 function rbac_btn_default($page, $key) { return !in_array($key, $GLOBALS['RBAC_BTN_DEFAULT_DENY'][strtolower((string)$page)] ?? [], true); }
 
+/* endpoints called from several pages — [page, right] in order; the request is allowed through the first one the role has */
+$GLOBALS['RBAC_MULTI_PARENT'] = [
+    'save_credit_bill_verify' => [['credit_bill_issue', 'edit'], ['credit_bill_summary2', 'view'], ['credit_bill_summary', 'view']],   // Verify / bill image on Credit Bill Issue and Credit Bill Summary (2)
+];
 $GLOBALS['RBAC_RELATED_PAGES'] = [
     // Users / roles
     'role_form'            => ['role', 'view'],       // add / edit right is checked inside the page
@@ -654,6 +658,13 @@ function rbac_resolve($page) {
         }
         return ['import_history', 'create'];
     }
+    /* endpoints used by more than one page: allowed through whichever of those pages the role has (first one when none) */
+    if (isset($GLOBALS['RBAC_MULTI_PARENT'][$page])) {
+        $opts = $GLOBALS['RBAC_MULTI_PARENT'][$page];
+        $c = rbac_context();
+        foreach ($opts as [$t, $r]) if (isset($menu[$t]) && !empty($c['perms'][$t]['view']) && ($r === 'view' || !empty($c['perms'][$t][$r]))) return [$t, $r];
+        foreach ($opts as [$t, $r]) if (isset($menu[$t])) return [$t, $r];
+    }
     if (isset($GLOBALS['RBAC_RELATED_PAGES'][$page])) return $GLOBALS['RBAC_RELATED_PAGES'][$page];
     if ($inf = rbac_infer_related($page)) return $inf;   // delete_x / edit_x / add_x → page x
     return [null, null];   // unprotected (only login)
@@ -768,6 +779,9 @@ function rbac_guard() {
     rbac_guard_buttons($page);
 
     $act = rbac_detect_action();
+    /* a shared endpoint reached through a page the role may only VIEW (e.g. Verify on Credit Bill Summary 2): saving is allowed
+       (the page's own buttons decide who sees Verify); deleting still needs the Delete right */
+    if (isset($GLOBALS['RBAC_MULTI_PARENT'][$page]) && (rbac_resolve($page)[1] ?? '') === 'view' && $act !== 'delete') return;
     if ($act === 'create_or_edit') {
         if (!rbac_can('create', $page) && !rbac_can('edit', $page)) rbac_deny('create', $page);
     } elseif ($act !== 'view' && !rbac_can($act, $page)) {
