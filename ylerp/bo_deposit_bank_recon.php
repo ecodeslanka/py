@@ -234,142 +234,273 @@ if (isset($_REQUEST['ajax'])) {
 
 $accounts = bor_accounts($conn); $stmt_accounts = bor_statement_accounts($conn); $SET = bor_settings($conn);
 
+$tab = in_array($_GET['tab'] ?? '', ['run', 'saved', 'settings'], true) ? $_GET['tab'] : 'run';
+if (!$SET['account'] && $tab === 'run' && !isset($_GET['tab'])) $tab = 'settings';
 include 'header.php';
 ?>
 <style>
-.bor{padding:16px;color:#111827}
-.bor h2{margin:0 0 4px;font-size:20px;font-weight:800;display:flex;gap:9px;align-items:center}.bor .sub{color:#6b7280;font-size:12.5px;margin-bottom:12px}
-.bor-tabs{display:flex;gap:6px;margin-bottom:12px}.bor-tab{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:8px 16px;font-weight:700;font-size:13px;cursor:pointer;color:#475569}.bor-tab.on{background:#1e3a8a;color:#fff;border-color:#1e3a8a}
-.bor-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px;margin-bottom:12px}
-.bor-bar label{font-size:11.5px;font-weight:700;color:#475569;display:flex;flex-direction:column;gap:3px}
-.bor-bar input,.bor-bar select{border:1.5px solid #e5e7eb;border-radius:8px;padding:6px 8px;font-size:13px}
-.bb{border:none;border-radius:8px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
-.bb.p{background:#2563eb;color:#fff}.bb.ok{background:#16a34a;color:#fff}.bb.g{background:#f3f4f6;color:#374151}.bb.r{background:#fee2e2;color:#b91c1c}.bb.o{background:#f59e0b;color:#fff}.bb:disabled{opacity:.5;cursor:not-allowed}
-.kp{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.kp div{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:8px 14px;min-width:150px}.kp b{display:block;font-size:17px}.kp span{font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase}
-.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:12px;overflow:hidden}
-.card h3{margin:0;padding:10px 14px;font-size:14px;font-weight:800;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px;background:#f8fafc}
-.tw{overflow:auto;max-height:460px}
-.t{width:100%;border-collapse:collapse;font-size:12.5px}.t th{background:#f1f5f9;text-align:left;padding:7px 8px;font-size:11px;text-transform:uppercase;color:#475569;position:sticky;top:0;white-space:nowrap}
-.t td{padding:6px 8px;border-top:1px solid #f1f5f9;vertical-align:top}.t .r{text-align:right;white-space:nowrap}.t .nw{white-space:nowrap}.t .ds{max-width:360px;font-size:11.5px;color:#475569}
-.pill{border-radius:99px;padding:1px 8px;font-size:11px;font-weight:800}.pill.a{background:#dcfce7;color:#166534}.pill.m{background:#ede9fe;color:#5b21b6}.pill.d{background:#fef3c7;color:#92400e}
-.foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:#f8fafc;border-top:1px solid #e5e7eb}
-.empty{padding:18px;color:#6b7280;text-align:center}
-.mm{position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.6);display:none;align-items:flex-start;justify-content:center;padding:20px 10px;overflow:auto}.mm.open{display:flex}
-.mm-box{background:#fff;border-radius:14px;width:min(1000px,100%);box-shadow:0 24px 60px rgba(0,0,0,.4);overflow:hidden}
-.mm-hd{display:flex;align-items:center;gap:10px;padding:12px 16px;background:linear-gradient(90deg,#1e3a8a,#2563eb);color:#fff}.mm-hd b{flex:1}.mm-hd button{width:32px;height:32px;border:none;border-radius:50%;background:#dc2626;color:#fff;font-size:18px;cursor:pointer}
-.mm-bd{padding:12px 16px}
-@media(max-width:700px){.bor{padding:10px}.kp div{min-width:120px}}
+/* same look as Deposit Reconciliation (cc_deposit_dp_bank_recon.php) */
+.dbr { font-family: 'Inter', system-ui, sans-serif; font-size: 13px; color: #111; padding: 22px 26px 70px; }
+.dbr *, .dbr *::before, .dbr *::after { box-sizing: border-box; }
+.dbr [hidden] { display: none !important; }
+.dbr h1 { margin: 0; font-size: 21px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.dbr h1 i { color: #0f766e; }
+.dbr .sub { margin: 4px 0 16px; color: #666; }
+.dbr h2 { font-size: 15px; margin: 26px 0 10px; display: flex; align-items: center; gap: 8px; }
+.dbr h2 .count { background: #f3f4f6; color: #444; border-radius: 999px; padding: 2px 9px; font-size: 12px; }
+.dbr .btn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border: 1px solid transparent; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; white-space: nowrap; }
+.dbr .btn-dark { background: #0f766e; color: #fff; } .dbr .btn-dark:hover { background: #115e59; }
+.dbr .btn-light { background: #fff; color: #333; border-color: #e5e5e5; } .dbr .btn-light:hover { background: #f5f5f5; }
+.dbr .btn-danger { background: #fff; color: #b91c1c; border-color: #fecaca; } .dbr .btn-danger:hover { background: #fef2f2; }
+.dbr .btn-sm { height: 30px; padding: 0 11px; font-size: 12.5px; }
+.dbr .btn:disabled { opacity: .4; cursor: not-allowed; }
+.dbr .btn:focus-visible, .dbr input:focus-visible, .dbr select:focus-visible, .dbr a:focus-visible { outline: 2px solid #0f766e; outline-offset: 2px; }
+.dbr .tabs { display: flex; gap: 4px; border-bottom: 1px solid #e5e5e5; margin-bottom: 16px; }
+.dbr .tabs a { padding: 10px 14px; color: #555; text-decoration: none; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; gap: 7px; align-items: center; }
+.dbr .tabs a.on { color: #111; border-bottom-color: #0f766e; }
+.dbr .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; }
+.dbr label.f { display: block; font-size: 12px; font-weight: 600; color: #444; margin-bottom: 5px; }
+.dbr input[type=date], .dbr input[type=text], .dbr input[type=search], .dbr select { width: 100%; height: 36px; padding: 0 10px; border: 1px solid #ddd; border-radius: 8px; font: inherit; background: #fff; }
+.dbr .chk { display: flex; gap: 7px; align-items: center; font-weight: 500; cursor: pointer; height: 36px; }
+.dbr .chk input { width: 16px; height: 16px; accent-color: #0f766e; }
+.dbr .alert { padding: 11px 14px; border-radius: 10px; margin: 14px 0; }
+.dbr .alert.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.dbr .alert.warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.dbr .alert.info { background: #f0fdfa; color: #134e4a; border: 1px solid #99f6e4; }
+.dbr .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 18px 0 6px; }
+.dbr .stat { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 13px 15px; }
+.dbr .stat .lbl { color: #666; font-size: 12px; }
+.dbr .stat .val { font-size: 19px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.dbr .stat .cnt { color: #777; font-size: 12px; margin-top: 2px; }
+.dbr .stat.g .val { color: #15803d; } .dbr .stat.a .val { color: #b45309; } .dbr .stat.r .val { color: #b91c1c; }
+.dbr .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; overflow-x: auto; }
+.dbr table { width: 100%; border-collapse: collapse; }
+.dbr th { white-space: nowrap; padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 600; color: #555; background: #fafafa; border-bottom: 1px solid #e5e5e5; }
+.dbr td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+.dbr tbody tr:last-child td { border-bottom: 0; }
+.dbr tr.staged td { background: #eff6ff; }
+.dbr tr.used td { opacity: .45; }
+.dbr .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dbr th.sep, .dbr td.sep { border-right: 2px solid #e5e5e5; }
+.dbr .muted { color: #777; font-size: 12px; }
+.dbr .rowmsg { font-size: 12px; margin-top: 3px; } .dbr .rowmsg.info { color: #1d4ed8; }
+.dbr .desc { color: #444; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; display: block; }
+.dbr .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.dbr .b-ok { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.dbr .b-diff { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.dbr .b-no { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.dbr .b-man { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+.dbr .b-auto { background: #f5f5f5; color: #555; border: 1px solid #e5e5e5; }
+.dbr .diff-pos { color: #15803d; font-weight: 700; } .dbr .diff-neg { color: #b91c1c; font-weight: 700; }
+.dbr .name { font-weight: 600; }
+.dbr .savebar { position: sticky; bottom: 0; z-index: 5; margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 12px 14px; box-shadow: 0 -6px 20px rgba(0,0,0,.06); }
+.dbr .savebar .grow { flex: 1 1 240px; }
+.dbr .empty { padding: 26px 16px; text-align: center; color: #666; }
+.dbr .setbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #f0fdfa; border: 1px solid #99f6e4; color: #134e4a; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; }
+.dbr .setbar .pill { background: #fff; border: 1px solid #99f6e4; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+.dbr .setbar .setlink { margin-left: auto; color: #0f766e; font-weight: 600; text-decoration: none; }
+.dbr .setcard { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 18px; max-width: 860px; }
+.dbr .setcard h3 { margin: 0 0 4px; font-size: 16px; }
+.dbr .setgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.dbr .setgrid .wide { grid-column: 1 / -1; }
+.dbr .modal { position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.5); }
+.dbr .modal[hidden] { display: none; }
+.dbr .dialog { width: 100%; max-width: 1040px; max-height: 92vh; display: flex; flex-direction: column; background: #fff; border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.dbr .dhead { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e5e5e5; }
+.dbr .dhead h3 { margin: 0; font-size: 16px; }
+.dbr .xbtn { border: 0; background: none; font-size: 18px; cursor: pointer; color: #555; width: 34px; height: 34px; border-radius: 8px; }
+.dbr .xbtn:hover { background: #f3f4f6; }
+.dbr .dbody { padding: 14px 18px; overflow: auto; flex: 1; }
+.dbr .mr-dep { display: flex; flex-wrap: wrap; gap: 8px 22px; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
+.dbr .mr-dep div { display: flex; flex-direction: column; }
+.dbr .mr-dep b { font-size: 14px; }
+.dbr .mr-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 10px; }
+.dbr .mr-filter .grow { flex: 1 1 200px; }
+.dbr .mr-list { max-height: 46vh; overflow: auto; }
+.dbr .mr-list th { position: sticky; top: 0; z-index: 1; }
+.dbr .mr-list tr { cursor: pointer; }
+.dbr .mr-list tr.pick td { background: #f0fdfa; }
+.dbr .mr-list tr.same td:nth-child(2) { color: #0f766e; font-weight: 700; }
+.dbr .mr-list tr.eq td.num { color: #15803d; font-weight: 700; }
+.dbr .dfoot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 18px; border-top: 1px solid #e5e5e5; background: #fafafa; border-radius: 0 0 14px 14px; }
+.dbr .tally { display: flex; gap: 18px; margin-right: auto; }
+.dbr .tally div { display: flex; flex-direction: column; }
+.dbr .tally b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.dbr .tally .ok { color: #15803d; } .dbr .tally .bad { color: #b91c1c; }
+.dbr .toast { position: fixed; right: 20px; bottom: 80px; z-index: 2147483600; padding: 12px 16px; border-radius: 10px; color: #fff; font-weight: 600; box-shadow: 0 10px 30px rgba(0,0,0,.2); opacity: 0; transform: translateY(10px); transition: .2s; pointer-events: none; max-width: 440px; }
+.dbr .toast.show { opacity: 1; transform: none; } .dbr .toast.ok { background: #15803d; } .dbr .toast.err { background: #b91c1c; }
+@media (max-width: 760px) { .dbr { padding: 14px 12px 70px; } .dbr .setgrid { grid-template-columns: 1fr; } }
+@media print { .dbr .tabs, .dbr .noprint, .dbr .toast { display: none !important; } .dbr { padding: 0; } }
 </style>
-<div class="bor">
-  <h2><i class="fa-solid fa-building-columns" style="color:#2563eb"></i> BO Cash Deposit Reconciliation</h2>
-  <div class="sub">BO cash deposits ↔ bank statement credits of the same bank account. <b>Deposits</b>: "Deposited to Bank" of BO Cash Deposit (SR) and (DP), by deposit date. <b>Auto</b>: same amount on the deposit date (± days set in Settings), bank lines of the Settings account. The rest: <b>Match manually</b> with 1 or more bank credits. Saved as a batch — delete the batch to undo.</div>
-  <div class="bor-tabs"><button class="bor-tab on" data-t="rec" onclick="tab('rec')"><i class="fa-solid fa-scale-balanced"></i> Reconcile</button><button class="bor-tab" data-t="his" onclick="tab('his')"><i class="fa-solid fa-clock-rotate-left"></i> History (batches)</button></div>
 
-  <div id="tRec">
-    <div class="card" id="setCard"><h3 style="cursor:pointer" onclick="setBody.style.display=setBody.style.display==='none'?'':'none'"><i class="fa-solid fa-gear" style="color:#2563eb"></i> Settings
-        <span id="setInfo" style="margin-left:auto;font-weight:600;font-size:12px;color:#475569"><?php if ($SET['account']): ?><?= htmlspecialchars($stmt_accounts[$SET['account']]['label'] ?? '') ?> · <?= htmlspecialchars(bor_type_label($SET['type'])) ?> · ±<?= (int)$SET['tol'] ?> day(s)<?= $SET['acc_only'] ? ' · only deposits to this account' : '' ?><?= $SET['by'] ? ' · saved by ' . htmlspecialchars($SET['by']) . ' ' . htmlspecialchars($SET['at']) : '' ?><?php else: ?><b style="color:#b91c1c">Set the bank account first</b><?php endif; ?></span></h3>
-      <div id="setBody" style="<?= $SET['account'] ? 'display:none;' : '' ?>padding:12px 14px">
-        <div class="bor-bar" style="margin:0;border:none;padding:0">
-          <label>Bank account (with bank statements)<select id="setAcc" onchange="setTypes()"><option value="">— Select —</option>
-            <?php foreach ($stmt_accounts as $id => $a): ?><option value="<?= $id ?>" data-types='<?= htmlspecialchars(json_encode(array_keys($a['types'])), ENT_QUOTES) ?>' <?= $id === $SET['account'] ? 'selected' : '' ?>><?= htmlspecialchars($a['label']) ?> — last statement <?= htmlspecialchars($a['last']) ?></option><?php endforeach; ?></select></label>
-          <label>Statement type<select id="setType" data-cur="<?= htmlspecialchars($SET['type']) ?>"></select></label>
-          <label>Date tolerance<select id="setTol"><?php foreach ([0 => 'Same date', 1 => '± 1 day', 2 => '± 2 days', 3 => '± 3 days', 5 => '± 5 days', 7 => '± 7 days'] as $v => $l): ?><option value="<?= $v ?>" <?= $v === (int)$SET['tol'] ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
-          <label style="flex-direction:row;align-items:center;gap:6px;align-self:center"><input type="checkbox" id="setOnly" <?= $SET['acc_only'] ? 'checked' : '' ?>> Only BO deposits made to this account</label>
-          <button class="bb p" onclick="saveSettings()" data-perm="edit"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
-        </div>
-        <?php if (!$stmt_accounts): ?><div style="color:#b91c1c;font-size:12.5px;margin-top:8px">No bank statements are uploaded yet — upload them on Bank Statements first.</div><?php endif; ?>
-      </div></div>
-    <div class="bor-bar">
-      <label>Deposit date from<input type="date" id="fFrom"></label>
-      <label>to<input type="date" id="fTo"></label>
-      <label>Deposits from<select id="fSrc"><option value="all">All — BO Cash Deposit (SR) + (DP)</option><option value="sr">BO Cash Deposit (SR)</option><option value="dp">BO Cash Deposit (DP)</option></select></label>
-      <button class="bb p" onclick="load()"><i class="fa-solid fa-wand-magic-sparkles"></i> Load &amp; match</button>
+<div class="dbr">
+    <h1><i class="fa-solid fa-scale-balanced"></i> BO Cash Deposit ↔ Bank Reconciliation</h1>
+    <p class="sub">Match the "Deposited to Bank" entries of BO Cash Deposit (SR) and (DP) to bank statement credits by deposit date and amount, and save them as batches.</p>
+
+    <div class="tabs">
+        <a href="?tab=run" class="<?= $tab === 'run' ? 'on' : '' ?>"><i class="fa-solid fa-wand-magic-sparkles"></i> Reconcile</a>
+        <a href="?tab=saved" class="<?= $tab === 'saved' ? 'on' : '' ?>"><i class="fa-solid fa-layer-group"></i> Saved batches</a>
+        <a href="?tab=settings" class="<?= $tab === 'settings' ? 'on' : '' ?>"><i class="fa-solid fa-gear"></i> Settings</a>
     </div>
-    <div class="kp" id="kp"></div>
-    <div class="card"><h3><span class="pill a">AUTO</span> Matched — deposit date + amount <span id="mCnt" style="margin-left:auto;font-size:12px;color:#6b7280"></span></h3>
-      <div class="tw"><table class="t"><thead><tr><th><input type="checkbox" id="mAll" checked onchange="document.querySelectorAll('.mChk').forEach(c=>c.checked=this.checked);tally()"></th><th>Deposit date</th><th>Delivery date</th><th>Employee</th><th>Bank account</th><th class="r">Deposit</th><th>Bank date</th><th>Bank description</th><th class="r">Bank credit</th></tr></thead><tbody id="mRows"><tr><td colspan="9" class="empty">Pick the dates and press Load &amp; match.</td></tr></tbody></table></div></div>
-    <div class="card"><h3><span class="pill d">NOT FOUND</span> BO deposits without a bank line — match manually <span id="uCnt" style="margin-left:auto;font-size:12px;color:#6b7280"></span></h3>
-      <div class="tw"><table class="t"><thead><tr><th>Deposit date</th><th>Delivery date</th><th>Employee</th><th>Bank account</th><th class="r">Deposit</th><th>Manual match</th><th></th></tr></thead><tbody id="uRows"><tr><td colspan="7" class="empty">—</td></tr></tbody></table></div></div>
-    <div class="card"><h3>Open bank credits in the range (not reconciled by anything) <span id="bCnt" style="margin-left:auto;font-size:12px;color:#6b7280"></span></h3>
-      <div class="tw" style="max-height:300px"><table class="t"><thead><tr><th>Date</th><th>Bank account</th><th>Description</th><th class="r">Credit</th></tr></thead><tbody id="bRows"><tr><td colspan="4" class="empty">—</td></tr></tbody></table></div></div>
-    <div class="card"><div class="foot"><input id="bRemark" placeholder="Batch remark (optional)" style="flex:1;min-width:200px;border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 10px;font-size:13px"><span id="sumTxt" style="font-size:13px;font-weight:700"></span><button class="bb ok" id="saveBtn" onclick="saveBatch()" data-perm="create"><i class="fa-solid fa-floppy-disk"></i> Save batch</button></div></div>
-  </div>
 
-  <div id="tHis" style="display:none">
-    <div class="card"><h3>Saved batches</h3><div class="tw" style="max-height:none"><table class="t"><thead><tr><th>Batch</th><th>Saved</th><th>Deposit dates</th><th>Account</th><th class="r">Reconciled</th><th class="r">Deposits</th><th class="r">Bank</th><th class="r">Left unreconciled</th><th>Remark</th><th></th></tr></thead><tbody id="hRows"></tbody></table></div></div>
-  </div>
+<?php if ($tab === 'run'): ?>
+    <?php if (!$SET['account']): ?>
+        <div class="alert warn">No bank account is set for reconcile yet. <a href="?tab=settings">Open Settings</a> and choose the bank account.</div>
+    <?php else: ?>
+        <div class="setbar">
+            <span><i class="fa-solid fa-building-columns"></i> <b><?= htmlspecialchars($stmt_accounts[$SET['account']]['label'] ?? '') ?></b></span>
+            <span class="pill"><?= htmlspecialchars(bor_type_label($SET['type'])) ?></span>
+            <span class="pill"><?= $SET['tol'] === 0 ? 'Same date only' : '± ' . $SET['tol'] . ' day' . ($SET['tol'] > 1 ? 's' : '') ?></span>
+            <span class="pill"><?= $SET['acc_only'] ? 'Only deposits to this account' : 'Deposits to any account' ?></span>
+            <a href="?tab=settings" class="setlink"><i class="fa-solid fa-gear"></i> Change</a>
+        </div>
+    <?php endif; ?>
+
+    <div class="filters">
+        <div><label class="f" for="fFrom">Deposit date from</label><input type="date" id="fFrom"></div>
+        <div><label class="f" for="fTo">Deposit date to</label><input type="date" id="fTo"></div>
+        <div><label class="f" for="fSrc">Deposits from</label><select id="fSrc"><option value="all">All — BO Cash Deposit (SR) + (DP)</option><option value="sr">BO Cash Deposit (SR)</option><option value="dp">BO Cash Deposit (DP)</option></select></div>
+        <div><button type="button" class="btn btn-dark" style="width:100%;justify-content:center;" onclick="load()" <?= $SET['account'] ? '' : 'disabled' ?>><i class="fa-solid fa-play"></i> Reconcile</button></div>
+    </div>
+
+    <div id="runOut"></div>
+
+    <div class="savebar noprint" id="saveBar" hidden>
+        <input type="text" class="grow" id="bRemark" placeholder="Batch remark (optional)" maxlength="500">
+        <span class="muted" id="sumTxt"></span>
+        <button type="button" class="btn btn-dark" id="saveBtn" onclick="saveBatch()" data-perm="create"><i class="fa-solid fa-floppy-disk"></i> Save batch</button>
+    </div>
+
+<?php elseif ($tab === 'saved'): ?>
+    <div class="card"><table>
+        <thead><tr><th>Batch</th><th>Saved</th><th>Deposit dates</th><th>Bank account</th><th class="num">Reconciled</th><th class="num">Deposit amount</th><th class="num sep">Bank amount</th><th class="num">Not reconciled</th><th>Remark</th><th></th></tr></thead>
+        <tbody id="hRows"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+    </table></div>
+
+<?php else: ?>
+    <div class="setcard">
+        <h3><i class="fa-solid fa-gear" style="color:#0f766e"></i> Reconcile settings</h3>
+        <p class="muted" style="margin:0 0 14px">Bank statement credits of this account are matched with the BO deposits.<?= $SET['by'] ? ' Last saved by <b>' . htmlspecialchars($SET['by']) . '</b> on ' . htmlspecialchars($SET['at']) . '.' : '' ?></p>
+        <?php if (!$stmt_accounts): ?><div class="alert warn">No bank statements are uploaded yet — upload them on Bank Statements first.</div><?php endif; ?>
+        <div class="setgrid">
+            <div class="wide"><label class="f" for="setAcc">Bank account (accounts with bank statements)</label>
+                <select id="setAcc" onchange="setTypes()"><option value="">— Select —</option>
+                <?php foreach ($stmt_accounts as $id => $a): ?><option value="<?= $id ?>" data-types='<?= htmlspecialchars(json_encode(array_keys($a['types'])), ENT_QUOTES) ?>' <?= $id === $SET['account'] ? 'selected' : '' ?>><?= htmlspecialchars($a['label']) ?> — last statement <?= htmlspecialchars($a['last']) ?> (<?= (int)$a['uploads'] ?> upload<?= $a['uploads'] == 1 ? '' : 's' ?>)</option><?php endforeach; ?></select></div>
+            <div><label class="f" for="setType">Statement type</label><select id="setType" data-cur="<?= htmlspecialchars($SET['type']) ?>"></select></div>
+            <div><label class="f" for="setTol">Date tolerance</label><select id="setTol"><?php foreach ([0 => 'Same date only', 1 => '± 1 day', 2 => '± 2 days', 3 => '± 3 days', 5 => '± 5 days', 7 => '± 7 days'] as $v => $l): ?><option value="<?= $v ?>" <?= $v === (int)$SET['tol'] ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
+            <div class="wide"><label class="chk"><input type="checkbox" id="setOnly" <?= $SET['acc_only'] ? 'checked' : '' ?>> Only BO deposits made to this bank account</label></div>
+            <div class="wide"><button type="button" class="btn btn-dark" onclick="saveSettings()" data-perm="edit"><i class="fa-solid fa-floppy-disk"></i> Save settings</button></div>
+        </div>
+    </div>
+<?php endif; ?>
+
+</div>
+<!-- the window and the toast sit on <body> (moved by the script) so the page header never covers them -->
+<div class="dbr" id="dbrPortal" style="padding:0">
+    <div class="modal" id="mm" hidden><div class="dialog">
+        <div class="dhead"><h3 id="mmT">Match manually</h3><button type="button" class="xbtn" onclick="mmClose()" aria-label="Close">&times;</button></div>
+        <div class="dbody" id="mmB"></div>
+        <div class="dfoot" id="mmF" hidden></div>
+    </div></div>
+    <div class="toast" id="toast"></div>
 </div>
 
-<div class="mm" id="mm"><div class="mm-box"><div class="mm-hd"><b id="mmT">Match manually</b><button onclick="mmClose()">&times;</button></div><div class="mm-bd" id="mmB"></div></div></div>
-
 <script>
-document.body.appendChild(document.getElementById('mm'));
-let D=null, ACC={}, MAN={};   // MAN[depId] = {bank:[ids], rows:[...], remark}
+const TAB=<?= json_encode($tab) ?>;
+let D=null, ACC={}, MAN={};   // MAN[depKey] = {bank:[ids], rows, sum, dep, remark}
+const TYPES={'BOC':'BOC','NDB':'NDB','SAMPATH':'Sampath'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const N=v=>Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const FD=d=>{ if(!d) return '—'; const x=new Date(d+'T00:00:00'); return isNaN(x)?d:x.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
 const ad=(d,n)=>{ const x=new Date(d+'T00:00:00'); x.setDate(x.getDate()+n); return x.toISOString().slice(0,10); };
+const diffHtml=v=>Math.abs(v)<0.005?'<span class="badge b-ok">0.00</span>':'<span class="'+(v>0?'diff-pos':'diff-neg')+'">'+(v>0?'+':'')+N(v)+'</span>';
+function toast(m,ok){ const t=document.getElementById('toast'); t.textContent=m; t.className='toast show '+(ok?'ok':'err'); clearTimeout(t._h); t._h=setTimeout(()=>t.className='toast',3500); }
 async function post(o){ const fd=new FormData(); Object.entries(o).forEach(([k,v])=>fd.append(k,v)); const r=await fetch(location.pathname,{method:'POST',body:fd}); const t=await r.text(); try{ return JSON.parse(t); }catch(e){ return {ok:false,msg:'Server error: '+t.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,200)}; } }
-const TYPES={'BOC':'BOC','NDB':'NDB','SAMPATH':'Sampath'};
-function setTypes(){ const o=setAcc.selectedOptions[0], t=o&&o.dataset.types?JSON.parse(o.dataset.types):[]; const cur=setType.dataset.cur||setType.value;
-  setType.innerHTML='<option value="">All types</option>'+t.map(x=>'<option value="'+esc(x)+'"'+(x===cur?' selected':'')+'>'+esc(TYPES[x]||x)+'</option>').join(''); setType.dataset.cur=''; }
-setTypes();
-async function saveSettings(){ const d=await post({ajax:'save_settings',account_id:setAcc.value,bank_type:setType.value,tol:setTol.value,acc_only:setOnly.checked?1:0}); alert(d.msg||(d.ok?'Saved':'Error')); if(d.ok) location.reload(); }
-try{ const s=JSON.parse(localStorage.getItem('borF')||'{}'); ['fFrom','fTo','fSrc'].forEach(k=>{ if(s[k]!==undefined) document.getElementById(k).value=s[k]; }); }catch(e){}
-if(!fFrom.value){ const d=new Date(); fTo.value=d.toISOString().slice(0,10); d.setDate(d.getDate()-14); fFrom.value=d.toISOString().slice(0,10); }
-function tab(t){ document.querySelectorAll('.bor-tab').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); tRec.style.display=t==='rec'?'':'none'; tHis.style.display=t==='his'?'':'none'; if(t==='his') hist(); }
+document.body.appendChild(document.getElementById('dbrPortal'));
+
+/* ── settings ── */
+function setTypes(){ const s=document.getElementById('setAcc'); if(!s) return; const o=s.selectedOptions[0], t=o&&o.dataset.types?JSON.parse(o.dataset.types):[]; const st=document.getElementById('setType'); const cur=st.dataset.cur||st.value;
+  st.innerHTML='<option value="">All types</option>'+t.map(x=>'<option value="'+esc(x)+'"'+(x===cur?' selected':'')+'>'+esc(TYPES[x]||x)+'</option>').join(''); st.dataset.cur=''; }
+async function saveSettings(){ const d=await post({ajax:'save_settings',account_id:setAcc.value,bank_type:setType.value,tol:setTol.value,acc_only:setOnly.checked?1:0}); toast(d.msg||(d.ok?'Saved':'Error'),d.ok); if(d.ok) setTimeout(()=>location.href='?tab=run',700); }
+
+/* ── reconcile ── */
+if(TAB==='run'){
+  try{ const s=JSON.parse(localStorage.getItem('borF')||'{}'); ['fFrom','fTo','fSrc'].forEach(k=>{ if(s[k]!==undefined) document.getElementById(k).value=s[k]; }); }catch(e){}
+  if(!fFrom.value){ const d=new Date(); fTo.value=d.toISOString().slice(0,10); d.setDate(d.getDate()-14); fFrom.value=d.toISOString().slice(0,10); }
+}
 async function load(){ try{ localStorage.setItem('borF',JSON.stringify({fFrom:fFrom.value,fTo:fTo.value,fSrc:fSrc.value})); }catch(e){}
-  mRows.innerHTML='<tr><td colspan="9" class="empty">Loading…</td></tr>'; MAN={};
+  runOut.innerHTML='<div class="alert info">Matching…</div>'; saveBar.hidden=true; MAN={};
   const d=await post({ajax:'load',dp_from:fFrom.value,dp_to:fTo.value,src:fSrc.value});
-  if(!d.ok){ mRows.innerHTML='<tr><td colspan="9" class="empty" style="color:#b91c1c">'+esc(d.msg)+'</td></tr>'; return; } D=d; ACC=d.accounts||{}; draw(); }
-function draw(){ const M=D.matches, U=D.unDeps, B=D.unBank, a=id=>esc(ACC[id]||('#'+id));
-  mRows.innerHTML=M.map((m,i)=>'<tr><td><input type="checkbox" class="mChk" data-i="'+i+'" checked onchange="tally()"></td><td class="nw"><b>'+esc(m.dep.date)+'</b></td><td class="nw">'+esc(m.dep.dd||'')+'</td><td>'+esc(m.dep.emp)+' <span class="pill '+(m.dep.src==='dp'?'m':'a')+'" title="'+esc(m.dep.srcl)+'">'+m.dep.src.toUpperCase()+'</span></td><td style="font-size:11.5px">'+a(m.dep.acc)+'</td><td class="r"><b>'+N(m.dep.amount)+'</b></td><td class="nw">'+esc(m.bank.date)+(m.days?' <span class="pill d">'+m.days+'d</span>':'')+'</td><td class="ds">'+esc(m.bank.desc)+'</td><td class="r"><b>'+N(m.bank.amount)+'</b></td></tr>').join('')||'<tr><td colspan="9" class="empty">No automatic matches.</td></tr>';
-  mCnt.textContent=M.length+' match(es)';
-  uRows.innerHTML=U.map(u=>{ const m=MAN[u.id]; return '<tr><td class="nw"><b>'+esc(u.date)+'</b></td><td class="nw">'+esc(u.dd||'')+'</td><td>'+esc(u.emp)+' <span class="pill '+(u.src==='dp'?'m':'a')+'" title="'+esc(u.srcl)+'">'+u.src.toUpperCase()+'</span>'+(u.remark?'<div style="font-size:11px;color:#6b7280">'+esc(u.remark)+'</div>':'')+'</td><td style="font-size:11.5px">'+a(u.acc)+'</td><td class="r"><b>'+N(u.amount)+'</b></td>'
-    +'<td>'+(m?'<span class="pill m">MANUAL</span> '+m.rows.length+' bank line(s) · Rs. '+N(m.sum)+(Math.abs(u.amount-m.sum)>0.005?' · <b style="color:#b45309">diff '+N(u.amount-m.sum)+'</b>':'')+(m.remark?'<div style="font-size:11px;color:#6b7280">'+esc(m.remark)+'</div>':''):'<span style="color:#9ca3af">—</span>')+'</td>'
-    +'<td class="nw"><button class="bb g" style="padding:4px 10px;font-size:12px" onclick="mmOpen(\''+u.id+'\')"><i class="fa-solid fa-hand-pointer"></i> '+(m?'Change':'Match manually')+'</button>'+(m?' <button class="bb r" style="padding:4px 8px;font-size:12px" onclick="delete MAN[\''+u.id+'\'];draw()">×</button>':'')+'</td></tr>'; }).join('')||'<tr><td colspan="7" class="empty">Every BO deposit in the range found its bank line.</td></tr>';
-  uCnt.textContent=U.length+' deposit(s) · Rs. '+N(U.reduce((t,x)=>t+x.amount,0));
+  if(!d.ok){ runOut.innerHTML='<div class="alert err">'+esc(d.msg)+'</div>'; return; } D=d; ACC=d.accounts||{}; draw(); }
+function srcBadge(o){ return '<span class="badge '+(o.src==='dp'?'b-man':'b-auto')+'" title="'+esc(o.srcl)+'">'+o.src.toUpperCase()+'</span>'; }
+function draw(){ const M=D.matches, U=D.unDeps, B=D.unBank, S=D.settings, sum=(a,f)=>a.reduce((t,x)=>t+f(x),0);
+  const depOpen=sum(M,m=>m.dep.amount)+sum(U,u=>u.amount), bankOpen=sum(M,m=>m.bank.amount)+sum(B,b=>b.amount);
+  let h='<div class="alert info">Deposits with deposit date <b>'+FD(D.range[0])+' – '+FD(D.range[1])+'</b> checked against <b>'+esc(S.type?(TYPES[S.type]||S.type):'All types')+'</b> statement credits of <b>'+esc(ACC[S.account]||'')+'</b>'+(S.tol?' (± '+S.tol+' day'+(S.tol>1?'s':'')+')':'')+'.'
+    +(D.already.n?' Already reconciled and left out: '+D.already.n+' deposit(s) (Rs '+N(D.already.amt)+').':'')+'</div>';
+  h+='<div class="stats"><div class="stat"><div class="lbl">Deposits (open)</div><div class="val">'+N(depOpen)+'</div><div class="cnt">'+(M.length+U.length)+' deposit(s)</div></div>'
+    +'<div class="stat"><div class="lbl">Bank credits (open)</div><div class="val">'+N(bankOpen)+'</div><div class="cnt">'+(M.length+B.length)+' transaction(s)</div></div>'
+    +'<div class="stat g"><div class="lbl">Tallied</div><div class="val">'+M.length+'</div><div class="cnt">Rs '+N(sum(M,m=>m.dep.amount))+'</div></div>'
+    +'<div class="stat r"><div class="lbl">Not in bank</div><div class="val">'+U.length+'</div><div class="cnt">Deposit side only</div></div>'
+    +'<div class="stat r"><div class="lbl">Not in deposits</div><div class="val">'+B.length+'</div><div class="cnt">Bank side only</div></div></div>';
+  h+='<h2><i class="fa-solid fa-circle-check" style="color:#15803d"></i> Reconciled (tallied one-to-one) <span class="count">'+M.length+'</span></h2><div class="card">'
+    +(M.length?'<table><thead><tr><th style="width:34px"><input type="checkbox" id="mAll" checked onchange="document.querySelectorAll(\'.mChk\').forEach(c=>c.checked=this.checked);tally()" aria-label="Select all"></th><th>Employee</th><th>Deposit</th><th>Deposit date</th><th class="num sep">Deposit amount</th><th>Txn date</th><th>Bank transaction</th><th class="num">Bank amount</th><th class="num">Difference</th></tr></thead><tbody>'
+      +M.map((m,i)=>'<tr><td><input type="checkbox" class="mChk" data-i="'+i+'" checked onchange="tally()" aria-label="Select"></td><td class="name">'+esc(m.dep.emp||'—')+(m.dep.remark?'<div class="muted">'+esc(m.dep.remark)+'</div>':'')+'</td><td class="nw">'+srcBadge(m.dep)+' <span class="muted">#'+m.dep.rid+'</span>'+(m.dep.dd?'<div class="muted">delivery '+FD(m.dep.dd)+'</div>':'')+'</td><td style="white-space:nowrap">'+FD(m.dep.date)+'</td><td class="num sep"><b>'+N(m.dep.amount)+'</b></td>'
+        +'<td style="white-space:nowrap">'+FD(m.bank.date)+(m.days?'<div class="muted">±'+m.days+' day(s)</div>':'')+'</td><td style="min-width:220px"><span class="desc">'+esc(m.bank.desc)+'</span></td><td class="num"><b>'+N(m.bank.amount)+'</b></td><td class="num">'+diffHtml(m.bank.amount-m.dep.amount)+'</td></tr>').join('')+'</tbody></table>'
+      :'<div class="empty">No deposit tallied with a bank credit.</div>')+'</div>';
+  h+='<h2><i class="fa-solid fa-circle-xmark" style="color:#b91c1c"></i> Not in bank (deposit side only) <span class="count">'+U.length+'</span></h2><p class="muted" style="margin:-4px 0 8px">Use <b>Reconcile manually</b> to pick one or more open bank credits for a deposit. Rows left as they are are saved in the batch as not reconciled.</p><div class="card">'
+    +(U.length?'<table><thead><tr><th>Employee</th><th>Deposit</th><th>Deposit date</th><th class="num sep">Deposit amount</th><th>Manual reconcile</th><th></th></tr></thead><tbody>'
+      +U.map(u=>{ const m=MAN[u.id]; return '<tr'+(m?' class="staged"':'')+'><td class="name">'+esc(u.emp||'—')+(u.remark?'<div class="muted">'+esc(u.remark)+'</div>':'')+(m?'<div class="rowmsg info">Staged — saved with the batch</div>':'')+'</td><td style="white-space:nowrap">'+srcBadge(u)+' <span class="muted">#'+u.rid+'</span>'+(u.dd?'<div class="muted">delivery '+FD(u.dd)+'</div>':'')+'</td><td style="white-space:nowrap">'+FD(u.date)+'</td><td class="num sep"><b>'+N(u.amount)+'</b></td>'
+        +'<td>'+(m?'<span class="badge b-man">Manual</span> '+m.rows.length+' bank credit(s) · Rs '+N(m.sum)+' · '+diffHtml(m.sum-u.amount)+(m.remark?'<div class="muted">'+esc(m.remark)+'</div>':''):'<span class="badge b-no">Not reconciled</span>')+'</td>'
+        +'<td style="white-space:nowrap"><button type="button" class="btn btn-light btn-sm" onclick="mmOpen(\''+u.id+'\')"><i class="fa-solid fa-hand-pointer"></i> '+(m?'Change':'Reconcile manually')+'</button>'+(m?' <button type="button" class="btn btn-danger btn-sm" onclick="delete MAN[\''+u.id+'\'];draw()" title="Remove the manual pick"><i class="fa-solid fa-xmark"></i></button>':'')+'</td></tr>'; }).join('')+'</tbody></table>'
+      :'<div class="empty">Every deposit found its bank credit.</div>')+'</div>';
   const usedMan=new Set(Object.values(MAN).flatMap(m=>m.bank));
-  bRows.innerHTML=B.map(b=>'<tr'+(usedMan.has(b.id)?' style="background:#f5f3ff"':'')+'><td class="nw">'+esc(b.date)+'</td><td style="font-size:11.5px">'+a(b.acc)+'</td><td class="ds">'+esc(b.desc)+(usedMan.has(b.id)?' <span class="pill m">picked</span>':'')+'</td><td class="r">'+N(b.amount)+'</td></tr>').join('')||'<tr><td colspan="4" class="empty">No open bank credits.</td></tr>';
-  bCnt.textContent=B.length+' line(s) · Rs. '+N(B.reduce((t,x)=>t+x.amount,0));
-  kp.innerHTML='<div><b>'+M.length+'</b><span>Auto matches</span></div><div><b style="color:#b45309">'+U.length+'</b><span>Deposits not found</span></div><div><b>'+B.length+'</b><span>Open bank credits</span></div><div><b style="color:#15803d">'+D.already.n+'</b><span>Already reconciled (Rs. '+N(D.already.amt)+')</span></div>';
-  tally(); }
+  h+='<h2><i class="fa-solid fa-circle-xmark" style="color:#b91c1c"></i> Not in deposits (bank side only) <span class="count">'+B.length+'</span></h2><div class="card">'
+    +(B.length?'<table><thead><tr><th>Txn date</th><th>Bank transaction</th><th class="num">Bank amount</th><th></th></tr></thead><tbody>'
+      +B.map(b=>'<tr'+(usedMan.has(b.id)?' class="used"':'')+'><td style="white-space:nowrap">'+FD(b.date)+'</td><td><span class="desc">'+esc(b.desc)+'</span></td><td class="num"><b>'+N(b.amount)+'</b></td><td>'+(usedMan.has(b.id)?'<span class="badge b-man">Picked</span>':'')+'</td></tr>').join('')+'</tbody></table>'
+      :'<div class="empty">No open bank credits in this range.</div>')+'</div>';
+  runOut.innerHTML=h; saveBar.hidden=false; tally(); }
 function tally(){ if(!D) return; const ch=[...document.querySelectorAll('.mChk:checked')].map(c=>D.matches[+c.dataset.i]); const man=Object.values(MAN);
   const n=ch.length+man.length, amt=ch.reduce((t,m)=>t+m.dep.amount,0)+man.reduce((t,m)=>t+m.dep,0);
-  sumTxt.textContent=n?('To save: '+n+' reconciliation(s) · Rs. '+N(amt)):''; saveBtn.disabled=!n; }
-async function mmOpen(id){ const u=D.unDeps.find(x=>x.id===id); if(!u) return; mm.classList.add('open'); mmT.textContent='Match manually — BO deposit '+u.date+' · Rs. '+N(u.amount);
-  const from=ad(u.date,-7), to=ad(u.date,14);
-  mmB.innerHTML='<div class="bor-bar" style="margin:0 0 8px"><label>Bank dates from<input type="date" id="mmF" value="'+from+'"></label><label>to<input type="date" id="mmTo" value="'+to+'"></label><button class="bb g" onclick="mmLoad(\''+id+'\')">Show</button><span style="font-size:12px;color:#6b7280">Bank: '+esc(ACC[D.settings.account]||'')+(D.settings.type?' · '+esc(TYPES[D.settings.type]||D.settings.type):'')+'</span></div><div class="tw" style="max-height:380px"><table class="t"><thead><tr><th></th><th>Date</th><th>Description</th><th class="r">Credit</th></tr></thead><tbody id="mmRows"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody></table></div>'
-    +'<div class="foot" style="margin-top:8px"><span id="mmSum" style="font-weight:700;font-size:13px"></span><input id="mmRem" placeholder="Remark (needed when the amounts differ)" style="flex:1;min-width:200px;border:1.5px solid #e5e7eb;border-radius:8px;padding:7px 10px;font-size:13px" value="'+esc(MAN[id]?.remark||'')+'"><button class="bb p" onclick="mmUse(\''+id+'\')"><i class="fa-solid fa-check"></i> Use these</button></div>';
-  mmLoad(id); }
+  sumTxt.textContent=n?(n+' reconciliation(s) to save · Rs '+N(amt)):'Nothing selected'; saveBtn.disabled=!n; }
+/* ── manual reconcile window ── */
 let MMR=[];
-async function mmLoad(id){ const u=D.unDeps.find(x=>x.id===id); const d=await post({ajax:'bank_open',from:mmF.value,to:mmTo.value}); if(!d.ok){ mmRows.innerHTML='<tr><td colspan="4" class="empty">'+esc(d.msg)+'</td></tr>'; return; }
+function mmOpen(id){ const u=D.unDeps.find(x=>x.id===id); if(!u) return; mm.hidden=false; mmT.textContent='Reconcile manually — '+(u.emp||'BO deposit');
+  mmB.innerHTML='<div class="mr-dep"><div><span class="muted">Deposit</span><b>'+srcBadge(u)+' #'+u.rid+'</b></div><div><span class="muted">Deposit date</span><b>'+FD(u.date)+'</b></div><div><span class="muted">Amount</span><b>Rs '+N(u.amount)+'</b></div><div><span class="muted">Bank</span><b>'+esc(ACC[D.settings.account]||'')+'</b></div></div>'
+    +'<div class="mr-filter"><div><label class="f">Bank date from</label><input type="date" id="mrF" value="'+ad(u.date,-7)+'"></div><div><label class="f">to</label><input type="date" id="mrT" value="'+ad(u.date,14)+'"></div><div><button type="button" class="btn btn-light" onclick="mmLoad(\''+id+'\')"><i class="fa-solid fa-magnifying-glass"></i> Show</button></div><div class="grow"><label class="f">Remark (needed when the amounts differ)</label><input type="text" id="mrRem" value="'+esc(MAN[id]?.remark||'')+'"></div></div>'
+    +'<div class="card mr-list"><table><thead><tr><th style="width:34px"></th><th>Txn date</th><th>Bank transaction</th><th class="num">Bank amount</th></tr></thead><tbody id="mrRows"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody></table></div>';
+  mmF.hidden=false; mmF.innerHTML='<div class="tally" id="mrTally"></div><button type="button" class="btn btn-light" onclick="mmClose()">Cancel</button><button type="button" class="btn btn-dark" onclick="mmUse(\''+id+'\')"><i class="fa-solid fa-check"></i> Use these</button>';
+  mmLoad(id); }
+async function mmLoad(id){ const u=D.unDeps.find(x=>x.id===id); const d=await post({ajax:'bank_open',from:mrF.value,to:mrT.value}); if(!d.ok){ mrRows.innerHTML='<tr><td colspan="4" class="empty">'+esc(d.msg)+'</td></tr>'; return; }
   const auto=new Set([...document.querySelectorAll('.mChk:checked')].map(c=>D.matches[+c.dataset.i].bank.id)); const other=new Set(Object.entries(MAN).filter(([k])=>k!==id).flatMap(([,m])=>m.bank)); const mine=new Set(MAN[id]?.bank||[]);
   MMR=d.rows.filter(b=>!auto.has(b.id)&&!other.has(b.id));
-  mmRows.innerHTML=MMR.map(b=>'<tr'+(Math.abs(b.amount-u.amount)<0.005?' style="background:#ecfdf5"':'')+'><td><input type="checkbox" class="mmC" value="'+b.id+'" '+(mine.has(b.id)?'checked':'')+' onchange="mmTally(\''+id+'\')"></td><td class="nw">'+esc(b.date)+'</td><td class="ds">'+esc(b.desc)+'</td><td class="r"><b>'+N(b.amount)+'</b></td></tr>').join('')||'<tr><td colspan="4" class="empty">No open bank credits of this account in these dates.</td></tr>'; mmTally(id); }
-function mmTally(id){ const u=D.unDeps.find(x=>x.id===id); const s=[...document.querySelectorAll('.mmC:checked')].reduce((t,c)=>t+(MMR.find(b=>b.id==c.value)?.amount||0),0); const df=u.amount-s;
-  mmSum.innerHTML='Picked Rs. '+N(s)+' · deposit Rs. '+N(u.amount)+(Math.abs(df)>0.005?' · <span style="color:#b45309">difference '+N(df)+'</span>':' · <span style="color:#15803d">equal</span>'); }
-function mmUse(id){ const u=D.unDeps.find(x=>x.id===id); const ids=[...document.querySelectorAll('.mmC:checked')].map(c=>+c.value); if(!ids.length){ alert('Tick at least one bank credit.'); return; }
-  const rows=MMR.filter(b=>ids.includes(b.id)), sum=rows.reduce((t,b)=>t+b.amount,0), rem=mmRem.value.trim();
-  if(Math.abs(u.amount-sum)>0.005&&!rem){ alert('The amounts differ by '+N(u.amount-sum)+' — give a remark.'); mmRem.focus(); return; }
+  mrRows.innerHTML=MMR.map(b=>'<tr class="'+(mine.has(b.id)?'pick ':'')+(b.date===u.date?'same ':'')+(Math.abs(b.amount-u.amount)<0.005?'eq':'')+'" onclick="if(event.target.tagName!==\'INPUT\'){const c=this.querySelector(\'input\');c.checked=!c.checked;} this.classList.toggle(\'pick\',this.querySelector(\'input\').checked); mmTally(\''+id+'\')"><td><input type="checkbox" class="mmC" value="'+b.id+'" '+(mine.has(b.id)?'checked':'')+'></td><td style="white-space:nowrap">'+FD(b.date)+'</td><td><span class="desc">'+esc(b.desc)+'</span></td><td class="num">'+N(b.amount)+'</td></tr>').join('')||'<tr><td colspan="4" class="empty">No open bank credits in these dates.</td></tr>'; mmTally(id); }
+function mmTally(id){ const u=D.unDeps.find(x=>x.id===id); const s=[...document.querySelectorAll('.mmC:checked')].reduce((t,c)=>t+(MMR.find(b=>b.id==c.value)?.amount||0),0); const df=s-u.amount;
+  mrTally.innerHTML='<div><span class="muted">Deposit</span><b>'+N(u.amount)+'</b></div><div><span class="muted">Picked</span><b>'+N(s)+'</b></div><div><span class="muted">Difference</span><b class="'+(Math.abs(df)<0.005?'ok':'bad')+'">'+N(df)+'</b></div>'; }
+function mmUse(id){ const u=D.unDeps.find(x=>x.id===id); const ids=[...document.querySelectorAll('.mmC:checked')].map(c=>+c.value); if(!ids.length){ toast('Tick at least one bank credit.'); return; }
+  const rows=MMR.filter(b=>ids.includes(b.id)), sum=rows.reduce((t,b)=>t+b.amount,0), rem=mrRem.value.trim();
+  if(Math.abs(u.amount-sum)>0.005&&!rem){ toast('The amounts differ by '+N(sum-u.amount)+' — give a remark.'); mrRem.focus(); return; }
   MAN[id]={bank:ids,rows,sum,dep:u.amount,remark:rem}; mmClose(); draw(); }
-function mmClose(){ mm.classList.remove('open'); }
+function mmClose(){ mm.hidden=true; mmF.hidden=true; }
 async function saveBatch(){ const items=[...document.querySelectorAll('.mChk:checked')].map(c=>{ const m=D.matches[+c.dataset.i]; return {dep:m.dep.id,bank:[m.bank.id],method:'auto'}; })
     .concat(Object.entries(MAN).map(([k,m])=>({dep:k,bank:m.bank,method:'manual',remark:m.remark})));
   if(!items.length) return; if(!confirm('Save '+items.length+' reconciliation(s) as one batch?')) return;
   const usedB=new Set(items.flatMap(i=>i.bank)); const ticked=new Set(items.map(i=>i.dep));
   const leftD=D.unDeps.filter(u=>!MAN[u.id]).concat(D.matches.filter(m=>!ticked.has(m.dep.id)).map(m=>m.dep)), leftB=D.unBank.filter(b=>!usedB.has(b.id)).concat(D.matches.filter(m=>!ticked.has(m.dep.id)).map(m=>m.bank)); saveBtn.disabled=true;
   const d=await post({ajax:'save_batch',items:JSON.stringify(items),dp_from:fFrom.value,dp_to:fTo.value,remark:bRemark.value,unrec:JSON.stringify({deps:leftD,bank:leftB})});
-  saveBtn.disabled=false; if(!d.ok){ alert(d.msg); return; } alert('Saved batch '+d.batch+' — '+d.n+' reconciliation(s).'); bRemark.value=''; load(); }
-async function hist(){ hRows.innerHTML='<tr><td colspan="10" class="empty">Loading…</td></tr>'; const d=await post({ajax:'batches'}); if(!d.ok){ hRows.innerHTML='<tr><td colspan="10" class="empty">'+esc(d.msg)+'</td></tr>'; return; } const A=d.accounts||{};
-  hRows.innerHTML=d.rows.map(b=>'<tr><td><b>'+esc(b.batch_no)+'</b></td><td class="nw">'+esc(b.created_at)+'<div style="font-size:11px;color:#6b7280">'+esc(b.created_by||'')+'</div></td><td class="nw">'+esc(b.date_from||'')+' → '+esc(b.date_to||'')+(+b.tolerance_days?' (±'+b.tolerance_days+'d)':'')+(b.dd_from?'<div style="font-size:11px;color:#6b7280">delivery '+esc(b.dd_from)+' → '+esc(b.dd_to||'')+'</div>':'')+'</td><td style="font-size:11.5px">'+esc(b.bank_account_id?(A[b.bank_account_id]||'#'+b.bank_account_id):'All')+(b.bank_type?' · '+esc(TYPES[b.bank_type]||b.bank_type):'')+'</td>'
-    +'<td class="r">'+b.rec_count+'</td><td class="r">'+N(b.rec_dep_amount)+'</td><td class="r">'+N(b.rec_bank_amount)+'</td><td class="r">'+b.unrec_dep_count+' dep · '+N(b.unrec_dep_amount)+'<div style="font-size:11px;color:#6b7280">'+(b.unrec_bank_count||0)+' bank · '+N(b.unrec_bank_amount||0)+'</div></td><td style="font-size:12px">'+esc(b.remark||'')+'</td>'
-    +'<td class="nw"><button class="bb g" style="padding:4px 10px;font-size:12px" onclick="bView('+b.id+',\''+esc(b.batch_no)+'\')"><i class="fa-solid fa-eye"></i> View</button> <button class="bb r" style="padding:4px 10px;font-size:12px" data-perm="delete" onclick="bDel('+b.id+',\''+esc(b.batch_no)+'\')"><i class="fa-solid fa-trash"></i></button></td></tr>').join('')||'<tr><td colspan="10" class="empty">No batches yet.</td></tr>'; }
-async function bView(id,no){ mm.classList.add('open'); mmT.textContent='Batch '+no; mmB.innerHTML='Loading…'; const d=await post({ajax:'batch_view',id});
-  mmB.innerHTML='<div class="tw" style="max-height:70vh"><table class="t"><thead><tr><th>Method</th><th>Deposit date</th><th class="r">Deposit</th><th class="r">Bank</th><th class="r">Diff</th><th>Bank line(s)</th><th>Remark</th></tr></thead><tbody>'+(d.rows||[]).map(r=>'<tr><td><span class="pill '+(r.method==='manual'?'m':'a')+'">'+esc(r.method)+'</span> <span class="pill d">'+esc(r.src||'SR')+'</span></td><td class="nw">'+esc(r.deposit_date)+'</td><td class="r">'+N(r.deposit_amount)+'</td><td class="r">'+N(r.bank_amount)+'</td><td class="r">'+(Math.abs(r.difference)>0.005?'<b style="color:#b45309">'+N(r.difference)+'</b>':'')+'</td><td class="ds" style="white-space:pre-line">'+esc(r.bank||'')+'</td><td style="font-size:12px">'+esc(r.remark||'')+'</td></tr>').join('')+'</tbody></table></div>'
-    +(()=>{ const U=d.unrec||[], dep=U.filter(x=>x.side==='deposit'), bk=U.filter(x=>x.side==='bank'); if(!U.length) return '';
-      return '<h4 style="margin:14px 0 6px;font-size:13px">Not reconciled when saved — deposits '+dep.length+' (Rs. '+N(dep.reduce((t,x)=>t+ +x.amount,0))+') · bank credits '+bk.length+' (Rs. '+N(bk.reduce((t,x)=>t+ +x.amount,0))+')</h4><div class="tw" style="max-height:40vh"><table class="t"><thead><tr><th>Side</th><th>Date</th><th>Delivery date / Employee / Description</th><th class="r">Amount</th></tr></thead><tbody>'
-        +U.map(x=>'<tr><td><span class="pill '+(x.side==='deposit'?'d':'m')+'">'+(x.side==='deposit'?'BO deposit':'Bank')+'</span></td><td class="nw">'+esc(x.ref_date||'')+'</td><td class="ds">'+(x.side==='deposit'?esc((x.delivery_date||'')+' · '+(x.employee||'')):esc(x.description||''))+'</td><td class="r">'+N(x.amount)+'</td></tr>').join('')+'</tbody></table></div>'; })(); }
-async function bDel(id,no){ if(!confirm('Delete batch '+no+'? Its deposits and bank lines become unreconciled again.')) return; const d=await post({ajax:'delete_batch',id}); if(!d.ok){ alert(d.msg); return; } hist(); }
+  saveBtn.disabled=false; if(!d.ok){ toast(d.msg); return; } toast('Saved batch '+d.batch+' — '+d.n+' reconciliation(s).',true); bRemark.value=''; load(); }
+/* ── saved batches ── */
+async function hist(){ const d=await post({ajax:'batches'}); if(!d.ok){ hRows.innerHTML='<tr><td colspan="10" class="empty">'+esc(d.msg)+'</td></tr>'; return; } const A=d.accounts||{};
+  hRows.innerHTML=d.rows.map(b=>'<tr><td class="name">'+esc(b.batch_no)+'</td><td style="white-space:nowrap">'+esc(b.created_at)+'<div class="muted">'+esc(b.created_by||'')+'</div></td><td style="white-space:nowrap">'+FD(b.date_from)+' – '+FD(b.date_to)+(+b.tolerance_days?'<div class="muted">± '+b.tolerance_days+' day(s)</div>':'')+'</td><td>'+esc(b.bank_account_id?(A[b.bank_account_id]||'#'+b.bank_account_id):'')+(b.bank_type?' <span class="badge b-auto">'+esc(TYPES[b.bank_type]||b.bank_type)+'</span>':'')+'</td>'
+    +'<td class="num">'+b.rec_count+'</td><td class="num">'+N(b.rec_dep_amount)+'</td><td class="num sep">'+N(b.rec_bank_amount)+'</td><td class="num">'+b.unrec_dep_count+' dep · '+N(b.unrec_dep_amount)+'<div class="muted">'+(b.unrec_bank_count||0)+' bank · '+N(b.unrec_bank_amount||0)+'</div></td><td>'+esc(b.remark||'')+'</td>'
+    +'<td style="white-space:nowrap"><button type="button" class="btn btn-light btn-sm" onclick="bView('+b.id+',\''+esc(b.batch_no)+'\')"><i class="fa-solid fa-eye"></i> View</button> <button type="button" class="btn btn-danger btn-sm" data-perm="delete" onclick="bDel('+b.id+',\''+esc(b.batch_no)+'\')"><i class="fa-solid fa-trash"></i></button></td></tr>').join('')||'<tr><td colspan="10" class="empty">No batches saved yet.</td></tr>'; }
+async function bView(id,no){ mm.hidden=false; mmF.hidden=true; mmT.textContent='Batch '+no; mmB.innerHTML='<div class="empty">Loading…</div>'; const d=await post({ajax:'batch_view',id});
+  const U=d.unrec||[], dep=U.filter(x=>x.side==='deposit'), bk=U.filter(x=>x.side==='bank');
+  mmB.innerHTML='<h2 style="margin-top:0"><i class="fa-solid fa-circle-check" style="color:#15803d"></i> Reconciled <span class="count">'+(d.rows||[]).length+'</span></h2><div class="card"><table><thead><tr><th>Method</th><th>Deposit</th><th>Deposit date</th><th class="num sep">Deposit amount</th><th>Bank transaction(s)</th><th class="num">Bank amount</th><th class="num">Difference</th><th>Remark</th></tr></thead><tbody>'
+    +(d.rows||[]).map(r=>'<tr><td><span class="badge '+(r.method==='manual'?'b-man':'b-auto')+'">'+esc(r.method==='manual'?'Manual':'Auto')+'</span></td><td><span class="badge '+(r.src==='DP'?'b-man':'b-auto')+'">'+esc(r.src||'SR')+'</span> <span class="muted">#'+r.deposit_id+'</span></td><td style="white-space:nowrap">'+FD(r.deposit_date)+'</td><td class="num sep">'+N(r.deposit_amount)+'</td><td><span class="desc" style="white-space:pre-line">'+esc(r.bank||'')+'</span></td><td class="num">'+N(r.bank_amount)+'</td><td class="num">'+diffHtml(r.bank_amount-r.deposit_amount)+'</td><td>'+esc(r.remark||'')+'</td></tr>').join('')+'</tbody></table></div>'
+    +(U.length?'<h2><i class="fa-solid fa-circle-xmark" style="color:#b91c1c"></i> Not reconciled when saved <span class="count">'+U.length+'</span></h2><p class="muted" style="margin:-4px 0 8px">Deposits '+dep.length+' (Rs '+N(dep.reduce((t,x)=>t+ +x.amount,0))+') · bank credits '+bk.length+' (Rs '+N(bk.reduce((t,x)=>t+ +x.amount,0))+')</p><div class="card"><table><thead><tr><th>Side</th><th>Date</th><th>Employee / bank transaction</th><th class="num">Amount</th></tr></thead><tbody>'
+      +U.map(x=>'<tr><td><span class="badge '+(x.side==='deposit'?'b-diff':'b-no')+'">'+(x.side==='deposit'?'Deposit'+(x.source?' '+x.source.toUpperCase():''):'Bank')+'</span></td><td style="white-space:nowrap">'+FD(x.ref_date)+'</td><td>'+(x.side==='deposit'?esc(x.employee||'')+(x.delivery_date?' <span class="muted">delivery '+FD(x.delivery_date)+'</span>':''):'<span class="desc">'+esc(x.description||'')+'</span>')+'</td><td class="num">'+N(x.amount)+'</td></tr>').join('')+'</tbody></table></div>':''); }
+async function bDel(id,no){ if(!confirm('Delete batch '+no+'? Its deposits and bank lines become unreconciled again.')) return; const d=await post({ajax:'delete_batch',id}); toast(d.ok?'Batch '+no+' deleted.':d.msg,d.ok); if(d.ok) hist(); }
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') mmClose(); });
+if(TAB==='saved') hist(); if(TAB==='settings') setTypes();
 </script>
 <?php include 'footer.php'; ?>
