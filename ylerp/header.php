@@ -1971,6 +1971,9 @@ if (isset($conn) && $conn) {
                     <a href="cc_deposit_dp_bank_recon.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cc_deposit_dp_bank_recon.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-hand-holding-dollar"></i><span>Deposit Reoncilation</span>
                     </a>
+                    <a href="bo_deposit_bank_recon.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'bo_deposit_bank_recon.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-building-columns"></i><span>BO Cash Deposit Reconciliation</span>
+                    </a>
                  
                   
                     <a href="cheque_reconciliation.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cheque_reconciliation.php') ? 'active' : ''; ?>">
