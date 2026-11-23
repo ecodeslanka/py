@@ -36,6 +36,16 @@ function bor_ensure($conn) {
         id INT AUTO_INCREMENT PRIMARY KEY, recon_id INT NOT NULL, bank_txn_id INT NOT NULL, transaction_date DATE NULL, description TEXT NULL,
         credit DECIMAL(15,2) NOT NULL DEFAULT 0, UNIQUE KEY uq_txn (bank_txn_id), INDEX (recon_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    bor_q($conn, "CREATE TABLE IF NOT EXISTS bo_bank_recon_settings (
+        id INT NOT NULL PRIMARY KEY, bank_account_id INT NULL, bank_type VARCHAR(10) NULL, tolerance_days TINYINT NOT NULL DEFAULT 1,
+        acc_only TINYINT(1) NOT NULL DEFAULT 1, updated_by VARCHAR(100) NULL, updated_at DATETIME NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    bor_q($conn, "CREATE TABLE IF NOT EXISTS bo_bank_recon_batch_unrec (   /* what was NOT reconciled when the batch was saved */
+        id INT AUTO_INCREMENT PRIMARY KEY, batch_id INT NOT NULL, side VARCHAR(10) NOT NULL, deposit_id INT NULL, bank_txn_id INT NULL,
+        ref_date DATE NULL, delivery_date DATE NULL, employee VARCHAR(191) NULL, description TEXT NULL, amount DECIMAL(15,2) NOT NULL DEFAULT 0, INDEX (batch_id, side)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    foreach (['bank_type' => "VARCHAR(10) NULL", 'dd_from' => "DATE NULL", 'dd_to' => "DATE NULL", 'unrec_bank_count' => "INT NOT NULL DEFAULT 0", 'unrec_bank_amount' => "DECIMAL(14,2) NOT NULL DEFAULT 0"] as $c => $d)
+        if (!bor_col($conn, 'bo_bank_recon_batches', $c)) bor_q($conn, "ALTER TABLE bo_bank_recon_batches ADD COLUMN `$c` $d");
     foreach (['recon_status' => "VARCHAR(20) NULL", 'recon_source' => "VARCHAR(30) NULL", 'recon_category' => "VARCHAR(50) NULL", 'recon_ref_id' => "INT NULL",
               'recon_remark' => "TEXT NULL", 'recon_by' => "VARCHAR(100) NULL", 'recon_at' => "DATETIME NULL"] as $c => $d)
         if (!bor_col($conn, 'bank_statement_transactions', $c)) bor_q($conn, "ALTER TABLE bank_statement_transactions ADD COLUMN `$c` $d");
@@ -49,12 +59,32 @@ function bor_accounts($conn) {
         FROM company_bank_accounts cba LEFT JOIN banks b ON b.bank_code = cba.bank_code LEFT JOIN bank_branches bb ON bb.bank_code = cba.bank_code AND bb.branch_code = cba.branch_code ORDER BY cba.id");
     while ($r && ($x = mysqli_fetch_assoc($r))) $o[(int)$x['id']] = $x['label']; return $o;
 }
+$BOR_TYPES = ['BOC' => 'BOC', 'NDB' => 'NDB', 'SAMPATH' => 'Sampath'];
+function bor_type_label($bt) { global $BOR_TYPES; $bt = strtoupper((string)$bt); return $bt === '' ? 'All types' : ($BOR_TYPES[$bt] ?? $bt); }
+/* bank accounts that have bank statements uploaded, with their statement types and last statement date */
+function bor_statement_accounts($conn) {
+    $acc = []; $names = bor_accounts($conn);
+    $r = bor_q($conn, "SELECT account_id, UPPER(bank_type) bt, MAX(statement_date) last_stmt, COUNT(*) uploads FROM bank_statement_uploads GROUP BY account_id, UPPER(bank_type)");
+    while ($r && ($x = mysqli_fetch_assoc($r))) { $id = (int)$x['account_id']; if ($id <= 0) continue;
+        if (!isset($acc[$id])) $acc[$id] = ['label' => $names[$id] ?? ('Account #' . $id), 'types' => [], 'last' => '', 'uploads' => 0];
+        $acc[$id]['types'][$x['bt']] = ['last' => $x['last_stmt'], 'uploads' => (int)$x['uploads']]; $acc[$id]['uploads'] += (int)$x['uploads'];
+        if ($x['last_stmt'] > $acc[$id]['last']) $acc[$id]['last'] = $x['last_stmt']; }
+    uasort($acc, fn($a, $b) => strcasecmp($a['label'], $b['label'])); return $acc;
+}
+function bor_settings($conn) {
+    $s = ['account' => 0, 'type' => '', 'tol' => 1, 'acc_only' => true, 'by' => '', 'at' => ''];
+    $r = bor_q($conn, "SELECT * FROM bo_bank_recon_settings WHERE id = 1"); if ($r && ($x = mysqli_fetch_assoc($r))) $s = ['account' => (int)$x['bank_account_id'], 'type' => strtoupper((string)$x['bank_type']),
+        'tol' => max(0, min(7, (int)$x['tolerance_days'])), 'acc_only' => (int)$x['acc_only'] === 1, 'by' => (string)$x['updated_by'], 'at' => (string)$x['updated_at']];
+    $A = bor_statement_accounts($conn); if (!isset($A[$s['account']])) $s['account'] = 0;
+    if ($s['type'] !== '' && (!$s['account'] || !isset($A[$s['account']]['types'][$s['type']]))) $s['type'] = '';
+    return $s;
+}
 /* open bank credits (not reconciled by anything) of these accounts in the date range; the same line uploaded twice counts once */
-function bor_bank_open($conn, array $accs, $from, $to) {
+function bor_bank_open($conn, array $accs, $from, $to, $type = '') {
     $o = []; if (!$accs) return $o; $seen = [];
     $r = bor_q($conn, "SELECT t.id, u.account_id acc, t.transaction_date d, CONCAT_WS(' ', t.description, t.reference) descr, t.credit, t.balance
                        FROM bank_statement_transactions t JOIN bank_statement_uploads u ON u.id = t.upload_id
-                       WHERE u.account_id IN (" . bor_ids($accs) . ") AND t.transaction_date BETWEEN '$from' AND '$to' AND t.credit > 0
+                       WHERE u.account_id IN (" . bor_ids($accs) . ")" . ($type !== '' ? " AND UPPER(u.bank_type) = '" . mysqli_real_escape_string($conn, $type) . "'" : "") . " AND t.transaction_date BETWEEN '$from' AND '$to' AND t.credit > 0
                          AND (t.recon_status IS NULL OR t.recon_status = '')" . (bor_col($conn, 'bank_statement_transactions', 'reconciled') ? " AND COALESCE(t.reconciled,0) = 0" : "") . "
                        ORDER BY t.transaction_date, t.id LIMIT 5000");
     while ($r && ($x = mysqli_fetch_assoc($r))) { $k = $x['acc'] . '|' . $x['d'] . '|' . trim(preg_replace('/\s+/', ' ', $x['descr'])) . '|' . $x['credit'] . '|' . $x['balance']; if (isset($seen[$k])) continue; $seen[$k] = 1;
@@ -65,11 +95,28 @@ function bor_bank_open($conn, array $accs, $from, $to) {
 /* ═════════ AJAX ═════════ */
 if (isset($_REQUEST['ajax'])) {
     $act = $_REQUEST['ajax'];
+    if ($act === 'save_settings') {
+        if (!bor_can('edit') && !bor_can('create')) bor_json(['ok' => false, 'msg' => 'Permission blocked: your role cannot change the settings.']);
+        $A = bor_statement_accounts($conn); $acc = (int)($_POST['account_id'] ?? 0); $bt = strtoupper(trim((string)($_POST['bank_type'] ?? '')));
+        $tol = max(0, min(7, (int)($_POST['tol'] ?? 1))); $only = !empty($_POST['acc_only']) ? 1 : 0;
+        if (!isset($A[$acc])) bor_json(['ok' => false, 'msg' => 'Select a bank account that has bank statements uploaded.']);
+        if ($bt !== '' && !isset($A[$acc]['types'][$bt])) bor_json(['ok' => false, 'msg' => 'No ' . bor_type_label($bt) . ' statements are uploaded for this account. Pick another type or "All types".']);
+        $u = mysqli_real_escape_string($conn, bor_user()); $now = date('Y-m-d H:i:s');
+        $ok = bor_q($conn, "INSERT INTO bo_bank_recon_settings (id, bank_account_id, bank_type, tolerance_days, acc_only, updated_by, updated_at) VALUES (1, $acc, " . ($bt !== '' ? "'" . mysqli_real_escape_string($conn, $bt) . "'" : "NULL") . ", $tol, $only, '$u', '$now')
+             ON DUPLICATE KEY UPDATE bank_account_id = VALUES(bank_account_id), bank_type = VALUES(bank_type), tolerance_days = VALUES(tolerance_days), acc_only = VALUES(acc_only), updated_by = VALUES(updated_by), updated_at = VALUES(updated_at)");
+        bor_json($ok ? ['ok' => true, 'msg' => 'Settings saved.'] : ['ok' => false, 'msg' => 'Could not save the settings.']);
+    }
     if ($act === 'load') {
-        $from = bor_date($_POST['from'] ?? ''); $to = bor_date($_POST['to'] ?? ''); $tol = max(0, min(7, (int)($_POST['tol'] ?? 0))); $acc = (int)($_POST['acc'] ?? 0);
-        if ($from === '' || $to === '' || $to < $from) bor_json(['ok' => false, 'msg' => 'Pick the deposit date range.']);
-        if ((strtotime($to) - strtotime($from)) / 86400 > 93) bor_json(['ok' => false, 'msg' => 'Pick 3 months or less.']);
-        $w = "bd.deposit_date BETWEEN '$from' AND '$to'" . ($acc ? " AND bd.bank_account_id = $acc" : "");
+        $S = bor_settings($conn); if (!$S['account']) bor_json(['ok' => false, 'msg' => 'Set the bank account in Settings first.']);
+        $acc = $S['account']; $tol = $S['tol']; $bt = $S['type'];
+        $dpf = bor_date($_POST['dp_from'] ?? ''); $dpt = bor_date($_POST['dp_to'] ?? ''); $ddf = bor_date($_POST['dd_from'] ?? ''); $ddt = bor_date($_POST['dd_to'] ?? '');
+        if ($dpf !== '' && $dpt === '') $dpt = $dpf; if ($dpt !== '' && $dpf === '') $dpf = $dpt; if ($ddf !== '' && $ddt === '') $ddt = $ddf; if ($ddt !== '' && $ddf === '') $ddf = $ddt;
+        if ($dpf === '' && $ddf === '') bor_json(['ok' => false, 'msg' => 'Pick the deposit dates and / or the delivery dates.']);
+        if (($dpf !== '' && $dpt < $dpf) || ($ddf !== '' && $ddt < $ddf)) bor_json(['ok' => false, 'msg' => 'The "to" date is before the "from" date.']);
+        foreach ([[$dpf, $dpt], [$ddf, $ddt]] as [$a, $b]) if ($a !== '' && (strtotime($b) - strtotime($a)) / 86400 > 93) bor_json(['ok' => false, 'msg' => 'Pick 3 months or less.']);
+        $w = []; if ($dpf !== '') $w[] = "bd.deposit_date BETWEEN '$dpf' AND '$dpt'"; if ($ddf !== '') $w[] = "bd.delivery_date BETWEEN '$ddf' AND '$ddt'";
+        if ($S['acc_only']) $w[] = "bd.bank_account_id = $acc";
+        $w = implode(' AND ', $w);
         $deps = []; $rec = 0; $recAmt = 0;
         $empName = bor_col($conn, 'employees', 'name_with_initials') ? "COALESCE(NULLIF(e.name_with_initials,''), e.employee_full_name)" : "e.employee_full_name";
         $r = bor_q($conn, "SELECT bd.id, bd.delivery_date, bd.deposit_date, bd.bank_account_id acc, bd.amount, bd.remark, bd.bank_recon_id, $empName emp
@@ -77,34 +124,38 @@ if (isset($_REQUEST['ajax'])) {
         if (!$r) bor_json(['ok' => false, 'msg' => 'Could not read the BO deposits: ' . mysqli_error($conn)]);
         while ($x = mysqli_fetch_assoc($r)) { if ((int)$x['bank_recon_id'] > 0) { $rec++; $recAmt += (float)$x['amount']; continue; }
             $deps[] = ['id' => (int)$x['id'], 'dd' => $x['delivery_date'], 'date' => $x['deposit_date'], 'acc' => (int)$x['acc'], 'amount' => round((float)$x['amount'], 2), 'emp' => $x['emp'] ?? '', 'remark' => $x['remark'] ?? '']; }
-        $accs = $acc ? [$acc] : [];
-        if (!$acc) { $r = bor_q($conn, "SELECT DISTINCT bank_account_id FROM bo_bank_deposits WHERE bank_account_id IS NOT NULL"); while ($r && ($x = mysqli_fetch_row($r))) $accs[] = (int)$x[0]; }   // every account BO deposits go to
-        $bf = date('Y-m-d', strtotime("$from -$tol days")); $bt = date('Y-m-d', strtotime("$to +$tol days"));
-        $bank = bor_bank_open($conn, $accs, $bf, $bt);
+        /* bank credits of the Settings account around the deposit dates */
+        $ds = array_filter(array_column($deps, 'date')); $from = $dpf !== '' ? $dpf : ($ds ? min($ds) : $ddf); $to = $dpt !== '' ? $dpt : ($ds ? max($ds) : $ddt);
+        $bf = date('Y-m-d', strtotime("$from -$tol days")); $bto = date('Y-m-d', strtotime("$to +$tol days"));
+        $bank = bor_bank_open($conn, [$acc], $bf, $bto, $bt);
         /* matching: same account + same amount, date within tolerance — closest date first, each line once */
         $cand = [];
         foreach ($deps as $i => $d) foreach ($bank as $j => $b)
-            if ($b['acc'] === $d['acc'] && abs($b['amount'] - $d['amount']) < 0.005) { $dd = abs((strtotime($b['date']) - strtotime($d['date'])) / 86400); if ($dd <= $tol) $cand[] = [$dd, $i, $j]; }
+            if ((!$S['acc_only'] || $b['acc'] === $d['acc']) && abs($b['amount'] - $d['amount']) < 0.005) { $dd = abs((strtotime($b['date']) - strtotime($d['date'])) / 86400); if ($dd <= $tol) $cand[] = [$dd, $i, $j]; }
         usort($cand, fn($a, $b) => $a[0] <=> $b[0] ?: $a[1] <=> $b[1] ?: $a[2] <=> $b[2]);
         $usedD = []; $usedB = []; $matches = [];
         foreach ($cand as [$dd, $i, $j]) { if (isset($usedD[$i]) || isset($usedB[$j])) continue; $usedD[$i] = $usedB[$j] = 1; $matches[] = ['dep' => $deps[$i], 'bank' => $bank[$j], 'days' => (int)$dd]; }
         $unD = array_values(array_filter($deps, fn($d, $i) => !isset($usedD[$i]), ARRAY_FILTER_USE_BOTH));
         $unB = array_values(array_filter($bank, fn($b, $j) => !isset($usedB[$j]) && $b['date'] >= $from && $b['date'] <= $to, ARRAY_FILTER_USE_BOTH));
-        bor_json(['ok' => true, 'matches' => $matches, 'unDeps' => $unD, 'unBank' => $unB, 'already' => ['n' => $rec, 'amt' => round($recAmt, 2)], 'accounts' => bor_accounts($conn)]);
+        bor_json(['ok' => true, 'matches' => $matches, 'unDeps' => $unD, 'unBank' => $unB, 'already' => ['n' => $rec, 'amt' => round($recAmt, 2)], 'accounts' => bor_accounts($conn),
+                  'range' => [$from, $to], 'settings' => ['account' => $acc, 'type' => $bt, 'tol' => $tol, 'acc_only' => $S['acc_only']]]);
     }
     if ($act === 'bank_open') {   // for a manual match: open credits of one account around a date
-        $acc = (int)($_POST['acc'] ?? 0); $from = bor_date($_POST['from'] ?? ''); $to = bor_date($_POST['to'] ?? '');
-        if (!$acc || $from === '' || $to === '') bor_json(['ok' => false, 'msg' => 'Missing account or dates.']);
-        bor_json(['ok' => true, 'rows' => bor_bank_open($conn, [$acc], $from, $to)]);
+        $S = bor_settings($conn); $from = bor_date($_POST['from'] ?? ''); $to = bor_date($_POST['to'] ?? '');
+        if (!$S['account']) bor_json(['ok' => false, 'msg' => 'Set the bank account in Settings first.']);
+        if ($from === '' || $to === '') bor_json(['ok' => false, 'msg' => 'Pick the dates.']);
+        bor_json(['ok' => true, 'rows' => bor_bank_open($conn, [$S['account']], $from, $to, $S['type'])]);
     }
     if ($act === 'save_batch') {
         if (!bor_can('create') && !bor_can('edit')) bor_json(['ok' => false, 'msg' => 'Permission blocked: your role cannot save reconciliations here.']);
         $items = json_decode($_POST['items'] ?? '[]', true); if (!is_array($items) || !$items) bor_json(['ok' => false, 'msg' => 'Nothing ticked to save.']);
-        $from = bor_date($_POST['from'] ?? ''); $to = bor_date($_POST['to'] ?? ''); $tol = (int)($_POST['tol'] ?? 0); $acc = (int)($_POST['acc'] ?? 0);
+        $S = bor_settings($conn); if (!$S['account']) bor_json(['ok' => false, 'msg' => 'Set the bank account in Settings first.']);
+        $from = bor_date($_POST['dp_from'] ?? ''); $to = bor_date($_POST['dp_to'] ?? ''); $ddf = bor_date($_POST['dd_from'] ?? ''); $ddt = bor_date($_POST['dd_to'] ?? '');
+        $tol = $S['tol']; $acc = $S['account'];
         $e = fn($v) => mysqli_real_escape_string($conn, (string)$v); $u = $e(bor_user()); $now = date('Y-m-d H:i:s'); $bremark = trim($_POST['remark'] ?? '');
         mysqli_begin_transaction($conn);
         try {
-            if (!bor_q($conn, "INSERT INTO bo_bank_recon_batches (date_from, date_to, tolerance_days, bank_account_id, remark, created_by, created_at) VALUES (" . ($from ? "'$from'" : "NULL") . "," . ($to ? "'$to'" : "NULL") . ",$tol," . ($acc ?: "NULL") . ",'" . $e($bremark) . "','$u','$now')")) throw new Exception(mysqli_error($conn));
+            if (!bor_q($conn, "INSERT INTO bo_bank_recon_batches (date_from, date_to, dd_from, dd_to, tolerance_days, bank_account_id, bank_type, remark, created_by, created_at) VALUES (" . ($from ? "'$from'" : "NULL") . "," . ($to ? "'$to'" : "NULL") . "," . ($ddf ? "'$ddf'" : "NULL") . "," . ($ddt ? "'$ddt'" : "NULL") . ",$tol,$acc," . ($S['type'] !== '' ? "'" . $e($S['type']) . "'" : "NULL") . ",'" . $e($bremark) . "','$u','$now')")) throw new Exception(mysqli_error($conn));
             $bid = (int)mysqli_insert_id($conn); $bno = 'RB-BO-' . str_pad((string)$bid, 5, '0', STR_PAD_LEFT);
             $n = 0; $da = 0; $ba = 0;
             foreach ($items as $it) {
@@ -117,7 +168,8 @@ if (isset($_REQUEST['ajax'])) {
                 $T = []; while ($r && ($x = mysqli_fetch_assoc($r))) $T[] = $x;
                 if (count($T) !== count($txs)) throw new Exception('A bank line was not found — reload.');
                 $sum = 0; foreach ($T as $t) { if (trim((string)$t['recon_status']) !== '') throw new Exception('Bank line of ' . $t['transaction_date'] . ' (' . number_format($t['credit'], 2) . ') is already reconciled — reload.');
-                    if ((int)$t['account_id'] !== (int)$d['bank_account_id']) throw new Exception('A bank line is from another bank account than the deposit.'); $sum += (float)$t['credit']; }
+                    if ((int)$t['account_id'] !== $acc) throw new Exception('A bank line is not from the Settings bank account.');
+                    if ($S['acc_only'] && (int)$t['account_id'] !== (int)$d['bank_account_id']) throw new Exception("BO deposit #$did was made to another bank account."); $sum += (float)$t['credit']; }
                 $diff = round((float)$d['amount'] - $sum, 2);
                 if ($method === 'auto' && abs($diff) > 0.005) throw new Exception('Auto match amounts differ — reload.');
                 if (abs($diff) > 0.005 && $rem === '') throw new Exception('Give a remark for the difference of ' . number_format($diff, 2) . " (deposit #$did).");
@@ -132,8 +184,13 @@ if (isset($_REQUEST['ajax'])) {
                 bor_q($conn, "UPDATE bo_bank_deposits SET bank_recon_id = $rid, bank_recon_remark = '" . $e($txt) . "' WHERE id = $did");
                 $n++; $da += (float)$d['amount']; $ba += $sum;
             }
-            $ud = json_decode($_POST['unrec'] ?? '{}', true) ?: [];
-            bor_q($conn, "UPDATE bo_bank_recon_batches SET batch_no = '$bno', rec_count = $n, rec_dep_amount = $da, rec_bank_amount = $ba, unrec_dep_count = " . (int)($ud['n'] ?? 0) . ", unrec_dep_amount = " . (float)($ud['amt'] ?? 0) . " WHERE id = $bid");
+            /* snapshot of what was NOT reconciled (sent by the page: deposits not found, open bank credits not picked) */
+            $un = json_decode($_POST['unrec'] ?? '{}', true) ?: []; $udn = 0; $uda = 0; $ubn = 0; $uba = 0;
+            foreach ((array)($un['deps'] ?? []) as $x) { $udn++; $uda += (float)($x['amount'] ?? 0);
+                bor_q($conn, "INSERT INTO bo_bank_recon_batch_unrec (batch_id, side, deposit_id, ref_date, delivery_date, employee, amount) VALUES ($bid, 'deposit', " . (int)($x['id'] ?? 0) . ", " . (bor_date($x['date'] ?? '') ? "'" . $x['date'] . "'" : "NULL") . ", " . (bor_date($x['dd'] ?? '') ? "'" . $x['dd'] . "'" : "NULL") . ", '" . $e(mb_substr((string)($x['emp'] ?? ''), 0, 190)) . "', " . (float)($x['amount'] ?? 0) . ")"); }
+            foreach ((array)($un['bank'] ?? []) as $x) { $ubn++; $uba += (float)($x['amount'] ?? 0);
+                bor_q($conn, "INSERT INTO bo_bank_recon_batch_unrec (batch_id, side, bank_txn_id, ref_date, description, amount) VALUES ($bid, 'bank', " . (int)($x['id'] ?? 0) . ", " . (bor_date($x['date'] ?? '') ? "'" . $x['date'] . "'" : "NULL") . ", '" . $e($x['desc'] ?? '') . "', " . (float)($x['amount'] ?? 0) . ")"); }
+            bor_q($conn, "UPDATE bo_bank_recon_batches SET batch_no = '$bno', rec_count = $n, rec_dep_amount = $da, rec_bank_amount = $ba, unrec_dep_count = $udn, unrec_dep_amount = $uda, unrec_bank_count = $ubn, unrec_bank_amount = $uba WHERE id = $bid");
             mysqli_commit($conn);
             bor_json(['ok' => true, 'batch' => $bno, 'n' => $n]);
         } catch (Throwable $ex) { mysqli_rollback($conn); bor_json(['ok' => false, 'msg' => 'Not saved: ' . $ex->getMessage()]); }
@@ -145,7 +202,9 @@ if (isset($_REQUEST['ajax'])) {
     if ($act === 'batch_view') {
         $bid = (int)($_POST['id'] ?? 0); $o = [];
         $r = bor_q($conn, "SELECT r.*, GROUP_CONCAT(CONCAT(b.transaction_date, ' · ', FORMAT(b.credit, 2), ' · ', LEFT(b.description, 80)) SEPARATOR '\n') bank FROM bo_bank_recon r LEFT JOIN bo_bank_recon_bank b ON b.recon_id = r.id WHERE r.batch_id = $bid GROUP BY r.id ORDER BY r.deposit_date, r.id");
-        while ($r && ($x = mysqli_fetch_assoc($r))) $o[] = $x; bor_json(['ok' => true, 'rows' => $o]);
+        while ($r && ($x = mysqli_fetch_assoc($r))) $o[] = $x;
+        $un = []; $r = bor_q($conn, "SELECT * FROM bo_bank_recon_batch_unrec WHERE batch_id = $bid ORDER BY side DESC, ref_date, id"); while ($r && ($x = mysqli_fetch_assoc($r))) $un[] = $x;
+        bor_json(['ok' => true, 'rows' => $o, 'unrec' => $un]);
     }
     if ($act === 'delete_batch') {
         if (!bor_can('delete')) bor_json(['ok' => false, 'msg' => 'Permission blocked: your role cannot delete reconciliation batches.']);
@@ -155,13 +214,13 @@ if (isset($_REQUEST['ajax'])) {
             bor_q($conn, "UPDATE bank_statement_transactions SET recon_status = NULL, recon_source = NULL, recon_category = NULL, recon_ref_id = NULL, recon_remark = NULL, recon_by = NULL, recon_at = NULL WHERE recon_source = '" . BOR_SOURCE . "' AND recon_ref_id IN ($in)");
             bor_q($conn, "UPDATE bo_bank_deposits SET bank_recon_id = NULL, bank_recon_remark = NULL WHERE bank_recon_id IN ($in)");
             bor_q($conn, "DELETE FROM bo_bank_recon_bank WHERE recon_id IN ($in)"); bor_q($conn, "DELETE FROM bo_bank_recon WHERE id IN ($in)"); }
-        bor_q($conn, "DELETE FROM bo_bank_recon_batches WHERE id = $bid"); mysqli_commit($conn);
+        bor_q($conn, "DELETE FROM bo_bank_recon_batch_unrec WHERE batch_id = $bid"); bor_q($conn, "DELETE FROM bo_bank_recon_batches WHERE id = $bid"); mysqli_commit($conn);
         bor_json(['ok' => true, 'n' => count($rids)]);
     }
     bor_json(['ok' => false, 'msg' => 'Unknown action']);
 }
 
-$accounts = bor_accounts($conn);
+$accounts = bor_accounts($conn); $stmt_accounts = bor_statement_accounts($conn); $SET = bor_settings($conn);
 $acc_used = []; $r = bor_q($conn, "SELECT DISTINCT bank_account_id FROM bo_bank_deposits WHERE bank_account_id IS NOT NULL"); while ($r && ($x = mysqli_fetch_row($r))) $acc_used[] = (int)$x[0];
 include 'header.php';
 ?>
@@ -191,16 +250,30 @@ include 'header.php';
 </style>
 <div class="bor">
   <h2><i class="fa-solid fa-building-columns" style="color:#2563eb"></i> BO Cash Deposit Reconciliation</h2>
-  <div class="sub">BO cash deposits ↔ bank statement credits of the same bank account. <b>Auto</b>: same amount on the deposit date (± days). The rest: <b>Match manually</b> with 1 or more bank credits. Saved as a batch — delete the batch to undo.</div>
+  <div class="sub">BO cash deposits ↔ bank statement credits of the same bank account. <b>Auto</b>: same amount on the deposit date (± days set in Settings), bank lines of the Settings account. The rest: <b>Match manually</b> with 1 or more bank credits. Saved as a batch — delete the batch to undo.</div>
   <div class="bor-tabs"><button class="bor-tab on" data-t="rec" onclick="tab('rec')"><i class="fa-solid fa-scale-balanced"></i> Reconcile</button><button class="bor-tab" data-t="his" onclick="tab('his')"><i class="fa-solid fa-clock-rotate-left"></i> History (batches)</button></div>
 
   <div id="tRec">
+    <div class="card" id="setCard"><h3 style="cursor:pointer" onclick="setBody.style.display=setBody.style.display==='none'?'':'none'"><i class="fa-solid fa-gear" style="color:#2563eb"></i> Settings
+        <span id="setInfo" style="margin-left:auto;font-weight:600;font-size:12px;color:#475569"><?php if ($SET['account']): ?><?= htmlspecialchars($stmt_accounts[$SET['account']]['label'] ?? '') ?> · <?= htmlspecialchars(bor_type_label($SET['type'])) ?> · ±<?= (int)$SET['tol'] ?> day(s)<?= $SET['acc_only'] ? ' · only deposits to this account' : '' ?><?= $SET['by'] ? ' · saved by ' . htmlspecialchars($SET['by']) . ' ' . htmlspecialchars($SET['at']) : '' ?><?php else: ?><b style="color:#b91c1c">Set the bank account first</b><?php endif; ?></span></h3>
+      <div id="setBody" style="<?= $SET['account'] ? 'display:none;' : '' ?>padding:12px 14px">
+        <div class="bor-bar" style="margin:0;border:none;padding:0">
+          <label>Bank account (with bank statements)<select id="setAcc" onchange="setTypes()"><option value="">— Select —</option>
+            <?php foreach ($stmt_accounts as $id => $a): ?><option value="<?= $id ?>" data-types='<?= htmlspecialchars(json_encode(array_keys($a['types'])), ENT_QUOTES) ?>' <?= $id === $SET['account'] ? 'selected' : '' ?>><?= htmlspecialchars($a['label']) ?> — last statement <?= htmlspecialchars($a['last']) ?></option><?php endforeach; ?></select></label>
+          <label>Statement type<select id="setType" data-cur="<?= htmlspecialchars($SET['type']) ?>"></select></label>
+          <label>Date tolerance<select id="setTol"><?php foreach ([0 => 'Same date', 1 => '± 1 day', 2 => '± 2 days', 3 => '± 3 days', 5 => '± 5 days', 7 => '± 7 days'] as $v => $l): ?><option value="<?= $v ?>" <?= $v === (int)$SET['tol'] ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
+          <label style="flex-direction:row;align-items:center;gap:6px;align-self:center"><input type="checkbox" id="setOnly" <?= $SET['acc_only'] ? 'checked' : '' ?>> Only BO deposits made to this account</label>
+          <button class="bb p" onclick="saveSettings()" data-perm="edit"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
+        </div>
+        <?php if (!$stmt_accounts): ?><div style="color:#b91c1c;font-size:12.5px;margin-top:8px">No bank statements are uploaded yet — upload them on Bank Statements first.</div><?php endif; ?>
+      </div></div>
     <div class="bor-bar">
       <label>Deposit date from<input type="date" id="fFrom"></label>
       <label>to<input type="date" id="fTo"></label>
-      <label>Bank account<select id="fAcc"><option value="0">All accounts</option><?php foreach ($accounts as $id => $l): if ($acc_used && !in_array($id, $acc_used, true)) continue; ?><option value="<?= $id ?>"><?= htmlspecialchars($l) ?></option><?php endforeach; ?></select></label>
-      <label>Date tolerance<select id="fTol"><option value="0">Same date</option><option value="1">± 1 day</option><option value="2">± 2 days</option><option value="3">± 3 days</option><option value="5">± 5 days</option></select></label>
+      <label>Delivery date from<input type="date" id="fDdFrom"></label>
+      <label>to<input type="date" id="fDdTo"></label>
       <button class="bb p" onclick="load()"><i class="fa-solid fa-wand-magic-sparkles"></i> Load &amp; match</button>
+      <button class="bb g" onclick="fDdFrom.value=fDdTo.value='';" title="Clear the delivery dates">Clear delivery dates</button>
     </div>
     <div class="kp" id="kp"></div>
     <div class="card"><h3><span class="pill a">AUTO</span> Matched — deposit date + amount <span id="mCnt" style="margin-left:auto;font-size:12px;color:#6b7280"></span></h3>
@@ -226,12 +299,17 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const N=v=>Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const ad=(d,n)=>{ const x=new Date(d+'T00:00:00'); x.setDate(x.getDate()+n); return x.toISOString().slice(0,10); };
 async function post(o){ const fd=new FormData(); Object.entries(o).forEach(([k,v])=>fd.append(k,v)); const r=await fetch(location.pathname,{method:'POST',body:fd}); const t=await r.text(); try{ return JSON.parse(t); }catch(e){ return {ok:false,msg:'Server error: '+t.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,200)}; } }
-try{ const s=JSON.parse(localStorage.getItem('borF')||'{}'); ['fFrom','fTo','fAcc','fTol'].forEach(k=>{ if(s[k]!==undefined) document.getElementById(k).value=s[k]; }); }catch(e){}
+const TYPES={'BOC':'BOC','NDB':'NDB','SAMPATH':'Sampath'};
+function setTypes(){ const o=setAcc.selectedOptions[0], t=o&&o.dataset.types?JSON.parse(o.dataset.types):[]; const cur=setType.dataset.cur||setType.value;
+  setType.innerHTML='<option value="">All types</option>'+t.map(x=>'<option value="'+esc(x)+'"'+(x===cur?' selected':'')+'>'+esc(TYPES[x]||x)+'</option>').join(''); setType.dataset.cur=''; }
+setTypes();
+async function saveSettings(){ const d=await post({ajax:'save_settings',account_id:setAcc.value,bank_type:setType.value,tol:setTol.value,acc_only:setOnly.checked?1:0}); alert(d.msg||(d.ok?'Saved':'Error')); if(d.ok) location.reload(); }
+try{ const s=JSON.parse(localStorage.getItem('borF')||'{}'); ['fFrom','fTo','fDdFrom','fDdTo'].forEach(k=>{ if(s[k]!==undefined) document.getElementById(k).value=s[k]; }); }catch(e){}
 if(!fFrom.value){ const d=new Date(); fTo.value=d.toISOString().slice(0,10); d.setDate(d.getDate()-14); fFrom.value=d.toISOString().slice(0,10); }
 function tab(t){ document.querySelectorAll('.bor-tab').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); tRec.style.display=t==='rec'?'':'none'; tHis.style.display=t==='his'?'':'none'; if(t==='his') hist(); }
-async function load(){ try{ localStorage.setItem('borF',JSON.stringify({fFrom:fFrom.value,fTo:fTo.value,fAcc:fAcc.value,fTol:fTol.value})); }catch(e){}
+async function load(){ try{ localStorage.setItem('borF',JSON.stringify({fFrom:fFrom.value,fTo:fTo.value,fDdFrom:fDdFrom.value,fDdTo:fDdTo.value})); }catch(e){}
   mRows.innerHTML='<tr><td colspan="9" class="empty">Loading…</td></tr>'; MAN={};
-  const d=await post({ajax:'load',from:fFrom.value,to:fTo.value,acc:fAcc.value,tol:fTol.value});
+  const d=await post({ajax:'load',dp_from:fFrom.value,dp_to:fTo.value,dd_from:fDdFrom.value,dd_to:fDdTo.value});
   if(!d.ok){ mRows.innerHTML='<tr><td colspan="9" class="empty" style="color:#b91c1c">'+esc(d.msg)+'</td></tr>'; return; } D=d; ACC=d.accounts||{}; draw(); }
 function draw(){ const M=D.matches, U=D.unDeps, B=D.unBank, a=id=>esc(ACC[id]||('#'+id));
   mRows.innerHTML=M.map((m,i)=>'<tr><td><input type="checkbox" class="mChk" data-i="'+i+'" checked onchange="tally()"></td><td class="nw"><b>'+esc(m.dep.date)+'</b></td><td class="nw">'+esc(m.dep.dd||'')+'</td><td>'+esc(m.dep.emp)+'</td><td style="font-size:11.5px">'+a(m.dep.acc)+'</td><td class="r"><b>'+N(m.dep.amount)+'</b></td><td class="nw">'+esc(m.bank.date)+(m.days?' <span class="pill d">'+m.days+'d</span>':'')+'</td><td class="ds">'+esc(m.bank.desc)+'</td><td class="r"><b>'+N(m.bank.amount)+'</b></td></tr>').join('')||'<tr><td colspan="9" class="empty">No automatic matches.</td></tr>';
@@ -250,11 +328,11 @@ function tally(){ if(!D) return; const ch=[...document.querySelectorAll('.mChk:c
   sumTxt.textContent=n?('To save: '+n+' reconciliation(s) · Rs. '+N(amt)):''; saveBtn.disabled=!n; }
 async function mmOpen(id){ const u=D.unDeps.find(x=>x.id===id); if(!u) return; mm.classList.add('open'); mmT.textContent='Match manually — BO deposit '+u.date+' · Rs. '+N(u.amount);
   const from=ad(u.date,-7), to=ad(u.date,14);
-  mmB.innerHTML='<div class="bor-bar" style="margin:0 0 8px"><label>Bank dates from<input type="date" id="mmF" value="'+from+'"></label><label>to<input type="date" id="mmTo" value="'+to+'"></label><button class="bb g" onclick="mmLoad('+id+')">Show</button><span style="font-size:12px;color:#6b7280">'+esc(ACC[u.acc]||'')+'</span></div><div class="tw" style="max-height:380px"><table class="t"><thead><tr><th></th><th>Date</th><th>Description</th><th class="r">Credit</th></tr></thead><tbody id="mmRows"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody></table></div>'
+  mmB.innerHTML='<div class="bor-bar" style="margin:0 0 8px"><label>Bank dates from<input type="date" id="mmF" value="'+from+'"></label><label>to<input type="date" id="mmTo" value="'+to+'"></label><button class="bb g" onclick="mmLoad('+id+')">Show</button><span style="font-size:12px;color:#6b7280">Bank: '+esc(ACC[D.settings.account]||'')+(D.settings.type?' · '+esc(TYPES[D.settings.type]||D.settings.type):'')+'</span></div><div class="tw" style="max-height:380px"><table class="t"><thead><tr><th></th><th>Date</th><th>Description</th><th class="r">Credit</th></tr></thead><tbody id="mmRows"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody></table></div>'
     +'<div class="foot" style="margin-top:8px"><span id="mmSum" style="font-weight:700;font-size:13px"></span><input id="mmRem" placeholder="Remark (needed when the amounts differ)" style="flex:1;min-width:200px;border:1.5px solid #e5e7eb;border-radius:8px;padding:7px 10px;font-size:13px" value="'+esc(MAN[id]?.remark||'')+'"><button class="bb p" onclick="mmUse('+id+')"><i class="fa-solid fa-check"></i> Use these</button></div>';
   mmLoad(id); }
 let MMR=[];
-async function mmLoad(id){ const u=D.unDeps.find(x=>x.id===id); const d=await post({ajax:'bank_open',acc:u.acc,from:mmF.value,to:mmTo.value}); if(!d.ok){ mmRows.innerHTML='<tr><td colspan="4" class="empty">'+esc(d.msg)+'</td></tr>'; return; }
+async function mmLoad(id){ const u=D.unDeps.find(x=>x.id===id); const d=await post({ajax:'bank_open',from:mmF.value,to:mmTo.value}); if(!d.ok){ mmRows.innerHTML='<tr><td colspan="4" class="empty">'+esc(d.msg)+'</td></tr>'; return; }
   const auto=new Set([...document.querySelectorAll('.mChk:checked')].map(c=>D.matches[+c.dataset.i].bank.id)); const other=new Set(Object.entries(MAN).filter(([k])=>+k!==id).flatMap(([,m])=>m.bank)); const mine=new Set(MAN[id]?.bank||[]);
   MMR=d.rows.filter(b=>!auto.has(b.id)&&!other.has(b.id));
   mmRows.innerHTML=MMR.map(b=>'<tr'+(Math.abs(b.amount-u.amount)<0.005?' style="background:#ecfdf5"':'')+'><td><input type="checkbox" class="mmC" value="'+b.id+'" '+(mine.has(b.id)?'checked':'')+' onchange="mmTally('+id+')"></td><td class="nw">'+esc(b.date)+'</td><td class="ds">'+esc(b.desc)+'</td><td class="r"><b>'+N(b.amount)+'</b></td></tr>').join('')||'<tr><td colspan="4" class="empty">No open bank credits of this account in these dates.</td></tr>'; mmTally(id); }
@@ -268,15 +346,19 @@ function mmClose(){ mm.classList.remove('open'); }
 async function saveBatch(){ const items=[...document.querySelectorAll('.mChk:checked')].map(c=>{ const m=D.matches[+c.dataset.i]; return {dep:m.dep.id,bank:[m.bank.id],method:'auto'}; })
     .concat(Object.entries(MAN).map(([k,m])=>({dep:+k,bank:m.bank,method:'manual',remark:m.remark})));
   if(!items.length) return; if(!confirm('Save '+items.length+' reconciliation(s) as one batch?')) return;
-  const left=D.unDeps.filter(u=>!MAN[u.id]); saveBtn.disabled=true;
-  const d=await post({ajax:'save_batch',items:JSON.stringify(items),from:fFrom.value,to:fTo.value,acc:fAcc.value,tol:fTol.value,remark:bRemark.value,unrec:JSON.stringify({n:left.length,amt:left.reduce((t,x)=>t+x.amount,0)})});
+  const usedB=new Set(items.flatMap(i=>i.bank)); const ticked=new Set(items.map(i=>i.dep));
+  const leftD=D.unDeps.filter(u=>!MAN[u.id]).concat(D.matches.filter(m=>!ticked.has(m.dep.id)).map(m=>m.dep)), leftB=D.unBank.filter(b=>!usedB.has(b.id)).concat(D.matches.filter(m=>!ticked.has(m.dep.id)).map(m=>m.bank)); saveBtn.disabled=true;
+  const d=await post({ajax:'save_batch',items:JSON.stringify(items),dp_from:fFrom.value,dp_to:fTo.value,dd_from:fDdFrom.value,dd_to:fDdTo.value,remark:bRemark.value,unrec:JSON.stringify({deps:leftD,bank:leftB})});
   saveBtn.disabled=false; if(!d.ok){ alert(d.msg); return; } alert('Saved batch '+d.batch+' — '+d.n+' reconciliation(s).'); bRemark.value=''; load(); }
 async function hist(){ hRows.innerHTML='<tr><td colspan="10" class="empty">Loading…</td></tr>'; const d=await post({ajax:'batches'}); if(!d.ok){ hRows.innerHTML='<tr><td colspan="10" class="empty">'+esc(d.msg)+'</td></tr>'; return; } const A=d.accounts||{};
-  hRows.innerHTML=d.rows.map(b=>'<tr><td><b>'+esc(b.batch_no)+'</b></td><td class="nw">'+esc(b.created_at)+'<div style="font-size:11px;color:#6b7280">'+esc(b.created_by||'')+'</div></td><td class="nw">'+esc(b.date_from||'')+' → '+esc(b.date_to||'')+(+b.tolerance_days?' (±'+b.tolerance_days+'d)':'')+'</td><td style="font-size:11.5px">'+esc(b.bank_account_id?(A[b.bank_account_id]||'#'+b.bank_account_id):'All')+'</td>'
-    +'<td class="r">'+b.rec_count+'</td><td class="r">'+N(b.rec_dep_amount)+'</td><td class="r">'+N(b.rec_bank_amount)+'</td><td class="r">'+b.unrec_dep_count+' · '+N(b.unrec_dep_amount)+'</td><td style="font-size:12px">'+esc(b.remark||'')+'</td>'
+  hRows.innerHTML=d.rows.map(b=>'<tr><td><b>'+esc(b.batch_no)+'</b></td><td class="nw">'+esc(b.created_at)+'<div style="font-size:11px;color:#6b7280">'+esc(b.created_by||'')+'</div></td><td class="nw">'+esc(b.date_from||'')+' → '+esc(b.date_to||'')+(+b.tolerance_days?' (±'+b.tolerance_days+'d)':'')+(b.dd_from?'<div style="font-size:11px;color:#6b7280">delivery '+esc(b.dd_from)+' → '+esc(b.dd_to||'')+'</div>':'')+'</td><td style="font-size:11.5px">'+esc(b.bank_account_id?(A[b.bank_account_id]||'#'+b.bank_account_id):'All')+(b.bank_type?' · '+esc(TYPES[b.bank_type]||b.bank_type):'')+'</td>'
+    +'<td class="r">'+b.rec_count+'</td><td class="r">'+N(b.rec_dep_amount)+'</td><td class="r">'+N(b.rec_bank_amount)+'</td><td class="r">'+b.unrec_dep_count+' dep · '+N(b.unrec_dep_amount)+'<div style="font-size:11px;color:#6b7280">'+(b.unrec_bank_count||0)+' bank · '+N(b.unrec_bank_amount||0)+'</div></td><td style="font-size:12px">'+esc(b.remark||'')+'</td>'
     +'<td class="nw"><button class="bb g" style="padding:4px 10px;font-size:12px" onclick="bView('+b.id+',\''+esc(b.batch_no)+'\')"><i class="fa-solid fa-eye"></i> View</button> <button class="bb r" style="padding:4px 10px;font-size:12px" data-perm="delete" onclick="bDel('+b.id+',\''+esc(b.batch_no)+'\')"><i class="fa-solid fa-trash"></i></button></td></tr>').join('')||'<tr><td colspan="10" class="empty">No batches yet.</td></tr>'; }
 async function bView(id,no){ mm.classList.add('open'); mmT.textContent='Batch '+no; mmB.innerHTML='Loading…'; const d=await post({ajax:'batch_view',id});
-  mmB.innerHTML='<div class="tw" style="max-height:70vh"><table class="t"><thead><tr><th>Method</th><th>Deposit date</th><th class="r">Deposit</th><th class="r">Bank</th><th class="r">Diff</th><th>Bank line(s)</th><th>Remark</th></tr></thead><tbody>'+(d.rows||[]).map(r=>'<tr><td><span class="pill '+(r.method==='manual'?'m':'a')+'">'+esc(r.method)+'</span></td><td class="nw">'+esc(r.deposit_date)+'</td><td class="r">'+N(r.deposit_amount)+'</td><td class="r">'+N(r.bank_amount)+'</td><td class="r">'+(Math.abs(r.difference)>0.005?'<b style="color:#b45309">'+N(r.difference)+'</b>':'')+'</td><td class="ds" style="white-space:pre-line">'+esc(r.bank||'')+'</td><td style="font-size:12px">'+esc(r.remark||'')+'</td></tr>').join('')+'</tbody></table></div>'; }
+  mmB.innerHTML='<div class="tw" style="max-height:70vh"><table class="t"><thead><tr><th>Method</th><th>Deposit date</th><th class="r">Deposit</th><th class="r">Bank</th><th class="r">Diff</th><th>Bank line(s)</th><th>Remark</th></tr></thead><tbody>'+(d.rows||[]).map(r=>'<tr><td><span class="pill '+(r.method==='manual'?'m':'a')+'">'+esc(r.method)+'</span></td><td class="nw">'+esc(r.deposit_date)+'</td><td class="r">'+N(r.deposit_amount)+'</td><td class="r">'+N(r.bank_amount)+'</td><td class="r">'+(Math.abs(r.difference)>0.005?'<b style="color:#b45309">'+N(r.difference)+'</b>':'')+'</td><td class="ds" style="white-space:pre-line">'+esc(r.bank||'')+'</td><td style="font-size:12px">'+esc(r.remark||'')+'</td></tr>').join('')+'</tbody></table></div>'
+    +(()=>{ const U=d.unrec||[], dep=U.filter(x=>x.side==='deposit'), bk=U.filter(x=>x.side==='bank'); if(!U.length) return '';
+      return '<h4 style="margin:14px 0 6px;font-size:13px">Not reconciled when saved — deposits '+dep.length+' (Rs. '+N(dep.reduce((t,x)=>t+ +x.amount,0))+') · bank credits '+bk.length+' (Rs. '+N(bk.reduce((t,x)=>t+ +x.amount,0))+')</h4><div class="tw" style="max-height:40vh"><table class="t"><thead><tr><th>Side</th><th>Date</th><th>Delivery date / Employee / Description</th><th class="r">Amount</th></tr></thead><tbody>'
+        +U.map(x=>'<tr><td><span class="pill '+(x.side==='deposit'?'d':'m')+'">'+(x.side==='deposit'?'BO deposit':'Bank')+'</span></td><td class="nw">'+esc(x.ref_date||'')+'</td><td class="ds">'+(x.side==='deposit'?esc((x.delivery_date||'')+' · '+(x.employee||'')):esc(x.description||''))+'</td><td class="r">'+N(x.amount)+'</td></tr>').join('')+'</tbody></table></div>'; })(); }
 async function bDel(id,no){ if(!confirm('Delete batch '+no+'? Its deposits and bank lines become unreconciled again.')) return; const d=await post({ajax:'delete_batch',id}); if(!d.ok){ alert(d.msg); return; } hist(); }
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') mmClose(); });
 </script>
