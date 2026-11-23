@@ -748,11 +748,19 @@ function matrixToRows($matrix, $bank_type) {
 
 /* ══════════════════════════════════════════════════════════
    DUPLICATE CHECK
-   A row is a duplicate when every field matches EXCEPT the
-   Serial No and the Balance: txn date, value date, description,
-   debit, credit, branch, cheque no, reference — within the same
-   bank account. Also flags repeated rows inside the same file.
+   Against what is already uploaded for the SAME bank account (a monthly statement over daily
+   ones, or the same file twice): a row is a duplicate when these 6 match —
+   Txn Date, Value Date, Description, Reference, Debit, Credit
+   (spaces / letter case ignored, 0.00 = blank; Serial No, Branch, Cheque No and Balance are not compared).
+   Inside one file, a repeated row is flagged only when Branch and Cheque No match too
+   (two real cheques of the same amount on the same day stay separate).
 ══════════════════════════════════════════════════════════ */
+function txnDupKey6($r) {
+    $n = function($v) { return ($v === null || $v === '' || (float)$v == 0.0) ? '' : number_format((float)$v, 2, '.', ''); };
+    $s = function($v) { return strtoupper(trim(preg_replace('/\s+/', ' ', (string)$v))); };
+    $d = function($v) { $v = trim((string)$v); return ($v === '' || $v === '0000-00-00') ? '' : substr($v, 0, 10); };
+    return implode('|', [$d($r['td'] ?? ''), $d($r['vd'] ?? ''), $s($r['desc'] ?? ''), $s($r['ref'] ?? ''), $n($r['debit'] ?? null), $n($r['credit'] ?? null)]);
+}
 function txnDupKey($r) {
     $n = function($v) { return ($v === null || $v === '') ? '' : number_format((float)$v, 2, '.', ''); };
     $s = function($v) { return strtoupper(trim(preg_replace('/\s+/', ' ', (string)$v))); };
@@ -786,7 +794,7 @@ function findDuplicates($conn, $account_id, $rows) {
           AND t.transaction_date BETWEEN '$min' AND '$max'
     ");
     while ($q && ($e = mysqli_fetch_assoc($q))) {
-        $key = txnDupKey([
+        $key = txnDupKey6([
             'td' => $e['transaction_date'], 'vd' => $e['value_date'], 'desc' => $e['description'],
             'debit' => $e['debit'], 'credit' => $e['credit'], 'bal' => $e['balance'],
             'br' => $e['branch_code'], 'ch' => $e['cheque_no'], 'ref' => $e['reference'],
@@ -800,7 +808,7 @@ function findDuplicates($conn, $account_id, $rows) {
 
     $seen_in_file = [];
     foreach ($rows as $i => $r) {
-        $key = txnDupKey($r);
+        $key = txnDupKey6($r); $fkey = txnDupKey($r);
         $hit = null;
         if (!empty($r['legacy']) && empty($existing[$key])) {
             /* a shifted NDB row: an older import stored it with the amounts in the wrong columns — find it by date + reference + description start */
@@ -820,10 +828,10 @@ function findDuplicates($conn, $account_id, $rows) {
             $ex_all[$hit]['used'] = true; $x = $ex_all[$hit];
             if ($x['rec']) $dups[$i] = ['kind' => 'db', 'where' => 'Already imported in ' . $x['where'] . ' but with the amounts in the WRONG columns, and it is already reconciled — remove that bank row from Unilever Reconcile, delete/re-import it to fix it'];
             else $dups[$i] = ['kind' => 'fix', 'fix_id' => $x['id'], 'where' => 'Already imported in ' . $x['where'] . ' with the amounts in the wrong columns (a shifted NDB row) — it will be CORRECTED, not added again'];
-        } elseif (isset($seen_in_file[$key])) {
-            $dups[$i] = ['kind' => 'file', 'where' => 'Same as row #' . ($seen_in_file[$key] + 1) . ' in this file'];
+        } elseif (isset($seen_in_file[$fkey])) {
+            $dups[$i] = ['kind' => 'file', 'where' => 'Same as row #' . ($seen_in_file[$fkey] + 1) . ' in this file'];
         } else {
-            $seen_in_file[$key] = $i;
+            $seen_in_file[$fkey] = $i;
         }
     }
     return $dups;
