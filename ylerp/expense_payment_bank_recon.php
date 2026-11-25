@@ -4,7 +4,7 @@
  * ─────────────────────────────────────────────────────────────────────
  * Expense Payments  ↔  Bank Statement debits
  *
- *  Payments : expense_payments (Expense Payments page), status Paid —
+ *  Payments : expense_payments (Expense Payments page), Bank Status Approved (matched by ref no in the bank description, then amount / date) —
  *             optionally Approved too (Settings). Shown by system ID.
  *  Bank     : debit lines of the Settings account / statement type,
  *             optionally only lines whose description has a keyword.
@@ -72,6 +72,25 @@ function epr_bank_chq($t) {
     if ($cn !== '' && (int)$cn > 0) return ltrim($cn, '0');
     if (preg_match('/\b(?:CHQ|CHEQUE|CHK)\.?\s*(?:NO|NUMBER|#)?\.?\s*[-:\x{2013}]?\s*(\d{4,})/iu', (string)($t['description'] ?? '') . ' ' . (string)($t['reference'] ?? ''), $m)) return ltrim($m[1], '0');
     return '';
+}
+/* the payment's ref no (EXP-PAY-000123) in a bank line's description / reference — spaces, dashes and leading zeros may differ */
+function epr_ref_forms($ref) {
+    $n = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)$ref)); if ($n === '') return [];
+    $f = [$n];
+    if (preg_match('/^([A-Z]+)0*(\d+)$/', $n, $m)) { $f[] = $m[1] . $m[2]; $f[] = $m[1] . str_pad($m[2], 6, '0', STR_PAD_LEFT); }
+    return array_values(array_unique($f));
+}
+function epr_ref_in($ref, $tx) {
+    $t = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)($tx['description'] ?? '') . ' ' . (string)($tx['reference'] ?? '')));
+    foreach (epr_ref_forms($ref) as $f) {
+        $p = strpos($t, $f);
+        while ($p !== false) {                                   /* EXPPAY12 must not match inside EXPPAY123 */
+            $nx = substr($t, $p + strlen($f), 1);
+            if ($nx === '' || !ctype_digit($nx)) return true;
+            $p = strpos($t, $f, $p + 1);
+        }
+    }
+    return false;
 }
 /* keywords from Settings: "transfer, slips" → ['transfer', 'slips'] */
 function epr_keywords($s) {
@@ -244,13 +263,16 @@ function epr_status_list($cfg) { return $cfg['approved'] ? ['paid', 'approved'] 
  */
 function epr_payments($conn, $from, $to, $statuses, $onlyId = 0) {
     if (!epr_table_exists($conn, 'expense_payments')) return [];
-    $st = implode(',', array_map(function ($x) use ($conn) { return "'" . mysqli_real_escape_string($conn, $x) . "'"; }, $statuses));
-    $where = "ep.status IN ($st)";
+    /* the payments come from the Expense Payments page: Bank Status = Approved (the bank approved the transfer; Verified is set by this reconcile) */
+    epr_bank_status_ready($conn);
+    $hasRef = epr_has_col($conn, 'expense_payments', 'system_ref');
+    $where = "COALESCE(ep.bank_status,'pending') = 'approved' AND ep.status NOT IN ('rejected','cancelled')";
     if ($onlyId > 0) $where .= " AND ep.id = " . (int)$onlyId;
-    elseif ($from !== '') $where .= " AND ep.payment_date BETWEEN '" . mysqli_real_escape_string($conn, $from) . "' AND '" . mysqli_real_escape_string($conn, $to) . "'";
+    elseif ($from !== '') { $fe = mysqli_real_escape_string($conn, $from); $te = mysqli_real_escape_string($conn, $to);
+        $where .= " AND (ep.payment_date BETWEEN '$fe' AND '$te' OR DATE(ep.bank_status_at) BETWEEN '$fe' AND '$te')"; }
     $hasE = epr_table_exists($conn, 'expenses');
     $hasB = epr_table_exists($conn, 'budgets');
-    $r = epr_q($conn, "SELECT ep.id, ep.payment_date, ep.amount, ep.status, ep.remarks, ep.paid_at, "
+    $r = epr_q($conn, "SELECT ep.id, ep.payment_date, ep.amount, ep.status, ep.remarks, ep.paid_at, ep.bank_status_at, " . ($hasRef ? "ep.system_ref" : "NULL AS system_ref") . ", "
                     . ($hasE ? "e.expense_name" : "NULL AS expense_name") . ", " . ($hasB ? "b.budget_name" : "NULL AS budget_name") . "
                          FROM expense_payments ep"
                     . ($hasE ? " LEFT JOIN expenses e ON e.id = ep.expense_id" : '')
@@ -265,8 +287,10 @@ function epr_payments($conn, $from, $to, $statuses, $onlyId = 0) {
             'date' => epr_valid_date((string)$x['payment_date']) ? $x['payment_date'] : '',
             'amount' => round((float)$x['amount'], 2), 'status' => $x['status'],
             'inv' => [['no' => $name, 'co' => ($x['budget_name'] ? 'Budget: ' . $x['budget_name'] : 'No budget') . ' · ' . ucfirst($x['status']), 'amt' => round((float)$x['amount'], 2)]],
-            'entry' => epr_norm((string)$x['remarks']) . ($x['paid_at'] ? (trim((string)$x['remarks']) !== '' ? ' · ' : '') . 'Marked paid ' . date('Y-m-d', strtotime($x['paid_at'])) : ''),
+            'entry' => (trim((string)$x['system_ref']) !== '' ? 'Ref ' . trim((string)$x['system_ref']) . ' · ' : '') . ($x['bank_status_at'] ? 'Bank approved ' . date('Y-m-d', strtotime($x['bank_status_at'])) . ' · ' : '') . epr_norm((string)$x['remarks']) . ($x['paid_at'] ? (trim((string)$x['remarks']) !== '' ? ' · ' : '') . 'Marked paid ' . date('Y-m-d', strtotime($x['paid_at'])) : ''),
             'note' => '', 'used' => false,
+            'ref' => trim((string)$x['system_ref']) !== '' ? trim((string)$x['system_ref']) : 'EXP-PAY-' . str_pad((string)$id, 6, '0', STR_PAD_LEFT),
+            'bank_ok' => $x['bank_status_at'] ? date('Y-m-d', strtotime($x['bank_status_at'])) : '',
         ];
     }
     return $units;
@@ -310,7 +334,7 @@ function epr_run($conn, $o) {
     $rs = mysqli_stmt_get_result($st);
     $banks = []; $seen = []; $kw = epr_keywords($o['keywords']);
     while ($rs && ($tx = mysqli_fetch_assoc($rs))) {
-        $dk = $tx['transaction_date'] . '|' . epr_norm($tx['description']) . '|' . $tx['debit'] . '|' . $tx['balance'];
+        $dk = $tx['transaction_date'] . '|' . epr_norm($tx['description']) . '|' . epr_norm($tx['reference'] ?? '') . '|' . $tx['debit'] . '|' . $tx['balance'];
         if (isset($seen[$dk])) continue;
         $seen[$dk] = true;
         if (!empty($tx['recon_status'])) { $R['already']['bank']++; continue; }
@@ -321,12 +345,30 @@ function epr_run($conn, $o) {
     }
     mysqli_stmt_close($st);
 
-    /* 3. candidates: same amount, bank date within ± window of the payment date */
+    /* 3a. ref no first: the bank description / reference carries the payment's ref no (EXP-PAY-000123) and the amount is the same → Tallied */
+    $refOf = [];                                                    /* bank line → the payment whose ref it carries */
+    foreach ($banks as $bi => $b) foreach ($units as $k => $u) if (epr_ref_in($u['ref'], $b['txns'][0])) { $refOf[$bi] = $k; break; }
+    $refDiff = [];
+    foreach ($units as $k => $u) {
+        foreach ($banks as $bi => $b) {
+            if ($b['used'] || ($refOf[$bi] ?? null) !== $k) continue;
+            if (abs($b['amount'] - $u['amount']) < 0.005) {
+                $units[$k]['note'] = 'Ref ' . $u['ref'] . ' found in the bank description';
+                $units[$k]['used'] = true; $banks[$bi]['used'] = true;
+                $R['pairs'][] = ['type' => 'matched', 'c' => $units[$k], 'b' => $banks[$bi], 'days' => $u['date'] !== '' ? epr_days($b['date'], $u['date']) : 0];
+                break;
+            }
+            $refDiff[$k] = 'Ref ' . $u['ref'] . ' is on the bank line of ' . $b['date'] . ' but the amount differs (bank Rs ' . epr_money($b['amount']) . ')';
+        }
+    }
+
+    /* 3b. candidates: same amount, bank date within ± window of the payment date (a bank line carrying another payment's ref is left to that payment) */
     $cand = []; $rev = [];
     foreach ($units as $k => $u) {
         $cand[$k] = [];
-        if ($u['date'] === '') continue;
+        if ($u['date'] === '' || $u['used']) continue;
         foreach ($banks as $bi => $b) {
+            if ($b['used'] || (isset($refOf[$bi]) && $refOf[$bi] !== $k)) continue;
             if (abs($b['amount'] - $u['amount']) < 0.005 && abs(epr_days($b['date'], $u['date'])) <= $win) {
                 $cand[$k][] = $bi; $rev[$bi][] = $k;
             }
@@ -366,7 +408,7 @@ function epr_run($conn, $o) {
             $pair($k, $best, 'mismatch');
         }
     }
-    foreach ($units as $u) if (!$u['used']) $R['chq_only'][] = ['c' => $u, 'why' => $u['date'] === '' ? 'No payment date' : 'No bank debit with this amount within ± ' . $win . ' day(s)'];
+    foreach ($units as $k => $u) if (!$u['used']) $R['chq_only'][] = ['c' => $u, 'why' => $refDiff[$k] ?? ($u['date'] === '' ? 'No payment date' : 'No bank debit with ref ' . $u['ref'] . ' or with this amount within ± ' . $win . ' day(s)')];
     foreach ($banks as $b) if (!$b['used']) $R['bank_only'][] = ['b' => $b, 'why' => 'No expense payment with this amount / date'];
     usort($R['pairs'], function ($a, $b) { return strcmp($a['c']['date'], $b['c']['date']) ?: ($a['c']['sid'] <=> $b['c']['sid']); });
     return $R;
@@ -384,7 +426,7 @@ function epr_save_item($conn, $it, &$ctx) {
     /* payment side — re-read from the database */
     $units = epr_payments($conn, '', '', $ctx['statuses'], (int)$km[1]);
     $u = $units ? reset($units) : null;
-    if (!$u) throw new EprUserError('Payment was changed, deleted or is no longer ' . implode(' / ', $ctx['statuses']) . '. Run the reconcile again.');
+    if (!$u) throw new EprUserError('Payment was changed, deleted or its Bank Status is no longer Approved. Run the reconcile again.');
     $r = mysqli_query($conn, "SELECT id FROM epr_recon WHERE payment_id = " . (int)$u['sid'] . " LIMIT 1");
     if ($r && mysqli_fetch_assoc($r)) throw new EprUserError('This payment is already reconciled.');
 
@@ -664,7 +706,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
         $rs = mysqli_stmt_get_result($st);
         $rows = []; $seen = [];
         while ($rs && ($tx = mysqli_fetch_assoc($rs))) {
-            $dk = $tx['transaction_date'] . '|' . epr_norm($tx['description']) . '|' . $tx['debit'] . '|' . $tx['balance'];
+            $dk = $tx['transaction_date'] . '|' . epr_norm($tx['description']) . '|' . epr_norm($tx['reference'] ?? '') . '|' . $tx['debit'] . '|' . $tx['balance'];
             if (isset($seen[$dk])) continue;
             $seen[$dk] = true;
             $rows[] = ['id' => (int)$tx['id'], 'date' => $tx['transaction_date'], 'desc' => epr_norm($tx['description'] . ' ' . $tx['reference']),
@@ -882,7 +924,7 @@ include 'header.php';
 
 <div class="dbr">
     <h1><i class="fa-solid fa-receipt"></i> Expense Payment ↔ Bank Reconciliation</h1>
-    <p class="sub">Match Paid expense payments to bank statement debits by <b>amount and date</b> (bank lines carry no expense reference), and save them as batches. Payments are shown by their system ID.
+    <p class="sub">Match the expense payments whose <b>Bank Status is Approved</b> (Expense Payments page) to bank statement debits — first by the <b>ref no</b> (e.g. EXP-PAY-000123) in the bank description, then by <b>amount and date</b> — and save them as batches. Saving sets the Bank Status to <b>Verified</b>.
         <a href="expense_payments.php" class="blink" style="margin-left:6px;"><i class="fa-solid fa-arrow-left"></i> Expense Payments</a></p>
 
     <div class="tabs">
@@ -900,7 +942,7 @@ include 'header.php';
             <span><i class="fa-solid fa-building-columns"></i> <b><?php echo epr_h(epr_acc_label($accounts, $cfg['account'])); ?></b></span>
             <span class="pill"><?php echo epr_h(epr_type_label($cfg['type'])); ?></span>
             <span class="pill">Payment date ± <?php echo (int)$cfg['window']; ?> day(s)</span>
-            <span class="pill"><?php echo $cfg['approved'] ? 'Paid + Approved payments' : 'Paid payments'; ?></span>
+            <span class="pill">Bank Status: Approved payments · ref no + amount</span>
             <?php if (trim($cfg['keywords']) !== ''): ?><span class="pill">Bank text: <?php echo epr_h($cfg['keywords']); ?></span><?php endif; ?>
             <a href="?tab=settings" class="setlink"><i class="fa-solid fa-gear"></i> Change</a>
         </div>
@@ -1055,7 +1097,8 @@ include 'header.php';
                 <label class="f" for="set_window">Date window (± days around the payment date)</label>
                 <input type="text" id="set_window" inputmode="numeric" value="<?php echo (int)$cfg['window']; ?>">
             </div>
-            <div class="wide"><label class="chk"><input type="checkbox" id="set_approved" <?php echo $cfg['approved'] ? 'checked' : ''; ?>> Also include <b>Approved</b> payments (not yet marked Paid)</label></div>
+            <div class="wide" style="display:none"><input type="checkbox" id="set_approved" <?php echo $cfg['approved'] ? 'checked' : ''; ?>></div>
+            <div class="wide muted" style="font-size:12px;">Payments are taken from Expense Payments with <b>Bank Status = Approved</b>. A bank line whose description or reference has the payment's ref no (EXP-PAY-000123) is matched first.</div>
             <div class="wide">
                 <label class="f" for="set_keywords">Bank description keywords (optional, comma separated)</label>
                 <input type="text" id="set_keywords" maxlength="500" value="<?php echo epr_h($cfg['keywords']); ?>" placeholder="e.g. TRANSFER, CEFT, CHQ — empty = every debit">
