@@ -158,6 +158,8 @@ $STATUS_LIST = ['initiated', 'authorized', 'approved', 'paid', 'rejected', 'canc
    Balance: opening balance of the Settings bank account (its latest Cash Flow Planner bank balance, or an amount typed in)
             − the payments marked Approved / Verified at the bank after the opening date. */
 $EP_BANK_STATUS = ['pending', 'initiated', 'approved', 'verified', 'cancelled', 'rejected'];
+/* the bank status moves one step at a time: Pending → Initiated → Approved / Rejected. Verified is never set by hand — the bank reconcile sets it. */
+$EP_BANK_NEXT = ['pending' => ['initiated'], 'initiated' => ['approved', 'rejected'], 'approved' => [], 'verified' => [], 'rejected' => [], 'cancelled' => []];
 foreach (['bank_status' => "VARCHAR(12) NOT NULL DEFAULT 'pending'", 'bank_status_by' => "VARCHAR(100) NULL", 'bank_status_at' => "DATETIME NULL"] as $__c => $__d) {
     $__r = @mysqli_query($conn, "SHOW COLUMNS FROM expense_payments LIKE '$__c'");
     if ($__r && mysqli_num_rows($__r) === 0) @mysqli_query($conn, "ALTER TABLE expense_payments ADD COLUMN `$__c` $__d");
@@ -783,6 +785,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_bank_status'])) 
     if (function_exists('rbac_can') && !rbac_can('edit', 'expense_payments')) { echo json_encode(['success' => false, 'message' => 'Permission blocked: your role cannot edit expense payments.']); exit; }
     $o = mysqli_query($conn, "SELECT bank_status FROM expense_payments WHERE id = $id"); $old = ($o && ($x = mysqli_fetch_row($o))) ? $x[0] : null;
     if ($old === null) { echo json_encode(['success' => false, 'message' => 'Payment not found.']); exit; }
+    $cur = in_array($old, $EP_BANK_STATUS, true) ? $old : 'pending';
+    if ($bs === 'verified') { echo json_encode(['success' => false, 'message' => 'Verified is set automatically when the payment is reconciled with the bank statement (Bank Recon).']); exit; }
+    if (!in_array($bs, $EP_BANK_NEXT[$cur] ?? [], true)) {
+        $nx = $EP_BANK_NEXT[$cur] ?? [];
+        $msg = $nx ? 'A ' . ucfirst($cur) . ' payment can only move to ' . implode(' / ', array_map('ucfirst', $nx)) . '.'
+                   : ($cur === 'approved' ? 'An Approved payment cannot be changed by hand — it becomes Verified when it is reconciled with the bank statement.' : ucfirst($cur) . ' is a final status — it cannot be changed.');
+        echo json_encode(['success' => false, 'message' => $msg]); exit;
+    }
     $u = mysqli_real_escape_string($conn, epUserName()); $now = date('Y-m-d H:i:s');
     mysqli_query($conn, "UPDATE expense_payments SET bank_status = '$bs', bank_status_by = '$u', bank_status_at = '$now' WHERE id = $id");
     mysqli_query($conn, "INSERT INTO expense_payment_bank_status_log (payment_id, old_status, new_status, done_by, done_at, note) VALUES ($id, '" . mysqli_real_escape_string($conn, (string)$old) . "', '$bs', '$u', '$now', 'Changed on Expense Payments')");
@@ -1843,6 +1853,7 @@ function bankBadge(p) {
 }
 
 /* ── Bank status (per payment) ── */
+const BANK_NEXT = <?php echo json_encode($EP_BANK_NEXT); ?>;
 const BANK_STATUS = {
     pending:   {l: 'Pending',   i: 'fa-hourglass-half',    c: 'bs-pending'},
     initiated: {l: 'Initiated', i: 'fa-paper-plane',       c: 'bs-initiated'},
@@ -1863,10 +1874,17 @@ function openBankMenu(ev, id) {
     const again = bankMenuFor === id && document.getElementById('bankStMenu'); closeBankMenu(); if (again) return;      // second click on the same label closes it
     const p = currentPayments.find(function (x) { return x.id === id; }); if (!p) return;
     const m = document.createElement('div'); m.id = 'bankStMenu'; m.className = 'bank-st-menu';
-    m.innerHTML = '<div class="bsm-h">Bank status</div>' + Object.keys(BANK_STATUS).map(function (k) {
-        const s = BANK_STATUS[k];
-        return '<button type="button" class="' + (p.bank_status === k ? 'on' : '') + '" onclick="setBankStatus(' + id + ',\'' + k + '\')"><span class="bank-st ' + s.c + '"><i class="fa-solid ' + s.i + '"></i> ' + s.l + '</span>' + (p.bank_status === k ? ' <i class="fa-solid fa-check"></i>' : '') + '</button>';
-    }).join('');
+    const cur = BANK_STATUS[p.bank_status] ? p.bank_status : 'pending', nx = BANK_NEXT[cur] || [], cs = BANK_STATUS[cur];
+    m.innerHTML = '<div class="bsm-h">Bank status</div>'
+        + '<div class="bsm-cur">Now: <span class="bank-st ' + cs.c + '"><i class="fa-solid ' + cs.i + '"></i> ' + cs.l + '</span></div>'
+        + (nx.length ? '<div class="bsm-h">Move to</div>' + nx.map(function (k) {
+            const s = BANK_STATUS[k];
+            return '<button type="button" onclick="setBankStatus(' + id + ',\'' + k + '\')"><span class="bank-st ' + s.c + '"><i class="fa-solid ' + s.i + '"></i> ' + s.l + '</span><i class="fa-solid fa-arrow-right"></i></button>';
+        }).join('') : '')
+        + '<div class="bsm-note">' + (cur === 'approved' ? '<i class="fa-solid fa-building-columns"></i> <b>Verified</b> is set automatically when this payment is reconciled with the bank statement.'
+            : cur === 'verified' ? '<i class="fa-solid fa-circle-check"></i> Reconciled with the bank — final status.'
+            : !nx.length ? '<i class="fa-solid fa-lock"></i> Final status — no further change.'
+            : 'Order: Pending → Initiated → Approved / Rejected → Verified (by bank reconcile)') + '</div>';
     m.addEventListener('click', function (e) { e.stopPropagation(); });
     document.body.appendChild(m); bankMenuFor = id;
     /* fixed to the screen, so a scrolling table, the header or the page bottom can never hide it: opens upward when there is no room below */
@@ -1958,8 +1976,9 @@ document.addEventListener('keydown', function (e) { const m = document.getElemen
     + '.bs-verified{background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;border-color:#0f766e}'
     + '.bs-cancelled{background:linear-gradient(135deg,#f9fafb,#e5e7eb);color:#4b5563;border-color:#d1d5db;text-decoration:line-through}'
     + '.bs-rejected{background:linear-gradient(135deg,#fef2f2,#fee2e2);color:#991b1b;border-color:#fca5a5}'
-    + '.bank-st-menu{position:fixed;z-index:2147483600;width:200px;overflow-y:auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.18);padding:6px}'
+    + '.bank-st-menu{position:fixed;z-index:2147483600;width:240px;overflow-y:auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.18);padding:6px}'
     + '.bs-log{display:flex;flex-direction:column;gap:5px;max-height:220px;overflow:auto}.bs-log div{font-size:12px;border-left:3px solid #2563eb;padding:3px 8px;background:#f8fafc;border-radius:4px}.bs-log span{color:#6b7280;font-size:11px}.bs-log em{display:block;color:#475569;font-size:11px}'
+    + '.bank-st-menu .bsm-cur{padding:2px 8px 6px;font-size:11.5px;color:#374151;display:flex;align-items:center;gap:6px;border-bottom:1px solid #f1f5f9;margin-bottom:4px}.bank-st-menu .bsm-note{font-size:11px;color:#6b7280;padding:6px 8px 3px;border-top:1px solid #f1f5f9;margin-top:4px;line-height:1.4}'
     + '.bank-st-menu .bsm-h{font-size:10.5px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;padding:4px 8px 6px}'
     + '.bank-st-menu button{display:flex;align-items:center;justify-content:space-between;width:100%;border:none;background:none;padding:6px 8px;border-radius:8px;cursor:pointer;color:#16a34a}.bank-st-menu button:hover,.bank-st-menu button.on{background:#f3f4f6}'
     + '.ep-bank-card{padding:14px 18px}.ep-bank-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr auto;gap:14px;align-items:start}'
