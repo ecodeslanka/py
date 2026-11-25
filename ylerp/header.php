@@ -2199,6 +2199,9 @@ if (isset($conn) && $conn) {
                     <a href="emergency_credit_bill_upload_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'emergency_credit_bill_upload_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-file-circle-check"></i><span>Em.Credit Bill Upload Report</span>
                     </a>
+                    <a href="emergency_credit_fc_verify.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'emergency_credit_fc_verify.php') ? 'active' : ''; ?>">
+                        <i class="fa-solid fa-user-check"></i><span>Emergency Credit FC Verify</span>
+                    </a>
 
                     <a href="cheque_scan_report.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'cheque_scan_report.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-money-check-dollar"></i><span>Cheque Scan Report</span>
