@@ -170,6 +170,8 @@ foreach (['bank_status' => "VARCHAR(12) NOT NULL DEFAULT 'pending'", 'bank_statu
     id INT AUTO_INCREMENT PRIMARY KEY, payment_id INT NOT NULL, old_status VARCHAR(12) NULL, new_status VARCHAR(12) NULL,
     done_by VARCHAR(100) NULL, done_at DATETIME NOT NULL, INDEX (payment_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+$__r = @mysqli_query($conn, "SHOW COLUMNS FROM expense_payment_bank_status_log LIKE 'note'");
+if ($__r && mysqli_num_rows($__r) === 0) @mysqli_query($conn, "ALTER TABLE expense_payment_bank_status_log ADD COLUMN note VARCHAR(255) NULL");
 function epUserName() { return $_SESSION['username'] ?? $_SESSION['user_name'] ?? $_SESSION['full_name'] ?? (epCurrentUserId() ? 'User #' . epCurrentUserId() : 'system'); }
 function epBankAccounts($conn) {
     $o = []; $r = @mysqli_query($conn, "SELECT cba.id, CONCAT(COALESCE(NULLIF(b.bank_name,''), cba.bank_code, ''), ' / ', COALESCE(NULLIF(bb.branch_name,''), cba.branch_code, ''), ' (', cba.account_no, ')') AS label
@@ -783,7 +785,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_bank_status'])) 
     if ($old === null) { echo json_encode(['success' => false, 'message' => 'Payment not found.']); exit; }
     $u = mysqli_real_escape_string($conn, epUserName()); $now = date('Y-m-d H:i:s');
     mysqli_query($conn, "UPDATE expense_payments SET bank_status = '$bs', bank_status_by = '$u', bank_status_at = '$now' WHERE id = $id");
-    mysqli_query($conn, "INSERT INTO expense_payment_bank_status_log (payment_id, old_status, new_status, done_by, done_at) VALUES ($id, '" . mysqli_real_escape_string($conn, (string)$old) . "', '$bs', '$u', '$now')");
+    mysqli_query($conn, "INSERT INTO expense_payment_bank_status_log (payment_id, old_status, new_status, done_by, done_at, note) VALUES ($id, '" . mysqli_real_escape_string($conn, (string)$old) . "', '$bs', '$u', '$now', 'Changed on Expense Payments')");
     echo json_encode(['success' => true, 'bank_status' => $bs, 'bank_status_by' => epUserName(), 'bank_status_at' => $now, 'bank' => epBankBalance($conn)]);
     exit;
 }
@@ -972,7 +974,13 @@ if (isset($_GET['ajax_load'])) {
                                         WHERE r.payment_id IN ($idsList)");
             while ($br && ($brow = mysqli_fetch_assoc($br))) $bankMap[(int)$brow['payment_id']] = $brow;
         }
+        // Bank status log (every change: by hand on this page or automatic by the bank reconcile)
+        $logMap = [];
+        $lr = @mysqli_query($conn, "SELECT payment_id, old_status, new_status, done_by, done_at, note FROM expense_payment_bank_status_log
+                                     WHERE payment_id IN ($idsList) ORDER BY done_at DESC, id DESC");
+        while ($lr && ($lrow = mysqli_fetch_assoc($lr))) $logMap[(int)$lrow['payment_id']][] = $lrow;
         foreach ($payments as &$p) {
+            $p['bank_status_log'] = $logMap[$p['id']] ?? [];
             $b = $bankMap[$p['id']] ?? null;
             $p['bank_recon'] = $b ? [
                 'status'   => $b['status'],
@@ -1849,20 +1857,29 @@ function bankStatusLabel(p, noClick) {
     return '<span class="bank-st ' + s.c + (noClick ? '' : ' clickable') + '"' + (noClick ? '' : ' onclick="openBankMenu(event,' + p.id + ')" title="Click to change the bank status' + (p.bank_status_by ? ' — last: ' + escapeHtml(p.bank_status_by) : '') + '"')
          + '><i class="fa-solid ' + s.i + '"></i> ' + s.l + (noClick ? '' : ' <i class="fa-solid fa-caret-down bs-caret"></i>') + '</span>';
 }
+let bankMenuFor = 0;
 function openBankMenu(ev, id) {
-    ev.stopPropagation(); closeBankMenu();
+    ev.stopPropagation(); ev.preventDefault();
+    const again = bankMenuFor === id && document.getElementById('bankStMenu'); closeBankMenu(); if (again) return;      // second click on the same label closes it
     const p = currentPayments.find(function (x) { return x.id === id; }); if (!p) return;
     const m = document.createElement('div'); m.id = 'bankStMenu'; m.className = 'bank-st-menu';
     m.innerHTML = '<div class="bsm-h">Bank status</div>' + Object.keys(BANK_STATUS).map(function (k) {
         const s = BANK_STATUS[k];
         return '<button type="button" class="' + (p.bank_status === k ? 'on' : '') + '" onclick="setBankStatus(' + id + ',\'' + k + '\')"><span class="bank-st ' + s.c + '"><i class="fa-solid ' + s.i + '"></i> ' + s.l + '</span>' + (p.bank_status === k ? ' <i class="fa-solid fa-check"></i>' : '') + '</button>';
     }).join('');
-    document.body.appendChild(m);
-    const r = ev.currentTarget.getBoundingClientRect(), w = 190;
-    m.style.top = (window.scrollY + r.bottom + 6) + 'px'; m.style.left = Math.max(8, Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - w - 8)) + 'px';
+    m.addEventListener('click', function (e) { e.stopPropagation(); });
+    document.body.appendChild(m); bankMenuFor = id;
+    /* fixed to the screen, so a scrolling table, the header or the page bottom can never hide it: opens upward when there is no room below */
+    const r = ev.currentTarget.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight, w = m.offsetWidth || 190, h = m.offsetHeight;
+    const below = vh - r.bottom - 8, above = r.top - 8;
+    let top = below >= h || below >= above ? r.bottom + 6 : r.top - 6 - Math.min(h, above);
+    m.style.maxHeight = Math.max(160, below >= h || below >= above ? below - 6 : above - 6) + 'px';
+    m.style.top = Math.max(8, top) + 'px'; m.style.left = Math.max(8, Math.min(r.left, vw - w - 8)) + 'px';
 }
-function closeBankMenu() { const m = document.getElementById('bankStMenu'); if (m) m.remove(); }
+function closeBankMenu() { const m = document.getElementById('bankStMenu'); if (m) m.remove(); bankMenuFor = 0; }
 document.addEventListener('click', function (e) { if (!e.target.closest('#bankStMenu')) closeBankMenu(); });
+window.addEventListener('scroll', function (e) { if (e.target && e.target.closest && e.target.closest('#bankStMenu')) return; closeBankMenu(); }, true); window.addEventListener('resize', closeBankMenu);
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeBankMenu(); });
 function setBankStatus(id, st) {
     closeBankMenu();
     const fd = new FormData(); fd.append('ajax_bank_status', '1'); fd.append('id', id); fd.append('bank_status', st);
@@ -1941,7 +1958,8 @@ document.addEventListener('keydown', function (e) { const m = document.getElemen
     + '.bs-verified{background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;border-color:#0f766e}'
     + '.bs-cancelled{background:linear-gradient(135deg,#f9fafb,#e5e7eb);color:#4b5563;border-color:#d1d5db;text-decoration:line-through}'
     + '.bs-rejected{background:linear-gradient(135deg,#fef2f2,#fee2e2);color:#991b1b;border-color:#fca5a5}'
-    + '.bank-st-menu{position:absolute;z-index:2147483000;width:190px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.18);padding:6px}'
+    + '.bank-st-menu{position:fixed;z-index:2147483600;width:200px;overflow-y:auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.18);padding:6px}'
+    + '.bs-log{display:flex;flex-direction:column;gap:5px;max-height:220px;overflow:auto}.bs-log div{font-size:12px;border-left:3px solid #2563eb;padding:3px 8px;background:#f8fafc;border-radius:4px}.bs-log span{color:#6b7280;font-size:11px}.bs-log em{display:block;color:#475569;font-size:11px}'
     + '.bank-st-menu .bsm-h{font-size:10.5px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;padding:4px 8px 6px}'
     + '.bank-st-menu button{display:flex;align-items:center;justify-content:space-between;width:100%;border:none;background:none;padding:6px 8px;border-radius:8px;cursor:pointer;color:#16a34a}.bank-st-menu button:hover,.bank-st-menu button.on{background:#f3f4f6}'
     + '.ep-bank-card{padding:14px 18px}.ep-bank-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr auto;gap:14px;align-items:start}'
@@ -2371,6 +2389,10 @@ function openViewModal(id) {
         ? (p.bank_recon.status === 'reconciled' ? 'Reconciled' : 'Reconciled (difference)') + ' — bank ' + formatDate(p.bank_recon.txn_date)
           + ' Rs. ' + formatMoney(p.bank_recon.amount) + ' · <a href="expense_payment_bank_recon.php?tab=saved&batch=' + p.bank_recon.batch_id + '">' + escapeHtml(p.bank_recon.batch_no || 'batch') + '</a>'
         : '<span class="empty">Not reconciled yet</span>', true);
+    const bl = p.bank_status_log || [], bsl = k => (BANK_STATUS[k] || {l: k || '—'}).l;
+    html += row('Bank status log', bl.length
+        ? '<div class="bs-log">' + bl.map(function (x) { return '<div><b>' + escapeHtml(bsl(x.old_status)) + ' → ' + escapeHtml(bsl(x.new_status)) + '</b> <span>' + escapeHtml(x.done_by || '') + ' · ' + escapeHtml(x.done_at || '') + '</span>' + (x.note ? '<em>' + escapeHtml(x.note) + '</em>' : '') + '</div>'; }).join('') + '</div>'
+        : '<span class="empty">No changes yet</span>', true);
     html += row('Initiated By', p.initiated_by_name);
     if (p.authorized_by_name) html += row('Authorized By', p.authorized_by_name + (p.authorized_at ? ' — ' + formatDate(p.authorized_at) : ''));
     if (p.approved_by_name)   html += row('Approved By', p.approved_by_name + (p.approved_at ? ' — ' + formatDate(p.approved_at) : ''));
