@@ -165,6 +165,20 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'issue_persons') {
     exit;
 }
 
+/* ── AJAX: every CC (delivery person) — for "Charge to CC" ── */
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'cc_list') {
+    ob_start(); include_once 'config.php'; mysqli_report(MYSQLI_REPORT_OFF); ob_end_clean();
+    header('Content-Type: application/json');
+    $o = [];
+    foreach (["SELECT DISTINCT TRIM(delivery_person) FROM loading_summary_import_details WHERE delivery_person IS NOT NULL AND TRIM(delivery_person) <> ''",
+              "SELECT DISTINCT TRIM(delivery_person) FROM secondary_invoice_import_details WHERE delivery_person IS NOT NULL AND TRIM(delivery_person) <> ''"] as $_q) {
+        $_r = @mysqli_query($conn, $_q);
+        while ($_r && ($_x = mysqli_fetch_row($_r))) $o[strtoupper($_x[0])] = $_x[0];
+    }
+    natcasesort($o);
+    echo json_encode(['success' => true, 'persons' => array_values($o)]);
+    exit;
+}
 /* ── AJAX: delete settlement payment ── */
 if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'rc_delete_payment') {
     ob_start(); include_once 'config.php'; mysqli_report(MYSQLI_REPORT_OFF); ob_end_clean();
@@ -304,14 +318,16 @@ if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'rc_add_payment') 
     $inv_pay_id  = intval($_POST['invoice_payment_id'] ?? 0);
 
     if (!$rid || $amt <= 0) { echo json_encode(['success'=>false,'error'=>'Invalid charge or zero amount']); exit; }
-    if ($method === 'credit_note') {      /* credit note: no money received — the charge is reduced; never more than what is still open */
-        if ($rem === '') { echo json_encode(['success'=>false,'error'=>'Enter the reason for the credit note.']); exit; }
+    if ($method === 'credit_note' || $method === 'cc_charge') {      /* credit note / charge to CC: no money received — the charge is reduced; never more than what is still open */
+        if ($method === 'credit_note' && $rem === '') { echo json_encode(['success'=>false,'error'=>'Enter the reason for the credit note.']); exit; }
+        if ($method === 'cc_charge' && $delivery_person === '') { echo json_encode(['success'=>false,'error'=>'Select the CC to charge.']); exit; }
         $_cq = mysqli_query($conn, "SELECT return_charge, COALESCE((SELECT SUM(amount) FROM rc_settlement_payments WHERE rc_id=$rid),0) AS paid FROM cheque_return_charges WHERE id=$rid LIMIT 1");
         $_cx = $_cq ? mysqli_fetch_assoc($_cq) : null;
         if (!$_cx) { echo json_encode(['success'=>false,'error'=>'Return charge not found']); exit; }
         $_open = round((float)$_cx['return_charge'] - (float)$_cx['paid'], 2);
         if ($amt > $_open + 0.005) { echo json_encode(['success'=>false,'error'=>'Credit note Rs.' . number_format($amt,2) . ' is more than the open balance Rs.' . number_format(max(0,$_open),2) . '.']); exit; }
-        $collected_by = $delivery_person = $sr_code = ''; $employee_id = 0;
+        if ($method === 'credit_note') { $collected_by = $delivery_person = $sr_code = ''; $employee_id = 0; }
+        else { $collected_by = 'cc'; $sr_code = ''; }      /* charged to this CC (marked as a special CC charge, not cash) */
     }
 
     /* ensure table */
@@ -649,6 +665,7 @@ select.fctrl{cursor:pointer}
 .btn-del-pay:hover{background:#fee2e2}
 .spm-method-cash{background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700}
 .spm-method-cheque{background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700}
+.spm-method-ccc{background:#ffedd5;color:#9a3412;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700}
 .spm-method-cn{background:#f3e8ff;color:#6b21a8;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700}
 .spm-method-other{background:#f3f4f6;color:#374151;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700}
 .bal-summary{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin-top:18px}
@@ -969,13 +986,24 @@ select.fctrl{cursor:pointer}
 
       <!-- Credit note block -->
       <div class="pay-block">
-        <div class="pay-block-title cn" style="background:#faf5ff;color:#6b21a8;border-left-color:#a855f7;"><i class="fa-solid fa-file-invoice"></i> Credit Note — reduce the return charge (no money received)</div>
+        <div class="pay-block-title cn" style="background:#faf5ff;color:#6b21a8;border-left-color:#a855f7;"><i class="fa-solid fa-file-invoice"></i> Credit Note / Charge to CC — reduce the return charge (no money received)</div>
+        <div class="collector-type-row">
+          <span class="collector-type-label"><i class="fa-solid fa-tag"></i> Type:</span>
+          <div class="collector-type-btns">
+            <button type="button" class="ctype-btn active-cc" id="cnTypeCN" onclick="cnSetType('credit_note')"><i class="fa-solid fa-file-invoice"></i> Credit Note</button>
+            <button type="button" class="ctype-btn" id="cnTypeCC" onclick="cnSetType('cc_charge')"><i class="fa-solid fa-user-tag"></i> Charge to CC</button>
+          </div>
+        </div>
+        <div class="fg" id="cnCcWrap" style="display:none;margin-bottom:8px;">
+          <label>CC to charge <span class="req">*</span></label>
+          <select class="fctrl" id="cnCc"><option value="">-- Select CC --</option></select>
+        </div>
         <div class="gr gr3">
           <div class="fg"><label>Credit Note Date</label><input type="date" class="fctrl" id="cnDate"></div>
-          <div class="fg"><label>Credit Note Amount (Rs.)</label><input type="number" class="fctrl" id="cnAmount" step="0.01" min="0" placeholder="0.00" oninput="syncPreviews()"></div>
+          <div class="fg"><label id="cnAmtLbl">Credit Note Amount (Rs.)</label><input type="number" class="fctrl" id="cnAmount" step="0.01" min="0" placeholder="0.00" oninput="syncPreviews()"></div>
           <div class="fg"><label>Credit Note No.</label><input type="text" class="fctrl" id="cnRef" placeholder="Optional"></div>
         </div>
-        <div class="fg"><label>Reason <span class="req">*</span></label><input type="text" class="fctrl" id="cnRemarks" placeholder="e.g. Charge waived — bank error / approved by manager"></div>
+        <div class="fg"><label>Reason <span class="req" id="cnReasonReq">*</span></label><input type="text" class="fctrl" id="cnRemarks" placeholder="e.g. Charge waived — bank error / approved by manager"></div>
         <button type="button" class="btn-add-cheque" style="margin-top:8px;" onclick="cnFullBalance()"><i class="fa-solid fa-wand-magic-sparkles"></i> Full open balance</button>
       </div>
 
@@ -1003,7 +1031,7 @@ select.fctrl{cursor:pointer}
       <div class="bal-summary">
         <div class="bal-sum-row"><span><i class="fa-solid fa-coins" style="color:#22c55e;"></i> Cash entering</span><strong id="sumCash">Rs. 0.00</strong></div>
         <div class="bal-sum-row"><span><i class="fa-solid fa-money-check" style="color:#3b82f6;"></i> Cheque total</span><strong id="sumCheque">Rs. 0.00</strong></div>
-        <div class="bal-sum-row"><span><i class="fa-solid fa-file-invoice" style="color:#a855f7;"></i> Credit note</span><strong id="sumCn">Rs. 0.00</strong></div>
+        <div class="bal-sum-row"><span><i class="fa-solid fa-file-invoice" style="color:#a855f7;"></i> <span id="sumCnLbl">Credit note</span></span><strong id="sumCn">Rs. 0.00</strong></div>
         <div class="bal-sum-row total"><span><i class="fa-solid fa-sigma"></i> Total payment</span><strong id="sumTotal">Rs. 0.00</strong></div>
         <div class="bal-sum-row balance"><span><i class="fa-solid fa-hourglass-half"></i> Remaining after this</span><strong id="sumBalance">Rs. —</strong></div>
       </div>
@@ -1249,6 +1277,7 @@ async function openSettleModal(rcId){
         document.getElementById('cashDate').value=today;
         document.getElementById('chqPayDate').value=today;
         if(document.getElementById('cnDate')) document.getElementById('cnDate').value=today;
+        if(document.getElementById('cnTypeCN')) cnSetType('credit_note');
         ['cashAmount','cashToBank','cashRef','cashRemarks','chqRef','chqRemarks','settlementNote','cnAmount','cnRef','cnRemarks'].forEach(id=>{
             const el=document.getElementById(id);if(el)el.value='';
         });
@@ -1390,7 +1419,8 @@ function renderSettlementPayments(payments, totalSettled) {
         const isCash   = p.payment_method === 'cash';
         const isCheque = p.payment_method === 'cheque';
         const isCn     = p.payment_method === 'credit_note';
-        const mc = isCash ? 'spm-method-cash' : isCheque ? 'spm-method-cheque' : isCn ? 'spm-method-cn' : 'spm-method-other';
+        const isCcc    = p.payment_method === 'cc_charge';
+        const mc = isCash ? 'spm-method-cash' : isCheque ? 'spm-method-cheque' : isCn ? 'spm-method-cn' : isCcc ? 'spm-method-ccc' : 'spm-method-other';
 
         let detailCell = '';
         if (isCheque) {
@@ -1407,6 +1437,8 @@ function renderSettlementPayments(payments, totalSettled) {
             </div>` : `<span style="font-size:11px;color:#6b7280;font-style:italic;">Cheque — no details saved</span>`;
         } else if (isCash) {
             detailCell = `<span style="font-size:11px;color:#16a34a;font-weight:600;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-coins"></i> Cash Payment</span>`;
+        } else if (isCcc) {
+            detailCell = `<span style="font-size:11px;color:#9a3412;font-weight:700;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-user-tag"></i> Charged to CC: ${esc(p.delivery_person || '—')}${p.created_by ? ' · by ' + esc(p.created_by) : ''}</span>`;
         } else if (isCn) {
             detailCell = `<span style="font-size:11px;color:#6b21a8;font-weight:600;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-file-invoice"></i> Credit Note${p.created_by ? ' · by ' + esc(p.created_by) : ''}</span>`;
         } else {
@@ -1415,7 +1447,7 @@ function renderSettlementPayments(payments, totalSettled) {
 
         rows += `<tr>
             <td>${esc(p.payment_date || '—')}</td>
-            <td><span class="${mc}">${isCn ? 'credit note' : esc(p.payment_method)}</span></td>
+            <td><span class="${mc}">${isCn ? 'credit note' : isCcc ? 'CC charged' : esc(p.payment_method)}</span></td>
             <td style="font-weight:700;color:#166534;white-space:nowrap;">Rs. ${parseFloat(p.amount).toFixed(2)}</td>
             <td>${detailCell}</td>
             <td style="font-size:11px;">${esc(p.reference_no || '—')}</td>
@@ -1438,6 +1470,26 @@ function renderSettlementPayments(payments, totalSettled) {
     </table>`;
     document.getElementById('hdrPaid').textContent = 'Rs. ' + total.toFixed(2);
     document.getElementById('hdrBal').textContent  = 'Rs. ' + Math.max(0, ARD.chargeAmt - total).toFixed(2);
+}
+
+/* Credit Note or Charge to CC (the same deduction, but marked as charged to the chosen CC) */
+let cnType = 'credit_note', _cnCcLoaded = false;
+async function cnSetType(t){
+    cnType = t;
+    document.getElementById('cnTypeCN').className = 'ctype-btn' + (t === 'credit_note' ? ' active-cc' : '');
+    document.getElementById('cnTypeCC').className = 'ctype-btn' + (t === 'cc_charge' ? ' active-sr' : '');
+    document.getElementById('cnCcWrap').style.display = t === 'cc_charge' ? '' : 'none';
+    document.getElementById('cnAmtLbl').textContent = t === 'cc_charge' ? 'Amount charged to CC (Rs.)' : 'Credit Note Amount (Rs.)';
+    document.getElementById('cnReasonReq').style.display = t === 'cc_charge' ? 'none' : '';
+    document.getElementById('sumCnLbl').textContent = t === 'cc_charge' ? 'Charged to CC' : 'Credit note';
+    if (t === 'cc_charge' && !_cnCcLoaded) {
+        _cnCcLoaded = true;
+        try {
+            const d = await (await fetch('return_charges.php?ajax=cc_list')).json(), sel = document.getElementById('cnCc');
+            (d.persons || []).forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+            if (window.$ && $.fn.select2) $('#cnCc').select2({placeholder: '-- Select CC --', allowClear: true, width: '100%', dropdownParent: $('#settleModal')});
+        } catch (e) { _cnCcLoaded = false; showToast('Could not load the CC list','err'); }
+    }
 }
 
 /* fill the credit note with what is still open on this charge */
@@ -1526,8 +1578,10 @@ async function submitSettlement(){
     const cnDate=(document.getElementById('cnDate')||{}).value||'';
     const cnReason=((document.getElementById('cnRemarks')||{}).value||'').trim();
     if(cashAmt<=0&&chqTotal<=0&&cnAmt<=0){showToast('Enter a cash amount, a cheque amount or a credit note amount.','err');return;}
+    const cnCc=cnType==='cc_charge'?((window.$?$('#cnCc').val():document.getElementById('cnCc').value)||''):'';
     if(cnAmt>0&&!cnDate){showToast('Select the Credit Note Date.','err');return;}
-    if(cnAmt>0&&!cnReason){showToast('Enter the reason for the credit note.','err');return;}
+    if(cnAmt>0&&cnType==='cc_charge'&&!cnCc){showToast('Select the CC to charge.','err');return;}
+    if(cnAmt>0&&cnType==='credit_note'&&!cnReason){showToast('Enter the reason for the credit note.','err');return;}
     if(cashAmt>0&&!cashDate){showToast('Select a Payment Date for cash.','err');return;}
     if(chqTotal>0&&!chqValid){showToast('Fill in all Cheque Numbers.','err');return;}
 
@@ -1592,16 +1646,17 @@ async function submitSettlement(){
             const fdn=new FormData();
             fdn.append('ajax_action','rc_add_payment');
             fdn.append('rc_id',ARD.rcId);
-            fdn.append('payment_method','credit_note');
+            fdn.append('payment_method',cnType);
+            if(cnType==='cc_charge'){ fdn.append('delivery_person',cnCc); fdn.append('collected_by','cc'); }
             fdn.append('payment_date',cnDate);
             fdn.append('amount',cnAmt.toFixed(2));
             fdn.append('reference_no',document.getElementById('cnRef').value||'');
             fdn.append('remarks',cnReason);
             const sr=await fetch('return_charges.php',{method:'POST',body:fdn});
             const sd=await sr.json();
-            if(!sd.success){showToast('Credit note error: '+(sd.error||'Unknown'),'err');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-circle-check"></i> Save Payment';await loadSettlementPayments();return;}
+            if(!sd.success){showToast((cnType==='cc_charge'?'CC charge':'Credit note')+' error: '+(sd.error||'Unknown'),'err');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-circle-check"></i> Save Payment';await loadSettlementPayments();return;}
             if(sd.new_total!==undefined) updateRowBadge(ARD.rcId,sd.new_total,sd.fully_settled,sd.charge_total||ARD.chargeAmt);
-            saved.push('🧾 Credit note Rs.'+cnAmt.toFixed(2));
+            saved.push(cnType==='cc_charge' ? '👤 Charged to CC '+cnCc+' Rs.'+cnAmt.toFixed(2) : '🧾 Credit note Rs.'+cnAmt.toFixed(2));
         }
 
         ['cashAmount','cashToBank','cashRef','cashRemarks','chqRef','chqRemarks','settlementNote','cnAmount','cnRef','cnRemarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
