@@ -155,7 +155,7 @@ $STATUS_LIST = ['initiated', 'authorized', 'approved', 'paid', 'rejected', 'canc
 
 /* ── Bank status of each payment + the bank account the payments go out from ──
    Bank status: Pending (default) → Initiated / Approved / Verified / Cancelled / Rejected (logged).
-   Balance: opening balance of the Settings bank account (its latest bank statement balance, or an amount typed in)
+   Balance: opening balance of the Settings bank account (its latest Cash Flow Planner bank balance, or an amount typed in)
             − the payments marked Approved / Verified at the bank after the opening date. */
 $EP_BANK_STATUS = ['pending', 'initiated', 'approved', 'verified', 'cancelled', 'rejected'];
 foreach (['bank_status' => "VARCHAR(12) NOT NULL DEFAULT 'pending'", 'bank_status_by' => "VARCHAR(100) NULL", 'bank_status_at' => "DATETIME NULL"] as $__c => $__d) {
@@ -180,23 +180,25 @@ function epBankAccounts($conn) {
 }
 /** settings + opening balance + approved deductions + balance */
 function epBankBalance($conn) {
-    $S = ['account_id' => 0, 'account_label' => '', 'source' => 'statement', 'opening' => null, 'opening_date' => null, 'approved_amount' => 0.0, 'approved_count' => 0, 'balance' => null, 'by' => '', 'at' => '', 'note' => ''];
+    $S = ['account_id' => 0, 'account_label' => '', 'source' => 'cashflow', 'opening' => null, 'opening_date' => null, 'approved_amount' => 0.0, 'approved_count' => 0, 'balance' => null, 'by' => '', 'at' => '', 'note' => ''];
     $r = @mysqli_query($conn, "SELECT * FROM expense_payment_bank_settings WHERE id = 1"); $x = $r ? mysqli_fetch_assoc($r) : null;
     if (!$x || !(int)$x['bank_account_id']) { $S['note'] = 'Choose the bank account in Bank account settings.'; return $S; }
-    $S['account_id'] = (int)$x['bank_account_id']; $S['source'] = $x['opening_source'] === 'manual' ? 'manual' : 'statement'; $S['by'] = (string)$x['updated_by']; $S['at'] = (string)$x['updated_at'];
+    $S['account_id'] = (int)$x['bank_account_id']; $S['source'] = $x['opening_source'] === 'manual' ? 'manual' : 'cashflow'; $S['by'] = (string)$x['updated_by']; $S['at'] = (string)$x['updated_at'];
     foreach (epBankAccounts($conn) as $a) if ($a['id'] === $S['account_id']) $S['account_label'] = $a['label'];
+    $S['opening_at'] = null;
     if ($S['source'] === 'manual') { $S['opening'] = $x['opening_amount'] !== null ? (float)$x['opening_amount'] : null; $S['opening_date'] = $x['opening_date']; }
-    else {   /* latest balance of the account's uploaded bank statements */
-        $q = @mysqli_query($conn, "SELECT t.balance, t.transaction_date FROM bank_statement_transactions t JOIN bank_statement_uploads u ON u.id = t.upload_id
-                                    WHERE u.account_id = {$S['account_id']} AND t.balance IS NOT NULL ORDER BY t.transaction_date DESC, u.statement_date DESC, t.id DESC LIMIT 1");
-        if ($q && ($y = mysqli_fetch_assoc($q))) { $S['opening'] = (float)$y['balance']; $S['opening_date'] = $y['transaction_date']; }
-        else $S['note'] = 'No bank statement is uploaded for this account — upload one, or type the opening balance in the settings.';
+    else {   /* latest balance saved for this account in the Cash Flow Planner (Bank Balances tab: bank_balance_logs / bank_balance_log_items) */
+        $q = @mysqli_query($conn, "SELECT i.amount, l.balance_date, COALESCE(i.saved_at, CONCAT(l.balance_date, ' ', COALESCE(l.entry_time, '00:00:00'))) AS saved_at
+                                    FROM bank_balance_log_items i JOIN bank_balance_logs l ON l.id = i.log_id
+                                    WHERE i.bank_account_id = {$S['account_id']} ORDER BY l.balance_date DESC, l.entry_time DESC, l.id DESC LIMIT 1");
+        if ($q && ($y = mysqli_fetch_assoc($q))) { $S['opening'] = (float)$y['amount']; $S['opening_date'] = $y['balance_date']; $S['opening_at'] = $y['saved_at']; }
+        else $S['note'] = 'No bank balance is saved for this account in the Cash Flow Planner (Bank Balances tab) — save one there, or type the opening balance in the settings.';
     }
     if ($S['opening'] === null) return $S;
-    /* statement balance already has that day's lines → count approvals after that day; a typed opening is the start of its date */
+    /* Cash Flow balance is as at the time it was saved → count approvals after that time; a typed opening is the start of its date */
     $cut = $S['source'] === 'manual' ? "DATE(ep.bank_status_at) >= '" . mysqli_real_escape_string($conn, (string)$S['opening_date']) . "'"
-                                     : "DATE(ep.bank_status_at) > '" . mysqli_real_escape_string($conn, (string)$S['opening_date']) . "'";
-    if (!$S['opening_date']) $cut = '1=1';
+                                     : "ep.bank_status_at > '" . mysqli_real_escape_string($conn, (string)$S['opening_at']) . "'";
+    if ($S['source'] === 'manual' && !$S['opening_date']) $cut = '1=1';
     $q = @mysqli_query($conn, "SELECT COUNT(*), COALESCE(SUM(ep.amount),0) FROM expense_payments ep WHERE ep.bank_status IN ('approved','verified') AND $cut");
     if ($q && ($y = mysqli_fetch_row($q))) { $S['approved_count'] = (int)$y[0]; $S['approved_amount'] = round((float)$y[1], 2); }
     $S['balance'] = round($S['opening'] - $S['approved_amount'], 2);
@@ -789,7 +791,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_bank_status'])) 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_bank_settings'])) {
     header('Content-Type: application/json');
     if (function_exists('rbac_can') && !rbac_can('edit', 'expense_payments')) { echo json_encode(['success' => false, 'message' => 'Permission blocked: your role cannot change the settings.']); exit; }
-    $acc = intval($_POST['bank_account_id'] ?? 0); $src = ($_POST['opening_source'] ?? '') === 'manual' ? 'manual' : 'statement';
+    $acc = intval($_POST['bank_account_id'] ?? 0); $src = ($_POST['opening_source'] ?? '') === 'manual' ? 'manual' : 'cashflow';
     $amt = trim((string)($_POST['opening_amount'] ?? '')); $dt = trim((string)($_POST['opening_date'] ?? ''));
     if (!$acc) { echo json_encode(['success' => false, 'message' => 'Choose the bank account.']); exit; }
     if ($src === 'manual' && (!is_numeric($amt) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dt))) { echo json_encode(['success' => false, 'message' => 'Type the opening balance and its date.']); exit; }
@@ -1879,7 +1881,7 @@ function renderBankCard(b) {
     $('epBankAcc').textContent = b.account_label || 'Not set';
     $('epBankNote').textContent = b.note || (b.by ? 'saved by ' + b.by : '');
     $('epBankOpen').textContent = b.opening === null ? '—' : 'Rs. ' + formatMoney(b.opening);
-    $('epBankOpenSub').textContent = b.opening === null ? '' : (b.source === 'manual' ? 'typed in · as of ' : 'bank statement balance · ') + (b.opening_date ? formatDate(b.opening_date) : '');
+    $('epBankOpenSub').textContent = b.opening === null ? '' : (b.source === 'manual' ? 'typed in · as of ' + (b.opening_date ? formatDate(b.opening_date) : '') : 'Cash Flow bank balance · saved ' + (b.opening_at ? formatDate(b.opening_at.slice(0,10)) + ' ' + b.opening_at.slice(11,16) : ''));
     $('epBankAppr').textContent = b.opening === null ? '—' : '− Rs. ' + formatMoney(b.approved_amount);
     $('epBankApprSub').textContent = b.opening === null ? '' : b.approved_count + ' payment(s) Approved / Verified';
     $('epBankBal').textContent = b.balance === null ? '—' : 'Rs. ' + formatMoney(b.balance);
@@ -1891,7 +1893,7 @@ function openBankSettings() {
     m.innerHTML = '<div class="ep-box"><div class="ep-hd"><b><i class="fa-solid fa-building-columns"></i> Bank account settings</b><button type="button" onclick="document.getElementById(\'bankSetModal\').classList.remove(\'open\')">&times;</button></div><div class="ep-bd">'
         + '<label class="field-label">Bank account the expense payments go out from</label><select id="bsAcc" class="ep-in"><option value="">— Select —</option>' + bankAccounts.map(function (a) { return '<option value="' + a.id + '"' + (a.id === b.account_id ? ' selected' : '') + '>' + escapeHtml(a.label) + '</option>'; }).join('') + '</select>'
         + '<label class="field-label" style="margin-top:14px">Opening balance</label>'
-        + '<label class="ep-radio"><input type="radio" name="bsSrc" value="statement"' + (b.source !== 'manual' ? ' checked' : '') + ' onchange="bsSrcUi()"> Latest balance of the account\'s uploaded bank statement (automatic)</label>'
+        + '<label class="ep-radio"><input type="radio" name="bsSrc" value="cashflow"' + (b.source !== 'manual' ? ' checked' : '') + ' onchange="bsSrcUi()"> Latest bank balance saved in the Cash Flow Planner (automatic)</label>'
         + '<label class="ep-radio"><input type="radio" name="bsSrc" value="manual"' + (b.source === 'manual' ? ' checked' : '') + ' onchange="bsSrcUi()"> Type the opening balance</label>'
         + '<div id="bsManual" style="display:flex;gap:10px;margin-top:6px"><div style="flex:1"><label class="field-label" style="font-size:11px">Amount (Rs.)</label><input type="number" step="0.01" id="bsAmt" class="ep-in" value="' + (b.source === 'manual' && b.opening !== null ? b.opening : '') + '"></div>'
         + '<div style="flex:1"><label class="field-label" style="font-size:11px">As of date</label><input type="date" id="bsDate" class="ep-in" value="' + (b.source === 'manual' && b.opening_date ? b.opening_date : new Date().toISOString().slice(0, 10)) + '"></div></div>'
@@ -1902,7 +1904,7 @@ function openBankSettings() {
 function bsSrcUi() { const man = (document.querySelector('input[name=bsSrc]:checked') || {}).value === 'manual'; document.getElementById('bsManual').style.display = man ? 'flex' : 'none'; }
 function saveBankSettings() {
     const fd = new FormData(); fd.append('ajax_bank_settings', '1'); fd.append('bank_account_id', document.getElementById('bsAcc').value);
-    fd.append('opening_source', (document.querySelector('input[name=bsSrc]:checked') || {}).value || 'statement');
+    fd.append('opening_source', (document.querySelector('input[name=bsSrc]:checked') || {}).value || 'cashflow');
     fd.append('opening_amount', document.getElementById('bsAmt').value); fd.append('opening_date', document.getElementById('bsDate').value);
     fetch('expense_payments.php', {method: 'POST', body: fd}).then(function (r) { return r.json(); }).then(function (d) {
         if (!d.success) { showToast('❌ ' + (d.message || 'Could not save.'), 'error'); return; }
