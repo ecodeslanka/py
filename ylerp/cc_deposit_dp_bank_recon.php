@@ -1161,11 +1161,16 @@ function dbr_diff_html($diff) {
                     <thead><tr>
                         <th style="width:34px;"><input type="checkbox" class="js-all" data-sec="<?php echo $sec['type']; ?>" <?php echo $sec['type'] === 'matched' ? 'checked' : ''; ?> aria-label="Select all"></th>
                         <th>Delivery person</th><th>Deposit</th><th>Deposit date</th><th class="num sep">Deposit amount</th>
-                        <th>Ref code</th><th>Txn date</th><th>Bank transaction</th><th class="num">Bank amount</th><th class="num">Difference</th>
+                        <th>Ref code</th><th>Txn date</th><th>Bank transaction</th><th class="num">Bank amount</th><th class="num">Difference</th><th></th>
                     </tr></thead>
                     <tbody>
-                    <?php foreach ($sec['rows'] as $p): $rowNo++; $d = $p['d']; $b = $p['b']; ?>
-                        <tr data-row="r<?php echo $rowNo; ?>" data-sec="<?php echo $sec['type']; ?>" data-payload="<?php echo dbr_h(dbr_payload($d, $b)); ?>">
+                    <?php foreach ($sec['rows'] as $p): $rowNo++; $d = $p['d']; $b = $p['b'];
+                        /* an auto row can also be reconciled manually (other / more bank lines): same data as a "not in bank" row */
+                        $amdata = ['row' => 'a' . $rowNo, 'dp' => $d['dp'], 'key' => $d['key'] ?? dbr_key($d['dp']), 'mobile' => $by_key[$d['key'] ?? dbr_key($d['dp'])] ?? '',
+                                   'deposits' => array_values(array_map(function ($x) { return $x['deposit_id']; }, $d['parts'])), 'amount' => round($d['amount'], 2),
+                                   'date' => $d['date'] !== '' ? $d['date'] : $b['date'], 'dep_date' => $d['date']]; ?>
+                        <tr data-row="r<?php echo $rowNo; ?>" data-sec="<?php echo $sec['type']; ?>" data-payload="<?php echo dbr_h(dbr_payload($d, $b)); ?>"
+                            data-mrow="a<?php echo $rowNo; ?>" data-manual="<?php echo dbr_h(json_encode($amdata, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)); ?>">
                             <td><input type="checkbox" class="js-pick" <?php echo $sec['type'] === 'matched' ? 'checked' : ''; ?> aria-label="Select"></td>
                             <td class="name"><?php echo dbr_h($d['dp']); ?><div class="rowmsg"></div></td>
                             <td style="white-space:nowrap;"><?php echo dbr_parts_html($d); ?></td>
@@ -1177,6 +1182,10 @@ function dbr_diff_html($diff) {
                             <td style="min-width:220px;"><?php echo dbr_txns_html($b); ?></td>
                             <td class="num"><b><?php echo dbr_money($b['amount']); ?></b></td>
                             <td class="num"><?php echo dbr_diff_html(round($b['amount'] - $d['amount'], 2)); ?></td>
+                            <td style="text-align:right;white-space:nowrap;">
+                                <button type="button" class="btn btn-light btn-sm js-manual" title="Reconcile this deposit manually instead (pick other / more bank lines)"><i class="fa-solid fa-hand-pointer"></i> Manual</button>
+                                <button type="button" class="btn btn-danger btn-sm js-unstage" hidden title="Remove the manual pick — back to the auto match"><i class="fa-solid fa-xmark"></i></button>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
@@ -1608,7 +1617,7 @@ function dbr_diff_html($diff) {
     document.querySelectorAll('.js-pick').forEach(function (c) { c.addEventListener('change', refresh); });
     document.querySelectorAll('.js-all').forEach(function (a) {
         a.addEventListener('change', function () {
-            document.querySelectorAll('tr[data-sec="' + a.dataset.sec + '"] .js-pick').forEach(function (c) { c.checked = a.checked; });
+            document.querySelectorAll('tr[data-sec="' + a.dataset.sec + '"] .js-pick').forEach(function (c) { if (!c.disabled) c.checked = a.checked; });   // rows moved to manual stay off
             refresh();
         });
     });
@@ -1678,7 +1687,7 @@ function dbr_diff_html($diff) {
 
     function usedElsewhere() {
         var u = {}, auto = autoTxnIds(true);
-        Object.keys(auto).forEach(function (id) { u[id] = 'Ticked in the auto list'; });
+        Object.keys(auto).forEach(function (id) { if (auto[id] !== curTr) u[id] = 'Ticked in the auto list'; });   // this row's own auto match can be picked
         Object.keys(staged).forEach(function (k) {
             if (k === cur.row) return;
             Object.keys(staged[k].txns).forEach(function (id) { u[id] = 'Added to batch for ' + staged[k].data.dp; });
@@ -1759,9 +1768,14 @@ function dbr_diff_html($diff) {
         document.querySelectorAll('tr[data-txn]').forEach(function (b) { b.classList.remove('used'); b.querySelector('.rowmsg').textContent = ''; });
         document.querySelectorAll('tr[data-mrow]').forEach(function (tr) {
             var k = tr.dataset.mrow, s = staged[k], msg = tr.querySelector('.rowmsg'), btn = tr.querySelector('.js-manual');
+            var pick = tr.querySelector('.js-pick');   // auto row: the manual pick replaces the auto match
+            if (pick) {
+                if (s) { if (!pick.disabled) tr.dataset.wasChecked = pick.checked ? '1' : '0'; pick.checked = false; pick.disabled = true; }
+                else if (pick.disabled) { pick.disabled = false; pick.checked = tr.dataset.wasChecked === '1'; }
+            }
             tr.classList.toggle('staged', !!s);
             tr.querySelector('.js-unstage').hidden = !s;
-            if (!s) { if (!tr.classList.contains('failed')) msg.textContent = ''; btn.innerHTML = '<i class="fa-solid fa-hand-pointer"></i> Manual reconcile'; return; }
+            if (!s) { if (!tr.classList.contains('failed')) msg.textContent = ''; btn.innerHTML = '<i class="fa-solid fa-hand-pointer"></i> ' + (pick ? 'Manual' : 'Manual reconcile'); return; }
             var ids = Object.keys(s.txns), sum = 0; ids.forEach(function (id) { sum += s.txns[id]; });
             var diff = r2(sum - s.data.amount);
             msg.className = 'rowmsg info';
