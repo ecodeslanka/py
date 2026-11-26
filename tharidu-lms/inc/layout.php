@@ -43,24 +43,27 @@ function site_nav(): void {
 </div></nav>
 <?php }
 
-function student_bar(array $u): void { ?>
-<header class="sbar"><div class="sbar-in">
-  <a class="brand" href="<?= url('dashboard') ?>"><span class="mark">TW</span><span><?= e(setting('site_name', SITE_NAME)) ?></span></a>
-  <nav class="snav">
-    <a href="<?= url('dashboard') ?>">Lessons</a><a href="<?= url('dashboard#payments') ?>">Payments</a><a href="<?= url('dashboard#profile') ?>">Profile</a><a href="<?= url() ?>">Website</a>
-  </nav>
+function student_bar(array $u, ?string $title = null, ?string $back = null): void { ?>
+<header class="abar"><div class="abar-in">
+  <?php if ($back): ?><a class="ib" href="<?= url($back) ?>" aria-label="Back"><i data-lucide="chevron-left"></i></a><div class="ttl"><?= e($title) ?></div>
+  <?php else: ?><a class="brand" href="<?= url('dashboard') ?>"><span class="mark">TW</span><span><?= e(setting('site_name', SITE_NAME)) ?></span></a><div class="ttl"></div><?php endif; ?>
   <button class="mode" id="mode" type="button" aria-label="Toggle dark mode"><i data-lucide="moon" class="sun"></i><i data-lucide="sun" class="moon"></i></button>
   <a class="avatar" href="<?= url('logout') ?>" title="Logout"><?= e(mb_strtoupper(mb_substr($u['name'], 0, 1))) ?></a>
 </div></header>
 <?php }
-function student_head(string $title, string $active = ''): array {
+function student_head(string $title, ?string $back = null): array {
     $u = require_login();
     if ($u['role'] === 'admin') redirect('admin/');
-    head_html($title, 'app'); student_bar($u); ?>
+    head_html($title, 'app'); student_bar($u, $title, $back); ?>
 <main class="smain">
 <?php flash_html(); return $u; }
-function student_foot(): void { ?></main>
-<nav class="stabs"><a href="<?= url('dashboard') ?>"><i data-lucide="book-open"></i>Lessons</a><a href="<?= url('dashboard#payments') ?>"><i data-lucide="wallet"></i>Payments</a><a href="<?= url('dashboard#profile') ?>"><i data-lucide="user"></i>Profile</a><a href="<?= url('logout') ?>"><i data-lucide="log-out"></i>Logout</a></nav>
+function student_foot(string $active = ''): void { ?></main>
+<nav class="dock">
+  <a href="<?= url('dashboard#home') ?>" data-screen="home" class="<?= $active === 'home' ? 'on' : '' ?>"><i data-lucide="house"></i>Home</a>
+  <a href="<?= url('dashboard#browse') ?>" data-screen="browse"><i data-lucide="book-open"></i>Lessons</a>
+  <a href="<?= url('dashboard#pay') ?>" data-screen="pay"><i data-lucide="wallet"></i>Payments</a>
+  <a href="<?= url('dashboard#me') ?>" data-screen="me"><i data-lucide="user-round"></i>Profile</a>
+</nav>
 <?php foot_html(); }
 
 function admin_head(string $title, string $active = ''): array {
@@ -103,3 +106,14 @@ function field(string $label, string $name, $value = '', array $o = []): void {
     } else echo '<input type="' . e($type) . '" name="' . e($name) . '" value="' . e($value) . '" ' . $req . ' ' . $extra . '>';
     echo '</label>';
 }
+
+/** Loads the lesson from ?lesson= (or ?id=) for admin sub-pages; returns [$lesson]. */
+function lesson_ctx(): array {
+    $l = row('SELECT l.*,b.name bname,c.name cname FROM lessons l JOIN batches b ON b.id=l.batch_id LEFT JOIN classes c ON c.id=l.class_id WHERE l.id=?', [(int)($_GET['lesson'] ?? $_GET['id'] ?? $_POST['lesson'] ?? 0)]);
+    if (!$l) { flash('Lesson not found.', 'err'); redirect('admin/lessons'); }
+    return $l;
+}
+function lesson_banner(array $l, string $section): void { ?>
+<a class="back" href="<?= url('admin/lesson?id=' . $l['id']) ?>"><i data-lucide="chevron-left"></i><?= e($l['name']) ?></a>
+<div class="pagehead"><span class="pill blue"><?= e($l['bname']) ?></span><span class="pill"><?= e(month_label($l['month_year'])) ?></span><span class="pill"><?= $l['class_type'] === 'online' ? 'Online' : e($l['cname'] ?: 'Physical') ?></span></div>
+<?php }

@@ -7,6 +7,6 @@ $link = dec($s['join_url_enc']);
 if ($s['kind'] !== 'youtube_live') { if (!preg_match('~^https://~i', $link)) exit('Invalid link'); redirect($link); }
 $embed = youtube_embed($link);
 if (!$embed) { if (preg_match('~^https://~i', $link)) redirect($link); exit('Invalid link'); }
-head_html($s['title'], 'app'); student_bar($u); ?>
-<main class="smain"><h1 class="stitle"><?= e($s['title']) ?></h1><br>
+head_html($s['title'], 'app'); student_bar($u, $s['title'], 'lesson?id=' . $s['lesson_id']); ?>
+<main class="smain">
 <div class="video"><iframe src="<?= e($embed) ?>" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div></main><?php foot_html();

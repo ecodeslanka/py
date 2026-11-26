@@ -26,4 +26,22 @@
   // hero slider
   var sl=document.querySelectorAll('.slider .slide');
   if(sl.length>1){var i=0;setInterval(function(){sl[i].classList.remove('on');i=(i+1)%sl.length;sl[i].classList.add('on')},4500)}
+  // ----- app-style screens (student dashboard) -----
+  var screens=document.querySelectorAll('.screen');
+  if(screens.length){
+    document.body.classList.add('has-screens');
+    var show=function(n){ if(![].some.call(screens,function(x){return x.dataset.screen===n})) n='home';
+      screens.forEach(function(x){x.classList.toggle('on',x.dataset.screen===n)});
+      document.querySelectorAll('.dock a').forEach(function(a){a.classList.toggle('on',a.dataset.screen===n)});
+      window.scrollTo(0,0); };
+    document.querySelectorAll('.dock a[data-screen]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();history.replaceState(null,'','#'+a.dataset.screen);show(a.dataset.screen)})});
+    document.querySelectorAll('[data-goto]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();history.replaceState(null,'','#'+a.dataset.goto);show(a.dataset.goto)})});
+    show((location.hash||'#home').slice(1));
+  }
+  // ----- modals -----
+  document.querySelectorAll('[data-open]').forEach(function(b){b.addEventListener('click',function(){var d=document.getElementById(b.dataset.open);if(d&&d.showModal){if(b.dataset.fill)d.dispatchEvent(new CustomEvent('fill',{detail:JSON.parse(b.dataset.fill)}));else d.dispatchEvent(new CustomEvent('fill',{detail:null}));d.showModal();icons();}})});
+  document.querySelectorAll('dialog.modal').forEach(function(d){
+    d.addEventListener('click',function(e){if(e.target===d)d.close()});
+    d.querySelectorAll('[data-close]').forEach(function(x){x.addEventListener('click',function(){d.close()})});
+  });
 })();

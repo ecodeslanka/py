@@ -11,20 +11,23 @@ Plain PHP 8+ / MySQL. No framework, no Composer. URLs hide the `.php` extension 
 
 Requires PHP extensions: pdo_mysql, curl, openssl, mbstring, fileinfo (all standard). Needs `mod_rewrite` (Apache/LiteSpeed).
 
-## Admin panel (`/admin`) – Apple-style dashboard
+## Admin panel (`/admin`) – site theme colours (red/blue), Apple-style type
 | Section | What it does |
 |---|---|
 | **Classes** | Only a class **name** (e.g. *Senara – Kegalle*) with Edit / Delete. Students pick it at registration; lessons link to it. |
 | **Batches** | Name, cover image, order, active |
 | **Grades** | Own page; used when creating lessons |
-| **Lessons** | Lesson name, fee, batch, grade, month + year, description, student limit (+ physical/online, class, due date). Shown as boxes. |
-| Lesson → **Materials** | YouTube recording (AES-256 encrypted link, optional per-student view count) or Document upload; optional description |
-| Lesson → **Enrolled students** | View, edit, change password, delete / remove, view payments |
-| Lesson → **Zoom & live** | Create Zoom meeting by API, paste a Zoom link, or YouTube live link; start time + duration |
+| **Lessons** | Shown as colourful boxes. **View, Create and Edit open in a modal.** Fields: name, fee, batch, grade, month + year, description, student limit (+ physical/online, class, due date). |
+| Lesson → **Materials** (own pages: list + *Add material* page) | YouTube recording (AES-256 encrypted link, optional per-student view count) or Document upload; optional description |
+| Lesson → **Enrolled students** (own page) | View, edit, change password, delete / remove, view payments |
+| Lesson → **Zoom & live** (own pages: list + *Add session* page) | Create Zoom meeting by API, paste a Zoom link, or YouTube live link; start time + duration |
 | **Payments** | Approve / reject offline payments (approve = student joins the lesson) |
 | **Students**, **Admin users** | Manage accounts; default admin is created at install |
 | **Home page** | Edit EVERY text, icon, box and photo of the public home page |
 | **Site settings** | Slides, WhatsApp groups, phone + social links, bank details, Dialog SMS + OTP, Zoom keys |
+
+## Student panel
+Mobile-app style: gradient hero card, colourful lesson cards, floating bottom dock (Home · Lessons · Payments · Profile).
 
 ## Student flow
 Register (mobile, name, optional NIC, Physical/Online, **class** for physical, batch, password) → OTP SMS if enabled → dashboard shows the **lessons** for their batch/class → Join & pay (upload slip) → admin approves → lesson unlocked (materials, live links, payments, due date).

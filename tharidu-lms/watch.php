@@ -7,11 +7,9 @@ $used = (int)val('SELECT views FROM material_views WHERE user_id=? AND material_
 if ($m['view_limit'] > 0 && $used >= $m['view_limit']) { flash('You have used all allowed views of this recording.', 'err'); redirect('lesson?id=' . $m['lesson_id']); }
 q('INSERT INTO material_views(user_id,material_id,views,last_view) VALUES(?,?,1,NOW()) ON DUPLICATE KEY UPDATE views=views+1,last_view=NOW()', [$u['id'], $m['id']]);
 $embed = youtube_embed(dec($m['url_enc']));
-student_head($m['title']);
+student_head($m['title'], 'lesson?id=' . $m['lesson_id']);
 ?>
-<a class="muted small" href="<?= url('lesson?id=' . $m['lesson_id']) ?>">← Back to lesson</a>
-<h1 class="stitle"><?= e($m['title']) ?></h1>
-<?php if ($m['view_limit'] > 0): ?><p class="lead">View <?= $used + 1 ?> of <?= (int)$m['view_limit'] ?>. Refreshing this page counts as a new view.</p><br><?php endif; ?>
+<?php if ($m['view_limit'] > 0): ?><p class="muted small">View <?= $used + 1 ?> of <?= (int)$m['view_limit'] ?>. Refreshing counts as a new view.</p><?php endif; ?>
 <?php if ($embed): ?><div class="video"><iframe src="<?= e($embed) ?>" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
 <?php else: ?><div class="alert err">This video link is invalid. Please tell the teacher.</div><?php endif; ?>
 <?php if ($m['description']): ?><div class="card" style="margin-top:18px"><div class="prose"><?= e($m['description']) ?></div></div><?php endif; ?>

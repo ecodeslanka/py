@@ -16,9 +16,9 @@ if (!$pending && !$full && is_post()) {
         redirect('dashboard');
     } catch (Throwable $ex) { flash($ex->getMessage(), 'err'); redirect('pay?lesson=' . $l['id']); }
 }
-student_head('Join & pay');
+student_head('Join & pay', 'dashboard#browse');
 ?>
-<div class="authwrap" style="margin:0">
+<div>
 <div class="card"><h3><i data-lucide="wallet"></i><?= e($l['name']) ?></h3>
   <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><span class="pill"><?= e($l['bname']) ?></span><span class="pill"><?= e(month_label($l['month_year'])) ?></span>
   <span class="pill"><?= $l['class_type'] === 'online' ? 'Online' : e($l['cname'] ?: 'Physical') ?></span></div>
