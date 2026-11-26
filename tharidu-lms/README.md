@@ -11,21 +11,26 @@ Plain PHP 8+ / MySQL. No framework, no Composer. URLs hide the `.php` extension 
 
 Requires PHP extensions: pdo_mysql, curl, openssl, mbstring, fileinfo (all standard). Needs `mod_rewrite` (Apache/LiteSpeed).
 
-## Admin panel (`/admin`)
-| # | Feature | Where |
-|---|---|---|
-| 1 | Default admin + more admin users | Admin users |
-| 2 | Batches: name, cover image, order, active | Batches |
-| 3 | Classes: name, fee, batch, grade (own page), month+year, description, student limit (+ physical/online, venue, due date) | Classes, Grades |
-| 4 | Materials inside a class: YouTube recording (link stored AES-256 encrypted, optional per-student view count) or Document upload; optional description | Classes → Manage → Materials |
-| 5 | Enrolled students: view, edit, delete, change password, view payments | Manage → Enrolled students |
-| 6 | Zoom & live: create Zoom meeting by API, paste a Zoom link, or YouTube live link; start time + duration minutes | Manage → Zoom & live |
-| 7 | Site settings: about us, image, home slides, WhatsApp groups, phone/WhatsApp/YouTube/Facebook/Instagram/TikTok, bank details, SMS (Dialog eSMS), Zoom keys | Site settings |
-| – | Offline payment approvals (approve = enrol) | Payments |
+## Admin panel (`/admin`) – Apple-style dashboard
+| Section | What it does |
+|---|---|
+| **Classes** | Only a class **name** (e.g. *Senara – Kegalle*) with Edit / Delete. Students pick it at registration; lessons link to it. |
+| **Batches** | Name, cover image, order, active |
+| **Grades** | Own page; used when creating lessons |
+| **Lessons** | Lesson name, fee, batch, grade, month + year, description, student limit (+ physical/online, class, due date). Shown as boxes. |
+| Lesson → **Materials** | YouTube recording (AES-256 encrypted link, optional per-student view count) or Document upload; optional description |
+| Lesson → **Enrolled students** | View, edit, change password, delete / remove, view payments |
+| Lesson → **Zoom & live** | Create Zoom meeting by API, paste a Zoom link, or YouTube live link; start time + duration |
+| **Payments** | Approve / reject offline payments (approve = student joins the lesson) |
+| **Students**, **Admin users** | Manage accounts; default admin is created at install |
+| **Home page** | Edit EVERY text, icon, box and photo of the public home page |
+| **Site settings** | Slides, WhatsApp groups, phone + social links, bank details, Dialog SMS + OTP, Zoom keys |
 
 ## Student flow
-Register (name, mobile, optional NIC, Physical/Online, batch, class e.g. *Senara – Kegalle*, password) → OTP SMS if enabled → pick class, upload bank slip → admin approves → class unlocked (materials, live links, payments).
-Create physical classes like "Senara – Kegalle" in *Classes* (type = Physical, venue = Senara – Kegalle) so they appear in registration.
+Register (mobile, name, optional NIC, Physical/Online, **class** for physical, batch, password) → OTP SMS if enabled → dashboard shows the **lessons** for their batch/class → Join & pay (upload slip) → admin approves → lesson unlocked (materials, live links, payments, due date).
+
+## Upgrading an existing install
+Just upload the new files. The database upgrades itself on the first page load (adds Classes, moves old lesson "venues" into Classes).
 
 ## SMS (Dialog eSMS, API v1.7)
 Site settings → SMS: choose **API** (username/password → token cached 12h, auto re-login) or **GET key** (`esmsqk`, needs Dialog to enable it). Mask max 11 chars. Use *Send test* to verify. Tick *Enable OTP* to require verification at registration. Failures are logged (last 8 shown).

@@ -11,7 +11,8 @@ if (is_post()) {
             $m = norm_mobile(post('mobile')); if (!$m) throw new RuntimeException('Invalid mobile number.');
             if (val('SELECT 1 FROM users WHERE mobile=? AND id<>?', [$m, $sid])) throw new RuntimeException('That mobile is used by another account.');
             if (post('name') === '') throw new RuntimeException('Name required.');
-            q('UPDATE users SET name=?,mobile=?,nic=?,batch_id=?,class_type=?,active=? WHERE id=?', [post('name'), $m, post('nic') ?: null, (int)post('batch_id') ?: null, in_array(post('class_type'), ['physical', 'online']) ? post('class_type') : null, isset($_POST['active']) ? 1 : 0, $sid]);
+            $ct = in_array(post('class_type'), ['physical', 'online']) ? post('class_type') : null;
+            q('UPDATE users SET name=?,mobile=?,nic=?,batch_id=?,class_type=?,class_id=?,active=? WHERE id=?', [post('name'), $m, post('nic') ?: null, (int)post('batch_id') ?: null, $ct, $ct === 'physical' ? ((int)post('class_id') ?: null) : null, isset($_POST['active']) ? 1 : 0, $sid]);
             flash('Student details saved.');
         } elseif ($act === 'pw') {
             if (strlen((string)$_POST['pw']) < 6) throw new RuntimeException('Password must be at least 6 characters.');
@@ -19,7 +20,7 @@ if (is_post()) {
         } elseif ($act === 'delete') {
             foreach (rows('SELECT slip FROM payments WHERE user_id=?', [$sid]) as $p) del_upload('slips', $p['slip']);
             q('DELETE FROM users WHERE id=?', [$sid]); flash('Student deleted.'); redirect('admin/students');
-        } elseif ($act === 'unenroll') { q('DELETE FROM enrollments WHERE user_id=? AND lesson_id=?', [$sid, (int)post('lesson_id')]); flash('Removed from class.'); }
+        } elseif ($act === 'unenroll') { q('DELETE FROM enrollments WHERE user_id=? AND lesson_id=?', [$sid, (int)post('lesson_id')]); flash('Removed from lesson.'); }
     } catch (Throwable $ex) { flash($ex->getMessage(), 'err'); }
     redirect('admin/student?id=' . $sid);
 }
@@ -31,16 +32,17 @@ $bo = ['' => '— none —'] + array_column(rows('SELECT id,name FROM batches OR
 <div class="card"><h3><i data-lucide="user"></i>Details</h3>
 <form method="post"><?= csrf_field() ?><input type="hidden" name="act" value="save">
 <div class="two"><?php field('Name', 'name', $s['name'], ['req' => 1]); field('Mobile', 'mobile', show_mobile($s['mobile']), ['req' => 1]); field('NIC', 'nic', $s['nic'] ?? ''); field('Batch', 'batch_id', $s['batch_id'], ['type' => 'select', 'options' => $bo]);
-field('Class type', 'class_type', $s['class_type'] ?? '', ['type' => 'select', 'options' => ['' => '—', 'physical' => 'Physical', 'online' => 'Online']]); ?></div>
+field('Class type', 'class_type', $s['class_type'] ?? '', ['type' => 'select', 'options' => ['' => '—', 'physical' => 'Physical', 'online' => 'Online']]);
+field('Class (place)', 'class_id', $s['class_id'] ?? '', ['type' => 'select', 'options' => ['' => '— none —'] + array_column(rows('SELECT id,name FROM classes ORDER BY sort_order,id'), 'name', 'id')]); ?></div>
 <label class="chk"><input type="checkbox" name="active" <?= $s['active'] ? 'checked' : '' ?>>Account active (can log in)</label>
 <button class="btn btn-r">Save details</button></form></div><br>
 <div class="card" id="pw"><h3><i data-lucide="key-round"></i>Change password</h3>
 <form method="post" class="two"><?= csrf_field() ?><input type="hidden" name="act" value="pw"><?php field('New password', 'pw', '', ['type' => 'password', 'req' => 1, 'attr' => 'minlength="6" autocomplete="new-password"']); ?>
 <div style="align-self:end;margin-bottom:14px"><button class="btn btn-o">Set password</button></div></form></div><br>
-<div class="card"><h3><i data-lucide="book-open"></i>Enrolled classes</h3>
-<?php if (!$enr) echo '<p class="empty">Not enrolled in any class.</p>'; foreach ($enr as $l): ?>
+<div class="card"><h3><i data-lucide="book-open"></i>Enrolled lessons</h3>
+<?php if (!$enr) echo '<p class="empty">Not enrolled in any lesson.</p>'; foreach ($enr as $l): ?>
 <div class="matitem"><div class="grow"><b><?= e($l['name']) ?></b> <span class="muted small"><?= e(month_label($l['month_year'])) ?></span></div>
-<form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="act" value="unenroll"><input type="hidden" name="lesson_id" value="<?= $l['id'] ?>"><button class="btn btn-danger btn-sm" data-confirm="Remove from this class?">Remove</button></form></div><?php endforeach; ?></div><br>
+<form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="act" value="unenroll"><input type="hidden" name="lesson_id" value="<?= $l['id'] ?>"><button class="btn btn-danger btn-sm" data-confirm="Remove from this lesson?">Remove</button></form></div><?php endforeach; ?></div><br>
 <div class="card" id="pay"><h3><i data-lucide="wallet"></i>Payments</h3>
 <?php if (!$pays): echo '<p class="empty">No payments.</p>'; else: ?><div class="tablewrap"><table><tr><th>Date</th><th>Class</th><th>Amount</th><th>Slip</th><th>Status</th></tr>
 <?php foreach ($pays as $p): ?><tr><td><?= e(date('d M Y', strtotime($p['created_at']))) ?></td><td><?= e($p['lname']) ?></td><td><?= e(money($p['amount'])) ?></td>

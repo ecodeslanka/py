@@ -145,3 +145,10 @@ function throttle_ok(string $mobile): bool {
     return (int)val('SELECT COUNT(*) FROM login_attempts WHERE ip=? OR mobile=?', [$_SERVER['REMOTE_ADDR'] ?? '', $mobile]) < 8;
 }
 function fail_attempt(string $mobile): void { q('INSERT INTO login_attempts(ip,mobile) VALUES(?,?)', [$_SERVER['REMOTE_ADDR'] ?? '', $mobile]); }
+
+// ---- auto-upgrade database when code is newer than schema ----
+try {
+    if (basename($_SERVER['SCRIPT_NAME'] ?? '') !== 'install.php' && (int)setting('schema_v', '1') < 2 && val("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users'")) {
+        require __DIR__ . '/migrate.php'; run_migrations();
+    }
+} catch (Throwable $e) { /* not installed yet */ }

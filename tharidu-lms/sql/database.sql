@@ -1,5 +1,11 @@
 -- Tharidu Chemistry LMS - MySQL / MariaDB schema
 SET NAMES utf8mb4;
+CREATE TABLE IF NOT EXISTS classes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   role ENUM('admin','student') NOT NULL DEFAULT 'student',
@@ -9,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   batch_id INT NULL,
   class_type ENUM('physical','online') NULL,
+  class_id INT NULL,
   active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -30,7 +37,7 @@ CREATE TABLE IF NOT EXISTS lessons (
   batch_id INT NOT NULL,
   grade_id INT NULL,
   class_type ENUM('physical','online') NOT NULL DEFAULT 'online',
-  venue VARCHAR(160) NULL,
+  class_id INT NULL,
   month_year CHAR(7) NOT NULL,          -- YYYY-MM
   due_date DATE NULL,
   description TEXT NULL,
@@ -141,3 +148,5 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   KEY (ip), KEY (mobile)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ALTER TABLE users ADD CONSTRAINT fk_user_batch FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE SET NULL;
+ALTER TABLE users ADD CONSTRAINT fk_user_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE SET NULL;
+ALTER TABLE lessons ADD CONSTRAINT fk_lesson_class FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE SET NULL;

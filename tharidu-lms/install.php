@@ -10,9 +10,11 @@ if (is_post()) {
         foreach (array_filter(array_map('trim', explode(";\n", $sql))) as $stmt) {
             try { db()->exec($stmt); } catch (PDOException $e) { if (stripos($stmt, 'ALTER TABLE') !== 0) throw $e; }
         }
+        require __DIR__ . '/inc/migrate.php'; run_migrations();   // upgrades older installs, sets schema version
         if (!val("SELECT COUNT(*) FROM users WHERE role='admin'")) {
             q("INSERT INTO users(role,name,mobile,password_hash) VALUES('admin','Administrator','700000000',?)", [password_hash('Admin@123', PASSWORD_DEFAULT)]);
         }
+        if (!val('SELECT COUNT(*) FROM classes')) foreach ([['Senara – Kegalle', 1], ['Sithumina – Kurunegala', 2]] as [$n, $o]) q('INSERT INTO classes(name,sort_order) VALUES(?,?)', [$n, $o]);
         if (!val('SELECT COUNT(*) FROM grades')) foreach (['A/L Theory', 'A/L Paper Class', 'A/L Revision'] as $g) q('INSERT INTO grades(name) VALUES(?)', [$g]);
         if (!val('SELECT COUNT(*) FROM batches')) foreach ([['2027 A/L', 1], ['2028 A/L', 2]] as [$n, $o]) q('INSERT INTO batches(name,sort_order) VALUES(?,?)', [$n, $o]);
         $defaults = ['site_name' => SITE_NAME, 'whatsapp' => '94703957020', 'phone' => '0703957020',

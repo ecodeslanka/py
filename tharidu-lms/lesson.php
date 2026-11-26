@@ -1,17 +1,18 @@
 <?php
 require __DIR__ . '/inc/bootstrap.php'; require __DIR__ . '/inc/layout.php';
-$u = student_head('Class');
-$l = row('SELECT l.*,b.name bname FROM lessons l JOIN batches b ON b.id=l.batch_id WHERE l.id=?', [(int)($_GET['id'] ?? 0)]);
-if (!$l || !is_enrolled($u['id'], $l['id'])) { flash('You are not enrolled in that class.', 'err'); redirect('dashboard'); }
+$u = require_login(); if ($u['role'] === 'admin') redirect('admin/');
+$l = row('SELECT l.*,b.name bname,c.name cname FROM lessons l JOIN batches b ON b.id=l.batch_id LEFT JOIN classes c ON c.id=l.class_id WHERE l.id=?', [(int)($_GET['id'] ?? 0)]);
+if (!$l || !is_enrolled($u['id'], $l['id'])) { flash('You are not enrolled in that lesson.', 'err'); redirect('dashboard'); }
+student_head($l['name']);
 $tab = $_GET['tab'] ?? 'materials';
 $mats = rows('SELECT m.*,COALESCE(v.views,0) views FROM materials m LEFT JOIN material_views v ON v.material_id=m.id AND v.user_id=? WHERE m.lesson_id=? ORDER BY m.id DESC', [$u['id'], $l['id']]);
 $live = rows('SELECT * FROM sessions_live WHERE lesson_id=? ORDER BY COALESCE(start_at,created_at) DESC', [$l['id']]);
 $pays = rows('SELECT * FROM payments WHERE user_id=? AND lesson_id=? ORDER BY id DESC', [$u['id'], $l['id']]);
 ?>
-<a class="muted small" href="<?= url('dashboard') ?>">← My classes</a>
-<div class="head" style="margin-top:8px"><h2><?= e($l['name']) ?></h2>
-  <p class="lead"><?= e($l['bname']) ?> · <?= e(month_label($l['month_year'])) ?> · <?= $l['class_type'] === 'online' ? 'Online' : 'Physical' . ($l['venue'] ? ' · ' . e($l['venue']) : '') ?></p></div>
-<?php if ($l['description']): ?><div class="card"><div class="prose"><?= e($l['description']) ?></div></div><br><?php endif; ?>
+<a class="muted small" href="<?= url('dashboard') ?>">← My lessons</a>
+<h1 class="stitle"><?= e($l['name']) ?></h1>
+  <p class="lead"><?= e($l['bname']) ?> · <?= e(month_label($l['month_year'])) ?> · <?= $l['class_type'] === 'online' ? 'Online' : e($l['cname'] ?: 'Physical') ?></p>
+<br><?php if ($l['description']): ?><div class="card"><div class="prose"><?= e($l['description']) ?></div></div><br><?php endif; ?>
 <div class="tabs">
   <a class="<?= $tab === 'materials' ? 'on' : '' ?>" href="?id=<?= $l['id'] ?>&tab=materials">Materials</a>
   <a class="<?= $tab === 'live' ? 'on' : '' ?>" href="?id=<?= $l['id'] ?>&tab=live">Live classes</a>

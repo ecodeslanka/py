@@ -7,6 +7,6 @@ $link = dec($s['join_url_enc']);
 if ($s['kind'] !== 'youtube_live') { if (!preg_match('~^https://~i', $link)) exit('Invalid link'); redirect($link); }
 $embed = youtube_embed($link);
 if (!$embed) { if (preg_match('~^https://~i', $link)) redirect($link); exit('Invalid link'); }
-head_html($s['title']); site_nav(); ?>
-<main class="band appmain"><div class="wrap"><div class="head"><h2><?= e($s['title']) ?></h2></div>
-<div class="video"><iframe src="<?= e($embed) ?>" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div></div></main><?php foot_html();
+head_html($s['title'], 'app'); student_bar($u); ?>
+<main class="smain"><h1 class="stitle"><?= e($s['title']) ?></h1><br>
+<div class="video"><iframe src="<?= e($embed) ?>" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div></main><?php foot_html();

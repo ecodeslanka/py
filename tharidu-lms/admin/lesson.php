@@ -1,8 +1,8 @@
 <?php
 require __DIR__ . '/../inc/bootstrap.php'; require __DIR__ . '/../inc/layout.php'; require __DIR__ . '/../inc/zoom.php';
 $u = require_admin();
-$l = row('SELECT l.*,b.name bname FROM lessons l JOIN batches b ON b.id=l.batch_id WHERE l.id=?', [(int)($_GET['id'] ?? 0)]);
-if (!$l) { flash('Class not found.', 'err'); redirect('admin/lessons'); }
+$l = row('SELECT l.*,b.name bname,c.name cname FROM lessons l JOIN batches b ON b.id=l.batch_id LEFT JOIN classes c ON c.id=l.class_id WHERE l.id=?', [(int)($_GET['id'] ?? 0)]);
+if (!$l) { flash('Lesson not found.', 'err'); redirect('admin/lessons'); }
 $lid = (int)$l['id']; $tab = $_GET['tab'] ?? 'materials';
 $back = 'admin/lesson?id=' . $lid . '&tab=';
 
@@ -29,10 +29,10 @@ if (is_post()) {
         if ($act === 'mat_resetviews') { q('DELETE FROM material_views WHERE material_id=?', [(int)post('id')]); flash('Views reset for all students.'); redirect($back . 'materials'); }
         if ($act === 'enroll_add') {
             $sid = (int)post('student_id');
-            if ($sid && !is_enrolled($sid, $lid)) { q('INSERT INTO enrollments(user_id,lesson_id) VALUES(?,?)', [$sid, $lid]); flash('Student added to class.'); }
+            if ($sid && !is_enrolled($sid, $lid)) { q('INSERT INTO enrollments(user_id,lesson_id) VALUES(?,?)', [$sid, $lid]); flash('Student added to lesson.'); }
             redirect($back . 'students');
         }
-        if ($act === 'enroll_del') { q('DELETE FROM enrollments WHERE user_id=? AND lesson_id=?', [(int)post('student_id'), $lid]); flash('Student removed from this class.'); redirect($back . 'students'); }
+        if ($act === 'enroll_del') { q('DELETE FROM enrollments WHERE user_id=? AND lesson_id=?', [(int)post('student_id'), $lid]); flash('Student removed from this lesson.'); redirect($back . 'students'); }
         if ($act === 'live_add') {
             $kind = post('kind'); $title = post('title'); $start = post('start_at') ? date('Y-m-d H:i:s', strtotime(post('start_at'))) : null; $dur = max(5, (int)post('duration') ?: 60);
             if ($title === '') throw new RuntimeException('Title is required.');
@@ -58,10 +58,11 @@ if (is_post()) {
 }
 
 admin_head($l['name'], 'lessons');
+echo '<a class="muted small" href="' . url('admin/lessons') . '">← All lessons</a><br><br>';
 $tabs = ['materials' => 'Materials', 'students' => 'Enrolled students', 'live' => 'Zoom & live'];
 ?>
-<div class="toolbar"><div><span class="pill"><?= e($l['bname']) ?></span> <span class="pill"><?= e(month_label($l['month_year'])) ?></span> <span class="pill"><?= $l['class_type'] === 'online' ? 'Online' : 'Physical' . ($l['venue'] ? ' · ' . e($l['venue']) : '') ?></span> <span class="pill"><?= e(money($l['fee'])) ?></span></div>
-<a class="btn btn-o btn-sm" href="<?= url('admin/lessons?edit=' . $lid) ?>"><i data-lucide="pencil"></i>Edit class</a></div>
+<div class="toolbar"><div><span class="pill"><?= e($l['bname']) ?></span> <span class="pill"><?= e(month_label($l['month_year'])) ?></span> <span class="pill"><?= $l['class_type'] === 'online' ? 'Online' : e($l['cname'] ?: 'Physical') ?></span> <span class="pill"><?= e(money($l['fee'])) ?></span></div>
+<a class="btn btn-o btn-sm" href="<?= url('admin/lessons?edit=' . $lid) ?>"><i data-lucide="pencil"></i>Edit lesson</a></div>
 <div class="tabs"><?php foreach ($tabs as $k => $t): ?><a class="<?= $tab === $k ? 'on' : '' ?>" href="?id=<?= $lid ?>&tab=<?= $k ?>"><?= $t ?></a><?php endforeach; ?></div>
 
 <?php if ($tab === 'materials'): $mats = rows('SELECT m.*,(SELECT COALESCE(SUM(views),0) FROM material_views v WHERE v.material_id=m.id) tv FROM materials m WHERE lesson_id=? ORDER BY id DESC', [$lid]); ?>
@@ -91,12 +92,12 @@ field('View count per student (optional)', 'view_limit', '', ['type' => 'number'
 <div class="card"><h3><i data-lucide="user-plus"></i>Add a student manually</h3>
 <form method="post" class="two"><?= csrf_field() ?><input type="hidden" name="act" value="enroll_add">
 <label class="f">Student<select name="student_id" required><option value="">— select —</option><?php foreach ($others as $o) echo '<option value="' . $o['id'] . '">' . e($o['name']) . ' (' . e(show_mobile($o['mobile'])) . ')</option>'; ?></select></label>
-<div style="align-self:end;margin-bottom:14px"><button class="btn btn-r">Add to class</button></div></form></div><br>
+<div style="align-self:end;margin-bottom:14px"><button class="btn btn-r">Add to lesson</button></div></form></div><br>
 <div class="tablewrap"><table><tr><th>Student</th><th>Mobile</th><th>NIC</th><th>Paid</th><th>Joined</th><th></th></tr>
 <?php foreach ($sts as $s): ?><tr><td><b><?= e($s['name']) ?></b><?= $s['active'] ? '' : ' <span class="pill err">disabled</span>' ?></td><td><?= e(show_mobile($s['mobile'])) ?></td><td><?= e($s['nic'] ?: '—') ?></td><td><?= e(money($s['paid'])) ?></td><td><?= e(date('d M Y', strtotime($s['joined']))) ?></td>
 <td><div class="acts"><a class="btn btn-b btn-sm" href="<?= url('admin/student?id=' . $s['id']) ?>">View / edit</a><a class="btn btn-o btn-sm" href="<?= url('admin/student?id=' . $s['id'] . '#pw') ?>">Change password</a>
 <a class="btn btn-o btn-sm" href="<?= url('admin/student?id=' . $s['id'] . '#pay') ?>">Payments</a>
-<form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="act" value="enroll_del"><input type="hidden" name="student_id" value="<?= $s['id'] ?>"><button class="btn btn-danger btn-sm" data-confirm="Remove this student from the class?">Remove</button></form></div></td></tr>
+<form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="act" value="enroll_del"><input type="hidden" name="student_id" value="<?= $s['id'] ?>"><button class="btn btn-danger btn-sm" data-confirm="Remove this student from the lesson?">Remove</button></form></div></td></tr>
 <?php endforeach; if (!$sts) echo '<tr><td colspan="6" class="empty">No students enrolled yet.</td></tr>'; ?></table></div>
 
 <?php else: $live = rows('SELECT * FROM sessions_live WHERE lesson_id=? ORDER BY COALESCE(start_at,created_at) DESC', [$lid]); ?>

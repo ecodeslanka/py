@@ -1,9 +1,9 @@
 <?php
 require __DIR__ . '/inc/bootstrap.php'; require __DIR__ . '/inc/layout.php';
-$u = student_head('Join & pay');
-$l = row('SELECT l.*,b.name bname FROM lessons l JOIN batches b ON b.id=l.batch_id WHERE l.id=? AND l.active=1', [(int)($_GET['lesson'] ?? 0)]);
-if (!$l) { flash('Class not found.', 'err'); redirect('dashboard'); }
-if (is_enrolled($u['id'], $l['id'])) { flash('You are already enrolled in this class.'); redirect('class?id=' . $l['id']); }
+$u = require_login(); if ($u['role'] === 'admin') redirect('admin/');
+$l = row('SELECT l.*,b.name bname,c.name cname FROM lessons l JOIN batches b ON b.id=l.batch_id LEFT JOIN classes c ON c.id=l.class_id WHERE l.id=? AND l.active=1', [(int)($_GET['lesson'] ?? 0)]);
+if (!$l) { flash('Lesson not found.', 'err'); redirect('dashboard'); }
+if (is_enrolled($u['id'], $l['id'])) { flash('You are already enrolled in this lesson.'); redirect('lesson?id=' . $l['id']); }
 $pending = row("SELECT * FROM payments WHERE user_id=? AND lesson_id=? AND status='pending'", [$u['id'], $l['id']]);
 $full = $l['student_limit'] > 0 && lesson_students($l['id']) >= $l['student_limit'];
 if (!$pending && !$full && is_post()) {
@@ -12,21 +12,22 @@ if (!$pending && !$full && is_post()) {
         if (!$f && post('reference') === '') throw new RuntimeException('Upload your payment slip or enter the bank reference number.');
         q('INSERT INTO payments(user_id,lesson_id,amount,method,reference,slip) VALUES(?,?,?,"offline",?,?)',
           [$u['id'], $l['id'], $l['fee'], post('reference') ?: null, $f['name'] ?? null]);
-        flash('Payment submitted. The teacher will approve it and you will be added to the class.');
+        flash('Payment submitted. The teacher will approve it and you will be added to the lesson.');
         redirect('dashboard');
     } catch (Throwable $ex) { flash($ex->getMessage(), 'err'); redirect('pay?lesson=' . $l['id']); }
 }
+student_head('Join & pay');
 ?>
-<div class="authwrap">
+<div class="authwrap" style="margin:0">
 <div class="card"><h3><i data-lucide="wallet"></i><?= e($l['name']) ?></h3>
   <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><span class="pill"><?= e($l['bname']) ?></span><span class="pill"><?= e(month_label($l['month_year'])) ?></span>
-  <span class="pill"><?= $l['class_type'] === 'online' ? 'Online' : 'Physical' . ($l['venue'] ? ' · ' . e($l['venue']) : '') ?></span></div>
+  <span class="pill"><?= $l['class_type'] === 'online' ? 'Online' : e($l['cname'] ?: 'Physical') ?></span></div>
   <?php if ($l['description']): ?><p class="muted"><?= nl2br(e($l['description'])) ?></p><?php endif; ?>
   <div class="fee" style="font-size:30px;font-weight:800;margin-top:10px"><?= e(money($l['fee'])) ?></div>
   <?php if ($l['due_date']): ?><div class="small muted">Payment due date: <?= e(date('d M Y', strtotime($l['due_date']))) ?></div><?php endif; ?>
 </div>
 <?php if ($pending): ?><div class="card"><div class="alert ok">Your payment is waiting for admin approval. You will get access as soon as it is approved.</div><a class="btn btn-o" href="<?= url('dashboard') ?>">Back</a></div>
-<?php elseif ($full): ?><div class="card"><div class="alert err">Sorry, this class is full.</div></div>
+<?php elseif ($full): ?><div class="card"><div class="alert err">Sorry, this lesson is full.</div></div>
 <?php else: ?>
 <div class="card"><h3><i data-lucide="landmark"></i>Offline payment</h3>
   <?php if (setting('bank_details')): ?><div class="copybox" style="white-space:pre-line;margin-bottom:16px"><?= e(setting('bank_details')) ?></div><?php endif; ?>
