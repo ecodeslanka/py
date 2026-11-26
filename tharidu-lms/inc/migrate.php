@@ -1,6 +1,6 @@
 <?php
 // Automatic, idempotent schema upgrades. Runs once (schema_v setting).
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 function col_exists(string $t, string $c): bool {
     return (bool)val('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?', [$t, $c]);
 }
@@ -33,6 +33,11 @@ function run_migrations(): void {
     db()->exec('CREATE TABLE IF NOT EXISTS cart (
       user_id INT NOT NULL, lesson_id INT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, lesson_id),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    // v4: AI chatbot history
+    db()->exec('CREATE TABLE IF NOT EXISTS chat_messages (
+      id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, role ENUM(\'user\',\'bot\') NOT NULL, content TEXT NOT NULL, image VARCHAR(255) NULL, lang CHAR(2) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, KEY (user_id, created_at), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
     set_setting('schema_v', (string)SCHEMA_VERSION);
 }

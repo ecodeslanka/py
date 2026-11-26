@@ -27,8 +27,14 @@ Requires PHP extensions: pdo_mysql, curl, openssl, mbstring, fileinfo (all stand
 ## Student panel (mobile-app style)
 Register (mobile, name, optional NIC, class, batch, password, OTP) → **Lessons** screen shows lessons **batch-wise** (switch batch with the chips) → **Add to cart** → **Cart**: one bank slip for all lessons → admin approves → lessons unlock: materials (grouped), live / Zoom links, recordings.
 
-## ECODES PLAYER V 5.0
-YouTube recordings play in a custom secure player: no YouTube logo / title / share / links (iframe cropped + click-shield), own controls (seek, speed, mute, fullscreen), moving watermark with the student's name + mobile, video id delivered by a one-time token (not in the page HTML), right-click / shortcut / DevTools blocking, auto-pause + blur when the window loses focus, PrintScreen blocking. **Note:** no website can technically stop OS-level screen recording (phone/PC recorders); the watermark makes leaks traceable to the student, and view limits cap sharing.
+## AI chatbot (Google Gemini) – Admin → Settings → AI Chatbot
+Paste a free key from aistudio.google.com/apikey. Students open **Ask AI** (bottom bar): ask A/L chemistry questions in **Sinhala (default) or English**, optionally attach a photo (question paper, structure, working). The bot refuses non-chemistry questions. Settings: on/off, model, **questions per student per day** (resets midnight Sri Lanka time), max image size, memory, bot **name**, **icon** (emoji or image), welcome message, extra teacher instructions, plus a usage table. Counted questions = successful answers only; 3-second flood guard.
+
+## ECODES PLAYER V 5.0 – Admin → Settings → Player
+YouTube recordings play in a custom secure player: no YouTube logo / title / share / links, own controls, one-time token for the video id, shortcut / right-click blocking, pause + blur when the window loses focus, PrintScreen blocking.
+- **Tap play → full screen** on every device: Android and desktop use the real Fullscreen API (+ landscape lock); iPhone Safari (no element fullscreen) uses a full-screen overlay with a ⟳ rotate-to-landscape button; Back button / ✕ Exit leave full screen.
+- **Watermark** (name + mobile): text template ({name} {mobile} {date}), movement **up ⇅ down / random / scroll / fixed**, side, speed, opacity, size, colour. Phones skip the DevTools detector to avoid false pauses.
+Note: no website can technically stop OS-level screen recording; the watermark makes leaks traceable and view limits cap sharing.
 
 ## Upgrading an existing install
 Upload the new files. The database upgrades itself on the first page load.

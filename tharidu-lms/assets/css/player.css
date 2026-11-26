@@ -20,6 +20,21 @@
 .ecp-t{font-size:12.5px;font-variant-numeric:tabular-nums;min-width:38px;text-align:center}
 .ecp-bar input[type=range]{flex:1;margin:0;padding:0;min-height:0;height:6px;accent-color:#ff5a1f;background:transparent;border:0;box-shadow:none}
 .ecp.blur .ecp-stage{filter:blur(30px)}
-.ecp.full{position:fixed;inset:0;z-index:9999;border-radius:0;aspect-ratio:auto;width:100vw;height:100dvh}
-.ecp:fullscreen{border-radius:0;aspect-ratio:auto}
 @media(max-width:560px){.ecp{border-radius:16px}.ecp-frame{top:-44px;bottom:-44px}.ecp-brand{font-size:9.5px;top:8px;left:8px}.ecp-bar{gap:6px;padding:20px 8px 8px}.ecp-b{min-width:32px;height:32px}}
+
+/* ----- full screen (native on Android/desktop, overlay on iPhone) ----- */
+.ecp.full,.ecp:fullscreen,.ecp:-webkit-full-screen{border-radius:0;aspect-ratio:auto;width:100vw;height:100vh;height:100dvh;max-width:none;box-shadow:none}
+.ecp.full{position:fixed;inset:0;z-index:99999}
+.ecp.full.rot{width:100vh;width:100dvh;height:100vw;top:0;left:100vw;right:auto;bottom:auto;transform:rotate(90deg);transform-origin:top left}
+html.ecp-lock,body.ecp-lock{overflow:hidden!important;overscroll-behavior:none;position:fixed;width:100%}
+.ecp-exit{display:none;position:absolute;z-index:12;top:max(10px,env(safe-area-inset-top));right:max(10px,env(safe-area-inset-right));border:0;border-radius:99px;padding:8px 14px;background:rgba(0,0,0,.55);color:#fff;font:700 13px var(--font,system-ui);cursor:pointer}
+.ecp-rot{display:none;position:absolute;z-index:12;top:max(10px,env(safe-area-inset-top));right:92px;border:0;border-radius:99px;width:38px;height:36px;background:rgba(0,0,0,.55);color:#fff;font-size:18px;cursor:pointer}
+.ecp.isfs .ecp-exit{display:block}
+.ecp.full:not(.rot) .ecp-rot{display:block}
+@media (orientation:landscape){.ecp.full .ecp-rot{display:none!important}}
+.ecp.isfs .ecp-bar{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+.ecp.isfs .ecp-frame{top:-70px;bottom:-70px}
+/* watermark animations */
+@keyframes ecpUD{from{top:7%}to{top:86%}}
+@keyframes ecpSC{from{left:104%}to{left:-70%}}
+.ecp-wm{will-change:top,left;top:7%}
