@@ -184,6 +184,8 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
   options TEXT NOT NULL,
   correct TINYINT NOT NULL DEFAULT 0,
   explanation TEXT NULL,
+  q_image VARCHAR(255) NULL,
+  opt_images TEXT NULL,
   ai_conf TINYINT NULL,
   reviewed TINYINT(1) NOT NULL DEFAULT 1,
   KEY (quiz_id, sort_order),

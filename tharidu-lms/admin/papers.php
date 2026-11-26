@@ -2,15 +2,10 @@
 require __DIR__ . '/../inc/bootstrap.php'; require __DIR__ . '/../inc/layout.php'; require __DIR__ . '/../inc/quiz.php';
 require_admin();
 const PAPER_EXT = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
-/** Create a draft quiz from a stored paper (+ its marking scheme) with Gemini, then go to the review screen. */
+/** Creates an empty draft quiz and opens the editor, which renders the paper's pages in the browser and lets Gemini read + auto-cut the figures. */
 function paper_to_quiz(array $p): never {
-    $files = [['path' => ROOT . '/uploads/papers/' . $p['paper_file'], 'name' => $p['paper_name'] ?: $p['paper_file'], 'role' => 'paper']];
-    if ($p['scheme_file']) $files[] = ['path' => ROOT . '/uploads/papers/' . $p['scheme_file'], 'name' => $p['scheme_name'] ?: $p['scheme_file'], 'role' => 'scheme'];
-    [$ok, $r] = quiz_ai_extract($files, '', 80);
-    if (!$ok) { flash($r, 'err'); redirect('admin/papers'); }
     q("INSERT INTO quizzes(title,description,mode,audience,batch_id,status,source_paper_id) VALUES(?,?,'exam','all',NULL,'draft',?)", [$p['year'] . ' ' . $p['name'], 'Made from the ' . $p['year'] . ' past paper', $p['id']]);
-    $qid = (int)db()->lastInsertId(); $n = quiz_add_extracted($qid, $r['questions']);
-    flash("AI created $n questions. Check the answers marked “needs review”, then publish."); redirect('admin/quiz?id=' . $qid);
+    flash('Quiz created – Gemini is now scanning the paper…'); redirect('admin/quiz?id=' . db()->lastInsertId() . '&scan_paper=' . $p['id']);
 }
 if (is_post()) {
     $act = post('act'); $id = (int)post('id');
@@ -58,7 +53,7 @@ $ai = bot_enabled() || dec(setting('gemini_key')) !== '';
       <?php if ($p['scheme_file']): ?><a href="<?= url('paper_dl?id=' . $p['id'] . '&f=scheme') ?>" target="_blank" class="pill ok">✅ Marking scheme</a><?php else: ?><span class="pill">No marking scheme</span><?php endif; ?>
       <?php if ($p['qn']): ?><span class="pill warn"><?= (int)$p['qn'] ?> MCQ quiz</span><?php endif; ?></span></div>
     <div class="acts">
-      <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="act" value="make_quiz"><input type="hidden" name="id" value="<?= $p['id'] ?>"><button class="btn btn-sm" data-confirm="Scan this paper with Gemini and create an MCQ quiz? This can take up to a minute." <?= $ai ? '' : 'disabled title="Add a Gemini key in Settings → AI Chatbot"' ?>><i data-lucide="sparkles"></i>Make MCQ with AI</button></form>
+      <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="act" value="make_quiz"><input type="hidden" name="id" value="<?= $p['id'] ?>"><button class="btn btn-sm" data-confirm="Scan this paper with Gemini (questions, answers and auto-cut pictures) and create an MCQ quiz? This can take up to a minute." <?= $ai ? '' : 'disabled title="Add a Gemini key in Settings → AI Chatbot"' ?>><i data-lucide="sparkles"></i>Make MCQ with AI</button></form>
       <button class="btn btn-o btn-sm" data-open="mPaper" data-fill="<?= $j ?>"><i data-lucide="pencil"></i></button>
       <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="act" value="delete"><input type="hidden" name="id" value="<?= $p['id'] ?>"><button class="btn btn-danger btn-sm" data-confirm="Delete this paper and its files?"><i data-lucide="trash-2"></i></button></form></div></div>
 <?php endforeach; ?></div>

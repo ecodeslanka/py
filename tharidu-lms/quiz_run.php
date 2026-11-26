@@ -8,8 +8,8 @@ $dl = quiz_deadline($z, $a); if ($dl !== null && time() > $dl + 8) { quiz_finish
 $qs = quiz_questions((int)$z['id']); $saved = []; foreach (rows('SELECT question_id,chosen,is_correct FROM quiz_answers WHERE attempt_id=?', [$a['id']]) as $r) $saved[$r['question_id']] = $r;
 $data = []; $fb = [];
 foreach ($qs as $k) {
-    $o = []; foreach (quiz_options($k) as $i => $t) $o[] = ['i' => $i, 't' => $t]; if ($z['shuffle']) shuffle($o);
-    $data[] = ['id' => (int)$k['id'], 'q' => $k['question'], 'o' => $o];
+    $oi = quiz_opt_images($k); $o = []; foreach (quiz_options($k) as $i => $t) $o[] = ['i' => $i, 't' => $t, 'im' => quiz_img_url($oi[$i])]; if ($z['shuffle']) shuffle($o);
+    $data[] = ['id' => (int)$k['id'], 'q' => $k['question'], 'qi' => quiz_img_url($k['q_image']), 'o' => $o];
     if ($z['mode'] === 'practice' && isset($saved[$k['id']])) $fb[$k['id']] = ['correct' => (int)$k['correct'], 'ex' => $k['explanation']];   // only for already-answered ones
 }
 $cfg = ['qs' => $data, 'saved' => array_map(fn($r) => (int)$r['chosen'], $saved), 'fb' => $fb, 'practice' => $z['mode'] === 'practice', 'a' => (int)$a['id'], 'csrf' => csrf(), 'api' => url('quiz_api'),

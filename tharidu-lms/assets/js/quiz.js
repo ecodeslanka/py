@@ -6,13 +6,15 @@
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function post(data) { var fd = new FormData(); fd.append('a', cfg.a); fd.append('_csrf', cfg.csrf); Object.keys(data).forEach(function (k) { fd.append(k, data[k]); });
     return fetch(cfg.api, { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); }); }
+  // tap a question picture to zoom
+  document.addEventListener('click', function (e) { var im = e.target.closest('img.zoomable'); if (!im) return; var z = document.createElement('div'); z.className = 'lightbox'; z.innerHTML = '<img src="' + im.src + '" alt=""><button type="button">✕</button>'; z.addEventListener('click', function () { z.remove(); }); document.body.appendChild(z); });
   function render() {
     var q = Q[cur], done = ans[q.id] !== undefined, f = fb[q.id];
     $('qnum').textContent = 'Question ' + (cur + 1); $('qof').textContent = ' of ' + Q.length; $('qbar').style.width = ((cur + 1) / Q.length * 100) + '%';
-    $('qq').innerHTML = esc(q.q).replace(/\n/g, '<br>');
+    $('qq').innerHTML = esc(q.q).replace(/\n/g, '<br>') + (q.qi ? '<img class="qpic zoomable" src="' + q.qi + '" alt="">' : '');
     $('qch').innerHTML = q.o.map(function (o, n) {
       var cls = 'qc'; if (ans[q.id] === o.i) cls += ' sel'; if (f) { if (o.i === f.correct) cls += ' good'; else if (ans[q.id] === o.i) cls += ' bad'; }
-      return '<button type="button" class="' + cls + '" data-i="' + o.i + '"' + (f ? ' disabled' : '') + '><span>' + String.fromCharCode(65 + n) + '</span><div>' + esc(o.t) + '</div></button>'; }).join('');
+      return '<button type="button" class="' + cls + '" data-i="' + o.i + '"' + (f ? ' disabled' : '') + '><span>' + String.fromCharCode(65 + n) + '</span><div>' + (o.im ? '<img class="opic" src="' + o.im + '" alt="">' : '') + esc(o.t) + '</div></button>'; }).join('');
     var b = $('qfb'); if (f) { b.hidden = false; b.className = 'qfb ' + (ans[q.id] === f.correct ? 'ok' : 'no'); b.innerHTML = (ans[q.id] === f.correct ? '✅ Correct!' : '❌ Not quite – the right answer is highlighted.') + (f.ex ? '<div>💡 ' + esc(f.ex) + '</div>' : ''); } else b.hidden = true;
     $('qprev').disabled = cur === 0; $('qnext').textContent = cur === Q.length - 1 ? '✓ Finish' : 'Next →'; $('qnext').className = 'btn' + (cur === Q.length - 1 ? ' btn-ok' : '');
     window.scrollTo(0, 0);

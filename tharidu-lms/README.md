@@ -51,7 +51,12 @@ iOS only starts a YouTube video from a tap that lands **on the video itself**, s
   - **Who**: everyone (common), a batch, or only students of a specific lesson (class). Optional SMS to those students on publish.
 - **Gemini scanner** (Settings → AI Chatbot key needed): upload a paper PDF / DOCX / photo (+ optional marking scheme) or paste text → Gemini builds every MCQ with options, the correct answer and a short explanation. With a marking scheme the answers come from it (100%); otherwise Gemini solves them and shows its confidence. Questions it is unsure about are marked ⚠ — the admin only taps the right option (or “Answer is right / Confirm all”) and publishes. A stored past paper can be turned into a quiz with one button (*Make MCQ with AI*).
 - Results page: ranking, average, hardest questions, reset an attempt.
+**Pictures in questions & options** – in the question editor every question and every answer option can have a picture: **drag & drop** a file, **Ctrl+V** a copied picture / screenshot (it goes into the option you are typing in, or the question box), or click to browse. Pictures are shrunk to 1600 px, served only to logged-in users (students only for published quizzes) and deleted when no longer used.
+**Auto-cut by AI** – on *Scan a paper with Gemini* keep “✂ Auto-cut diagrams & structures” ticked: the PDF is rendered page by page in the admin's browser (bundled pdf.js – nothing to install), Gemini returns the position of every diagram / structure / graph, and the server (PHP GD) cuts each one out and attaches it to the right question or option. Options that are only a picture are handled too. Works for a PDF, several photos of pages, or a stored past paper (*Make MCQ with AI*). Needs the PHP **GD** extension (standard on Hostinger).
 Hosting note: scanning big papers can take up to ~1 minute – ask Hostinger for `max_execution_time` ≥ 120 s and `upload_max_filesize` ≥ 20 MB if scans/uploads time out (use ≤ 20-page files otherwise). `.doc` is not readable – save as `.docx` or PDF.
+
+### Troubleshooting: “MySQL server has gone away” while scanning
+A long Gemini scan keeps the database connection idle and some hosts close it. The site now reconnects automatically and retries (no action needed). If an AI scan still stops, ask the host for `max_execution_time` ≥ 120 s or scan fewer pages.
 
 ## Upgrading an existing install
 Upload the new files. The database upgrades itself on the first page load.

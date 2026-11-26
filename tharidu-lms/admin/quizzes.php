@@ -22,13 +22,13 @@ if (is_post()) {
                 if (!(int)val('SELECT COUNT(*) FROM quiz_questions WHERE quiz_id=?', [$id])) throw new RuntimeException('Add at least one question before publishing.');
                 q("UPDATE quizzes SET status='published' WHERE id=?", [$id]); flash('Published – students can now see it.');
             } else { q("UPDATE quizzes SET status='draft' WHERE id=?", [$id]); flash('Moved back to draft (hidden from students).'); }
-        } elseif ($act === 'delete') { q('DELETE FROM quizzes WHERE id=?', [$id]); flash('Quiz deleted.');
+        } elseif ($act === 'delete') { $imgs = []; foreach (quiz_questions($id) as $k) $imgs = array_merge($imgs, quiz_question_images($k)); q('DELETE FROM quizzes WHERE id=?', [$id]); quiz_img_gc($imgs); flash('Quiz deleted.');
         } elseif ($act === 'duplicate') {
             $z = row('SELECT * FROM quizzes WHERE id=?', [$id]); if ($z) {
                 q("INSERT INTO quizzes(title,description,mode,audience,batch_id,lesson_id,open_at,close_at,duration_min,attempts,show_answers,shuffle,status,source_paper_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'draft',?)",
                   ['Copy of ' . $z['title'], $z['description'], $z['mode'], $z['audience'], $z['batch_id'], $z['lesson_id'], $z['open_at'], $z['close_at'], $z['duration_min'], $z['attempts'], $z['show_answers'], $z['shuffle'], $z['source_paper_id']]);
                 $nid = (int)db()->lastInsertId();
-                foreach (quiz_questions($id) as $k) q('INSERT INTO quiz_questions(quiz_id,sort_order,question,options,correct,explanation,ai_conf,reviewed) VALUES(?,?,?,?,?,?,?,?)', [$nid, $k['sort_order'], $k['question'], $k['options'], $k['correct'], $k['explanation'], $k['ai_conf'], $k['reviewed']]);
+                foreach (quiz_questions($id) as $k) q('INSERT INTO quiz_questions(quiz_id,sort_order,question,options,correct,explanation,q_image,opt_images,ai_conf,reviewed) VALUES(?,?,?,?,?,?,?,?,?,?)', [$nid, $k['sort_order'], $k['question'], $k['options'], $k['correct'], $k['explanation'], $k['q_image'], $k['opt_images'], $k['ai_conf'], $k['reviewed']]);
                 flash('Duplicated as a draft.'); redirect('admin/quiz?id=' . $nid);
             }
         } elseif ($act === 'notify') {

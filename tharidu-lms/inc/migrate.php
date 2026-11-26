@@ -1,6 +1,6 @@
 <?php
 // Automatic, idempotent schema upgrades. Runs once (schema_v setting).
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 function col_exists(string $t, string $c): bool {
     return (bool)val('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?', [$t, $c]);
 }
@@ -115,5 +115,8 @@ CREATE TABLE IF NOT EXISTS quiz_answers (
   FOREIGN KEY (attempt_id) REFERENCES quiz_attempts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 SQL);
+    // v6: pictures on questions and answer options
+    if (!col_exists('quiz_questions', 'q_image')) db()->exec('ALTER TABLE quiz_questions ADD q_image VARCHAR(255) NULL');
+    if (!col_exists('quiz_questions', 'opt_images')) db()->exec('ALTER TABLE quiz_questions ADD opt_images TEXT NULL');
     set_setting('schema_v', (string)SCHEMA_VERSION);
 }
