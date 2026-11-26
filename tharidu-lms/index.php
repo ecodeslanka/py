@@ -64,8 +64,8 @@ $socials = ['youtube' => ['youtube', '#ff0000'], 'facebook' => ['facebook', '#18
       <div class="orbit"><svg viewBox="0 0 100 100">
         <g class="s1"><ellipse cx="50" cy="50" rx="49" ry="20" fill="none" stroke-width=".3" transform="rotate(-25 50 50)"/><circle cx="95" cy="30" r="1.6" fill="#ff5a1f"/></g>
         <g class="s2"><ellipse cx="50" cy="50" rx="49" ry="20" fill="none" stroke-width=".3" transform="rotate(35 50 50)"/><circle cx="8" cy="30" r="1.6" fill="#22d3ff"/></g></svg></div>
-      <?php if ($slides): ?><div class="slides"><?php foreach ($slides as $i => $sl): ?><div class="sl<?= $i === 0 ? ' on' : '' ?>"><img src="<?= img($sl['image']) ?>" alt="<?= e($sl['caption']) ?>"><?php if ($sl['caption']): ?><div class="cap"><?= e($sl['caption']) ?></div><?php endif; ?></div><?php endforeach; ?></div>
-      <?php else: ?><img src="<?= img(setting('hero_image') ?: null, 'assets/img/coat.webp') ?>" alt="" width="900" height="1100"><?php endif; ?>
+      <?php if ($slides): ?><div class="slides"><?php foreach ($slides as $i => $sl): ?><div class="sl<?= $i === 0 ? ' on' : '' ?>"><img src="<?= img($sl['image']) ?>" alt="<?= e($sl['caption']) ?>" decoding="async"><?php if ($sl['caption']): ?><div class="cap"><?= e($sl['caption']) ?></div><?php endif; ?></div><?php endforeach; ?></div>
+      <?php else: ?><img src="<?= img(setting('hero_image') ?: null, 'assets/img/coat.webp') ?>" alt="" width="900" height="1100" fetchpriority="high" decoding="async"><?php endif; ?>
       <?php foreach (array_slice($H['chips'], 0, 3) as $i => $c): ?>
       <div class="chip c<?= $i + 1 ?>"><span class="ib"><i data-lucide="<?= e($c['icon'] ?? 'star') ?>"></i></span><span><?= e($c['title'] ?? '') ?><small><?= e($c['sub'] ?? '') ?></small></span></div>
       <?php endforeach; ?>
@@ -93,7 +93,7 @@ $socials = ['youtube' => ['youtube', '#ff0000'], 'facebook' => ['facebook', '#18
 <section class="band about" id="about" style="padding-top:0">
   <div class="wrap">
     <div class="ph">
-      <img src="<?= img(setting('about_image') ?: null, 'assets/img/polo.webp') ?>" alt="About" width="900" height="985">
+      <img src="<?= img(setting('about_image') ?: null, 'assets/img/polo.webp') ?>" alt="About" width="900" height="985" loading="lazy" decoding="async">
       <div class="badge"><i data-lucide="award"></i><span><?= e($H['about_badge1']) ?><small><?= e($H['about_badge2']) ?></small></span></div>
     </div>
     <div>
@@ -132,7 +132,7 @@ $socials = ['youtube' => ['youtube', '#ff0000'], 'facebook' => ['facebook', '#18
 
 <section class="band why">
   <div class="wrap">
-    <div class="lab"><img src="<?= img(setting('why_image') ?: null, 'assets/img/lab-bg.webp') ?>" alt="" width="880" height="1100"><p><i data-lucide="flask-round"></i><?= e($H['w_caption']) ?></p></div>
+    <div class="lab"><img src="<?= img(setting('why_image') ?: null, 'assets/img/lab-bg.webp') ?>" alt="" width="880" height="1100" loading="lazy" decoding="async"><p><i data-lucide="flask-round"></i><?= e($H['w_caption']) ?></p></div>
     <div>
       <span class="tag"><i data-lucide="sparkles"></i><?= e($H['w_tag']) ?></span>
       <h2><?= e($H['w_t1']) ?> <span class="grad-b"><?= e($H['w_t2']) ?></span><?= e($H['w_t3']) ?></h2>
@@ -154,7 +154,7 @@ $socials = ['youtube' => ['youtube', '#ff0000'], 'facebook' => ['facebook', '#18
           <?php if (!$groups): ?><a class="btn btn-w" href="https://wa.me/<?= e($wa) ?>" target="_blank" rel="noopener"><i data-lucide="message-circle"></i>Chat on WhatsApp</a><?php endif; ?>
         </div>
       </div>
-      <img src="<?= img(setting('community_image') ?: null, 'assets/img/plaid.webp') ?>" alt="" width="880" height="1100">
+      <img src="<?= img(setting('community_image') ?: null, 'assets/img/plaid.webp') ?>" alt="" width="880" height="1100" loading="lazy" decoding="async">
     </div>
   </div>
 </section>
