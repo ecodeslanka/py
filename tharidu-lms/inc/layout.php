@@ -68,7 +68,7 @@ function student_foot(string $active = ''): void { ?></main>
   <a href="<?= url('dashboard#home') ?>" data-screen="home" class="<?= $active === 'home' ? 'on' : '' ?>"><i data-lucide="house"></i>Home</a>
   <a href="<?= url('dashboard#browse') ?>" data-screen="browse"><i data-lucide="book-open"></i>Lessons</a>
   <?php if (setting('bot_enabled', '1') === '1' && setting('gemini_key') !== ''): ?><a href="<?= url('chat') ?>" class="<?= $active === 'chat' ? 'on' : '' ?>"><i data-lucide="sparkles"></i>Ask AI</a><?php endif; ?>
-  <a href="<?= url('dashboard#pay') ?>" data-screen="pay"><i data-lucide="wallet"></i>Payments</a>
+  <a href="<?= url('papers') ?>" class="<?= $active === 'papers' ? 'on' : '' ?>"><i data-lucide="file-check-2"></i>Papers</a>
   <a href="<?= url('dashboard#me') ?>" data-screen="me"><i data-lucide="user-round"></i>Profile</a>
 </nav>
 <?php foot_html(); }
@@ -79,6 +79,7 @@ function admin_head(string $title, string $active = ''): array {
     $groups = [
         'Overview' => [['index', '', 'layout-dashboard', 'Dashboard']],
         'Academics' => [['batches', 'batches', 'layers', 'Batches'], ['classes', 'classes', 'map-pin', 'Classes'], ['grades', 'grades', 'graduation-cap', 'Grades'], ['lessons', 'lessons', 'book-open', 'Lessons']],
+        'Exams' => [['papers', 'papers', 'file-text', 'Past papers'], ['quizzes', 'quizzes', 'list-checks', 'MCQ quizzes']],
         'People & money' => [['students', 'students', 'users', 'Students'], ['payments', 'payments', 'wallet', 'Payments'], ['users', 'users', 'shield', 'Admin users']],
         'Website' => [['home', 'home', 'house', 'Home page'], ['settings', 'settings', 'settings', 'Site settings']],
     ]; ?>

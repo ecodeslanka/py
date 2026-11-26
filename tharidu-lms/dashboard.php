@@ -27,7 +27,7 @@ $g = ['g1', 'g2', 'g3', 'g4'];
 <section class="screen on" data-screen="home">
   <div class="ahero"><div class="hi">Welcome back 👋</div><h1><?= e($u['name']) ?></h1>
     <div class="chips"><?php if ($my['bname']): ?><span><?= e($my['bname']) ?></span><?php endif; ?><?php if ($my['cname']): ?><span><?= e($my['cname']) ?></span><?php endif; ?></div>
-    <div class="astats"><div><b><?= count($mine) ?></b><small>My lessons</small></div><div><b><?= count($avail) ?></b><small>Available</small></div><div><b><?= $pendingN ?></b><small>Pending</small></div></div></div>
+    <div class="astats"><div><b><?= count($mine) ?></b><small>My lessons</small></div><div><b><?= count($avail) ?></b><small>Available</small></div><a href="#pay" data-goto="pay" style="color:inherit"><b><?= $pendingN ?></b><small>Pending pay ›</small></a></div></div>
   <div class="sh"><h2>My lessons</h2><small><?= count($mine) ?> joined</small></div>
   <?php if (!$mine): ?><div class="card empty">No lessons yet.<br><a class="btn btn-sm" style="margin-top:12px" href="#browse" data-goto="browse">Browse &amp; add to cart</a></div><?php else: ?>
   <div class="gstack"><?php foreach ($mine as $i => $l): ?>
@@ -58,6 +58,7 @@ $g = ['g1', 'g2', 'g3', 'g4'];
 
 <!-- PAYMENTS -->
 <section class="screen" data-screen="pay">
+  <a class="back" href="#me" data-goto="me"><i data-lucide="chevron-left"></i>Profile</a>
   <div class="sh" style="margin-top:6px"><h2>Payments</h2><small><?= count($hist) ?></small></div>
   <?php if (!$hist): ?><div class="card empty">No payments yet.</div><?php else: ?><div class="tile-list">
   <?php foreach ($hist as $p): $cls = ['approved' => 'ok', 'pending' => 'warn', 'rejected' => 'err'][$p['status']]; ?>
@@ -75,7 +76,8 @@ $g = ['g1', 'g2', 'g3', 'g4'];
     <form method="post"><?= csrf_field() ?><input type="hidden" name="act" value="pw">
     <?php field('Current password', 'old', '', ['type' => 'password', 'req' => 1]); field('New password', 'new', '', ['type' => 'password', 'req' => 1, 'attr' => 'minlength="6"']); field('Repeat new password', 'new2', '', ['type' => 'password', 'req' => 1]); ?>
     <button class="btn btn-block">Update password</button></form></div>
-  <br><a class="btn btn-o btn-block" href="<?= url() ?>"><i data-lucide="globe"></i>Visit website</a><br>
+  <br><a class="btn btn-block" href="#pay" data-goto="pay"><i data-lucide="wallet"></i>My payments</a><br>
+  <a class="btn btn-o btn-block" href="<?= url() ?>"><i data-lucide="globe"></i>Visit website</a><br>
   <a class="btn btn-danger btn-block" href="<?= url('logout') ?>"><i data-lucide="log-out"></i>Logout</a>
 </section>
 <?php student_foot();

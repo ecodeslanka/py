@@ -42,6 +42,17 @@ YouTube refuses an embed when the page does not send a Referer. This site now se
 ### iPhone / iOS Chrome & Safari
 iOS only starts a YouTube video from a tap that lands **on the video itself**, so on iOS the first tap goes straight to the video; the moment it plays the player switches to a full-screen overlay (⟳ rotates to landscape). Browsers on iOS cannot hide their address bar, so for **true full screen** students use *Share → Add to Home Screen* (the site is an installable web app) and open it from the home screen.
 
+## Past papers & MCQ quizzes
+**Admin → Exams**
+- **Past papers**: year, paper name, paper file (PDF/Word/image), optional marking scheme, optional batch. Students download the paper and the marking scheme from **Papers → Past papers** (grouped by year, searchable).
+- **MCQ quizzes** (admin MCQ maker). Per quiz you choose how it is sent to students:
+  - **Exam** – optional *opens / closes* time, time limit (auto-submit), attempts per student, when answers are shown (after submit / after close / never);
+  - **Practice** – always open, unlimited tries, instant correct answer + explanation after every question;
+  - **Who**: everyone (common), a batch, or only students of a specific lesson (class). Optional SMS to those students on publish.
+- **Gemini scanner** (Settings → AI Chatbot key needed): upload a paper PDF / DOCX / photo (+ optional marking scheme) or paste text → Gemini builds every MCQ with options, the correct answer and a short explanation. With a marking scheme the answers come from it (100%); otherwise Gemini solves them and shows its confidence. Questions it is unsure about are marked ⚠ — the admin only taps the right option (or “Answer is right / Confirm all”) and publishes. A stored past paper can be turned into a quiz with one button (*Make MCQ with AI*).
+- Results page: ranking, average, hardest questions, reset an attempt.
+Hosting note: scanning big papers can take up to ~1 minute – ask Hostinger for `max_execution_time` ≥ 120 s and `upload_max_filesize` ≥ 20 MB if scans/uploads time out (use ≤ 20-page files otherwise). `.doc` is not readable – save as `.docx` or PDF.
+
 ## Upgrading an existing install
 Upload the new files. The database upgrades itself on the first page load.
 
