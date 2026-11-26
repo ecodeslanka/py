@@ -16,6 +16,7 @@ session_start();
 header('X-Frame-Options: SAMEORIGIN');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: same-origin');
+header('Cache-Control: private, no-cache, must-revalidate');
 
 function db(): PDO {
     static $pdo;
@@ -40,6 +41,8 @@ function rows(string $sql, array $p = []): array { return q($sql, $p)->fetchAll(
 function val(string $sql, array $p = []) { $r = q($sql, $p)->fetch(PDO::FETCH_NUM); return $r ? $r[0] : null; }
 
 function e($s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+/** URL of a file under /assets with an automatic cache-busting version (file modified time). */
+function asset(string $p): string { $f = ROOT . '/assets/' . ltrim($p, '/'); return BASE . '/assets/' . ltrim($p, '/') . '?v=' . (is_file($f) ? filemtime($f) : 1); }
 function url(string $p = ''): string { return BASE . '/' . ltrim($p, '/'); }
 function redirect(string $p): never { header('Location: ' . (preg_match('~^https?://~', $p) ? $p : url($p))); exit; }
 function money($n): string { return 'Rs. ' . number_format((float)$n, 2); }

@@ -23,8 +23,8 @@ $socials = ['youtube' => ['youtube', '#ff0000'], 'facebook' => ['facebook', '#18
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Noto+Sans+Sinhala:wght@500;700;900&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
-<link rel="stylesheet" href="<?= url('assets/css/home.css') ?>?v=2">
+<script src="<?= asset('js/lucide.min.js') ?>"></script>
+<link rel="stylesheet" href="<?= asset('css/home.css') ?>">
 </head>
 <body>
 

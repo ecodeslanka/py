@@ -74,7 +74,7 @@ if (!isset($by[$tab])) $tab = array_key_first($by) ?? '';
 </form></dialog>
 <style>.drag{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:9px;color:var(--mute);cursor:grab;touch-action:none}.drag:hover{background:var(--fill)}
 #sortable tr.ghost td{background:var(--tint-b,#eaf1ff)!important;outline:2px dashed var(--b)}</style>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script src="<?= asset('js/Sortable.min.js') ?>"></script>
 <script>
 (function(){
   var ef=document.getElementById('ef'),dlg=document.getElementById('mEdit'),$=function(i){return document.getElementById(i)};

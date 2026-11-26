@@ -16,7 +16,7 @@ function youtube_id(string $link): ?string {
 }
 function render_player(string $videoId, string $watermark, bool $live = false, string $title = ''): void {
     $tok = player_token($videoId); ?>
-<link rel="stylesheet" href="<?= url('assets/css/player.css') ?>?v=1">
+<link rel="stylesheet" href="<?= asset('css/player.css') ?>">
 <div class="ecp" id="ecp" data-token="<?= e($tok) ?>" data-stream="<?= e(url('stream')) ?>" data-live="<?= $live ? 1 : 0 ?>" data-wm="<?= e($watermark) ?>">
   <div class="ecp-stage"><div class="ecp-frame"><div id="ecp-yt"></div></div></div>
   <div class="ecp-shield" id="ecp-shield"></div>
@@ -36,5 +36,5 @@ function render_player(string $videoId, string $watermark, bool $live = false, s
   </div>
 </div>
 <script src="https://www.youtube.com/iframe_api" async></script>
-<script src="<?= url('assets/js/ecodes-player.js') ?>?v=1" defer></script>
+<script src="<?= asset('js/ecodes-player.js') ?>" defer></script>
 <?php }

@@ -10,16 +10,16 @@ function head_html(string $title, string $body_class = ''): void {
 <title><?= e($title) ?> · <?= e($s) ?></title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400;600;700;800&family=Noto+Sans+Sinhala:wght@500;700;900&display=swap" rel="stylesheet">
-<?php if (in_array($body_class, ['app', 'adm'], true)): ?><link rel="stylesheet" href="<?= url('assets/css/dash.css') ?>?v=3">
-<?php else: ?><link rel="stylesheet" href="<?= url('assets/css/app.css') ?>?v=1"><?php endif; ?>
+<?php if (in_array($body_class, ['app', 'adm'], true)): ?><link rel="stylesheet" href="<?= asset('css/dash.css') ?>">
+<?php else: ?><link rel="stylesheet" href="<?= asset('css/app.css') ?>"><?php endif; ?>
 <script>try{var m=localStorage.getItem('mode');if(m)document.documentElement.dataset.mode=m}catch(e){}</script>
-<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js" defer></script>
+<script src="<?= asset('js/lucide.min.js') ?>" defer></script>
 </head>
 <body class="<?= e($body_class) ?>">
 <?php }
 
 function foot_html(): void { ?>
-<script src="<?= url('assets/js/app.js') ?>?v=1" defer></script>
+<script src="<?= asset('js/app.js') ?>" defer></script>
 </body></html>
 <?php }
 

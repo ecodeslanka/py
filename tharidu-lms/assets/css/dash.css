@@ -215,3 +215,11 @@ dialog.modal::backdrop{background:rgba(6,11,36,.55);-webkit-backdrop-filter:blur
 .gcard .gbtn.in{background:rgba(255,255,255,.28);color:#fff;box-shadow:none}
 .matgroup{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:20px 4px 8px}
 .noticeimg{width:100%;border-radius:18px;margin-top:8px;box-shadow:var(--sh)}
+/* modal fallback for browsers without <dialog>.showModal */
+dialog.modal.fallback{position:fixed;inset:0;margin:auto;z-index:99999;box-shadow:0 0 0 100vmax rgba(6,11,36,.6),0 40px 90px -20px rgba(11,20,56,.55)}
+body.modal-open{overflow:hidden}
+dialog.modal:not([open]){display:none}
+/* icon-only buttons stay usable if icons are slow to load */
+.btn svg:only-child,.btn i:only-child{min-width:1em}
+.x{font-size:0}.x svg{font-size:18px}
+.x:not(:has(svg))::after{content:"✕";font-size:16px}
