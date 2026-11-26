@@ -110,6 +110,7 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     // Field summary
     'edit_field_summary'   => ['field_summary_list', 'edit'],
     'update_field_summary' => ['field_summary_list', 'edit'],
+    'add_manual_invoice'   => ['field_summary_list', 'edit'],     // Edit Field Summary → Add Invoice Manually
     'view_field_summary'   => ['field_summary_list', 'view'],
     'delete_field_summary' => ['field_summary_list', 'delete'],
     'delete_field_summary_details' => ['field_summary_list', 'delete'],

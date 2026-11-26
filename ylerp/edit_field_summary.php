@@ -122,6 +122,12 @@ if ($sinv_q) {
     }
 }
 
+/* ── manual invoices (Add Invoice Manually) ── */
+foreach (['is_manual' => "TINYINT(1) NOT NULL DEFAULT 0", 'manual_by' => "VARCHAR(100) NULL", 'manual_at' => "DATETIME NULL", 'manual_remarks' => "VARCHAR(255) NULL"] as $_mc => $_md) {
+    $_mr = mysqli_query($conn, "SHOW COLUMNS FROM field_summary_details LIKE '$_mc'");
+    if ($_mr && mysqli_num_rows($_mr) === 0) mysqli_query($conn, "ALTER TABLE field_summary_details ADD COLUMN `$_mc` $_md");
+}
+
 /* ── detail rows — ACTIVE (not to_be_delivery) ── */
 $details_result = mysqli_query($conn,
     "SELECT d.*,
@@ -298,7 +304,7 @@ function renderDetailRow(&$d, $field_summary_id, $cash_paid_map, $cheque_paid_ma
     $v_damage = zv($d['damage_adjustment']);
     $v_cancel = zv($d['cancel_value']);
     $v_adj    = floatval($d['adjust_net_value']);
-    $v_ikea   = isset($sinv_map[trim($d['invoice_num'])]) ? zv($sinv_map[trim($d['invoice_num'])]) : '';
+    $v_ikea   = isset($sinv_map[trim($d['invoice_num'])]) ? zv($sinv_map[trim($d['invoice_num'])]) : (!empty($d['is_manual']) ? zv($d['ikea_value'] ?? '') : '');   /* a manual invoice keeps the Ikea value typed for it */
 
     $is_updated = intval($d['updated'] ?? 0);
     $tbd_disabled = ($is_updated || $is_tbd) ? 'disabled' : '';
@@ -352,7 +358,9 @@ function renderDetailRow(&$d, $field_summary_id, $cash_paid_map, $cheque_paid_ma
     echo '</td>';
 
     echo '<td>'.($rn++).'</td>';
-    echo '<td>'.htmlspecialchars($d['invoice_num']).'</td>';
+    echo '<td>'.htmlspecialchars($d['invoice_num'])
+        .(!empty($d['is_manual']) ? ' <span class="mi-badge" title="Added manually'.(!empty($d['manual_by']) ? ' by '.htmlspecialchars($d['manual_by']) : '').(!empty($d['manual_at']) ? ' on '.htmlspecialchars($d['manual_at']) : '').(!empty($d['manual_remarks']) ? ' — '.htmlspecialchars($d['manual_remarks']) : '').'"><i class="fa-solid fa-hand"></i> Manual</span>' : '')
+        .'</td>';
     echo '<td title="'.htmlspecialchars($tcode_full).'">'.htmlspecialchars($tcode_display).'</td>';
     echo '<td>'.htmlspecialchars($d['display_customer_name']).'</td>';
     echo '<td>'.htmlspecialchars($d['route']).'</td>';
@@ -727,6 +735,27 @@ body.fs-locked #editSummaryForm input:disabled,body.fs-locked #editSummaryForm s
 body.fs-locked #editSummaryForm button:disabled,body.fs-locked .modal button:disabled{opacity:.45;cursor:not-allowed;}
 
 @media(max-width:700px){.gr2,.gr3,.gr4{grid-template-columns:1fr;}.inv-summary-strip{flex-wrap:wrap;}.inv-sum-item{min-width:50%;}.cust-info-strip{grid-template-columns:1fr 1fr;}.bulk-panel,.tbd-panel,.move-panel,.re-tbd-panel{flex-direction:column;align-items:flex-start;}.bulk-pay-group,.tbd-group,.move-group,.re-tbd-group{width:100%;}}
+/* Add Invoice Manually */
+.btn-mi{background:#0f766e;color:#fff;border:1px solid #0b5f58}
+.btn-mi:hover{background:#115e59;color:#fff}
+.mi-badge{display:inline-flex;align-items:center;gap:3px;margin-left:4px;padding:1px 6px;border-radius:9px;background:#ccfbf1;color:#0f766e;border:1px solid #99f6e4;font-size:10px;font-weight:700;white-space:nowrap;vertical-align:middle}
+.mi-back{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:2147483000;display:none;align-items:center;justify-content:center;padding:16px}
+.mi-back.open{display:flex}
+.mi-box{background:#fff;border-radius:14px;width:100%;max-width:560px;max-height:92vh;overflow:auto;box-shadow:0 24px 70px rgba(0,0,0,.3)}
+.mi-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#f0fdfa;border-bottom:1px solid #ccfbf1;border-radius:14px 14px 0 0}
+.mi-head h3{margin:0;font-size:16px;color:#0f766e}
+.mi-x{border:1px solid #99f6e4;background:#fff;color:#0f766e;width:32px;height:32px;border-radius:8px;cursor:pointer}
+.mi-body{padding:16px 18px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mi-body .w2{grid-column:1/-1}
+.mi-body label{display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:4px}
+.mi-body input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px}
+.mi-body input:focus{outline:none;border-color:#14b8a6;box-shadow:0 0 0 3px rgba(20,184,166,.15)}
+.mi-hint{font-size:11.5px;margin-top:4px;color:#6b7280;min-height:15px}
+.mi-hint.bad{color:#b91c1c;font-weight:600}.mi-hint.ok{color:#047857;font-weight:600}
+.mi-msg{grid-column:1/-1;display:none;padding:9px 12px;border-radius:8px;font-size:13px;font-weight:600}
+.mi-msg.err{display:block;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+.mi-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #f1f5f9}
+@media (max-width:560px){.mi-body{grid-template-columns:1fr}}
 </style>
 
 <div class="page-header">
@@ -751,6 +780,7 @@ body.fs-locked #editSummaryForm button:disabled,body.fs-locked .modal button:dis
         <button type="button" class="btn fsv-hist" data-fsv-keep onclick="document.getElementById('fsvLog').classList.toggle('open')" title="Verify history"><i class="fa-solid fa-clock-rotate-left"></i></button>
       <?php endif; ?>
       </span>
+      <?php if (!$fs_verified): ?><button type="button" class="btn btn-mi" onclick="miOpen()"><i class="fa-solid fa-file-circle-plus"></i> Add Invoice Manually</button><?php endif; ?>
       <a href="view_payments.php?id=<?php echo $field_summary_id; ?>" class="btn btn-secondary"><i class="fa-solid fa-receipt"></i> View Payments</a>
       <a href="field_summary_list.php" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>
     </div>
@@ -1353,6 +1383,66 @@ endforeach; ?>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<!-- Add Invoice Manually -->
+<div class="mi-back" id="miBack" onclick="if(event.target===this)miClose()" data-fsv-keep>
+  <div class="mi-box" role="dialog" aria-modal="true" aria-labelledby="miTitle">
+    <div class="mi-head"><h3 id="miTitle"><i class="fa-solid fa-file-circle-plus"></i> Add Invoice Manually</h3><button type="button" class="mi-x" onclick="miClose()" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+    <div class="mi-body">
+      <div class="mi-msg" id="miMsg"></div>
+      <div><label for="miInv">Invoice No <span style="color:#dc2626">*</span></label><input id="miInv" autocomplete="off" onblur="miCheckInv()"><div class="mi-hint" id="miInvHint"></div></div>
+      <div><label for="miTc">Customer T-Code <span style="color:#dc2626">*</span></label><input id="miTc" autocomplete="off" onblur="miLookup()"><div class="mi-hint" id="miTcHint"></div></div>
+      <div class="w2"><label for="miCust">Customer Name</label><input id="miCust" placeholder="Filled from the T-Code"></div>
+      <div><label for="miNet">Invoice Amount (Net) <span style="color:#dc2626">*</span></label><input id="miNet" inputmode="decimal" placeholder="0.00"></div>
+      <div><label for="miIkea">Ikea Value</label><input id="miIkea" inputmode="decimal" placeholder="Same as the invoice amount"></div>
+      <div class="w2"><label for="miRem">Remarks</label><input id="miRem" maxlength="255" placeholder="e.g. Manual bill — not in the import"></div>
+      <div class="w2 mi-hint">The invoice is added to this field summary like the others (route <?= htmlspecialchars($summary['route']) ?>). Discounts, returns, damage, cancel and payments are entered on its row after it is added.</div>
+    </div>
+    <div class="mi-foot"><button type="button" class="btn btn-secondary" onclick="miClose()">Cancel</button><button type="button" class="btn btn-mi" id="miSave" onclick="miSave()"><i class="fa-solid fa-floppy-disk"></i> Add Invoice</button></div>
+  </div>
+</div>
+<script>
+/* ── Add Invoice Manually ── */
+function miOpen(){
+  ['miInv','miTc','miCust','miNet','miIkea','miRem'].forEach(function(i){ document.getElementById(i).value=''; });
+  ['miInvHint','miTcHint'].forEach(function(i){ var e=document.getElementById(i); e.textContent=''; e.className='mi-hint'; });
+  document.getElementById('miMsg').className='mi-msg';
+  var b=document.getElementById('miBack'); if(b.parentElement!==document.body) document.body.appendChild(b);
+  b.classList.add('open'); setTimeout(function(){ document.getElementById('miInv').focus(); },50);
+}
+function miClose(){ document.getElementById('miBack').classList.remove('open'); }
+function miCheckInv(){
+  var v=document.getElementById('miInv').value.trim(), h=document.getElementById('miInvHint'); if(!v){ h.textContent=''; return; }
+  fetch('add_manual_invoice.php?check='+encodeURIComponent(v)).then(function(r){return r.json();}).then(function(d){
+    if(d.used && d.used.length){ h.className='mi-hint bad'; h.textContent='Already in field summary '+(d.used[0].code||('#'+d.used[0].fsid))+(d.used[0].date?' ('+d.used[0].date+')':''); }
+    else { h.className='mi-hint ok'; h.textContent='New invoice number'; }
+  }).catch(function(){});
+}
+function miLookup(){
+  var v=document.getElementById('miTc').value.trim(), h=document.getElementById('miTcHint'); if(!v){ h.textContent=''; return; }
+  fetch('add_manual_invoice.php?lookup='+encodeURIComponent(v)).then(function(r){return r.json();}).then(function(d){
+    if(d.ok){ h.className='mi-hint ok'; h.textContent=d.name+(d.route?' · route '+d.route:''); if(!document.getElementById('miCust').value) document.getElementById('miCust').value=d.name; }
+    else { h.className='mi-hint bad'; h.textContent=d.msg||'T-Code not found'; }
+  }).catch(function(){});
+}
+function miSave(){
+  var m=document.getElementById('miMsg'), b=document.getElementById('miSave'), fd=new FormData();
+  fd.append('field_summary_id','<?= (int)$field_summary_id ?>');
+  fd.append('invoice_num',document.getElementById('miInv').value.trim());
+  fd.append('t_code',document.getElementById('miTc').value.trim());
+  fd.append('customer_name',document.getElementById('miCust').value.trim());
+  fd.append('net_value',document.getElementById('miNet').value.trim());
+  fd.append('ikea_value',document.getElementById('miIkea').value.trim());
+  fd.append('remarks',document.getElementById('miRem').value.trim());
+  m.className='mi-msg'; b.disabled=true;
+  fetch('add_manual_invoice.php',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
+    b.disabled=false;
+    if(!d.ok){ m.className='mi-msg err'; m.textContent=d.msg||'Could not add the invoice.'; return; }
+    sessionStorage.setItem('mi_added', d.msg); location.reload();
+  }).catch(function(){ b.disabled=false; m.className='mi-msg err'; m.textContent='Could not reach the server. Try again.'; });
+}
+document.addEventListener('keydown',function(e){ var b=document.getElementById('miBack'); if(!b||!b.classList.contains('open')) return; if(e.key==='Escape') miClose(); if(e.key==='Enter' && e.target.tagName==='INPUT'){ e.preventDefault(); miSave(); } });
+document.addEventListener('DOMContentLoaded',function(){ try{ var t=sessionStorage.getItem('mi_added'); if(t){ sessionStorage.removeItem('mi_added'); if(typeof showToast==='function') showToast(t,'ok'); else alert(t); } }catch(e){} });
+</script>
 <script>
 /* ═══ VERIFIED LOCK ═══════════════════════════════════════════
    verified → every input / button on the page is disabled and every save call is blocked
