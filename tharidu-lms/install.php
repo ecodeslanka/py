@@ -15,7 +15,7 @@ if (is_post()) {
         }
         if (!val('SELECT COUNT(*) FROM grades')) foreach (['A/L Theory', 'A/L Paper Class', 'A/L Revision'] as $g) q('INSERT INTO grades(name) VALUES(?)', [$g]);
         if (!val('SELECT COUNT(*) FROM batches')) foreach ([['2027 A/L', 1], ['2028 A/L', 2]] as [$n, $o]) q('INSERT INTO batches(name,sort_order) VALUES(?,?)', [$n, $o]);
-        $defaults = ['site_name' => SITE_NAME, 'tagline' => 'Chemistry made clear.', 'whatsapp' => '94703957020', 'phone' => '0703957020',
+        $defaults = ['site_name' => SITE_NAME, 'whatsapp' => '94703957020', 'phone' => '0703957020',
             'about_title' => 'Learn chemistry the genuine way',
             'about_text' => "Tharidu K. Wijekoon is a science graduate in Chemistry and Physics who teaches G.C.E. A/L Chemistry.\n\nTheory classes, paper classes and online revision — in Kegalle, Kurunegala and from your home."];
         foreach ($defaults as $k => $v) if (setting($k) === '') set_setting($k, $v);

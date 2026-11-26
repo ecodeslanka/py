@@ -48,7 +48,7 @@ $slides = rows('SELECT * FROM slides ORDER BY sort_order,id'); $groups = rows('S
 ?>
 <div class="card"><h3><i data-lucide="info"></i>About us & site details</h3>
 <form method="post" enctype="multipart/form-data"><?= csrf_field() ?><input type="hidden" name="act" value="general">
-<div class="two"><?php field('Site name', 'site_name', setting('site_name', SITE_NAME)); field('Hero tagline', 'tagline', setting('tagline')); ?></div>
+<div class="two"><?php field('Site name', 'site_name', setting('site_name', SITE_NAME)); field('Hero description (optional)', 'tagline', setting('tagline') === 'Chemistry made clear.' ? '' : setting('tagline')); ?></div>
 <?php field('About title', 'about_title', setting('about_title')); field('About us text', 'about_text', setting('about_text'), ['type' => 'textarea', 'rows' => 8, 'hint' => 'Blank line = new paragraph']); ?>
 <label class="f">About image<span class="hint">Shown beside the About text on the home page</span><input type="file" name="about_image" accept="image/*"></label>
 <?php if (setting('about_image')): ?><img class="thumb" style="width:120px;height:80px" src="<?= img(setting('about_image')) ?>" alt=""><br><br><?php endif; ?>
