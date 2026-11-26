@@ -1,0 +1,12 @@
+Options -Indexes -MultiViews
+RewriteEngine On
+# Block private folders
+RewriteRule ^(inc|sql)(/|$) - [F,L]
+# Hide .php extension: /login -> login.php
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME}.php -f
+RewriteRule ^(.+?)/?$ $1.php [L]
+<FilesMatch "^\.(ht|git)">
+Require all denied
+</FilesMatch>
