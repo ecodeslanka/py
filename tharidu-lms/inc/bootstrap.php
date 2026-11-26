@@ -15,7 +15,7 @@ session_name('tlms');
 session_start();
 header('X-Frame-Options: SAMEORIGIN');
 header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: same-origin');
+header('Referrer-Policy: strict-origin-when-cross-origin');   // YouTube needs the Referer, otherwise: "Video player configuration error" (153)
 header('Cache-Control: private, no-cache, must-revalidate');
 
 function db(): PDO {

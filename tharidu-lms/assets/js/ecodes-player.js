@@ -33,19 +33,40 @@
     .catch(function () { $('ecp-splash-t').textContent = 'Session expired – please reload the page.'; });
   window.onYouTubeIframeAPIReady = function () { apiReady = true; boot(); };
   if (window.YT && YT.Player) apiReady = true;
+  var ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);   // Safari AND Chrome/Firefox on iPhone (all WebKit)
+  var started = false, errShown = false, readyTimer = null, resumeT = null;
+  function showErr(t, sub) { errShown = true; $('ecp-splash').style.display = 'none'; $('ecp-err-t').textContent = t; $('ecp-err-s').textContent = sub || ''; $('ecp-err').style.display = 'flex'; }
+  $('ecp-reload').addEventListener('click', function () { location.reload(); });
+  function setDirect(on) { root.classList.toggle('ios-direct', !!on); $('ecp-hint').style.display = on ? 'block' : 'none'; }
   function boot() {
     if (!vid || !apiReady || player) return;
+    // build the iframe ourselves so the referrer policy is guaranteed (YouTube error 153 = "player configuration error" when the Referer is missing)
+    var holder = $('ecp-yt'), f = document.createElement('iframe'), q = {
+      enablejsapi: 1, controls: 0, modestbranding: 1, rel: 0, fs: 0, disablekb: 1, iv_load_policy: 3, playsinline: 1, cc_load_policy: 0,
+      origin: location.origin, widget_referrer: location.href };
+    f.id = 'ecp-yt'; f.title = 'video'; f.setAttribute('frameborder', '0'); f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen'); f.setAttribute('allowfullscreen', '');
+    f.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(vid) + '?' + Object.keys(q).map(function (k) { return k + '=' + encodeURIComponent(q[k]); }).join('&');
+    holder.parentNode.replaceChild(f, holder);
+    if (ios) setDirect(true);                       // iOS only starts playback from a tap that lands ON the video itself
+    clearTimeout(readyTimer); readyTimer = setTimeout(function () { if (!ready && !errShown) showErr('Video could not start', 'Check your internet connection, then tap Reload. If it keeps failing, tell your teacher.'); }, 20000);
     player = new YT.Player('ecp-yt', {
-      videoId: vid, host: 'https://www.youtube-nocookie.com',
-      playerVars: { controls: 0, modestbranding: 1, rel: 0, fs: 0, disablekb: 1, iv_load_policy: 3, playsinline: 1, cc_load_policy: 0, showinfo: 0, origin: location.origin },
       events: {
         onReady: function () {
-          ready = true; var f = root.querySelector('iframe'); if (f) f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-          setTimeout(function () { $('ecp-splash').style.display = 'none'; }, 1500); $('ecp-dur').textContent = fmt(player.getDuration());
+          ready = true; clearTimeout(readyTimer); setTimeout(function () { if (!errShown) $('ecp-splash').style.display = 'none'; }, 1200); $('ecp-dur').textContent = fmt(player.getDuration());
+        },
+        onError: function (e) {
+          var c = e.data, m = { 2: 'Invalid video link', 5: 'Your browser could not play this video', 100: 'This video was removed or is private', 101: 'The owner has not allowed this video to be embedded', 150: 'The owner has not allowed this video to be embedded', 153: 'Video player configuration error' }[c] || 'Video error';
+          showErr(m, 'Code ' + c + (c === 153 || c === 101 || c === 150 ? ' · Teacher: check the video is Public/Unlisted with “Allow embedding” on, and that the site runs on https.' : ''));
         },
         onStateChange: function (e) {
           var playing = e.data === 1; root.classList.toggle('playing', playing); $('ecp-pp').textContent = playing ? '❚❚' : '▶';
-          if (playing) { $('ecp-dur').textContent = fmt(player.getDuration()); wake(); } if (e.data === 0) root.classList.remove('playing', 'idle');
+          if (playing) {
+            clearTimeout(resumeT); $('ecp-dur').textContent = fmt(player.getDuration()); wake();
+            if (ios) setDirect(false);                                 // after the first real tap our shield protects the video again
+            if (!started) { started = true; if (cfg.autofs && !isFull()) setPseudo(true); }   // auto full screen (CSS overlay needs no gesture)
+          }
+          if (e.data === 0) root.classList.remove('playing', 'idle');
         }
       }
     });
@@ -89,9 +110,10 @@
   function toggle() {
     if (!ready) return;
     var st = player.getPlayerState();
-    if (firstTap && cfg.autofs && st !== 1) { firstTap = false; enterFull(); }              // tap play -> full screen (needs this user gesture)
-    firstTap = false;
-    (st === 1) ? player.pauseVideo() : player.playVideo();
+    if (st === 1) { player.pauseVideo(); return; }
+    if (!ios && firstTap && cfg.autofs && !isFull()) enterFull();                          // Android / desktop: real full screen from this tap
+    firstTap = false; player.playVideo();
+    if (ios) { clearTimeout(resumeT); resumeT = setTimeout(function () { if (player.getPlayerState() !== 1) setDirect(true); }, 1300); }   // iOS refused? next tap goes straight to the video
   }
   function shieldTap() {                                                                  // on phones: first tap reveals controls, next tap pauses
     if (isTouch && root.classList.contains('playing') && root.classList.contains('idle')) { wake(); return; }

@@ -33,6 +33,8 @@ function render_player(string $videoId, array $u, bool $live = false, string $ti
   <?php if ($cfg['brand']): ?><div class="ecp-brand"><b>ECODES</b> PLAYER <i>V 5.0</i></div><?php endif; ?>
   <button class="ecp-exit" id="ecp-exit" aria-label="Exit full screen">✕ Exit</button><button class="ecp-rot" id="ecp-rot" aria-label="Rotate">⟳</button>
   <div class="ecp-splash" id="ecp-splash"><div class="ecp-spin"></div><b><?= e(PLAYER_NAME) ?></b><span id="ecp-splash-t">Secure player starting…</span></div>
+  <div class="ecp-err" id="ecp-err"><b id="ecp-err-t">Video unavailable</b><span id="ecp-err-s"></span><button type="button" id="ecp-reload">⟳ Reload</button></div>
+  <div class="ecp-hint" id="ecp-hint">👆 Tap the video to start</div>
   <div class="ecp-blocked" id="ecp-blocked"><b>Playback paused</b><span id="ecp-blocked-t">Return to this window to continue.</span></div>
   <button class="ecp-bigplay" id="ecp-big" aria-label="Play"><svg viewBox="0 0 24 24" width="34" height="34"><path fill="#fff" d="M8 5v14l11-7z"/></svg></button>
   <div class="ecp-bar" id="ecp-bar">

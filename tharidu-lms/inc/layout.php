@@ -7,6 +7,11 @@ function head_html(string $title, string $body_class = ''): void {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ff2a40">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="manifest" href="<?= url('manifest.webmanifest') ?>">
+<link rel="apple-touch-icon" href="<?= url('assets/img/icon-180.png') ?>">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="<?= e(setting('site_name', SITE_NAME)) ?>">
 <title><?= e($title) ?> · <?= e($s) ?></title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400;600;700;800&family=Noto+Sans+Sinhala:wght@500;700;900&display=swap" rel="stylesheet">

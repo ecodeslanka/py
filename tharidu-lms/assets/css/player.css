@@ -38,3 +38,15 @@ html.ecp-lock,body.ecp-lock{overflow:hidden!important;overscroll-behavior:none;p
 @keyframes ecpUD{from{top:7%}to{top:86%}}
 @keyframes ecpSC{from{left:104%}to{left:-70%}}
 .ecp-wm{will-change:top,left;top:7%}
+
+/* touch + iOS */
+.ecp-shield,.ecp-bigplay,.ecp-b{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.ecp.ios-direct .ecp-shield{pointer-events:none}
+.ecp.ios-direct .ecp-frame iframe{pointer-events:auto}
+.ecp.ios-direct .ecp-bigplay{display:none}
+.ecp.ios-direct:not(.playing) .ecp-bar{opacity:.0;pointer-events:none}
+.ecp-hint{display:none;position:absolute;z-index:7;left:50%;bottom:16%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;font-weight:700;font-size:13px;padding:8px 16px;border-radius:99px;pointer-events:none;white-space:nowrap}
+.ecp.playing .ecp-hint{display:none!important}
+.ecp-err{display:none;position:absolute;inset:0;z-index:30;background:radial-gradient(circle at 50% 40%,#3a0d18,#0b0410);color:#fff;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:20px}
+.ecp-err b{font-size:clamp(15px,3.4vw,19px)}.ecp-err span{opacity:.8;font-size:12.5px;max-width:34ch}
+.ecp-err button{margin-top:8px;border:0;border-radius:99px;padding:10px 20px;background:linear-gradient(135deg,#ff1f3d,#ff9a1f);color:#fff;font:700 14px var(--font,system-ui);cursor:pointer}

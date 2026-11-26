@@ -36,6 +36,12 @@ YouTube recordings play in a custom secure player: no YouTube logo / title / sha
 - **Watermark** (name + mobile): text template ({name} {mobile} {date}), movement **up ⇅ down / random / scroll / fixed**, side, speed, opacity, size, colour. Phones skip the DevTools detector to avoid false pauses.
 Note: no website can technically stop OS-level screen recording; the watermark makes leaks traceable and view limits cap sharing.
 
+### Troubleshooting: “Video player configuration error” (YouTube error 153)
+YouTube refuses an embed when the page does not send a Referer. This site now sends `Referrer-Policy: strict-origin-when-cross-origin` and builds the iframe with a matching `referrerpolicy`. If it still appears: (1) the site must run on **https**, (2) the video on YouTube must be **Public or Unlisted** with *Allow embedding* switched on, (3) make sure hosting / Cloudflare does not add a `Referrer-Policy: no-referrer` header.
+
+### iPhone / iOS Chrome & Safari
+iOS only starts a YouTube video from a tap that lands **on the video itself**, so on iOS the first tap goes straight to the video; the moment it plays the player switches to a full-screen overlay (⟳ rotates to landscape). Browsers on iOS cannot hide their address bar, so for **true full screen** students use *Share → Add to Home Screen* (the site is an installable web app) and open it from the home screen.
+
 ## Upgrading an existing install
 Upload the new files. The database upgrades itself on the first page load.
 

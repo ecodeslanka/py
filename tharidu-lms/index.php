@@ -18,6 +18,10 @@ $socials = ['youtube' => ['youtube', '#ff0000'], 'facebook' => ['facebook', '#18
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ff2a40">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="manifest" href="<?= url('manifest.webmanifest') ?>">
+<link rel="apple-touch-icon" href="<?= url('assets/img/icon-180.png') ?>">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title><?= e(setting('site_name', SITE_NAME)) ?></title>
 <meta name="description" content="<?= e($H['lead']) ?>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
