@@ -56,6 +56,8 @@ try { $pdo->exec("ALTER TABLE daily_plans ADD COLUMN loading_amount DECIMAL(15,2
 try { $pdo->exec("ALTER TABLE daily_plans ADD COLUMN porters_count INT DEFAULT 0 AFTER plan_staff_count"); } catch (PDOException $e) {}
 /* driver_is_cc = 1 → the driver is also the CC: driver + CC are counted as ONE person */
 try { $chk = $pdo->query("SHOW COLUMNS FROM daily_plans LIKE 'driver_is_cc'"); if ($chk && !$chk->fetch()) $pdo->exec("ALTER TABLE daily_plans ADD COLUMN driver_is_cc TINYINT(1) NOT NULL DEFAULT 0 AFTER driver_name"); } catch (PDOException $e) {}
+/* driver_is_porter = 1 → the driver also works as a porter: driver + that porter are counted as ONE person */
+try { $chk = $pdo->query("SHOW COLUMNS FROM daily_plans LIKE 'driver_is_porter'"); if ($chk && !$chk->fetch()) $pdo->exec("ALTER TABLE daily_plans ADD COLUMN driver_is_porter TINYINT(1) NOT NULL DEFAULT 0 AFTER driver_is_cc"); } catch (PDOException $e) {}
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS daily_plan_staff (
     id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -119,6 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $vehicle_id     = intval($_POST['vehicle_id']        ?? 0) ?: null;
     $driver_name    = trim($_POST['driver_name']         ?? '');
     $driver_is_cc   = !empty($_POST['driver_is_cc']) ? 1 : 0;
+    $driver_is_porter = !empty($_POST['driver_is_porter']) ? 1 : 0;
     $plan_staff     = intval($_POST['plan_staff_count']  ?? 0);
     $porters_count  = intval($_POST['porters_count']     ?? 0);
     $loading_amount = floatval($_POST['loading_amount']  ?? 0);
@@ -137,12 +140,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $code = 'PLN-' . date('Ymd') . '-' . strtoupper(substr(md5(uniqid()), 0, 4));
                 $ins  = $pdo->prepare(
                     "INSERT INTO daily_plans
-                        (plan_code,delivery_date,delivery_person,vehicle_id,driver_name,driver_is_cc,
+                        (plan_code,delivery_date,delivery_person,vehicle_id,driver_name,driver_is_cc,driver_is_porter,
                          plan_staff_count,porters_count,loading_amount,status,created_by)
-                     VALUES (?,?,?,?,?,?,?,?,?,'draft',?)"
+                     VALUES (?,?,?,?,?,?,?,?,?,?,'draft',?)"
                 );
                 $ins->execute([$code, $delivery_date, $del_person, $vehicle_id,
-                               $driver_name, $driver_is_cc, $plan_staff, $porters_count, $loading_amount, $createdByCode]);
+                               $driver_name, $driver_is_cc, $driver_is_porter, $plan_staff, $porters_count, $loading_amount, $createdByCode]);
                 $plan_id = (int)$pdo->lastInsertId();
 
                 $ist = $pdo->prepare("INSERT INTO daily_plan_staff (plan_id,employee_id,staff_type) VALUES (?,?,?)");
@@ -154,12 +157,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } elseif ($action === 'update' && $plan_id) {
             $upd = $pdo->prepare(
                 "UPDATE daily_plans
-                 SET delivery_date=?,delivery_person=?,vehicle_id=?,driver_name=?,driver_is_cc=?,
+                 SET delivery_date=?,delivery_person=?,vehicle_id=?,driver_name=?,driver_is_cc=?,driver_is_porter=?,
                      plan_staff_count=?,porters_count=?,loading_amount=?
                  WHERE id=?"
             );
             $upd->execute([$delivery_date, $del_person, $vehicle_id,
-                           $driver_name, $driver_is_cc, $plan_staff, $porters_count, $loading_amount, $plan_id]);
+                           $driver_name, $driver_is_cc, $driver_is_porter, $plan_staff, $porters_count, $loading_amount, $plan_id]);
 
             $pdo->prepare("DELETE FROM daily_plan_staff WHERE plan_id=?")->execute([$plan_id]);
 
@@ -551,6 +554,10 @@ body{display:flex;justify-content:center;}
             <input type="checkbox" name="driver_is_cc" id="driverIsCc" value="1" <?= !empty($edit_plan['driver_is_cc']) ? 'checked' : '' ?> onchange="updateAutoCount();updateSummary()">
             <span><b>Driver and CC are the same person</b><small>Driver + CC are counted as 1 person</small></span>
           </label>
+          <label class="drv-cc-chk" for="driverIsPorter" style="background:rgba(255,159,10,.08);border-color:rgba(255,159,10,.25)">
+            <input type="checkbox" name="driver_is_porter" id="driverIsPorter" value="1" <?= !empty($edit_plan['driver_is_porter']) ? 'checked' : '' ?> onchange="updateAutoCount();updateSummary()" style="accent-color:var(--orange)">
+            <span><b>Driver also works as a porter</b><small>Driver + 1 porter are counted as 1 person</small></span>
+          </label>
         </div>
       </div>
 
@@ -785,14 +792,14 @@ function onPortersInput(){
 function updateAutoCount(){
   var driver    = (document.getElementById('driverInput').value || '').trim();
   var staffQty  = S.staffCC.length + S.staffACC.length;
-  var sameCc    = driverSameAsCc();
-  var driverN   = (driver && !sameCc) ? 1 : 0;          /* driver is also the CC → already counted with the CC */
-  if (sameCc && !S.staffCC.length) driverN = 1;          /* no CC picked yet → the driver alone is 1 */
+  var sameCc    = driverSameAsCc(), samePorter = driverSameAsPorter();
   var portersN  = getPortersCount();
+  var inCc      = sameCc && S.staffCC.length > 0, inPorter = samePorter && portersN > 0;
+  var driverN   = (driver && !inCc && !inPorter) ? 1 : 0;   /* driver is also the CC / a porter → already counted there */
   var autoTotal = staffQty + driverN + portersN;
 
   document.getElementById('hidAutoStaffCount').value   = autoTotal;
-  document.getElementById('cntDriver').textContent     = sameCc ? (driverN ? 1 : '=CC') : driverN;
+  document.getElementById('cntDriver').textContent     = inCc ? '=CC' : (inPorter ? '=Porter' : driverN);
   document.getElementById('cntPorters').textContent    = portersN;
   document.getElementById('cntAutoTotal').textContent  = autoTotal;
 
@@ -803,7 +810,8 @@ function updateAutoCount(){
     note.style.display = 'flex';
     var parts = [];
     if(staffQty) parts.push(staffQty + ' staff');
-    if(sameCc)   parts.push('driver = CC (counted once)');
+    if(inCc)          parts.push('driver = CC (counted once)');
+    else if(inPorter) parts.push('driver = porter (counted once)');
     else if(driverN)  parts.push('1 driver');
     if(portersN) parts.push(portersN + ' porter' + (portersN > 1 ? 's' : ''));
     noteTxt.textContent = 'Auto total: ' + autoTotal + ' (' + parts.join(' + ') + ')';
@@ -814,6 +822,7 @@ function updateAutoCount(){
 
 /* driver and CC are the same person (checkbox) */
 function driverSameAsCc(){ var c = document.getElementById('driverIsCc'); return !!(c && c.checked); }
+function driverSameAsPorter(){ var c = document.getElementById('driverIsPorter'); return !!(c && c.checked); }
 
 /* ── VEHICLE CHANGE → auto-fill driver ── */
 function onVehicleChange(){
@@ -995,7 +1004,8 @@ function updateSummary(){
   var vTxt      = (vEl && vEl.value) ? vEl.options[vEl.selectedIndex].text : '—';
   var driver    = document.getElementById('driverInput').value || '—';
   var driverN   = (document.getElementById('driverInput').value || '').trim() ? 1 : 0;
-  if (driverSameAsCc() && S.staffCC.length) driverN = 0;
+  var dIn = driverSameAsCc() && S.staffCC.length ? 'CC' : (driverSameAsPorter() && getPortersCount() > 0 ? 'porter' : '');
+  if (dIn) driverN = 0;
   var amt       = S.currentAmount || 0;
   var amtFmt    = 'Rs ' + amt.toLocaleString('en-LK',{minimumFractionDigits:2,maximumFractionDigits:2});
   var portersN  = getPortersCount();
@@ -1007,7 +1017,7 @@ function updateSummary(){
   document.getElementById('sLoadingAmount').textContent = amtFmt;
   document.getElementById('sVehicle').textContent       = (vEl && vEl.value) ? vTxt : '—';
   document.getElementById('sDriver').textContent        = driver;
-  document.getElementById('sDriverCount').textContent   = driverSameAsCc() && S.staffCC.length ? '0 (same as CC)' : driverN;
+  document.getElementById('sDriverCount').textContent   = dIn ? '0 (same as ' + dIn + ')' : driverN;
   document.getElementById('sCC').textContent            = S.staffCC.length;
   document.getElementById('sACC').textContent           = S.staffACC.length;
   document.getElementById('sPorters').textContent       = portersN;
@@ -1017,7 +1027,7 @@ function updateSummary(){
   // Update hint under manual input
   var hint = document.getElementById('planStaffHint');
   if(autoTotal > 0){
-    hint.textContent = 'Auto total is ' + autoTotal + (driverSameAsCc() ? ' (CC + ACC + porters — driver is the CC)' : ' (CC + ACC + driver + porters)');
+    hint.textContent = 'Auto total is ' + autoTotal + (dIn ? ' (CC + ACC + porters — driver is the ' + dIn + ')' : ' (CC + ACC + driver + porters)');
   } else {
     hint.textContent = 'Leave 0 to use auto total';
   }
