@@ -47,6 +47,7 @@ function student_bar(array $u, ?string $title = null, ?string $back = null): voi
 <header class="abar"><div class="abar-in">
   <?php if ($back): ?><a class="ib" href="<?= url($back) ?>" aria-label="Back"><i data-lucide="chevron-left"></i></a><div class="ttl"><?= e($title) ?></div>
   <?php else: ?><a class="brand" href="<?= url('dashboard') ?>"><span class="mark">TW</span><span><?= e(setting('site_name', SITE_NAME)) ?></span></a><div class="ttl"></div><?php endif; ?>
+  <?php [$cn] = cart_summary((int)$u['id']); ?><a class="ib cartb" href="<?= url('cart') ?>" aria-label="Cart"><i data-lucide="shopping-cart"></i><?php if ($cn): ?><em><?= $cn ?></em><?php endif; ?></a>
   <button class="mode" id="mode" type="button" aria-label="Toggle dark mode"><i data-lucide="moon" class="sun"></i><i data-lucide="sun" class="moon"></i></button>
   <a class="avatar" href="<?= url('logout') ?>" title="Logout"><?= e(mb_strtoupper(mb_substr($u['name'], 0, 1))) ?></a>
 </div></header>
@@ -115,5 +116,5 @@ function lesson_ctx(): array {
 }
 function lesson_banner(array $l, string $section): void { ?>
 <a class="back" href="<?= url('admin/lesson?id=' . $l['id']) ?>"><i data-lucide="chevron-left"></i><?= e($l['name']) ?></a>
-<div class="pagehead"><span class="pill blue"><?= e($l['bname']) ?></span><span class="pill"><?= e(month_label($l['month_year'])) ?></span><span class="pill"><?= $l['class_type'] === 'online' ? 'Online' : e($l['cname'] ?: 'Physical') ?></span></div>
+<div class="pagehead"><span class="pill blue"><?= e($l['bname']) ?></span><span class="pill"><?= e(month_label($l['month_year'])) ?></span></div>
 <?php }

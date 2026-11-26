@@ -8,7 +8,7 @@ $n = ['m' => (int)val('SELECT COUNT(*) FROM materials WHERE lesson_id=?', [$lid]
 ?>
 <a class="back" href="<?= url('admin/lessons') ?>"><i data-lucide="chevron-left"></i>All lessons</a>
 <div class="ahero"><div class="hi"><?= e($l['bname']) ?> · <?= e(month_label($l['month_year'])) ?></div><h1><?= e($l['name']) ?></h1>
-  <div class="chips"><span><?= $l['class_type'] === 'online' ? 'Online' : e($l['cname'] ?: 'Physical') ?></span><span><?= e(money($l['fee'])) ?></span><?php if ($l['due_date']): ?><span>Due <?= e(date('d M', strtotime($l['due_date']))) ?></span><?php endif; ?><?php if (!$l['active']): ?><span>Hidden</span><?php endif; ?></div>
+  <div class="chips"><span><?= e(money($l['fee'])) ?></span><?php if ($l['due_date']): ?><span>Due <?= e(date('d M', strtotime($l['due_date']))) ?></span><?php endif; ?><?php if (!$l['active']): ?><span>Hidden</span><?php endif; ?></div>
   <div class="astats"><div><b><?= $n['s'] ?><?= $l['student_limit'] ? '/' . (int)$l['student_limit'] : '' ?></b><small>Students</small></div><div><b><?= $n['m'] ?></b><small>Materials</small></div><div><b><?= $n['p'] ?></b><small>Pending pay</small></div></div></div>
 <div class="hub">
   <a class="hubtile r" href="<?= url('admin/materials?lesson=' . $lid) ?>"><span class="hi"><i data-lucide="library"></i></span><b>Materials</b><span>YouTube recordings &amp; documents · <?= $n['m'] ?></span></a>

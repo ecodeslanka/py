@@ -205,3 +205,13 @@ dialog.modal::backdrop{background:rgba(6,11,36,.55);-webkit-backdrop-filter:blur
 .apptabs{display:flex;gap:8px;overflow-x:auto;margin:0 0 18px;padding-bottom:2px;scrollbar-width:none}.apptabs::-webkit-scrollbar{display:none}
 .apptabs a{flex:none;padding:9px 18px;border-radius:99px;background:var(--card);border:1px solid var(--sep);font-weight:600;font-size:14px;color:var(--sub)}
 .apptabs a.on{background:var(--g-r);color:#fff;border-color:transparent;box-shadow:var(--shg)}
+
+.cartb{position:relative}.cartb em{position:absolute;top:-4px;right:-4px;background:var(--g-r);color:#fff;font-style:normal;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:99px;display:grid;place-items:center;padding:0 5px;box-shadow:var(--shg)}
+.cartbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom));width:min(440px,calc(100% - 24px));z-index:65;display:flex;align-items:center;gap:12px;padding:10px 10px 10px 18px;border-radius:99px;background:#0b1438;color:#fff;box-shadow:0 18px 40px -12px rgba(11,20,56,.6)}
+.cartbar b{flex:1;font-size:14px}.cartbar small{display:block;font-weight:400;opacity:.8;font-size:12px}
+.chipsrow{display:flex;gap:8px;overflow-x:auto;margin:4px 0 14px;scrollbar-width:none}.chipsrow::-webkit-scrollbar{display:none}
+.chipsrow a{flex:none;padding:8px 16px;border-radius:99px;background:var(--card);border:1px solid var(--sep);font-weight:600;font-size:13.5px;color:var(--sub)}
+.chipsrow a.on{background:var(--g-b);color:#fff;border-color:transparent;box-shadow:0 10px 22px -10px rgba(37,99,255,.7)}
+.gcard .gbtn.in{background:rgba(255,255,255,.28);color:#fff;box-shadow:none}
+.matgroup{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:20px 4px 8px}
+.noticeimg{width:100%;border-radius:18px;margin-top:8px;box-shadow:var(--sh)}

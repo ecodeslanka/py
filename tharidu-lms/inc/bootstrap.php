@@ -131,6 +131,16 @@ function del_upload(?string $dir, ?string $name): void { if ($name) @unlink(ROOT
 function img(?string $n, string $fallback = 'assets/img/lab-bg.webp'): string { return $n ? url('uploads/images/' . $n) : url($fallback); }
 const IMG_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
 
+// ---- cart ----
+function cart_items(int $uid): array {
+    return rows('SELECT l.*,b.name bname FROM cart c JOIN lessons l ON l.id=c.lesson_id JOIN batches b ON b.id=l.batch_id WHERE c.user_id=? AND l.active=1 ORDER BY c.created_at', [$uid]);
+}
+function cart_summary(int $uid): array { $it = cart_items($uid); return [count($it), array_sum(array_column($it, 'fee'))]; }
+// ---- material types ----
+const MATERIAL_TYPES = [
+    'youtube' => ['YouTube Videos', 'play'], 'document' => ['PDF Notes', 'file-text'], 'gdrive' => ['Google Drive', 'hard-drive'],
+    'notice' => ['Notice (Image)', 'image'], 'assessment' => ['Assessments (Links)', 'clipboard-check'], 'zoom_rec' => ['Zoom Recordings', 'video'],
+];
 // ---- misc ----
 function month_label(string $my): string { $t = DateTime::createFromFormat('Y-m-d', $my . '-01'); return $t ? $t->format('F Y') : $my; }
 function youtube_embed(string $link): ?string {
@@ -148,7 +158,7 @@ function fail_attempt(string $mobile): void { q('INSERT INTO login_attempts(ip,m
 
 // ---- auto-upgrade database when code is newer than schema ----
 try {
-    if (basename($_SERVER['SCRIPT_NAME'] ?? '') !== 'install.php' && (int)setting('schema_v', '1') < 2 && val("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users'")) {
+    if (basename($_SERVER['SCRIPT_NAME'] ?? '') !== 'install.php' && (int)setting('schema_v', '1') < 3 && val("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users'")) {
         require __DIR__ . '/migrate.php'; run_migrations();
     }
 } catch (Throwable $e) { /* not installed yet */ }

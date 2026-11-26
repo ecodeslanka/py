@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS payments (
   method VARCHAR(30) NOT NULL DEFAULT 'offline',
   reference VARCHAR(160) NULL,
   slip VARCHAR(255) NULL,
+  order_ref VARCHAR(24) NULL,
   status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   admin_note VARCHAR(255) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -74,14 +75,25 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE TABLE IF NOT EXISTS materials (
   id INT AUTO_INCREMENT PRIMARY KEY,
   lesson_id INT NOT NULL,
-  type ENUM('youtube','document') NOT NULL,
+  type VARCHAR(20) NOT NULL,            -- youtube | document | gdrive | notice | assessment | zoom_rec
   title VARCHAR(160) NOT NULL,
   description TEXT NULL,
   url_enc TEXT NULL,                    -- AES-256-CBC encrypted YouTube link
   file_path VARCHAR(255) NULL,
   file_name VARCHAR(255) NULL,
   view_limit INT NOT NULL DEFAULT 0,    -- 0 = unlimited views per student
+  group_name VARCHAR(120) NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  passcode VARCHAR(60) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS cart (
+  user_id INT NOT NULL,
+  lesson_id INT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, lesson_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS material_views (

@@ -11,29 +11,27 @@ Plain PHP 8+ / MySQL. No framework, no Composer. URLs hide the `.php` extension 
 
 Requires PHP extensions: pdo_mysql, curl, openssl, mbstring, fileinfo (all standard). Needs `mod_rewrite` (Apache/LiteSpeed).
 
-## Admin panel (`/admin`) – site theme colours (red/blue), Apple-style type
+## Admin panel (`/admin`)
 | Section | What it does |
 |---|---|
-| **Classes** | Only a class **name** (e.g. *Senara – Kegalle*) with Edit / Delete. Students pick it at registration; lessons link to it. |
-| **Batches** | Name, cover image, order, active |
-| **Grades** | Own page; used when creating lessons |
-| **Lessons** | Shown as colourful boxes. **View, Create and Edit open in a modal.** Fields: name, fee, batch, grade, month + year, description, student limit (+ physical/online, class, due date). |
-| Lesson → **Materials** (own pages: list + *Add material* page) | YouTube recording (AES-256 encrypted link, optional per-student view count) or Document upload; optional description |
-| Lesson → **Enrolled students** (own page) | View, edit, change password, delete / remove, view payments |
-| Lesson → **Zoom & live** (own pages: list + *Add session* page) | Create Zoom meeting by API, paste a Zoom link, or YouTube live link; start time + duration |
-| **Payments** | Approve / reject offline payments (approve = student joins the lesson) |
-| **Students**, **Admin users** | Manage accounts; default admin is created at install |
-| **Home page** | Edit EVERY text, icon, box and photo of the public home page |
+| **Classes** | Only a class **name** (e.g. *Senara – Kegalle*) with Edit / Delete. Used at student registration only. |
+| **Batches / Grades** | Batch: name, cover, order, active. Grades have their own page. |
+| **Lessons** | Colourful boxes; View / Create / Edit open in a modal. Fields: name, fee, batch, grade, month + year, description, student limit, due date. (No class selection.) |
+| Lesson → **Materials** | Own pages. Types: YouTube Videos, PDF Notes, Google Drive, Notice (image), Assessments (link), Zoom Recordings (+passcode). Group name, optional view count (YouTube), tabs per type, drag-to-reorder, edit modal, preview. All links stored AES-256 encrypted. |
+| Lesson → **Enrolled students** | View, edit, change password, remove, payments |
+| Lesson → **Zoom & live** | Create Zoom meeting by API, paste Zoom link or YouTube live link |
+| **Payments** | Orders: one student payment may contain several lessons; one click approves the whole order and enrols the student in every lesson |
+| **Home page** | Edit every text, icon, box and photo of the public home page |
 | **Site settings** | Slides, WhatsApp groups, phone + social links, bank details, Dialog SMS + OTP, Zoom keys |
 
-## Student panel
-Mobile-app style: gradient hero card, colourful lesson cards, floating bottom dock (Home · Lessons · Payments · Profile).
+## Student panel (mobile-app style)
+Register (mobile, name, optional NIC, class, batch, password, OTP) → **Lessons** screen shows lessons **batch-wise** (switch batch with the chips) → **Add to cart** → **Cart**: one bank slip for all lessons → admin approves → lessons unlock: materials (grouped), live / Zoom links, recordings.
 
-## Student flow
-Register (mobile, name, optional NIC, Physical/Online, **class** for physical, batch, password) → OTP SMS if enabled → dashboard shows the **lessons** for their batch/class → Join & pay (upload slip) → admin approves → lesson unlocked (materials, live links, payments, due date).
+## ECODES PLAYER V 5.0
+YouTube recordings play in a custom secure player: no YouTube logo / title / share / links (iframe cropped + click-shield), own controls (seek, speed, mute, fullscreen), moving watermark with the student's name + mobile, video id delivered by a one-time token (not in the page HTML), right-click / shortcut / DevTools blocking, auto-pause + blur when the window loses focus, PrintScreen blocking. **Note:** no website can technically stop OS-level screen recording (phone/PC recorders); the watermark makes leaks traceable to the student, and view limits cap sharing.
 
 ## Upgrading an existing install
-Just upload the new files. The database upgrades itself on the first page load (adds Classes, moves old lesson "venues" into Classes).
+Upload the new files. The database upgrades itself on the first page load.
 
 ## SMS (Dialog eSMS, API v1.7)
 Site settings → SMS: choose **API** (username/password → token cached 12h, auto re-login) or **GET key** (`esmsqk`, needs Dialog to enable it). Mask max 11 chars. Use *Send test* to verify. Tick *Enable OTP* to require verification at registration. Failures are logged (last 8 shown).

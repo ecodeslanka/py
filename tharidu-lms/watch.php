@@ -1,16 +1,20 @@
 <?php
-require __DIR__ . '/inc/bootstrap.php'; require __DIR__ . '/inc/layout.php';
-$u = require_login(); if ($u['role'] === 'admin') redirect('admin/');
+require __DIR__ . '/inc/bootstrap.php'; require __DIR__ . '/inc/layout.php'; require __DIR__ . '/inc/player.php';
+$u = require_login();
 $m = row("SELECT * FROM materials WHERE id=? AND type='youtube'", [(int)($_GET['id'] ?? 0)]);
-if (!$m || !is_enrolled($u['id'], $m['lesson_id'])) { flash('Not available.', 'err'); redirect('dashboard'); }
+$admin = $u['role'] === 'admin';
+if (!$m || (!$admin && !is_enrolled($u['id'], $m['lesson_id']))) { flash('Not available.', 'err'); redirect($admin ? 'admin/lessons' : 'dashboard'); }
 $used = (int)val('SELECT views FROM material_views WHERE user_id=? AND material_id=?', [$u['id'], $m['id']]);
-if ($m['view_limit'] > 0 && $used >= $m['view_limit']) { flash('You have used all allowed views of this recording.', 'err'); redirect('lesson?id=' . $m['lesson_id']); }
-q('INSERT INTO material_views(user_id,material_id,views,last_view) VALUES(?,?,1,NOW()) ON DUPLICATE KEY UPDATE views=views+1,last_view=NOW()', [$u['id'], $m['id']]);
-$embed = youtube_embed(dec($m['url_enc']));
-student_head($m['title'], 'lesson?id=' . $m['lesson_id']);
-?>
-<?php if ($m['view_limit'] > 0): ?><p class="muted small">View <?= $used + 1 ?> of <?= (int)$m['view_limit'] ?>. Refreshing counts as a new view.</p><?php endif; ?>
-<?php if ($embed): ?><div class="video"><iframe src="<?= e($embed) ?>" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
-<?php else: ?><div class="alert err">This video link is invalid. Please tell the teacher.</div><?php endif; ?>
-<?php if ($m['description']): ?><div class="card" style="margin-top:18px"><div class="prose"><?= e($m['description']) ?></div></div><?php endif; ?>
-<?php student_foot();
+if (!$admin) {
+    if ($m['view_limit'] > 0 && $used >= $m['view_limit']) { flash('You have used all allowed views of this recording.', 'err'); redirect('lesson?id=' . $m['lesson_id']); }
+    q('INSERT INTO material_views(user_id,material_id,views,last_view) VALUES(?,?,1,NOW()) ON DUPLICATE KEY UPDATE views=views+1,last_view=NOW()', [$u['id'], $m['id']]);
+}
+$vid = youtube_id(dec($m['url_enc']));
+head_html($m['title'], 'app'); student_bar($u, $m['title'], $admin ? 'admin/materials?lesson=' . $m['lesson_id'] : 'lesson?id=' . $m['lesson_id']); ?>
+<main class="smain">
+<?php if ($vid): render_player($vid, $u['name'] . ' · ' . show_mobile($u['mobile']), false, $m['title']); else: ?><div class="alert err">This video link is invalid. Please tell the teacher.</div><?php endif; ?>
+<h1 class="stitle" style="font-size:clamp(20px,4vw,28px);margin-top:18px"><?= e($m['title']) ?></h1>
+<?php if (!$admin && $m['view_limit'] > 0): ?><p class="muted small">View <?= $used + 1 ?> of <?= (int)$m['view_limit'] ?>. Reloading this page counts as a new view.</p><?php endif; ?>
+<?php if ($m['description']): ?><div class="card" style="margin-top:12px"><div class="prose"><?= e($m['description']) ?></div></div><?php endif; ?>
+<p class="muted small" style="margin-top:16px">🔒 Protected by <b>ECODES PLAYER V 5.0</b> – your name and number are shown on the video.</p>
+</main><?php foot_html();
