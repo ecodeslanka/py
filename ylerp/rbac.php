@@ -183,6 +183,7 @@ $GLOBALS['RBAC_RELATED_PAGES'] = [
     'sscl_vat_new'         => ['sscl_vat', 'view'],
     'dal_cheque_ack'       => ['cheque_acknowledgments', 'view'],
     'dl_cheque_ack_new'    => ['cheque_acknowledgments', 'view'],
+    'print_cheque_ack_summary' => ['cheque_acknowledgments', 'view'],   // Cheque Acknowledgments → Print Acknowledgment Summary
     // Cash float
     'cash_float_create'      => ['cash_float', 'create'],
     'cash_float_add_expense' => ['cash_float', 'create'],
