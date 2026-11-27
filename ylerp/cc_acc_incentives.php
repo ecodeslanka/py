@@ -17,8 +17,10 @@ function ci_q($conn, $sql) { try { return mysqli_query($conn, $sql); } catch (Th
 function ci_has($conn, $t) { $r = ci_q($conn, "SHOW TABLES LIKE '$t'"); return $r && mysqli_num_rows($r) > 0; }
 $h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
 
-/* sections: code → [title, staff category codes, components]
-   component: key (incentive_entries __iach__<key>), label, tiers [% => cfg column], mode: 'gm' (Actual + GM inputs) | 'act' (Actual input) | 'att' (live attendance) */
+/* sections: code → [title, staff category codes, components, meal mode ('rate' = config meal × attendance rate | 'flat' = fixed meal), save amounts?]
+   component: key (incentive_entries __iach__<key> / __incent__<key>), label, tiers [threshold => cfg column], mode:
+     'gm' (Actual + GM inputs) | 'act' (Actual input) | 'att' (live attendance) | 'dmg' (damage % — LOWER is better: ≤ threshold earns)
+   save amounts: the ST / OFF salary sheets read the earned amount (__incent__<key>), CC / ACC resolve the tier from the % themselves */
 $SECTIONS = [
     'CC' => ['Cash Collectors', ['CC', 'SACC'], [
         ['ccfot', 'CCFOT', [90 => 'ccfot_90', 91 => 'ccfot_91', 92 => 'ccfot_92', 93 => 'ccfot_93', 94 => 'ccfot_94', 95 => 'ccfot_95'], 'gm'],
@@ -27,14 +29,37 @@ $SECTIONS = [
         ['ssv_cc', 'Secondary Sales Value', [90 => 'ssv_90', 95 => 'ssv_95'], 'act'],
         ['attendance_cc', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
         ['locus_admin', 'Locus Admin', [100 => 'locus_admin'], 'act'],
-    ]],
+    ], 'rate', false],
     'ACC' => ['Assistant Cash Collectors', ['ACC'], [
         ['ssv_acc', 'Secondary Sales Value', [90 => 'ssv_90', 95 => 'ssv_95'], 'act'],
         ['ccfot_acc', 'CCFOT', [90 => 'ccfot_90', 91 => 'ccfot_91', 92 => 'ccfot_92', 93 => 'ccfot_93', 94 => 'ccfot_94', 95 => 'ccfot_95'], 'gm'],
         ['punctuality_acc', 'Punctuality', [70 => 'punctuality_70', 80 => 'punctuality_80'], 'act'],
         ['attendance_acc', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
-    ]],
+    ], 'rate', false],
+    'ST' => ['Back Office Stores Team', ['ST'], [
+        ['stores_damage', 'Stores Damage', ['0.007' => 'stores_damage_lo', '0.020' => 'stores_damage_hi'], 'dmg'],
+        ['rsqm', 'RSQM Score', [60 => 'rsqm_60', 70 => 'rsqm_70'], 'act'],
+        ['punctuality', 'Punctuality', [75 => 'punctuality_75', 85 => 'punctuality_85'], 'act'],
+        ['loading_unloading', 'L/Unloading', [90 => 'loading_unloading'], 'act'],
+        ['ccfot_st', 'CCFOT', [90 => 'ccfot_st'], 'act'],
+        ['attendance_st', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
+    ], 'rate', true],
+    'OFF' => ['Back Office Team', ['OFF'], [
+        ['incentive_daily_90', 'Daily', [90 => 'incentive_daily_90'], 'act'],
+        ['incentive_weekly_90', 'Weekly', [90 => 'incentive_weekly_90'], 'act'],
+        ['incentive_monthly_90', 'Monthly', [90 => 'incentive_monthly_90'], 'act'],
+        ['punctuality_75', 'Punctuality', [75 => 'punctuality_75'], 'act'],
+        ['attendance_off', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
+    ], 'flat', true],
 ];
+/* the amount a % earns: highest tier reached (rate > 0); damage: the lowest limit not exceeded */
+function ci_amount($mode, $tiers, $cfg, $p) {
+    if ($p === null) return 0.0;
+    $hit = 0.0;
+    if ($mode === 'dmg') { $lim = $tiers; uksort($lim, function ($a, $b) { return (float)$b <=> (float)$a; }); foreach ($lim as $t => $f) if ($p <= (float)$t + 1e-9 && (float)($cfg[$f] ?? 0) > 0) $hit = (float)$cfg[$f]; return $hit; }
+    foreach ($tiers as $t => $f) if ($p >= (float)$t - 1e-9 && (float)($cfg[$f] ?? 0) > 0) $hit = (float)$cfg[$f];
+    return $hit;
+}
 
 /* ── payroll months ── */
 $periods = []; $r = ci_q($conn, "SELECT id, year, month, status FROM payroll_periods ORDER BY year DESC, month DESC");
@@ -71,7 +96,9 @@ function ci_type_id($conn, $codes) {
     }
     return 0;
 }
-$pct = function ($v) { $v = trim(str_replace('%', '', (string)$v)); if ($v === '' || !is_numeric($v)) return null; $v = (float)$v; if ($v > 0 && $v <= 1) $v *= 100; return round($v, 2); };
+$pct = function ($v, $mode = '') { $v = trim(str_replace('%', '', (string)$v)); if ($v === '' || !is_numeric($v)) return null; $v = (float)$v;
+    if ($mode === 'dmg') { if ($v > 0 && $v < 0.001) $v *= 100; return round($v, 5); }       /* damage typed as % (0.007), a fraction (0.00007) is converted */
+    if ($v > 0 && $v <= 1) $v *= 100; return round($v, 2); };
 
 /* ── SAVE (AJAX) ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
@@ -83,27 +110,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
     $uid = (int)($_SESSION['user_id'] ?? $_SESSION['id'] ?? 0);
     $n = 0; $err = '';
     $run = function ($sql) use ($conn, &$err) { $ok = ci_q($conn, $sql); if (!$ok && $err === '') $err = mysqli_error($conn) ?: 'database error'; return $ok; };
+    $cfgs = []; $q = ci_q($conn, "SELECT * FROM sr_salary_config"); while ($q && ($x = mysqli_fetch_assoc($q))) $cfgs[(int)$x['designation_id']] = $x;
+    /* one row per (employee, month, label): update the first, drop duplicates, insert when missing, delete when $val is null */
+    $put = function ($eid, $label, $val, $notes, $type) use ($conn, $pid, $uid, $run) {
+        $ex = []; $q = ci_q($conn, "SELECT id FROM incentive_entries WHERE employee_id = $eid AND payroll_period_id = $pid AND component_label = '$label' ORDER BY id");
+        while ($q && ($x = mysqli_fetch_row($q))) $ex[] = (int)$x[0];
+        if ($val === null) { if ($ex) $run("DELETE FROM incentive_entries WHERE id IN (" . implode(',', $ex) . ")"); return; }
+        $nt = $notes === null ? 'NULL' : "'" . mysqli_real_escape_string($conn, $notes) . "'";
+        if ($ex) {
+            $keep = array_shift($ex);
+            $run("UPDATE incentive_entries SET amount = '$val', notes = $nt, updated_at = NOW() WHERE id = $keep");
+            if ($ex) $run("DELETE FROM incentive_entries WHERE id IN (" . implode(',', $ex) . ")");
+        } else {
+            $run("INSERT INTO incentive_entries (incentive_type_id, employee_id, payroll_period_id, component_label, amount, notes" . ($uid ? ', entered_by' : '') . ")
+                  VALUES ($type, $eid, $pid, '$label', '$val', $nt" . ($uid ? ", $uid" : '') . ")");
+        }
+    };
     foreach ($SECTIONS as $sk => $sec) {
+        if (empty($data[$sk]) || !is_array($data[$sk])) continue;
         $emps = ci_employees($conn, $sec[1]); $type = ci_type_id($conn, $sec[1]);
-        $keys = []; foreach ($sec[2] as $c) if ($c[3] !== 'att') $keys[$c[0]] = 1;
-        foreach (($data[$sk] ?? []) as $eid => $vals) {
+        $comps = []; foreach ($sec[2] as $c) if ($c[3] !== 'att') $comps[$c[0]] = $c;
+        foreach ($data[$sk] as $eid => $vals) {
             $eid = (int)$eid; if (!isset($emps[$eid]) || !is_array($vals)) continue;
+            $cfg = $cfgs[(int)($emps[$eid]['designation_id'] ?? 0)] ?? [];
             foreach ($vals as $key => $v) {
-                if (!isset($keys[$key]) || !is_array($v)) continue;
-                $act = $pct($v['act'] ?? ''); $gm = $pct($v['gm'] ?? '');
-                $label = '__iach__' . $key; $use = $gm !== null ? $gm : $act;
-                $ex = []; $q = ci_q($conn, "SELECT id FROM incentive_entries WHERE employee_id = $eid AND payroll_period_id = $pid AND component_label = '$label' ORDER BY id");
-                while ($q && ($x = mysqli_fetch_row($q))) $ex[] = (int)$x[0];
-                if ($use === null) { if ($ex) { $run("DELETE FROM incentive_entries WHERE id IN (" . implode(',', $ex) . ")"); $n++; } continue; }
-                $notes = mysqli_real_escape_string($conn, json_encode(['act' => $act, 'gm' => $gm, 'src' => 'cc_acc_incentives']));
-                if ($ex) {
-                    $keep = array_shift($ex);
-                    $run("UPDATE incentive_entries SET amount = '$use', notes = '$notes', updated_at = NOW() WHERE id = $keep");
-                    if ($ex) $run("DELETE FROM incentive_entries WHERE id IN (" . implode(',', $ex) . ")");
-                } else {
-                    $run("INSERT INTO incentive_entries (incentive_type_id, employee_id, payroll_period_id, component_label, amount, notes" . ($uid ? ', entered_by' : '') . ")
-                                 VALUES ($type, $eid, $pid, '$label', '$use', '$notes'" . ($uid ? ", $uid" : '') . ")");
-                }
+                if (!isset($comps[$key]) || !is_array($v)) continue;
+                $c = $comps[$key];
+                $act = $pct($v['act'] ?? '', $c[3]); $gm = $pct($v['gm'] ?? '', $c[3]); $use = $gm !== null ? $gm : $act;
+                $put($eid, '__iach__' . $key, $use, json_encode(['act' => $act, 'gm' => $gm, 'src' => 'cc_acc_incentives']), $type);
+                if ($sec[4]) $put($eid, '__incent__' . $key, $use === null ? null : ci_amount($c[3], $c[2], $cfg, $use), null, $type);
                 $n++;
             }
         }
@@ -122,7 +157,7 @@ if ($period) {
     $att = []; $q = ci_q($conn, "SELECT employee_id, COUNT(*) FROM attendance WHERE att_date BETWEEN '$from' AND '$to' GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $att[(int)$x[0]] = (int)$x[1];
     $leave = []; $q = ci_q($conn, "SELECT employee_id, SUM(days_count) FROM leave_applications WHERE status = 'Approved' AND (start_date BETWEEN '$from' AND '$to' OR end_date BETWEEN '$from' AND '$to' OR (start_date <= '$from' AND end_date >= '$to')) GROUP BY employee_id");
     while ($q && ($x = mysqli_fetch_row($q))) $leave[(int)$x[0]] = (float)$x[1];
-    $inc = []; $q = ci_q($conn, "SELECT employee_id, component_label, amount, notes FROM incentive_entries WHERE payroll_period_id = $pid AND (component_label LIKE '\\_\\_iach\\_\\_%' OR component_label LIKE '\\_\\_incent\\_\\_%') ORDER BY id");
+    $inc = []; $q = ci_q($conn, "SELECT employee_id, component_label, amount, notes FROM incentive_entries WHERE payroll_period_id = $pid AND (component_label LIKE '\\_\\_iach\\_\\_%' OR component_label LIKE '\\_\\_incent\\_\\_%' OR component_label = '__reimb__meal_reimbursement') ORDER BY id");
     while ($q && ($x = mysqli_fetch_assoc($q))) $inc[(int)$x['employee_id']][$x['component_label']] = $x;
 
     foreach ($SECTIONS as $sk => $sec) {
@@ -132,7 +167,7 @@ if ($period) {
         foreach ($sec[2] as $c) {
             $used = [];
             foreach ($c[2] as $t => $f) foreach ($emps as $e) if ((float)($cfgs[(int)$e['designation_id']][$f] ?? 0) > 0) { $used[$t] = $f; break; }
-            $c[2] = $used ?: $c[2]; ksort($c[2]); $comps[] = $c;
+            $c[2] = $used ?: $c[2]; uksort($c[2], function ($a, $b) { return (float)$a <=> (float)$b; }); $comps[] = $c;
         }
         $groups = [];
         foreach ($emps as $eid => $e) {
@@ -147,21 +182,26 @@ if ($period) {
             }
             $norm = max(1, $mdays - $hol); $w = $att[$eid] ?? 0; $rate = round($w / $norm * 100, 2);
             $npd = max(0, $norm - $w - ($leave[$eid] ?? 0)); $basic = (float)($e['basic_salary'] ?? 0);
+            if ($sk === 'ST' && (float)($cfg['basic_salary'] ?? 0) > 0) $basic = (float)$cfg['basic_salary'];
             $vals = [];
             foreach ($comps as $c) {
                 $row = $inc[$eid]['__iach__' . $c[0]] ?? null; $n = $row ? (json_decode((string)$row['notes'], true) ?: []) : [];
                 $act = $row ? ($n['act'] ?? (float)$row['amount']) : null; $gm = $n['gm'] ?? null;
+                /* an amount entered in Incentive Entry without a % here: the salary sheet uses that amount (shown red) */
                 $fixed = (float)($inc[$eid]['__incent__' . $c[0]]['amount'] ?? 0);
+                if ($sec[4] && $row) $fixed = 0;
                 $vals[$c[0]] = ['act' => $act, 'gm' => $gm, 'fixed' => $fixed > 0 ? $fixed : null];
             }
             if (!isset($groups[$did])) $groups[$did] = ['name' => $e['designation_name'] ?: 'No designation', 'code' => $e['designation_code'] ?? '', 'cfg' => $cfg, 'emps' => []];
             $groups[$did]['emps'][] = ['id' => $eid, 'name' => $e['employee_full_name'] ?? '', 'code' => $e['employee_id'] ?? '', 'days' => $w, 'norm' => $norm, 'rate' => $rate,
                 'npd' => $npd, 'basic' => $basic, 'basic_adj' => $basic > 0 ? round($basic - $basic / $norm * $npd, 2) : 0,
-                'meal_cfg' => (float)(($cfg['meal_reimbursement'] ?? null) ?: ($e['reimbursement_meal'] ?? 0)), 'v' => $vals];
+                'meal_cfg' => (float)(($cfg['meal_reimbursement'] ?? null) ?: ($e['reimbursement_meal'] ?? 0)), 'v' => $vals,
+                /* meal saved for the month in Incentive Entry is used as it is (ST / OFF sheets do the same) */
+                'meal_fixed' => ($sec[3] === 'flat' || $sk === 'ST') && isset($inc[$eid]['__reimb__meal_reimbursement']) ? (float)$inc[$eid]['__reimb__meal_reimbursement']['amount'] : null];
         }
         /* designations by rank: the lowest CCFOT 90% rate first (as in the Excel), then name */
         uasort($groups, function ($a, $b) { return ((float)($a['cfg']['ccfot_90'] ?? 0) <=> (float)($b['cfg']['ccfot_90'] ?? 0)) ?: strcasecmp($a['name'], $b['name']); });
-        $out[$sk] = ['title' => $sec[0], 'comps' => $comps, 'groups' => array_values($groups)];
+        $out[$sk] = ['title' => $sec[0], 'comps' => $comps, 'groups' => array_values($groups), 'meal' => $sec[3]];
     }
 }
 $plabel = $period ? $MON[(int)$period['month']] . ' ' . $period['year'] : '';
@@ -170,7 +210,7 @@ $back = (!empty($_SERVER['HTTP_REFERER']) && strpos((string)$_SERVER['HTTP_REFER
 $nf = function ($v) { return $v === null || $v === '' ? '' : (abs((float)$v) < 0.005 ? '-' : number_format((float)$v, (float)$v == (int)$v ? 0 : 2)); };
 $pv = function ($v) { return $v === null || $v === '' ? '' : rtrim(rtrim(number_format((float)$v, 2, '.', ''), '0'), '.'); };
 ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CC &amp; ACC Incentives<?= $plabel ? ' — ' . $h($plabel) : '' ?></title>
+<title>Incentives Sheet<?= $plabel ? ' — ' . $h($plabel) : '' ?></title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <style>
 :root{ --ob-navy:#1F497D; --ob-acc:#4F81BD; --ob-pale:#DCE6F1; --ob-line:#0070C0; --ink:#1d1f22; --grid:#c9c9c4; --win:#ecebe4; --neg:#b3261e; --f: Tahoma, Verdana, "Segoe UI", Geneva, sans-serif; }
@@ -217,7 +257,7 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
 <div class="win">
   <div class="tb">
     <a href="<?= $h($back) ?>" class="btn" title="Back"><i class="fa-solid fa-arrow-left"></i> Back</a>
-    <h1><i class="fa-solid fa-coins"></i> CC &amp; ACC Incentives<?= $plabel ? ' — ' . $h($plabel) : '' ?></h1>
+    <h1><i class="fa-solid fa-coins"></i> Incentives Sheet — CC · ACC · Stores · Office<?= $plabel ? ' — ' . $h($plabel) : '' ?></h1>
     <span class="dirty" id="ciDirty"><i class="fa-solid fa-circle-exclamation"></i> Unsaved changes</span>
     <button class="btn pri" id="ciSave" onclick="ciSave()"<?= (!$period || $closed) ? ' disabled' : '' ?>><i class="fa-solid fa-floppy-disk"></i> Save</button>
     <button class="btn" onclick="ciExport()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
@@ -244,27 +284,27 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
   <?php if (!$period): ?><div class="scroll" style="padding:20px;text-align:center;color:#8e909a">No payroll month found.</div><?php endif; ?>
   <?php $first = true; foreach ($out as $sk => $s): ?>
   <div class="scroll sec" data-sec="<?= $sk ?>"<?= $first ? '' : ' style="display:none"' ?>>
-    <table id="ciTbl_<?= $sk ?>">
+    <table id="ciTbl_<?= $sk ?>" data-sa="<?= $SECTIONS[$sk][4] ? 1 : 0 ?>">
       <thead>
         <tr><th rowspan="2" class="sticky">Name</th><th rowspan="2">Designation</th><th rowspan="2">Code</th>
           <?php foreach ($s['comps'] as $i => $c): $span = count($c[2]) + ($c[3] === 'gm' ? 2 : 1); ?><th colspan="<?= $span ?>" class="g<?= $i % 2 ?>"><?= $h($c[1]) ?></th><?php endforeach; ?>
           <th rowspan="2" class="g<?= count($s['comps']) % 2 ?>">Meal</th><th rowspan="2" class="gT">Total</th><th rowspan="2">Days Worked</th><th rowspan="2">No Pay Days</th><th rowspan="2">Basic</th><th rowspan="2" class="gT">Basic + Incentives</th></tr>
-        <tr><?php foreach ($s['comps'] as $i => $c): ?><th class="g<?= $i % 2 ?>">Actual</th><?php if ($c[3] === 'gm'): ?><th class="g<?= $i % 2 ?>">GM</th><?php endif; foreach ($c[2] as $t => $f): ?><th class="g<?= $i % 2 ?>"><?= $t ?>%</th><?php endforeach; endforeach; ?></tr>
+        <tr><?php foreach ($s['comps'] as $i => $c): ?><th class="g<?= $i % 2 ?>">Actual</th><?php if ($c[3] === 'gm'): ?><th class="g<?= $i % 2 ?>">GM</th><?php endif; foreach ($c[2] as $t => $f): ?><th class="g<?= $i % 2 ?>"><?= $c[3] === 'dmg' ? '≤' . $t : $t ?>%</th><?php endforeach; endforeach; ?></tr>
       </thead>
       <tbody>
       <?php if (!$s['groups']): ?><tr><td colspan="99" style="text-align:center;padding:20px;color:#8e909a">No employees in this category.</td></tr><?php endif; ?>
       <?php foreach ($s['groups'] as $g): $cfg = $g['cfg']; ?>
         <tr class="rate"><td class="sticky"><?= $h($g['name']) ?></td><td><?= $h($g['name']) ?></td><td><?= $h($g['code']) ?></td>
           <?php foreach ($s['comps'] as $c): ?><td class="lbl">rate</td><?php if ($c[3] === 'gm'): ?><td class="lbl"></td><?php endif; foreach ($c[2] as $t => $f): ?><td class="n"><?= $nf($cfg[$f] ?? null) ?></td><?php endforeach; endforeach; ?>
-          <td class="n" title="Meal reimbursement × attendance rate"><?= $nf($cfg['meal_reimbursement'] ?? null) ?></td><td></td><td></td><td></td><td></td><td></td></tr>
+          <td class="n" title="<?= $s['meal'] === 'flat' ? 'Meal reimbursement (fixed)' : 'Meal reimbursement × attendance rate' ?>"><?= $nf($cfg['meal_reimbursement'] ?? null) ?></td><td></td><td></td><td></td><td></td><td></td></tr>
         <?php foreach ($g['emps'] as $e): ?>
-        <tr class="emp" data-id="<?= $e['id'] ?>" data-s="<?= $h(mb_strtolower($e['name'] . ' ' . $e['code'] . ' ' . $g['name'])) ?>" data-rate="<?= $e['rate'] ?>" data-meal="<?= $e['meal_cfg'] ?>" data-basic="<?= $e['basic_adj'] ?>">
+        <tr class="emp" data-id="<?= $e['id'] ?>" data-s="<?= $h(mb_strtolower($e['name'] . ' ' . $e['code'] . ' ' . $g['name'])) ?>" data-rate="<?= $e['rate'] ?>" data-meal="<?= $e['meal_cfg'] ?>" data-mealmode="<?= $s['meal'] ?>" data-mealfix="<?= $e['meal_fixed'] === null ? '' : $e['meal_fixed'] ?>" data-basic="<?= $e['basic_adj'] ?>">
           <td class="sticky b"><?= $h($e['name']) ?></td><td><?= $h($g['name']) ?></td><td><?= $h($e['code']) ?></td>
           <?php foreach ($s['comps'] as $c): $v = $e['v'][$c[0]]; $rates = []; foreach ($c[2] as $t => $f) $rates[$t] = (float)($cfg[$f] ?? 0); ?>
             <?php if ($c[3] === 'att'): ?><td class="live" title="Live: <?= $e['days'] ?> of <?= $e['norm'] ?> days"><?= $pv($e['rate']) ?>%</td>
-            <?php else: ?><td class="in"><input class="ia" data-k="<?= $c[0] ?>" value="<?= $h($pv($v['act'])) ?>" placeholder="" inputmode="decimal"<?= $closed ? ' disabled' : '' ?>></td><?php endif; ?>
+            <?php else: ?><td class="in"><input class="ia" data-k="<?= $c[0] ?>" data-m="<?= $c[3] ?>" value="<?= $h($c[3] === 'dmg' ? ($v['act'] === null ? '' : rtrim(rtrim(number_format((float)$v['act'], 5, '.', ''), '0'), '.')) : $pv($v['act'])) ?>" placeholder="" inputmode="decimal"<?= $closed ? ' disabled' : '' ?>></td><?php endif; ?>
             <?php if ($c[3] === 'gm'): ?><td class="in gm"><input class="ig" data-k="<?= $c[0] ?>" value="<?= $h($pv($v['gm'])) ?>" inputmode="decimal"<?= $closed ? ' disabled' : '' ?>></td><?php endif; ?>
-            <?php foreach ($c[2] as $t => $f): ?><td class="tier" data-k="<?= $c[0] ?>" data-t="<?= $t ?>" data-r="<?= $rates[$t] ?>"<?= $v['fixed'] !== null ? ' data-fixed="' . $v['fixed'] . '"' : '' ?>></td><?php endforeach; ?>
+            <?php foreach ($c[2] as $t => $f): ?><td class="tier" data-k="<?= $c[0] ?>" data-m="<?= $c[3] ?>" data-t="<?= $t ?>" data-r="<?= $rates[$t] ?>"<?= $v['fixed'] !== null ? ' data-fixed="' . $v['fixed'] . '"' : '' ?>></td><?php endforeach; ?>
           <?php endforeach; ?>
           <td class="live meal"></td><td class="tot"></td><td class="c"><?= $e['days'] ?> / <?= $e['norm'] ?></td><td class="c"><?= $pv($e['npd']) ?></td><td class="n"><?= $nf($e['basic_adj']) ?></td><td class="tot gross"></td>
         </tr>
@@ -277,27 +317,31 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
     </table>
   </div>
   <?php $first = false; endforeach; ?>
-  <div class="note">Employees and attendance are live for the payroll month; rates come from <b>Salary Configuration</b> of each designation (the blue rows). Type <b>Actual</b> achievement % (e.g. 90.6 or 0.906); <b>GM</b> is the amended % used for the tier — leave it empty to use Actual. The amount falls in the highest tier reached. Attendance is live (days worked ÷ norm days); Meal = configured meal × attendance rate. <b>Save</b> stores the % in Incentive Entries, so the CC / ACC salary sheets use it. <span style="color:var(--neg)">Red</span> = a fixed amount already entered in Incentive Entry overrides the tier.</div>
+  <div class="note">Employees and attendance are live for the payroll month; rates come from <b>Salary Configuration</b> of each designation (the blue rows). Type <b>Actual</b> achievement % (e.g. 90.6 or 0.906); <b>GM</b> is the amended % used for the tier — leave it empty to use Actual. The amount falls in the highest tier reached; <b>Stores Damage</b> is the damage % (e.g. 0.007) — the lower the better (≤0.007% / ≤0.020%). Attendance is live (days worked ÷ norm days). Meal = configured meal × attendance rate (Office: the fixed meal); a meal saved in Incentive Entry is used as it is. <b>Save</b> stores the entries in Incentive Entries, so the CC / ACC / ST / Office salary sheets use them. <span style="color:var(--neg)">Red</span> = an amount already entered in Incentive Entry is used by the salary sheet.</div>
 </div>
 <div class="toast" id="ciToast"></div>
 <script>
 var CI_PERIOD = <?= (int)$pid ?>, ciDirty = false;
-function num(v){ v = String(v == null ? '' : v).replace(/[%,\s]/g, ''); if (v === '' || isNaN(v)) return null; v = parseFloat(v); if (v > 0 && v <= 1) v *= 100; return v; }
+function num(v, m){ v = String(v == null ? '' : v).replace(/[%,\s]/g, ''); if (v === '' || isNaN(v)) return null; v = parseFloat(v);
+  if (m === 'dmg') return (v > 0 && v < 0.001) ? v * 100 : v;   /* damage % typed as 0.007; a fraction 0.00007 is converted */
+  if (v > 0 && v <= 1) v *= 100; return v; }
 function fmt(v){ return Math.abs(v) < 0.005 ? '-' : v.toLocaleString('en-US', {minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2}); }
 function ciRow(tr){
   var rate = parseFloat(tr.dataset.rate) || 0, total = 0, earned = {};
   var keys = {}; tr.querySelectorAll('td.tier').forEach(function(td){ (keys[td.dataset.k] = keys[td.dataset.k] || []).push(td); });
   Object.keys(keys).forEach(function(k){
     var a = tr.querySelector('input.ia[data-k="' + k + '"]'), g = tr.querySelector('input.ig[data-k="' + k + '"]');
-    var p = a ? num(g && g.value.trim() !== '' ? g.value : a.value) : rate;
+    var mode = keys[k][0].dataset.m, p = a ? num(g && g.value.trim() !== '' ? g.value : a.value, mode) : rate;
     var tds = keys[k], hit = null;
     tds.forEach(function(td){ td.classList.remove('hit', 'fx'); td.textContent = ''; td.dataset.v = 0; });
     var fixed = tds[0].dataset.fixed ? parseFloat(tds[0].dataset.fixed) : 0;
+    if (fixed > 0 && a && (a.dataset.d || (g && g.dataset.d)) && tr.closest('table').dataset.sa === '1') fixed = 0;   /* ST / OFF: saving the % replaces that amount */
     if (fixed > 0) { tds[0].classList.add('hit', 'fx'); tds[0].textContent = fmt(fixed); tds[0].dataset.v = fixed; tds[0].title = 'Fixed amount from Incentive Entry'; total += fixed; return; }
-    if (p !== null) tds.forEach(function(td){ var t = parseFloat(td.dataset.t), r = parseFloat(td.dataset.r) || 0; if (p >= t - 1e-9 && r > 0) hit = td; });
+    if (p !== null && mode === 'dmg') { for (var x = 0; x < tds.length; x++) { if (p <= parseFloat(tds[x].dataset.t) + 1e-9 && (parseFloat(tds[x].dataset.r) || 0) > 0) { hit = tds[x]; break; } } }   /* lower damage is better */
+    else if (p !== null) tds.forEach(function(td){ var t = parseFloat(td.dataset.t), r = parseFloat(td.dataset.r) || 0; if (p >= t - 1e-9 && r > 0) hit = td; });
     if (hit) { hit.classList.add('hit'); hit.textContent = fmt(parseFloat(hit.dataset.r)); hit.dataset.v = hit.dataset.r; total += parseFloat(hit.dataset.r); }
   });
-  var meal = Math.round((parseFloat(tr.dataset.meal) || 0) * rate) / 100;
+  var meal = tr.dataset.mealfix !== '' ? parseFloat(tr.dataset.mealfix) || 0 : (tr.dataset.mealmode === 'flat' ? parseFloat(tr.dataset.meal) || 0 : Math.round((parseFloat(tr.dataset.meal) || 0) * rate) / 100);
   tr.querySelector('td.meal').textContent = fmt(meal); tr.querySelector('td.meal').dataset.v = meal;
   total += meal; tr.dataset.total = total; tr.dataset.mealv = meal;
   tr.querySelector('td.tot').textContent = fmt(total);
@@ -325,7 +369,7 @@ function ciFilter(){
   ciTotals();
 }
 function ciLeave(){ return !ciDirty || confirm('You have unsaved changes. Leave without saving?'); }
-document.addEventListener('input', function(e){ var i = e.target; if (!i.matches || !i.matches('td.in input')) return; ciDirty = true; document.getElementById('ciDirty').classList.add('on'); ciRow(i.closest('tr')); ciTotals(); });
+document.addEventListener('input', function(e){ var i = e.target; if (!i.matches || !i.matches('td.in input')) return; i.dataset.d = 1; ciDirty = true; document.getElementById('ciDirty').classList.add('on'); ciRow(i.closest('tr')); ciTotals(); });
 document.addEventListener('keydown', function(e){ /* Enter / arrows move like Excel */
   var i = e.target; if (!i.matches || !i.matches('td.in input')) return;
   var k = e.key; if (['Enter', 'ArrowDown', 'ArrowUp'].indexOf(k) < 0) return; e.preventDefault();
@@ -342,14 +386,15 @@ function ciSave(){
     var sk = sec.dataset.sec; data[sk] = {};
     sec.querySelectorAll('tr.emp').forEach(function(tr){
       var o = {};
-      tr.querySelectorAll('input.ia').forEach(function(a){ var g = tr.querySelector('input.ig[data-k="' + a.dataset.k + '"]'); o[a.dataset.k] = {act: a.value.trim(), gm: g ? g.value.trim() : ''}; });
-      data[sk][tr.dataset.id] = o;
+      tr.querySelectorAll('input.ia').forEach(function(a){ var g = tr.querySelector('input.ig[data-k="' + a.dataset.k + '"]');
+        if (a.dataset.d || (g && g.dataset.d)) o[a.dataset.k] = {act: a.value.trim(), gm: g ? g.value.trim() : ''}; });   /* only what was changed */
+      if (Object.keys(o).length) data[sk][tr.dataset.id] = o;
     });
   });
   var b = document.getElementById('ciSave'); b.disabled = true;
   var fd = new FormData(); fd.append('action', 'save'); fd.append('period_id', CI_PERIOD); fd.append('data', JSON.stringify(data));
   fetch(location.pathname, {method: 'POST', body: fd, credentials: 'same-origin'}).then(function(r){ return r.json(); })
-    .then(function(j){ toast(j.msg || (j.ok ? 'Saved.' : 'Could not save.'), j.ok); if (j.ok) { ciDirty = false; document.getElementById('ciDirty').classList.remove('on'); } })
+    .then(function(j){ toast(j.msg || (j.ok ? 'Saved.' : 'Could not save.'), j.ok); if (j.ok) { ciDirty = false; document.getElementById('ciDirty').classList.remove('on'); document.querySelectorAll('td.in input').forEach(function(i){ delete i.dataset.d; }); } })
     .catch(function(){ toast('Could not save (network / session).', false); })
     .then(function(){ b.disabled = false; });
 }
@@ -361,7 +406,7 @@ function ciExport(){
       c.querySelectorAll('td.in').forEach(function(td){ var i = td.querySelector('input'); td.textContent = i ? i.value : ''; });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.table_to_sheet(c, {raw: false}), t.id.replace('ciTbl_', ''));
     });
-    XLSX.writeFile(wb, 'CC_ACC_Incentives_<?= $h(preg_replace('/\W+/', '_', $plabel)) ?>.xlsx');
+    XLSX.writeFile(wb, 'Incentives_<?= $h(preg_replace('/\W+/', '_', $plabel)) ?>.xlsx');
   };
   if (window.XLSX) return go();
   var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = go; s.onerror = function(){ alert('Could not load the Excel library (internet needed).'); }; document.head.appendChild(s);
