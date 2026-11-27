@@ -1208,6 +1208,9 @@ if (isset($conn) && $conn) {
         <a href="sr_salary_config.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'sr_salary_config.php') ? 'active' : ''; ?>">
             <i class="fa-solid fa-folder"></i><span>Salary Configuration</span>
         </a>
+        <a href="payroll_headers.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'payroll_headers.php') ? 'active' : ''; ?>">
+            <i class="fa-solid fa-list-check"></i><span>Payroll Headers</span>
+        </a>
         
           <a href="incentive_types.php" class="submenu-item <?php echo (basename($_SERVER['PHP_SELF']) == 'incentive_types.php') ? 'active' : ''; ?>">
                         <i class="fa-solid fa-folder"></i><span>Incentive</span>
