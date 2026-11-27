@@ -21,7 +21,7 @@ function ph_categories($conn) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ph_action'])) {
     header('Content-Type: application/json; charset=utf-8');
     $act = (string)$_POST['ph_action'];
-    if (function_exists('rbac_can') && !rbac_can($act === 'delete' ? 'delete' : 'edit', 'payroll_headers')) { echo json_encode(['ok' => false, 'msg' => 'Permission blocked for your role.']); exit; }
+    if (function_exists('rbac_can') && !rbac_can(in_array($act, ['delete', 'delete_all'], true) ? 'delete' : 'edit', 'payroll_headers')) { echo json_encode(['ok' => false, 'msg' => 'Permission blocked for your role.']); exit; }
     $e = function ($v) use ($conn) { return mysqli_real_escape_string($conn, (string)$v); };
     if ($act === 'save') {
         $id   = (int)($_POST['id'] ?? 0);
@@ -57,6 +57,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ph_action'])) {
         ph_q($conn, "DELETE FROM payroll_header_categories WHERE header_id = $id");
         $ok = ph_q($conn, "DELETE FROM payroll_headers WHERE id = $id");
         echo json_encode($ok ? ['ok' => true, 'msg' => 'Deleted.'] : ['ok' => false, 'msg' => 'Could not delete.']); exit;
+    }
+    if ($act === 'delete_all') {                                   /* all headers, or only the additions / deductions */
+        $t = (string)($_POST['type'] ?? 'all'); $w = in_array($t, ['addition', 'deduction'], true) ? "WHERE header_type = '$t'" : '';
+        $ids = []; $r = ph_q($conn, "SELECT id FROM payroll_headers $w"); while ($r && ($x = mysqli_fetch_row($r))) $ids[] = (int)$x[0];
+        if (!$ids) { echo json_encode(['ok' => false, 'msg' => 'There is nothing to delete.']); exit; }
+        $in = implode(',', $ids);
+        ph_q($conn, "DELETE FROM payroll_header_categories WHERE header_id IN ($in)");
+        $ok = ph_q($conn, "DELETE FROM payroll_headers WHERE id IN ($in)");
+        echo json_encode($ok ? ['ok' => true, 'msg' => count($ids) . ' header(s) deleted.'] : ['ok' => false, 'msg' => 'Could not delete.']); exit;
     }
     if ($act === 'toggle') {
         $id = (int)($_POST['id'] ?? 0);
@@ -158,6 +167,7 @@ $nAdd = count(array_filter($rows, function ($x) { return $x['header_type'] !== '
 .ph-msg { grid-column: 1 / -1; display: none; padding: 9px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 .ph-bf { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid #f1f5f9; }
 .ph-cancel { background: #f1f5f9; color: #334155; }
+.ph-delall { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; } .ph-delall:hover { background: #fee2e2; }
 .ph-imp { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; } .ph-imp:hover { background: #d1fae5; }
 .ph-scan { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ph-scan th { position: sticky; top: 0; background: #f8fafc; text-align: left; padding: 8px 10px; font-size: 11px; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #e5e7eb; }
@@ -175,6 +185,7 @@ $nAdd = count(array_filter($rows, function ($x) { return $x['header_type'] !== '
     <div><h2><i class="fa-solid fa-list-check"></i> Payroll Headers</h2>
       <p>Salary additions and deductions by name. Tick the staff categories each one is used for — the salary sheets offer them in <b>Additional Earnings / Deductions</b>.</p></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="ph-btn ph-imp" onclick="phScan()"><i class="fa-solid fa-wand-magic-sparkles"></i> Load Salary Components</button>
+    <?php if ($rows): ?><button type="button" class="ph-btn ph-delall" onclick="phDeleteAll()"><i class="fa-solid fa-trash-can"></i> Delete All</button><?php endif; ?>
     <button type="button" class="ph-btn ph-new" onclick="phOpen(0)"><i class="fa-solid fa-plus"></i> New Header</button></div>
   </div>
   <div class="ph-tabs">
@@ -270,6 +281,14 @@ function phDelete(id){
   var x = PH.find(function(r){ return r.id===id; }); if(!x) return;
   if(!confirm('Delete the ' + (x.type==='deduction'?'deduction':'addition') + ' header "' + x.name + '"?\n\nSalary sheets already saved keep their rows; it is only removed from the list.')) return;
   phPost({ph_action:'delete', id:id}).then(function(d){ if(!d.ok){ alert(d.msg||'Could not delete.'); return; } sessionStorage.setItem('ph_msg','Header deleted'); location.reload(); });
+}
+function phDeleteAll(){
+  var lbl = phF==='addition' ? 'additions' : (phF==='deduction' ? 'deductions' : 'payroll headers');
+  var n = PH.filter(function(r){ return phF==='all' || r.type===phF; }).length;
+  if(!n){ alert('There is nothing to delete.'); return; }
+  if(!confirm('Delete ALL ' + n + ' ' + lbl + '?\n\nSalary sheets already saved keep their rows. This cannot be undone.')) return;
+  if(prompt('Type DELETE to confirm deleting all ' + n + ' ' + lbl + '.') !== 'DELETE') { phToast('Not deleted'); return; }
+  phPost({ph_action:'delete_all', type:phF}).then(function(d){ if(!d.ok){ alert(d.msg||'Could not delete.'); return; } sessionStorage.setItem('ph_msg', d.msg); location.reload(); });
 }
 function phToggle(id, el){
   phPost({ph_action:'toggle', id:id}).then(function(d){ if(!d.ok){ el.checked=!el.checked; alert(d.msg||'Could not change.'); return; } el.closest('tr').classList.toggle('off', !el.checked); phToast(el.checked?'Activated':'Deactivated'); });
