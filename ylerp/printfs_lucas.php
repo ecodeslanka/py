@@ -468,6 +468,8 @@ td, th { border:1px solid #000; padding:2px 3px; text-align:left; white-space:no
 .right-block {
     border:2px solid #000; padding:4px 6px; font-size:10px; line-height:1.8;
 }
+.right-block .rb-mobile { font-size:10px; }
+.right-block .rb-mobile b { font-size:11px; letter-spacing:.3px; }
 .right-block .rb-title { font-weight:bold; font-size:10px; margin-bottom:2px; text-decoration:underline; }
 .date-right { text-align:right; font-size:10px; font-weight:bold; padding:2px 0 3px; }
 
@@ -646,6 +648,15 @@ td, th { border:1px solid #000; padding:2px 3px; text-align:left; white-space:no
 </div>
 
 <?php
+/* the mobile no (ref code) linked to each CC in Cash Collectors — the bank deposit reference */
+$cc_mobile_by_key = [];
+$__cc = @mysqli_query($conn, "SHOW TABLES LIKE 'cash_collectors'");
+if ($__cc && mysqli_num_rows($__cc) > 0) {
+    $__r = @mysqli_query($conn, "SELECT delivery_person, ref_code FROM cash_collectors WHERE ref_code IS NOT NULL AND ref_code <> ''");
+    while ($__r && ($__x = mysqli_fetch_assoc($__r))) $cc_mobile_by_key[strtoupper(preg_replace('/\s+/', ' ', trim((string)$__x['delivery_person'])))] = trim((string)$__x['ref_code']);
+}
+?>
+<?php
 /* ══════════════════════════════════════════════════════════════
    RENDER EACH CC (DELIVERY PERSON) GROUP — EXACTLY 2 pages per CC
    Page 1: All invoice rows for this CC (grouped by SR with divider),
@@ -733,6 +744,8 @@ foreach ($cc_groups as $cc_person => $records):
         <!-- RIGHT -->
         <div class="right-block">
             <div class="rb-title"><?php echo htmlspecialchars($unilever_code); ?></div>
+            <?php $cc_mobile = $cc_mobile_by_key[strtoupper(preg_replace('/\s+/', ' ', trim((string)$cc_person)))] ?? ''; ?>
+            <div class="rb-line rb-mobile">Deposit Ref (Mobile) : <b><?php echo $cc_mobile !== '' ? htmlspecialchars($cc_mobile) : '..............................'; ?></b></div>
             <div class="rb-line">Received Cash :</div>
             <div class="rb-line">Cash Excess/Short :</div>
             <div class="rb-line">Note :</div>
