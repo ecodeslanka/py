@@ -68,8 +68,8 @@ td.sig { width: 30mm; }
 tbody tr { height: 11mm; page-break-inside: avoid; }
 td.no { width: 8mm; text-align: center; color: #555; }
 tfoot td { font-weight: 700; background: #f8fafc; }
-.foot { display: flex; justify-content: space-between; margin-top: 26px; font-size: 12px; }
-.foot div { width: 45%; border-top: 1px dotted #333; padding-top: 4px; text-align: center; }
+.foot { display: flex; justify-content: space-between; margin-top: 30mm; font-size: 13px; page-break-inside: avoid; }
+.foot div { width: 40%; border-top: 1px dotted #333; padding-top: 6px; text-align: center; }
 @media print { body { background: #fff; } .bar { display: none; } .sheet { margin: 0; width: auto; min-height: 0; padding: 0; box-shadow: none; } thead { display: table-header-group; } }
 </style></head>
 <body>
