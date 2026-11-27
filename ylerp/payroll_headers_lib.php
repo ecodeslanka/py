@@ -15,6 +15,9 @@ if (!function_exists('ph_ensure')) {
             created_by VARCHAR(100) NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_by VARCHAR(100) NULL, updated_at DATETIME NULL,
             UNIQUE KEY uq_name_type (name, header_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach (['source' => "VARCHAR(20) NULL", 'component_key' => "VARCHAR(40) NULL"] as $c => $d) {      /* source 'salary_sheet' = a column the salary sheet calculates */
+            $r = ph_q($conn, "SHOW COLUMNS FROM payroll_headers LIKE '$c'"); if ($r && mysqli_num_rows($r) === 0) ph_q($conn, "ALTER TABLE payroll_headers ADD COLUMN `$c` $d");
+        }
         ph_q($conn, "CREATE TABLE IF NOT EXISTS payroll_header_categories (
             header_id INT NOT NULL, category_code VARCHAR(50) NOT NULL, PRIMARY KEY (header_id, category_code), INDEX idx_cat (category_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -27,12 +30,61 @@ if (!function_exists('ph_ensure')) {
         $in = implode(',', array_map(function ($c) use ($conn) { return "'" . mysqli_real_escape_string($conn, $c) . "'"; }, $codes));
         $r = ph_q($conn, "SELECT DISTINCT h.id, h.name, h.header_type, h.default_amount, h.sort_order FROM payroll_headers h
                           JOIN payroll_header_categories c ON c.header_id = h.id
-                          WHERE h.active = 1 AND c.category_code IN ($in) ORDER BY h.sort_order, h.name");
+                          WHERE h.active = 1 AND COALESCE(h.source,'') <> 'salary_sheet' AND c.category_code IN ($in) ORDER BY h.sort_order, h.name");   /* the sheet's own columns are not offered as Additional rows */
         while ($r && ($x = mysqli_fetch_assoc($r))) {
             $t = $x['header_type'] === 'deduction' ? 'deduction' : 'addition';
             $o[$t][] = ['name' => $x['name'], 'amount' => $x['default_amount'] !== null ? (float)$x['default_amount'] : null];
         }
         return $o;
+    }
+    /** the salary sheets: sheet → staff category codes */
+    if (!defined('PH_SHEET_CATS')) define('PH_SHEET_CATS', ['CC' => ['CC', 'SACC'], 'ACC' => ['ACC'], 'SR' => ['SR'], 'MR' => ['MR'], 'OFF' => ['OFF'], 'ST' => ['ST']]);
+    /** the components each salary sheet calculates: key → [name, type, sheets] (from the Total Earnings / Total Deductions of cc/acc/sr/mr/off/st_salary.php) */
+    function ph_components() {
+        $all = ['CC', 'ACC', 'SR', 'MR', 'OFF', 'ST'];
+        return [
+            'basic'        => ['Basic Salary', 'addition', $all],
+            'ccfot'        => ['CCFOT', 'addition', ['CC', 'ACC', 'ST']],
+            'credit_mgt'   => ['Credit Management', 'addition', ['CC']],
+            'payee_chq'    => ['Payee Cheque', 'addition', ['CC']],
+            'ssv'          => ['SSV', 'addition', ['CC', 'ACC', 'SR']],
+            'att_inc'      => ['Attendance Incentive', 'addition', ['CC', 'MR']],
+            'locus_admin'  => ['Locus Admin', 'addition', ['CC']],
+            'att_allow'    => ['Attendance Allowance', 'addition', ['ACC', 'SR', 'OFF', 'ST']],
+            'punctuality'  => ['Punctuality', 'addition', ['ACC', 'OFF', 'ST']],
+            'disc'         => ['Discretionary Support', 'addition', ['SR']],
+            'ps'           => ['PS Compliance Incentive', 'addition', ['SR']],
+            'eco'          => ['ECO Incentive', 'addition', ['SR']],
+            'bp'           => ['BP Incentive', 'addition', ['SR']],
+            'assort'       => ['Assortment Incentive', 'addition', ['SR']],
+            'other_inc'    => ['Other Incentive', 'addition', ['SR']],
+            'plc'          => ['Placement', 'addition', ['MR']],
+            'dlink'        => ['D-Link Amount', 'addition', ['MR']],
+            'daily_inc'    => ['Daily Incentive', 'addition', ['OFF']],
+            'weekly_inc'   => ['Weekly Incentive', 'addition', ['OFF']],
+            'monthly_inc'  => ['Monthly Incentive', 'addition', ['OFF']],
+            'stores_dmg'   => ['Stores Damage', 'addition', ['ST']],
+            'rsqm'         => ['RSQM', 'addition', ['ST']],
+            'load_unload'  => ['Loading / Unloading', 'addition', ['ST']],
+            'meal'         => ['Meal Reimbursement', 'addition', $all],
+            'travel'       => ['Travel Reimbursement', 'addition', ['SR', 'MR']],
+            'fuel'         => ['Fuel', 'addition', ['SR']],
+            'mobile'       => ['Mobile Reimbursement', 'addition', ['CC', 'SR']],
+            'arrears'      => ['Arrears', 'addition', $all],
+            'epf8'         => ['EPF 8%', 'deduction', $all],
+            'welfare'      => ['Welfare', 'deduction', $all],
+            'w_loan'       => ['Welfare Loan', 'deduction', $all],
+            'w_soc'        => ['Welfare Society', 'deduction', $all],
+            'donations'    => ['Donations', 'deduction', $all],
+            'sal_adv'      => ['Salary Advance', 'deduction', $all],
+            'loan'         => ['Loan Deduction', 'deduction', $all],
+            'credit_rec'   => ['Credit Recovery', 'deduction', $all],
+            'cash_short'   => ['Cash Short', 'deduction', ['CC', 'ACC']],
+            'good_short'   => ['Good Short', 'deduction', ['CC', 'ACC']],
+            'no_pay'       => ['No Pay', 'deduction', $all],
+            'retention'    => ['Retention', 'deduction', $all],
+            'excess'       => ['Excess Payment', 'deduction', $all],
+        ];
     }
     /** prints the two lists the salary sheets use (<datalist id="phEarnList"> / "phDedList") and the script that fills a default amount */
     function ph_salary_lists($conn, $codes) {

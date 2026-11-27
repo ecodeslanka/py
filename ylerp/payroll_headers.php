@@ -63,51 +63,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ph_action'])) {
         $ok = ph_q($conn, "UPDATE payroll_headers SET active = 1 - active, updated_by = '" . $e($ph_user) . "', updated_at = NOW() WHERE id = $id");
         echo json_encode($ok ? ['ok' => true] : ['ok' => false, 'msg' => 'Could not change.']); exit;
     }
-    /* ── the additions / deductions already typed in the saved salary sheets (Additional Earnings / Deductions) ── */
+    /* ── the salary sheet components (the columns each salary sheet calculates) → payroll headers per staff category ── */
     if ($act === 'scan' || $act === 'import') {
-        $found = [];                                              /* type|lower name → name, type, uses, amounts, categories */
-        $have = (ph_q($conn, "SHOW TABLES LIKE 'salary_sheet_entries'") ?: null);
-        if ($have && mysqli_num_rows($have)) {
-            $r = ph_q($conn, "SELECT s.additional_earnings, s.additional_deductions, COALESCE(sc.category_code,'') AS cat
-                              FROM salary_sheet_entries s LEFT JOIN employees e ON e.id = s.employee_id LEFT JOIN staff_categories sc ON sc.id = e.staff_category_id
-                              WHERE (s.additional_earnings IS NOT NULL AND s.additional_earnings NOT IN ('','[]','null')) OR (s.additional_deductions IS NOT NULL AND s.additional_deductions NOT IN ('','[]','null'))");
-            while ($r && ($x = mysqli_fetch_assoc($r))) {
-                foreach (['addition' => 'additional_earnings', 'deduction' => 'additional_deductions'] as $t => $col) {
-                    $list = json_decode((string)$x[$col], true); if (!is_array($list)) continue;
-                    foreach ($list as $it) {
-                        $n = trim(preg_replace('/\s+/', ' ', (string)($it['desc'] ?? ''))); if ($n === '' || mb_strlen($n) > 150) continue;
-                        $k = $t . '|' . mb_strtolower($n);
-                        if (!isset($found[$k])) $found[$k] = ['type' => $t, 'names' => [], 'uses' => 0, 'amounts' => [], 'cats' => []];
-                        $found[$k]['names'][$n] = ($found[$k]['names'][$n] ?? 0) + 1; $found[$k]['uses']++;
-                        $a = round((float)($it['amount'] ?? 0), 2); if ($a > 0) $found[$k]['amounts'][(string)$a] = ($found[$k]['amounts'][(string)$a] ?? 0) + 1;
-                        if (trim($x['cat']) !== '') $found[$k]['cats'][trim($x['cat'])] = 1;
-                    }
-                }
-            }
+        $have = []; foreach (ph_categories($conn) as $c) if (trim((string)$c['category_code']) !== '') $have[strtoupper(trim($c['category_code']))] = trim($c['category_code']);
+        $comp = [];
+        foreach (ph_components() as $k => $x) {
+            $cats = [];
+            foreach ($x[2] as $sheet) foreach (PH_SHEET_CATS[$sheet] ?? [] as $code) if (isset($have[strtoupper($code)])) $cats[$have[strtoupper($code)]] = 1;
+            $comp[] = ['key' => $k, 'name' => $x[0], 'type' => $x[1], 'sheets' => $x[2], 'cats' => array_keys($cats)];
         }
         $exist = []; $r = ph_q($conn, "SELECT id, name, header_type FROM payroll_headers"); while ($r && ($x = mysqli_fetch_assoc($r))) $exist[$x['header_type'] . '|' . mb_strtolower($x['name'])] = (int)$x['id'];
-        $out = [];
-        foreach ($found as $k => $f) {
-            arsort($f['names']); arsort($f['amounts']);
-            $amts = array_keys($f['amounts']);
-            $out[] = ['key' => $k, 'name' => array_key_first($f['names']), 'type' => $f['type'], 'uses' => $f['uses'], 'cats' => array_keys($f['cats']),
-                      'amount' => count($amts) === 1 ? (float)$amts[0] : null, 'amounts' => array_slice(array_map('floatval', $amts), 0, 4), 'exists' => $exist[$k] ?? 0];
+        foreach ($comp as &$c) $c['exists'] = $exist[$c['type'] . '|' . mb_strtolower($c['name'])] ?? 0; unset($c);
+        $old = []; $r = ph_q($conn, "SELECT id, name FROM payroll_headers WHERE description = 'Created from the salary sheets'"); while ($r && ($x = mysqli_fetch_assoc($r))) $old[] = $x;
+        if ($act === 'scan') { echo json_encode(['ok' => true, 'rows' => $comp, 'old' => $old]); exit; }
+        $pick = array_flip((array)json_decode((string)($_POST['keys'] ?? '[]'), true)); $n = 0; $m = 0; $del = 0;
+        if (!empty($_POST['remove_old']) && $old) {                    /* headers made by the earlier import from the Additional rows */
+            $ids = implode(',', array_map(function ($x) { return (int)$x['id']; }, $old));
+            ph_q($conn, "DELETE FROM payroll_header_categories WHERE header_id IN ($ids)"); ph_q($conn, "DELETE FROM payroll_headers WHERE id IN ($ids)"); $del = count($old);
+            foreach ($comp as &$c) if (in_array($c['exists'], array_map('intval', array_column($old, 'id')), true)) $c['exists'] = 0; unset($c);
         }
-        usort($out, function ($a, $b) { return strcmp($a['type'], $b['type']) ?: ($b['uses'] <=> $a['uses']) ?: strcasecmp($a['name'], $b['name']); });
-        if ($act === 'scan') { echo json_encode(['ok' => true, 'rows' => $out]); exit; }
-        /* import the ticked ones: new name → new header (default amount only when it was always the same); existing name → its categories are added */
-        $pick = array_flip((array)json_decode((string)($_POST['keys'] ?? '[]'), true)); $n = 0; $m = 0;
-        foreach ($out as $o) {
-            if (!isset($pick[$o['key']])) continue;
-            $id = (int)$o['exists'];
+        $sort = 0;
+        foreach ($comp as $c) {
+            $sort++; if (!isset($pick[$c['key']])) continue;
+            $id = (int)$c['exists'];
             if (!$id) {
-                $ok = ph_q($conn, "INSERT INTO payroll_headers (name, header_type, default_amount, description, active, created_by)
-                                   VALUES ('" . $e($o['name']) . "', '{$o['type']}', " . ($o['amount'] !== null ? $o['amount'] : 'NULL') . ", 'Created from the salary sheets', 1, '" . $e($ph_user) . "')");
+                $ok = ph_q($conn, "INSERT INTO payroll_headers (name, header_type, description, source, component_key, active, sort_order, created_by)
+                                   VALUES ('" . $e($c['name']) . "', '{$c['type']}', 'Salary sheet component', 'salary_sheet', '" . $e($c['key']) . "', 1, $sort, '" . $e($ph_user) . "')");
                 if (!$ok) continue; $id = (int)mysqli_insert_id($conn); $n++;
-            } else $m++;
-            foreach ($o['cats'] as $c) ph_q($conn, "INSERT IGNORE INTO payroll_header_categories (header_id, category_code) VALUES ($id, '" . $e($c) . "')");
+            } else { ph_q($conn, "UPDATE payroll_headers SET source = 'salary_sheet', component_key = '" . $e($c['key']) . "' WHERE id = $id"); $m++; }
+            foreach ($c['cats'] as $code) ph_q($conn, "INSERT IGNORE INTO payroll_header_categories (header_id, category_code) VALUES ($id, '" . $e($code) . "')");
         }
-        echo json_encode(['ok' => true, 'created' => $n, 'updated' => $m, 'msg' => $n . ' header(s) created' . ($m ? ', ' . $m . ' existing header(s) got their categories' : '') . '.']); exit;
+        echo json_encode(['ok' => true, 'msg' => $n . ' salary component header(s) created' . ($m ? ', ' . $m . ' existing updated' : '') . ($del ? ', ' . $del . ' old imported header(s) removed' : '') . '.']); exit;
     }
     echo json_encode(['ok' => false, 'msg' => 'Unknown action.']); exit;
 }
@@ -188,7 +174,7 @@ $nAdd = count(array_filter($rows, function ($x) { return $x['header_type'] !== '
   <div class="ph-top">
     <div><h2><i class="fa-solid fa-list-check"></i> Payroll Headers</h2>
       <p>Salary additions and deductions by name. Tick the staff categories each one is used for — the salary sheets offer them in <b>Additional Earnings / Deductions</b>.</p></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="ph-btn ph-imp" onclick="phScan()"><i class="fa-solid fa-wand-magic-sparkles"></i> Import from Salary Sheets</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="ph-btn ph-imp" onclick="phScan()"><i class="fa-solid fa-wand-magic-sparkles"></i> Load Salary Components</button>
     <button type="button" class="ph-btn ph-new" onclick="phOpen(0)"><i class="fa-solid fa-plus"></i> New Header</button></div>
   </div>
   <div class="ph-tabs">
@@ -205,7 +191,7 @@ $nAdd = count(array_filter($rows, function ($x) { return $x['header_type'] !== '
       <?php foreach ($rows as $i => $x): $t = $x['header_type'] === 'deduction' ? 'deduction' : 'addition'; ?>
         <tr class="<?= $x['active'] ? '' : 'off' ?>" data-type="<?= $t ?>" data-s="<?= $h(mb_strtolower($x['name'] . ' ' . implode(' ', array_map(function ($c) use ($catName) { return $c . ' ' . ($catName[$c] ?? ''); }, $x['cat_list'])))) ?>">
           <td style="color:#94a3b8"><?= $i + 1 ?></td>
-          <td><b><?= $h($x['name']) ?></b><?= $x['description'] ? '<div style="font-size:11.5px;color:#64748b">' . $h($x['description']) . '</div>' : '' ?></td>
+          <td><b><?= $h($x['name']) ?></b><?= ($x['source'] ?? '') === 'salary_sheet' ? ' <span class="ph-ex-tag" title="A column of the salary sheet — not offered in the Additional rows">Salary sheet</span>' : '' ?><?= $x['description'] && $x['description'] !== 'Salary sheet component' ? '<div style="font-size:11.5px;color:#64748b">' . $h($x['description']) . '</div>' : '' ?></td>
           <td><span class="ph-type <?= $t ?>"><i class="fa-solid fa-<?= $t === 'addition' ? 'plus' : 'minus' ?>"></i> <?= $t === 'addition' ? 'Addition' : 'Deduction' ?></span></td>
           <td style="text-align:right;font-weight:700"><?= $x['default_amount'] !== null ? number_format((float)$x['default_amount'], 2) : '<span style="color:#cbd5e1">—</span>' ?></td>
           <td><?php foreach ($x['cat_list'] as $c) echo '<span class="ph-chip" title="' . $h($c) . '">' . $h($catName[$c] ?? $c) . '</span>'; if (!$x['cat_list']) echo '<span style="color:#cbd5e1">—</span>'; ?></td>
@@ -244,9 +230,9 @@ $nAdd = count(array_filter($rows, function ($x) { return $x['header_type'] !== '
 </div>
 <div class="ph-mo" id="phScanMo" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="ph-box" role="dialog" aria-modal="true" aria-labelledby="phScanTitle" style="max-width:860px">
-    <div class="ph-bh"><h3 id="phScanTitle"><i class="fa-solid fa-wand-magic-sparkles"></i> Import from Salary Sheets</h3><button type="button" onclick="document.getElementById('phScanMo').classList.remove('open')" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
-    <div style="padding:12px 18px 0;font-size:13px;color:#475569">The additions and deductions typed in the saved salary sheets (Additional Earnings / Deductions). The staff categories come from the employees they were used for; the default amount is filled only when it was always the same. Tick the ones to create.</div>
-    <div style="padding:10px 18px;max-height:56vh;overflow:auto"><table class="ph-scan"><thead><tr><th><input type="checkbox" id="phScanAll" onchange="document.querySelectorAll('.ph-sk').forEach(function(c){c.checked=document.getElementById('phScanAll').checked;})"></th><th>Name</th><th>Type</th><th style="text-align:right">Used</th><th>Amount(s)</th><th>Staff Categories</th><th></th></tr></thead><tbody id="phScanBody"></tbody></table></div>
+    <div class="ph-bh"><h3 id="phScanTitle"><i class="fa-solid fa-wand-magic-sparkles"></i> Load Salary Components</h3><button type="button" onclick="document.getElementById('phScanMo').classList.remove('open')" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+    <div style="padding:12px 18px 0;font-size:13px;color:#475569">The additions and deductions each salary sheet calculates (Basic Salary, allowances, incentives / EPF, welfare, loans …). Each one is ticked for the staff categories whose salary sheet has it. Tick the ones to create.<div id="phOldBox" style="display:none;margin-top:8px;padding:8px 10px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="phRemoveOld" checked> <span>Remove the <b id="phOldN"></b> header(s) made earlier from the Additional rows (<span id="phOldNames"></span>)</span></label></div></div>
+    <div style="padding:10px 18px;max-height:56vh;overflow:auto"><table class="ph-scan"><thead><tr><th><input type="checkbox" id="phScanAll" onchange="document.querySelectorAll('.ph-sk').forEach(function(c){c.checked=document.getElementById('phScanAll').checked;})"></th><th>Name</th><th>Type</th><th>Salary Sheets</th><th>Staff Categories</th><th></th></tr></thead><tbody id="phScanBody"></tbody></table></div>
     <div class="ph-bf"><span id="phScanInfo" style="margin-right:auto;font-size:12.5px;color:#64748b;align-self:center"></span><button type="button" class="ph-btn ph-cancel" onclick="document.getElementById('phScanMo').classList.remove('open')">Cancel</button><button type="button" class="ph-btn ph-new" id="phImpBtn" onclick="phImport()"><i class="fa-solid fa-file-import"></i> Create Ticked</button></div>
   </div>
 </div>
@@ -292,25 +278,27 @@ var CAT_NAME = <?= json_encode($catName) ?>;
 function phEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 function phScan(){
   var m=phEl('phScanMo'); if(m.parentElement!==document.body) document.body.appendChild(m); m.classList.add('open');
-  phEl('phScanBody').innerHTML='<tr><td colspan="7" style="text-align:center;padding:24px;color:#94a3b8">Reading the salary sheets…</td></tr>'; phEl('phScanInfo').textContent='';
+  phEl('phScanBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8">Loading…</td></tr>'; phEl('phScanInfo').textContent='';
   phPost({ph_action:'scan'}).then(function(d){
-    if(!d.ok){ phEl('phScanBody').innerHTML='<tr><td colspan="7">'+phEsc(d.msg)+'</td></tr>'; return; }
-    var nNew=d.rows.filter(function(r){return !r.exists;}).length;
-    phEl('phScanInfo').textContent=d.rows.length+' found · '+nNew+' new';
-    phEl('phScanBody').innerHTML = d.rows.length ? d.rows.map(function(r){
-      return '<tr class="'+(r.exists?'ex':'')+'"><td><input type="checkbox" class="ph-sk" value="'+phEsc(r.key)+'"'+(r.exists?'':' checked')+'></td><td><b>'+phEsc(r.name)+'</b></td>'
-        +'<td><span class="ph-type '+r.type+'">'+(r.type==='addition'?'+ Addition':'− Deduction')+'</span></td><td style="text-align:right">'+r.uses+'</td>'
-        +'<td>'+(r.amounts.length? r.amounts.map(function(a){return Number(a).toLocaleString('en-US',{minimumFractionDigits:2});}).join(', ')+(r.amount===null&&r.amounts.length>1?' <small style="color:#94a3b8">(varies — no default)</small>':''):'<span style="color:#cbd5e1">—</span>')+'</td>'
-        +'<td>'+(r.cats.length? r.cats.map(function(c){return '<span class="ph-chip">'+phEsc(CAT_NAME[c]||c)+'</span>';}).join(''):'<span style="color:#cbd5e1">—</span>')+'</td>'
+    if(!d.ok){ phEl('phScanBody').innerHTML='<tr><td colspan="6">'+phEsc(d.msg)+'</td></tr>'; return; }
+    var nNew=d.rows.filter(function(r){return !r.exists;}).length, last='';
+    phEl('phScanInfo').textContent=d.rows.length+' components · '+nNew+' new';
+    phEl('phOldBox').style.display = d.old.length ? 'block' : 'none'; phEl('phOldN').textContent=d.old.length; phEl('phOldNames').textContent=d.old.map(function(x){return x.name;}).join(', ');
+    phEl('phScanBody').innerHTML = d.rows.map(function(r){
+      var h = r.type!==last ? '<tr><td colspan="6" style="background:'+(r.type==='addition'?'#f0fdf4':'#fef2f2')+';font-weight:800;color:'+(r.type==='addition'?'#166534':'#991b1b')+'">'+(r.type==='addition'?'Additions (Earnings)':'Deductions')+'</td></tr>' : ''; last=r.type;
+      return h+'<tr class="'+(r.exists?'ex':'')+'"><td><input type="checkbox" class="ph-sk" value="'+phEsc(r.key)+'"'+(r.cats.length?' checked':'')+'></td><td><b>'+phEsc(r.name)+'</b></td>'
+        +'<td><span class="ph-type '+r.type+'">'+(r.type==='addition'?'+ Addition':'− Deduction')+'</span></td>'
+        +'<td style="font-size:11.5px;color:#475569">'+r.sheets.join(', ')+'</td>'
+        +'<td>'+(r.cats.length? r.cats.map(function(c){return '<span class="ph-chip">'+phEsc(CAT_NAME[c]||c)+'</span>';}).join(''):'<span style="color:#cbd5e1" title="No staff category with these codes">—</span>')+'</td>'
         +'<td>'+(r.exists?'<span class="ph-ex-tag">Exists — adds categories</span>':'<span class="ph-new-tag">New</span>')+'</td></tr>';
-    }).join('') : '<tr><td colspan="7" style="text-align:center;padding:24px;color:#94a3b8">No additions or deductions found in the saved salary sheets.</td></tr>';
-    phEl('phScanAll').checked = nNew>0 && nNew===d.rows.length;
-  }).catch(function(){ phEl('phScanBody').innerHTML='<tr><td colspan="7">Could not reach the server.</td></tr>'; });
+    }).join('');
+    phEl('phScanAll').checked = true;
+  }).catch(function(){ phEl('phScanBody').innerHTML='<tr><td colspan="6">Could not reach the server.</td></tr>'; });
 }
 function phImport(){
   var keys=[].map.call(document.querySelectorAll('.ph-sk:checked'),function(c){return c.value;}); if(!keys.length){ alert('Tick at least one.'); return; }
   var b=phEl('phImpBtn'); b.disabled=true;
-  phPost({ph_action:'import', keys:JSON.stringify(keys)}).then(function(d){ b.disabled=false; if(!d.ok){ alert(d.msg||'Could not import.'); return; } sessionStorage.setItem('ph_msg', d.msg); location.reload(); })
+  phPost({ph_action:'import', keys:JSON.stringify(keys), remove_old: phEl('phRemoveOld').checked && phEl('phOldBox').style.display!=='none' ? 1 : 0}).then(function(d){ b.disabled=false; if(!d.ok){ alert(d.msg||'Could not create.'); return; } sessionStorage.setItem('ph_msg', d.msg); location.reload(); })
   .catch(function(){ b.disabled=false; alert('Could not reach the server.'); });
 }
 function phFilter(btn){ phF = btn.dataset.f; document.querySelectorAll('.ph-tabs button').forEach(function(b){ b.classList.toggle('on', b===btn); }); phApply(); }
