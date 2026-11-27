@@ -202,7 +202,7 @@ $nAdd = count(array_filter($rows, function ($x) { return $x['header_type'] !== '
       <?php foreach ($rows as $i => $x): $t = $x['header_type'] === 'deduction' ? 'deduction' : 'addition'; ?>
         <tr class="<?= $x['active'] ? '' : 'off' ?>" data-type="<?= $t ?>" data-s="<?= $h(mb_strtolower($x['name'] . ' ' . implode(' ', array_map(function ($c) use ($catName) { return $c . ' ' . ($catName[$c] ?? ''); }, $x['cat_list'])))) ?>">
           <td style="color:#94a3b8"><?= $i + 1 ?></td>
-          <td><b><?= $h($x['name']) ?></b><?= ($x['source'] ?? '') === 'salary_sheet' ? ' <span class="ph-ex-tag" title="A column of the salary sheet — not offered in the Additional rows">Salary sheet</span>' : '' ?><?= $x['description'] && $x['description'] !== 'Salary sheet component' ? '<div style="font-size:11.5px;color:#64748b">' . $h($x['description']) . '</div>' : '' ?></td>
+          <td><b><?= $h($x['name']) ?></b><?= $x['description'] && $x['description'] !== 'Salary sheet component' ? '<div style="font-size:11.5px;color:#64748b">' . $h($x['description']) . '</div>' : '' ?></td>
           <td><span class="ph-type <?= $t ?>"><i class="fa-solid fa-<?= $t === 'addition' ? 'plus' : 'minus' ?>"></i> <?= $t === 'addition' ? 'Addition' : 'Deduction' ?></span></td>
           <td style="text-align:right;font-weight:700"><?= $x['default_amount'] !== null ? number_format((float)$x['default_amount'], 2) : '<span style="color:#cbd5e1">—</span>' ?></td>
           <td><?php foreach ($x['cat_list'] as $c) echo '<span class="ph-chip" title="' . $h($c) . '">' . $h($catName[$c] ?? $c) . '</span>'; if (!$x['cat_list']) echo '<span style="color:#cbd5e1">—</span>'; ?></td>
