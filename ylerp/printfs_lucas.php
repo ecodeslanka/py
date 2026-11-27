@@ -748,7 +748,6 @@ foreach ($cc_groups as $cc_person => $records):
             <div class="rb-line rb-mobile">Deposit Ref (Mobile) : <b><?php echo $cc_mobile !== '' ? htmlspecialchars($cc_mobile) : '..............................'; ?></b></div>
             <div class="rb-line">Received Cash :</div>
             <div class="rb-line">Cash Excess/Short :</div>
-            <div class="rb-line">Note :</div>
         </div>
     </div>
 
