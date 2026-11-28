@@ -86,12 +86,13 @@ if ($period) {
     $adv = []; $q = ls_q($conn, "SELECT employee_id, SUM(amount) FROM salary_advances WHERE status = 'Approved' AND employee_id IN ($ids) AND request_date BETWEEN '$from' AND '$to' GROUP BY employee_id");
     while ($q && ($x = mysqli_fetch_row($q))) $adv[(int)$x[0]] = (float)$x[1];
 
-    /* approved loans: this month's instalment (never more than the balance) */
+    /* approved loans: this month's instalment (never more than the balance), loans approved before the month */
     $loan = [];
     if (ls_has_table($conn, 'loan_requests')) {
         $q = ls_q($conn, "SELECT lr.employee_id, lr.loan_amount, lr.total_repayment, lr.monthly_instalment,
                              COALESCE((SELECT SUM(lp.total_paid) FROM loan_payments lp WHERE lp.loan_request_id = lr.id), 0) paid
-                          FROM loan_requests lr WHERE lr.status = 'Approved' AND lr.employee_id IN ($ids)");
+                          FROM loan_requests lr WHERE lr.status = 'Approved' AND lr.employee_id IN ($ids)
+                           AND DATE_FORMAT(" . (isset(ls_cols($conn, 'loan_requests')['approved_at']) ? "COALESCE(lr.approved_at, lr.request_date)" : "lr.request_date") . ", '%Y-%m') < '" . substr($from, 0, 7) . "'");   /* as the salary sheets: loans approved before the month */
         while ($q && ($x = mysqli_fetch_assoc($q))) {
             $bal = round(((float)$x['total_repayment'] ?: (float)$x['loan_amount']) - (float)$x['paid'], 2); if ($bal <= 0) continue;
             $loan[(int)$x['employee_id']] = ($loan[(int)$x['employee_id']] ?? 0) + min((float)$x['monthly_instalment'], $bal);
@@ -116,20 +117,37 @@ if ($period) {
     if (ls_has_table($conn, 'sr_fuel_entries')) { $q = ls_q($conn, "SELECT employee_id, SUM(fuel_rate * fuel_liter) FROM sr_fuel_entries WHERE payroll_period_id = $pid AND employee_id IN ($ids) GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $fuel[(int)$x[0]] = (float)$x[1]; }
 
     $f = function ($e, $k) { return (float)($e[$k] ?? 0); };
+    $skipped = [];
+    $savedAmt = function ($eid, $keys) use ($isl) { foreach ($keys as $k) if (isset($isl[$eid][$k]) && $isl[$eid][$k]['amount'] !== null) return (float)$isl[$eid][$k]['amount']; return null; };
     foreach ($emps as $eid => $e) {
         $cat = $e['cat']; $c = $cfg[(int)($e['designation_id'] ?? 0)] ?? null;
         $hol = $holidays($e); $norm = max(1, $mdays - $hol); $worked = $att[$eid] ?? 0; $rate = round($worked / $norm * 100, 2);
+        /* no attendance and no leave in the month: not paid this month (left out, listed above the sheet) */
+        if ($worked <= 0 && ($lv[$eid] ?? 0) <= 0) { $skipped[] = trim(($e['employee_id'] ?? '') . ' ' . ($e['employee_full_name'] ?? '')) . (!empty($e['pme_exit']) ? ' (left ' . date('d M', strtotime($e['pme_exit'])) . ')' : ''); continue; }
+        $cv = function ($k) use ($c) { return $c ? (float)($c[$k] ?? 0) : 0.0; };
         $basic = $f($e, 'basic_salary'); if ($cat === 'ST' && $c && (float)($c['basic_salary'] ?? 0) > 0) $basic = (float)$c['basic_salary'];
         if ($basic <= 0 && $c) $basic = (float)($c['basic_salary'] ?? 0);
         /* No Pay as the Attendance Summary: norm days − attended days − leave; amount = basic ÷ norm days × no pay days */
         $leave = $lv[$eid] ?? 0; $no_pay_days = max(0, $norm - $worked - $leave); $no_pay = $basic > 0 ? round($basic / $norm * $no_pay_days, 2) : 0;
-        /* attendance allowance: the Salary Configuration tiers of the designation (≥90% / ≥85%), else the employee profile */
+        /* attendance allowance: Salary Configuration tiers of the designation, as the Attendance Summary — MR ≥90 / ≥80 / ≥70 %,
+           CC / ACC / ST / OFF ≥90 / ≥85 %; SR (and no tiers configured): the employee profile */
+        $tiers = $cat === 'MR' ? [90 => 'attendance_90', 80 => 'attendance_80', 70 => 'attendance_70'] : [90 => 'attendance_90', 85 => 'attendance_85'];
+        $hasT = false; foreach ($tiers as $tc) if ($cv($tc) > 0) $hasT = true;
         $att_allow = 0.0;
-        if ($c && ((float)($c['attendance_90'] ?? 0) > 0 || (float)($c['attendance_85'] ?? 0) > 0)) $att_allow = $rate >= 90 ? (float)($c['attendance_90'] ?? 0) : ($rate >= 85 ? (float)($c['attendance_85'] ?? 0) : 0);
+        if ($cat !== 'SR' && $hasT) { foreach ($tiers as $t => $tc) if ($rate >= $t && $cv($tc) > 0) { $att_allow = $cv($tc); break; } }
         else $att_allow = $f($e, 'attendance_allowance');
-        $meal   = $cat === 'OFF' ? 0.0 : $rmb($eid, 'meal', $e['reimbursement_meal'] ?? 0);
+        /* meal: as each salary sheet — CC / ACC: configured meal × attendance rate; ST: saved, else configured × rate; OFF: saved, else the fixed meal;
+           SR / MR: saved in the Incentives Sheet / Incentive Entry, else the profile */
+        $mealCfg = $cv('meal_reimbursement') ?: $f($e, 'reimbursement_meal'); $share = min(1, $worked / $norm);
+        $mealSaved = $savedAmt($eid, ['meal_sr', 'meal_mr', '_meal']);
+        if (in_array($cat, ['CC', 'ACC'], true)) $meal = round($mealCfg * $share, 2);
+        elseif ($cat === 'ST') $meal = $mealSaved !== null ? $mealSaved : round($mealCfg * $share, 2);
+        elseif ($cat === 'OFF') $meal = $mealSaved !== null ? $mealSaved : $mealCfg;
+        else $meal = $rmb($eid, 'meal', $e['reimbursement_meal'] ?? 0);
         $travel = in_array($cat, ['SR', 'MR'], true) ? $rmb($eid, 'travel', $e['reimbursement_traveling'] ?? 0) : 0.0;
-        $mobile = in_array($cat, ['SR', 'CC'], true) ? $rmb($eid, 'mobile', ($e['reimbursement_mobile'] ?? 0) ?: ($e['mobile_reimbursement'] ?? 0)) : 0.0;
+        /* mobile / data allowance for every category: saved, else the Salary Configuration, else the profile */
+        $mobSaved = $savedAmt($eid, ['mobile_sr']);
+        $mobile = $mobSaved !== null ? $mobSaved : ($cv('mobile_reimbursement') ?: (($e['reimbursement_mobile'] ?? 0) ?: (float)($e['mobile_reimbursement'] ?? 0)));
         $fuelA  = $cat === 'SR' ? ($fuel[$eid] ?? $f($e, 'reimbursement_fuel')) : 0.0;
         /* saved salary sheet of the month: its overrides replace the profile values, its additional rows are added */
         $sv = $sse[$eid] ?? []; $ov = function ($k, $live) use ($sv) { return isset($sv[$k]) && $sv[$k] !== null && $sv[$k] !== '' ? (float)$sv[$k] : $live; };
@@ -144,14 +162,18 @@ if ($period) {
         $incent = round(array_sum(array_column($incList, 'amount')), 2);
         $earn = round($basic + $incent + $att_allow + $meal + $travel + $mobile + $fuelA + $arrears + $addEarn, 2);
 
-        $epf8 = round($basic * $epfE / 100, 2);
-        $d = ['epf8' => $epf8, 'welfare' => $f($e, 'welfare_amount'), 'w_loan' => $f($e, 'welfare_loan_deduction'), 'w_soc' => $f($e, 'welfare_society'),
+        /* EPF / ETF on the basic after no pay (the salary actually earned) */
+        $epfBase = max(0, $basic - $no_pay);
+        $epf8 = round($epfBase * $epfE / 100, 2);
+        /* welfare / insurance: the employee profile, else the Salary Configuration of the designation */
+        $welfare = $f($e, 'welfare_amount') ?: $cv('welfare_amount');
+        $d = ['epf8' => $epf8, 'welfare' => $welfare, 'w_loan' => $f($e, 'welfare_loan_deduction'), 'w_soc' => $f($e, 'welfare_society'),
               'donations' => $f($e, 'donations'), 'sal_adv' => $adv[$eid] ?? $f($e, 'salary_advance'), 'loan_ded' => ($loan[$eid] ?? 0) > 0 ? round($loan[$eid], 2) : $f($e, 'loan_deduction'),
               'credit_r' => $ov('override_credit_r', $f($e, 'credit_recovery')), 'cash_short' => in_array($cat, ['CC', 'ACC'], true) ? $ov('override_cash_short', $f($e, 'cash_short')) : 0.0,
               'good_short' => in_array($cat, ['CC', 'ACC'], true) ? $ov('override_good_short', $f($e, 'good_short')) : 0.0, 'no_pay' => $no_pay, 'retention' => $f($e, 'retention'),
               'excess_p' => $ov('override_excess', $f($e, 'excess_payment')), 'payee' => $f($e, 'payee') ?: $f($e, 'income_tax'), 'add_ded' => $addDed];
         $ded = round(array_sum($d), 2);
-        $epfR_ = round($basic * $epfR / 100, 2); $etf = round($basic * $etfR / 100, 2); $bonus = $basic > 0 ? round($basic / 12, 2) : 0; $grat = $basic > 0 ? round($basic / 24, 2) : 0; $ins = $f($e, 'insurance_amount');
+        $epfR_ = round($epfBase * $epfR / 100, 2); $etf = round($epfBase * $etfR / 100, 2); $bonus = $basic > 0 ? round($basic / 12, 2) : 0; $grat = $basic > 0 ? round($basic / 24, 2) : 0; $ins = $f($e, 'insurance_amount') ?: $cv('insurance_amount');
         /* details shown when the name is clicked (the fields the employee record has) */
         $det = [];
         foreach (['employee_full_name' => 'Full Name', 'name_with_initials' => 'Name with Initials', 'employee_id' => 'Employee Code', 'epf_number' => 'EPF No', 'nic_number' => 'NIC',
@@ -266,6 +288,7 @@ tbody tr.r:hover td{background:#fff1a8}
     <span style="color:#55585e"><b><?= count($rows) ?></b> employee(s) · live data <?= $h(date('d M Y H:i')) ?></span>
   </form>
   <?php foreach ($warn as $w): ?><div class="msg"><?= $h($w) ?></div><?php endforeach; ?>
+  <?php if (!empty($skipped)): ?><div class="msg" style="background:#fffbeb;border-color:#fde68a;color:#92400e" title="<?= $h(implode("\n", $skipped)) ?>"><i class="fa-solid fa-user-slash"></i> <?= count($skipped) ?> employee(s) with no attendance and no leave this month are not paid and left out: <?= $h(implode(', ', array_slice($skipped, 0, 8))) ?><?= count($skipped) > 8 ? ' …' : '' ?></div><?php endif; ?>
   <div class="kpis">
     <div class="kpi"><div class="k">Employees</div><div class="v" id="kN"><?= count($rows) ?></div></div>
     <div class="kpi"><div class="k">Basic Salary</div><div class="v" id="kB"><?= $num($tot['basic'] ?? 0) ?></div></div>
@@ -315,7 +338,7 @@ tbody tr.r:hover td{background:#fff1a8}
       <?php if ($rows): ?><tfoot><?= $totRow('GRAND TOTAL (' . count($rows) . ')', $tot, 'grand') ?></tfoot><?php endif; ?>
     </table>
   </div>
-  <div class="note">Live figures for the chosen payroll month. From the salary sheet saved for the month: the values changed there (Arrears, Excess Payment, Credit Recovery, Cash / Good Short) and its Additional Earnings / Deductions rows (<span style="color:#7c3aed;font-weight:bold">purple</span>, hover for the rows); everything else is live. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentive</b> = the Incentives Sheet amounts of the employee's staff category (hover for the columns; before November 2026 from the old Incentive Entries). Norm days = days in the month − special holidays; days worked = attendance; No Pay as the Attendance Summary: no-pay days = norm days − days worked − approved Annual / Casual / Medical leave; amount = basic ÷ norm days × no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
+  <div class="note">Live figures for the chosen payroll month. From the salary sheet saved for the month: the values changed there (Arrears, Excess Payment, Credit Recovery, Cash / Good Short) and its Additional Earnings / Deductions rows (<span style="color:#7c3aed;font-weight:bold">purple</span>, hover for the rows); everything else is live. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentive</b> = the Incentives Sheet amounts of the employee's staff category (hover for the columns; before November 2026 from the old Incentive Entries). Norm days = days in the month − special holidays; days worked = attendance; EPF 8% / 12% and ETF 3% on the basic after no pay. Employees with no attendance and no leave in the month are left out. No Pay as the Attendance Summary: no-pay days = norm days − days worked − approved Annual / Casual / Medical leave; amount = basic ÷ norm days × no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
 </div>
 <div class="mdl" id="lsM" onclick="if(event.target===this)lsHide()">
   <div class="mbox">

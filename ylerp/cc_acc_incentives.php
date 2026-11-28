@@ -123,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
                 $earn = $use === null ? null : ci_amount($c[3], ci_tiers($c, $cfg), $cfg, $use);
                 if (!isl_put($conn, $pid, $eid, $sk, $key, $use, $act, $gm, $earn, 0, 'sheet', $by, true) && $err === '') $err = mysqli_error($conn);
                 $put($eid, ci_lbl_pct($c), $use, json_encode(['act' => $act, 'gm' => $gm, 'src' => 'cc_acc_incentives']), $type);
-                if ($sec[4]) $put($eid, ci_lbl_amt($c), $earn, null, $type);
+                if ($sec[4] || ci_opt($c, 'save_amt')) $put($eid, ci_lbl_amt($c), $earn, null, $type);   /* the salary sheet reads the amount */
                 $n++;
             }
             /* reimbursements the salary sheet reads only from Incentive Entry (SR): saved from live data (kept up to date by this page) */
@@ -171,7 +171,7 @@ if ($period) {
                 $act = $row ? ($nt['act'] ?? (float)$row['amount']) : null; $gm = $nt['gm'] ?? null;
                 /* an amount entered in Incentive Entry without a % here: the salary sheet uses that amount (shown red) */
                 $fixed = $fixedRow ? (float)$fixedRow['amount'] : 0;
-                if ($sec[4] && $row) $fixed = 0;
+                if (($sec[4] || ci_opt($c, 'save_amt')) && $row) $fixed = 0;
                 $vals[$c[0]] = ['act' => $act, 'gm' => $gm, 'fixed' => $fixed > 0 ? $fixed : null, 'tiers' => array_keys(ci_tiers($c, $cfg))];
             }
             if (!isset($groups[$did])) $groups[$did] = ['name' => $e['designation_name'] ?: 'No designation', 'code' => $e['designation_code'] ?? '', 'cfg' => $cfg, 'emps' => []];

@@ -59,7 +59,8 @@ function isl_sections() {
         ['locus_admin', 'Locus Admin', [100 => 'locus_admin'], 'act'],
     ], 'rate', false],
     'ACC' => ['Assistant Cash Collectors', ['ACC'], [
-        ['ssv_acc', 'Secondary Sales Value', [90 => 'ssv_90', 95 => 'ssv_95'], 'act'],
+        /* ACC SSV: the designation's Secondary Sales rates (Incentive Entry saves ACC SSV as __sec_achievement / __ssv_amount, like SR) */
+        ['ssv_acc', 'Secondary Sales Value', $SSV_SR, 'act', ['alias' => ['__sec_achievement' => 'pct', '__ssv_amount' => 'amt'], 'save_amt' => true]],
         ['ccfot_acc', 'CCFOT', [90 => 'ccfot_90', 91 => 'ccfot_91', 92 => 'ccfot_92', 93 => 'ccfot_93', 94 => 'ccfot_94', 95 => 'ccfot_95'], 'gm'],
         ['punctuality_acc', 'Punctuality', [70 => 'punctuality_70', 80 => 'punctuality_80'], 'act'],
         ['attendance_acc', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
@@ -106,6 +107,7 @@ function ci_cfgs($conn) {
     $q = ci_q($conn, "SELECT * FROM sr_salary_config"); while ($q && ($x = mysqli_fetch_assoc($q))) $c[(int)$x['designation_id']] = $x;
     $q = ci_q($conn, "SELECT designation_id, rate_label, amount FROM sr_secondary_sales_rates");
     while ($q && ($x = mysqli_fetch_assoc($q))) { $t = (float)str_replace('%', '', (string)$x['rate_label']); if ($t > 0) $c[(int)$x['designation_id']]['ssvr_' . rtrim(rtrim(number_format($t, 2, '.', ''), '0'), '.')] = $x['amount']; }
+    foreach ($c as $did => $x) foreach ([90, 95] as $t) if (!isset($x['ssvr_' . $t]) && (float)($x['ssv_' . $t] ?? 0) > 0) $c[$did]['ssvr_' . $t] = $x['ssv_' . $t];   /* SSV 90 / 95 of Salary Configuration when no SSV rates */
     $q = ci_q($conn, "SELECT designation_id, incent_key, rate_value FROM sr_incentive_rates");
     while ($q && ($x = mysqli_fetch_assoc($q))) { $t = (float)str_replace('%', '', (string)$x['rate_value']); if ($t > 0) $c[(int)$x['designation_id']]['_thr'][$x['incent_key']] = $t; }
     return $c;
@@ -200,7 +202,10 @@ function isl_is_old($period) { return isl_period_ym($period) < ISL_CUTOVER; }   
 function isl_label_map($sk) {
     $sec = isl_sections()[$sk]; $m = [];
     foreach ($sec[2] as $c) {
-        if (in_array($c[3], ['gm', 'act', 'dmg'], true)) { $m[ci_lbl_pct($c)] = [$c[0], 'pct']; $m[ci_lbl_amt($c)] = [$c[0], 'amt']; }
+        if (in_array($c[3], ['gm', 'act', 'dmg'], true)) {
+            $m[ci_lbl_pct($c)] = [$c[0], 'pct']; $m[ci_lbl_amt($c)] = [$c[0], 'amt'];
+            foreach (ci_opt($c, 'alias', []) as $al => $kind) if (!isset($m[$al])) $m[$al] = [$c[0], $kind];       /* other labels the old entries used */
+        }
         elseif ($c[3] === 'att') { if (ci_opt($c, 'amt')) $m[ci_lbl_amt($c)] = [$c[0], 'amt']; else $m['__incent__' . $c[0]] = [$c[0], 'amt']; }
         elseif ($c[3] === 'amt') $m[ci_lbl_amt($c)] = [$c[0], 'amt'];
         elseif ($c[3] === 'live' && ci_opt($c, 'field')) $m['__reimb__' . ci_opt($c, 'field')] = [$c[0], 'reimb'];
