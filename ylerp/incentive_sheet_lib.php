@@ -6,9 +6,9 @@
  *       section (SR / MR / CC / ACC / ST / OFF), pct (the % used for the tier), actual, gm, amount (earned or entered amount),
  *       amount_manual (1 = an amount typed in, not worked out from a %), source ('sheet' = saved on the Incentives Sheet,
  *       'live' = a reimbursement worked out by the sheet, 'old' = copied from incentive_entries), old_ids.
- *   Months before ISL_CUTOVER (November 2026) are filled from the old incentive_entries table on every load (view only);
- *   from ISL_CUTOVER the sheet saves here (and keeps the old rows the salary sheets read in step); old rows entered
- *   elsewhere for those months are copied in, never over an entry saved on the sheet.
+ *   Every month is filled from the old incentive_entries table (rows copied in on load, never over an entry saved on the sheet);
+ *   an amount without its % gets the % of the tier that pays that amount, so the boxes are filled.
+ *   Editing saves here: before ISL_CUTOVER (November 2026) only here; from ISL_CUTOVER also to the old rows the salary sheets read.
  */
 include_once __DIR__ . '/payroll_month_employees_lib.php';
 if (!defined('ISL_CUTOVER')) define('ISL_CUTOVER', '2026-11');
@@ -194,7 +194,7 @@ function isl_ensure($conn) {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 function isl_period_ym($period) { return sprintf('%04d-%02d', (int)$period['year'], (int)$period['month']); }
-function isl_is_old($period) { return isl_period_ym($period) < ISL_CUTOVER; }          /* filled from incentive_entries, view only */
+function isl_is_old($period) { return isl_period_ym($period) < ISL_CUTOVER; }          /* before the cutover: edits are kept in the new table only */
 /* old label → [comp_key, kind] of a section */
 function isl_label_map($sk) {
     $sec = isl_sections()[$sk]; $m = [];
@@ -233,37 +233,40 @@ function isl_from_old($conn, $period) {
         else { $r['amount'] = (float)$x['amount']; $r['amount_manual'] = 1; }
         $rows[$k] = $r;
     }
-    /* the amount a % earns, for the columns that had only the % */
+    /* fill the boxes: the amount a % earns (only the % was there), or the % of the tier that pays the amount (only the amount was there) */
     foreach ($rows as $k => &$r) {
-        if ($r['pct'] === null || $r['amount'] !== null) continue;
-        $c = isl_comp($r['section'], $r['comp_key']); $e = $es[$r['employee_id']][1] ?? null; if (!$c) continue;
-        $did = (int)($e['designation_id'] ?? 0);
+        $c = isl_comp($r['section'], $r['comp_key']); if (!$c || !in_array($c[3], ['gm', 'act', 'dmg'], true)) continue;
+        $e = $es[$r['employee_id']][1] ?? null; $did = (int)($e['designation_id'] ?? 0);
         if (!$e) { $qq = ci_q($conn, "SELECT designation_id FROM employees WHERE id = " . (int)$r['employee_id']); $did = $qq && ($y = mysqli_fetch_row($qq)) ? (int)$y[0] : 0; }
-        $cfg = $cfgs[$did] ?? [];
-        $r['amount'] = ci_amount($c[3], ci_tiers($c, $cfg), $cfg, (float)$r['pct']);
+        $cfg = $cfgs[$did] ?? []; $tiers = ci_tiers($c, $cfg);
+        if ($r['pct'] !== null && $r['amount'] === null) { $r['amount'] = ci_amount($c[3], $tiers, $cfg, (float)$r['pct']); continue; }
+        if ($r['pct'] === null && $r['amount'] !== null && (float)$r['amount'] > 0) {
+            foreach ($tiers as $t => $f) if (abs((float)($cfg[$f] ?? 0) - (float)$r['amount']) < 0.01) { $r['pct'] = (float)$t; $r['actual'] = (float)$t; break; }
+            if ($r['pct'] !== null && abs(ci_amount($c[3], $tiers, $cfg, $r['pct']) - (float)$r['amount']) < 0.01) $r['amount_manual'] = 0;   /* the tier pays exactly that */
+        }
     }
     unset($r);
     return $rows;
 }
 /* bring the old table into incentive_sheet_entries for a month:
    before ISL_CUTOVER the old table is the source (the month is rebuilt); from ISL_CUTOVER old rows are added / refreshed,
-   never over an entry saved on the sheet */
+   never over an entry saved (or cleared) on the sheet */
 function isl_sync($conn, $period) {
-    isl_ensure($conn); $pid = (int)$period['id']; $old = isl_is_old($period);
+    isl_ensure($conn); $pid = (int)$period['id'];
     $rows = isl_from_old($conn, $period);
     $cur = []; $q = ci_q($conn, "SELECT id, employee_id, comp_key, source FROM incentive_sheet_entries WHERE payroll_period_id = $pid");
     while ($q && ($x = mysqli_fetch_assoc($q))) $cur[(int)$x['employee_id'] . '|' . $x['comp_key']] = $x;
     $e = function ($v) use ($conn) { return $v === null ? 'NULL' : "'" . mysqli_real_escape_string($conn, (string)$v) . "'"; };
     foreach ($rows as $k => $r) {
         $c = $cur[$k] ?? null;
-        if ($c && !$old && $c['source'] !== 'old') continue;                                  /* saved on the sheet: kept */
+        if ($c && $c['source'] !== 'old') continue;                                           /* saved on the sheet: kept */
         ci_q($conn, "INSERT INTO incentive_sheet_entries (payroll_period_id, employee_id, section, comp_key, pct, actual, gm, amount, amount_manual, source, old_ids, updated_by, updated_at)
             VALUES ($pid, {$r['employee_id']}, " . $e($r['section']) . ", " . $e($r['comp_key']) . ", " . $e($r['pct']) . ", " . $e($r['actual']) . ", " . $e($r['gm']) . ", " . $e($r['amount']) . ", {$r['amount_manual']}, " . $e($r['source']) . ", " . $e(implode(',', $r['old_ids'])) . ", 'incentive_entries', NOW())
             ON DUPLICATE KEY UPDATE section = VALUES(section), pct = VALUES(pct), actual = VALUES(actual), gm = VALUES(gm), amount = VALUES(amount), amount_manual = VALUES(amount_manual),
                                     source = VALUES(source), old_ids = VALUES(old_ids), updated_by = VALUES(updated_by), updated_at = NOW()");
     }
-    /* rows copied before whose old entry is gone (before the cutover: every row of the month comes from the old table) */
-    foreach ($cur as $k => $c) if (!isset($rows[$k]) && ($old || $c['source'] === 'old')) ci_q($conn, "DELETE FROM incentive_sheet_entries WHERE id = " . (int)$c['id']);
+    /* rows copied before whose old entry is gone */
+    foreach ($cur as $k => $c) if (!isset($rows[$k]) && $c['source'] === 'old') ci_q($conn, "DELETE FROM incentive_sheet_entries WHERE id = " . (int)$c['id']);
 }
 /* the rows of a month: [employee_id][comp_key] => row */
 function isl_rows($conn, $pid) {
@@ -288,11 +291,11 @@ function isl_labels($conn, $pid) {
     }
     return $o;
 }
-/* save one column of an employee (null pct and amount = remove) */
-function isl_put($conn, $pid, $eid, $sk, $key, $pct, $actual, $gm, $amount, $manual, $source, $by) {
+/* save one column of an employee (null pct and amount = remove; $keepEmpty: keep it as an empty row, so an old value is not copied in again) */
+function isl_put($conn, $pid, $eid, $sk, $key, $pct, $actual, $gm, $amount, $manual, $source, $by, $keepEmpty = false) {
     isl_ensure($conn);
     $e = function ($v) use ($conn) { return $v === null ? 'NULL' : "'" . mysqli_real_escape_string($conn, (string)$v) . "'"; };
-    if ($pct === null && $amount === null) return ci_q($conn, "DELETE FROM incentive_sheet_entries WHERE payroll_period_id = $pid AND employee_id = $eid AND comp_key = " . $e($key));
+    if ($pct === null && $amount === null && !$keepEmpty) return ci_q($conn, "DELETE FROM incentive_sheet_entries WHERE payroll_period_id = $pid AND employee_id = $eid AND comp_key = " . $e($key));
     return ci_q($conn, "INSERT INTO incentive_sheet_entries (payroll_period_id, employee_id, section, comp_key, pct, actual, gm, amount, amount_manual, source, updated_by, updated_at)
         VALUES ($pid, $eid, " . $e($sk) . ", " . $e($key) . ", " . $e($pct) . ", " . $e($actual) . ", " . $e($gm) . ", " . $e($amount) . ", " . (int)$manual . ", " . $e($source) . ", " . $e($by) . ", NOW())
         ON DUPLICATE KEY UPDATE section = VALUES(section), pct = VALUES(pct), actual = VALUES(actual), gm = VALUES(gm), amount = VALUES(amount), amount_manual = VALUES(amount_manual),

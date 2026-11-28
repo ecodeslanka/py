@@ -77,17 +77,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
     header('Content-Type: application/json; charset=utf-8');
     if (function_exists('rbac_can') && !rbac_can('edit', 'cc_acc_incentives')) { echo json_encode(['ok' => false, 'msg' => 'Permission blocked for your role.']); exit; }
     if (!$period) { echo json_encode(['ok' => false, 'msg' => 'Choose a payroll month.']); exit; }
-    if (strtolower((string)$period['status']) === 'closed') { echo json_encode(['ok' => false, 'msg' => 'This payroll month is closed.']); exit; }
-    if (isl_is_old($period)) { echo json_encode(['ok' => false, 'msg' => 'Months before ' . date('F Y', strtotime(ISL_CUTOVER . '-01')) . ' come from the old Incentive Entries — view only.']); exit; }
+    if (strtolower((string)$period['status']) === 'closed' && !isl_is_old($period)) { echo json_encode(['ok' => false, 'msg' => 'This payroll month is closed.']); exit; }   /* old months: only the new table changes */
     $data = json_decode((string)($_POST['data'] ?? ''), true); if (!is_array($data)) { echo json_encode(['ok' => false, 'msg' => 'Nothing to save.']); exit; }
     $uid = (int)($_SESSION['user_id'] ?? $_SESSION['id'] ?? 0);
     $n = 0; $err = '';
     $run = function ($sql) use ($conn, &$err) { $ok = ci_q($conn, $sql); if (!$ok && $err === '') $err = mysqli_error($conn) ?: 'database error'; return $ok; };
     $by = (string)($_SESSION['username'] ?? $_SESSION['user_name'] ?? $_SESSION['full_name'] ?? 'system');
+    $oldM = isl_is_old($period);                     /* before the cutover: saved in incentive_sheet_entries only (the old rows are left as they were) */
     isl_sync($conn, $period);
     $ctx = ci_ctx($conn, $period, $pid);
     /* one row per (employee, month, label): update the first, drop duplicates, insert when missing, delete when $val is null */
-    $put = function ($eid, $label, $val, $notes, $type) use ($conn, $pid, $uid, $run) {
+    $put = function ($eid, $label, $val, $notes, $type) use ($conn, $pid, $uid, $run, $oldM) {
+        if ($oldM) return;
         $label = mysqli_real_escape_string($conn, $label);
         $ex = []; $q = ci_q($conn, "SELECT id FROM incentive_entries WHERE employee_id = $eid AND payroll_period_id = $pid AND component_label = '$label' ORDER BY id");
         while ($q && ($x = mysqli_fetch_row($q))) $ex[] = (int)$x[0];
@@ -115,12 +116,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
                 /* incentive_sheet_entries (the sheet's table) + the old incentive_entries rows the salary sheets read */
                 if ($c[3] === 'amt') {
                     $amt = $pct($v['act'] ?? '', 'amt');
-                    if (!isl_put($conn, $pid, $eid, $sk, $key, null, null, null, $amt, 1, 'sheet', $by) && $err === '') $err = mysqli_error($conn);
+                    if (!isl_put($conn, $pid, $eid, $sk, $key, null, null, null, $amt, 1, 'sheet', $by, true) && $err === '') $err = mysqli_error($conn);
                     $put($eid, ci_lbl_amt($c), $amt, null, $type); $n++; continue;
                 }
                 $act = $pct($v['act'] ?? '', $c[3]); $gm = $pct($v['gm'] ?? '', $c[3]); $use = $gm !== null ? $gm : $act;
                 $earn = $use === null ? null : ci_amount($c[3], ci_tiers($c, $cfg), $cfg, $use);
-                if (!isl_put($conn, $pid, $eid, $sk, $key, $use, $act, $gm, $earn, 0, 'sheet', $by) && $err === '') $err = mysqli_error($conn);
+                if (!isl_put($conn, $pid, $eid, $sk, $key, $use, $act, $gm, $earn, 0, 'sheet', $by, true) && $err === '') $err = mysqli_error($conn);
                 $put($eid, ci_lbl_pct($c), $use, json_encode(['act' => $act, 'gm' => $gm, 'src' => 'cc_acc_incentives']), $type);
                 if ($sec[4]) $put($eid, ci_lbl_amt($c), $earn, null, $type);
                 $n++;
@@ -207,7 +208,7 @@ $ci_head = function ($sk, $key, $label) use ($LINKS, $PH, $h) {
 };
 $plabel = $period ? $MON[(int)$period['month']] . ' ' . $period['year'] : '';
 $oldMonth = $period && isl_is_old($period);                                 /* before the cutover: from the old Incentive Entries, view only */
-$closed = $period && (strtolower((string)$period['status']) === 'closed' || $oldMonth);
+$closed = $period && strtolower((string)$period['status']) === 'closed' && !$oldMonth;
 $back = (!empty($_SERVER['HTTP_REFERER']) && strpos((string)$_SERVER['HTTP_REFERER'], 'cc_acc_incentives.php') === false) ? $_SERVER['HTTP_REFERER'] : 'sr_salary.php';
 $nf = function ($v) { return $v === null || $v === '' ? '' : (abs((float)$v) < 0.005 ? '-' : number_format((float)$v, (float)$v == (int)$v ? 0 : 2)); };
 $pv = function ($v) { return $v === null || $v === '' ? '' : rtrim(rtrim(number_format((float)$v, 2, '.', ''), '0'), '.'); };
@@ -299,7 +300,7 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
     <div class="tabs"><?php $first = true; foreach ($out as $sk => $s): $cnt = 0; foreach ($s['groups'] as $g) $cnt += count($g['emps']); ?><span class="tab<?= $first ? ' on' : '' ?>" data-sec="<?= $sk ?>" onclick="ciTab('<?= $sk ?>')" title="<?= $h($s['title']) ?>"><?= $sk ?> — <?= $h($s['title']) ?> (<?= $cnt ?>)</span><?php $first = false; endforeach; ?></div>
     <input type="search" id="ciQ" placeholder="Search name / code…" oninput="ciFilter()" style="width:200px">
     <span class="sp"></span>
-    <?php if ($oldMonth): ?><span style="color:#b45309;font-weight:bold"><i class="fa-solid fa-clock-rotate-left"></i> From the old Incentive Entries (before <?= $h(date('F Y', strtotime(ISL_CUTOVER . '-01'))) ?>) — view only</span>
+    <?php if ($oldMonth): ?><span style="color:#b45309;font-weight:bold"><i class="fa-solid fa-clock-rotate-left"></i> Filled from the old Incentive Entries — changes are saved to the new table only</span>
     <?php elseif ($closed): ?><span style="color:var(--neg);font-weight:bold"><i class="fa-solid fa-lock"></i> Closed month — view only</span><?php endif; ?>
   </form>
   <div class="kpis">
