@@ -6,11 +6,12 @@
  *
  *  Settings  : bank account (accounts that have bank statements), optional
  *              statement type, date tolerance, "only deposits to this account".
- *  Reconcile : deposits picked by delivery date and / or deposit date.
+ *  Reconcile : deposits picked by delivery date and / or deposit date (the CC Cash Deposit page filter, any bank account).
  *              Bank credits of the Settings account around the deposit dates.
  *              Ref read from the bank text: "CRDLESDEP 0000715283492 AECR"
  *              → last 10 digits 0715283492 → Cash Collectors → delivery person.
- *              One deposit (per delivery person) ↔ one bank transaction.
+ *              One deposit (per delivery person) ↔ one bank transaction; split amounts of the same
+ *              person (n deposits ↔ 1 credit, 1 deposit ↔ n credits) are tallied when the totals agree.
  *              Deposits not found can be reconciled manually (1+ bank credits).
  *  Not reconciled: every bank deposit line of the delivery / deposit date range that is not reconciled yet.
  *  Save batch: everything ticked + manual picks are saved as ONE batch,
@@ -330,17 +331,21 @@ function dbr_refresh_deposit_remark($conn, $deposit_id) {
  * $o = [account, type, tol, acc_only, dd_from, dd_to, dp_from, dp_to]
  * Returns pairs (one deposit ↔ one bank txn), dep_only, bank_only, totals …
  */
+/* the deposits of a delivery / deposit date range — the same filter as the CC Cash Deposit page (cc_cash_deposit_dp.php):
+   delivery date of the deposit entry, deposit date, bank deposits only (not handed over to BO); the bank account chosen in the entry is not used */
+function dbr_dep_where($conn, $o) {
+    $w = "d.handed_over_bo = 0";
+    if ($o['dd_from'] !== '') $w .= " AND d.delivery_date BETWEEN '" . mysqli_real_escape_string($conn, $o['dd_from']) . "' AND '" . mysqli_real_escape_string($conn, $o['dd_to']) . "'";
+    if ($o['dp_from'] !== '') $w .= " AND d.deposit_date BETWEEN '" . mysqli_real_escape_string($conn, $o['dp_from']) . "' AND '" . mysqli_real_escape_string($conn, $o['dp_to']) . "'";
+    return $w;
+}
+
 /* every deposit line (deposit × delivery person) of the delivery / deposit date range that is not reconciled yet */
 function dbr_pending($conn, $o) {
     $R = ['error' => '', 'rows' => [], 'total' => 0.0, 'persons' => []];
     if ($o['dd_from'] === '' && $o['dp_from'] === '') { $R['error'] = 'Enter a delivery date range, a deposit date range, or both.'; return $R; }
     list($by_ref, $by_key) = dbr_collectors($conn);
-    $where = "d.handed_over_bo = 0";              /* the bank account chosen in the CC cash deposit entry is not used */
-    if ($o['dd_from'] !== '') {
-        $where .= " AND d.id IN (SELECT p2.deposit_id FROM cc_cash_deposit_dp_persons p2 JOIN cc_cash_deposit_dp d2 ON d2.id = p2.deposit_id
-                                  WHERE COALESCE(p2.delivery_date, d2.delivery_date) BETWEEN '" . mysqli_real_escape_string($conn, $o['dd_from']) . "' AND '" . mysqli_real_escape_string($conn, $o['dd_to']) . "')";
-    }
-    if ($o['dp_from'] !== '') $where .= " AND d.deposit_date BETWEEN '" . mysqli_real_escape_string($conn, $o['dp_from']) . "' AND '" . mysqli_real_escape_string($conn, $o['dp_to']) . "'";
+    $where = dbr_dep_where($conn, $o);
     $parts = [];
     $r = dbr_q($conn, "SELECT d.id, d.deposit_date, d.bank_account_id, p.delivery_person, p.amount, COALESCE(p.delivery_date, d.delivery_date) AS dd
                          FROM cc_cash_deposit_dp d JOIN cc_cash_deposit_dp_persons p ON p.deposit_id = d.id
@@ -381,18 +386,7 @@ function dbr_run($conn, $o) {
     $tol = (int)$o['tol'];
 
     /* 1. deposits (bank deposits only) by delivery date and / or deposit date */
-    $where = "d.handed_over_bo = 0";
-    if ($o['acc_only']) $where .= " AND d.bank_account_id = " . (int)$o['account'];
-    if ($o['dd_from'] !== '') {
-        $where .= " AND d.id IN (SELECT p2.deposit_id FROM cc_cash_deposit_dp_persons p2
-                                   JOIN cc_cash_deposit_dp d2 ON d2.id = p2.deposit_id
-                                  WHERE COALESCE(p2.delivery_date, d2.delivery_date) BETWEEN '"
-                . mysqli_real_escape_string($conn, $o['dd_from']) . "' AND '" . mysqli_real_escape_string($conn, $o['dd_to']) . "')";
-    }
-    if ($o['dp_from'] !== '') {
-        $where .= " AND d.deposit_date BETWEEN '" . mysqli_real_escape_string($conn, $o['dp_from']) . "' AND '"
-                . mysqli_real_escape_string($conn, $o['dp_to']) . "'";
-    }
+    $where = dbr_dep_where($conn, $o);
     $parts = [];
     $r = dbr_q($conn, "SELECT d.id, d.deposit_date, p.delivery_person, p.amount,
                               COALESCE(p.delivery_date, d.delivery_date) AS dd
@@ -484,7 +478,8 @@ function dbr_run($conn, $o) {
           pass 3 same date, amount differs → mismatch; pass 4 within tolerance, amount differs → mismatch.
           Closest date, then closest amount wins. */
     usort($dunits, function ($a, $b) { return strcmp($a['date'], $b['date']) ?: ($b['amount'] <=> $a['amount']); });
-    foreach ([[0, true, 'matched'], [$tol, true, 'matched'], [0, false, 'mismatch'], [$tol, false, 'mismatch']] as $ps) {
+    foreach ([[0, true, 'matched'], [$tol, true, 'matched'], ['combine'], [0, false, 'mismatch'], [$tol, false, 'mismatch']] as $ps) {
+        if ($ps[0] === 'combine') { dbr_combine($dunits, $bunits, $tol, $R); continue; }
         list($maxDays, $needEqual, $ptype) = $ps;
         foreach ($dunits as $di => $du) {
             if ($du['used']) continue;
@@ -512,6 +507,33 @@ function dbr_run($conn, $o) {
     }
     usort($R['pairs'], function ($a, $b) { return strcmp($a['d']['date'], $b['d']['date']) ?: strcasecmp($a['d']['dp'], $b['d']['dp']); });
     return $R;
+}
+
+/* split amounts, same delivery person (same mobile no) within the tolerance:
+   several deposits that add up to one bank credit, or one deposit paid in by several bank credits → tallied */
+function dbr_combine(&$dunits, &$bunits, $tol, &$R) {
+    foreach ($bunits as $bi => $bu) {                                   /* many deposits → one bank credit */
+        if ($bu['used']) continue;
+        $idx = []; $sum = 0.0;
+        foreach ($dunits as $di => $du) if (!$du['used'] && $du['key'] === $bu['key'] && abs(dbr_days($bu['date'], $du['date'])) <= $tol) { $idx[] = $di; $sum += $du['amount']; }
+        if (count($idx) < 2 || abs(round($sum - $bu['amount'], 2)) >= 0.005) continue;
+        $g = $dunits[$idx[0]]; $g['parts'] = []; $g['amount'] = 0.0; $dates = [];
+        foreach ($idx as $di) { $dunits[$di]['used'] = true; $g['parts'] = array_merge($g['parts'], $dunits[$di]['parts']); $g['amount'] += $dunits[$di]['amount']; $dates[] = $dunits[$di]['date']; }
+        $g['amount'] = round($g['amount'], 2); $g['date'] = max($dates);
+        $bunits[$bi]['used'] = true;
+        $R['pairs'][] = ['type' => 'matched', 'd' => $g, 'b' => $bunits[$bi], 'days' => dbr_days($bu['date'], $g['date']), 'combined' => 'deposits'];
+    }
+    foreach ($dunits as $di => $du) {                                   /* one deposit → many bank credits */
+        if ($du['used']) continue;
+        $idx = []; $sum = 0.0;
+        foreach ($bunits as $bi => $bu) if (!$bu['used'] && $bu['key'] === $du['key'] && abs(dbr_days($bu['date'], $du['date'])) <= $tol) { $idx[] = $bi; $sum += $bu['amount']; }
+        if (count($idx) < 2 || abs(round($sum - $du['amount'], 2)) >= 0.005) continue;
+        $g = $bunits[$idx[0]]; $g['txns'] = []; $g['amount'] = 0.0; $dates = [];
+        foreach ($idx as $bi) { $bunits[$bi]['used'] = true; $g['txns'] = array_merge($g['txns'], $bunits[$bi]['txns']); $g['amount'] += $bunits[$bi]['amount']; $dates[] = $bunits[$bi]['date']; }
+        $g['amount'] = round($g['amount'], 2); $g['date'] = min($dates);
+        $dunits[$di]['used'] = true;
+        $R['pairs'][] = ['type' => 'matched', 'd' => $dunits[$di], 'b' => $g, 'days' => dbr_days($g['date'], $du['date']), 'combined' => 'bank'];
+    }
 }
 
 /* ═════════════════════════ SAVE ONE RECONCILIATION (inside a batch transaction) ═════════════════════════ */
@@ -1244,7 +1266,7 @@ function dbr_diff_html($diff) {
             <span><i class="fa-solid fa-building-columns"></i> <b><?php echo dbr_h(dbr_account_label($accounts, $eff['account'])); ?></b></span>
             <span class="pill"><?php echo dbr_h(dbr_type_label($eff['type'])); ?></span>
             <span class="pill"><?php echo $eff['tol'] === 0 ? 'Same date only' : '± ' . $eff['tol'] . ' day' . ($eff['tol'] > 1 ? 's' : ''); ?></span>
-            <span class="pill"><?php echo $eff['acc_only'] ? 'Only deposits to this account' : 'Deposits to any account'; ?></span>
+            <span class="pill">Deposits as on the CC Cash Deposit page (any account)</span>
             <a href="?tab=settings" class="setlink"><i class="fa-solid fa-gear"></i> Change</a>
         </div>
     <?php endif; ?>
@@ -1289,7 +1311,7 @@ function dbr_diff_html($diff) {
 
         <?php
         $sections = [
-            ['title' => 'Reconciled (tallied one-to-one)', 'icon' => 'fa-circle-check', 'color' => '#15803d', 'rows' => $matched, 'type' => 'matched'],
+            ['title' => 'Reconciled (tallied — one-to-one or split amounts of the same person)', 'icon' => 'fa-circle-check', 'color' => '#15803d', 'rows' => $matched, 'type' => 'matched'],
             ['title' => 'Amount mismatch', 'icon' => 'fa-triangle-exclamation', 'color' => '#b45309', 'rows' => $mismatch, 'type' => 'mismatch'],
         ];
         $rowNo = 0;
@@ -1437,7 +1459,7 @@ function dbr_diff_html($diff) {
                     <?php for ($i = 0; $i <= 7; $i++): ?><option value="<?php echo $i; ?>" <?php echo $cfg['tol'] === $i ? 'selected' : ''; ?>><?php echo $i === 0 ? 'Same date only' : "± $i day" . ($i > 1 ? 's' : ''); ?></option><?php endfor; ?>
                 </select>
             </div>
-            <div class="wide"><label class="chk"><input type="checkbox" id="set_acc_only" <?php echo $cfg['acc_only'] ? 'checked' : ''; ?>> Only include deposits entered for this bank account</label></div>
+            <!-- "only deposits entered for this bank account" is not used: deposits are taken as on the CC Cash Deposit page -->
         </div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap;">
             <button type="button" class="btn btn-dark" id="setSave"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
@@ -1701,7 +1723,7 @@ function dbr_diff_html($diff) {
             if (!setAcc.value) { toast('Select the bank account.', 'err'); setAcc.focus(); return; }
             b.disabled = true;
             post({ajax: 'save_settings', account_id: setAcc.value, bank_type: setType.value,
-                  tol: document.getElementById('set_tol').value, acc_only: document.getElementById('set_acc_only').checked ? 1 : 0})
+                  tol: document.getElementById('set_tol').value, acc_only: 0})
             .then(function (res) {
                 b.disabled = false;
                 toast(res.msg || (res.ok ? 'Saved.' : 'Could not save.'), res.ok ? 'ok' : 'err');
