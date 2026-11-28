@@ -194,6 +194,46 @@ $pct = function ($v, $mode = '') { $v = trim(str_replace(['%', ','], '', (string
     if ($mode === 'dmg') { if ($v > 0 && $v < 0.001) $v *= 100; return round($v, 5); }       /* damage typed as % (0.007), a fraction (0.00007) is converted */
     if ($v > 0 && $v <= 2) $v *= 100; return round($v, 2); };   /* a fraction (0.906, 1.0497) → % */
 
+/* ── Payroll Header links: each column of a tab can be linked to a Payroll Header (payroll_headers.php) ──
+   incentive_sheet_headers: section, comp_key ('_meal' = the Meal column), header_id */
+if (is_file(__DIR__ . '/payroll_headers_lib.php')) include_once __DIR__ . '/payroll_headers_lib.php';
+function ci_links_ensure($conn) {
+    if (function_exists('ph_ensure')) ph_ensure($conn);
+    ci_q($conn, "CREATE TABLE IF NOT EXISTS incentive_sheet_headers (section VARCHAR(10) NOT NULL, comp_key VARCHAR(60) NOT NULL, header_id INT NOT NULL,
+        updated_by VARCHAR(100) NULL, updated_at DATETIME NULL, PRIMARY KEY (section, comp_key)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+/* the salary component (payroll_headers.component_key) each column matches — used to suggest the link */
+const CI_PH_KEY = ['ccfot' => 'ccfot', 'ccfot_acc' => 'ccfot', 'ccfot_st' => 'ccfot', 'credit_mgt' => 'credit_mgt', 'payee_chq' => 'payee_chq',
+    'ssv_cc' => 'ssv', 'ssv_acc' => 'ssv', 'ssv_sr' => 'ssv', 'attendance_cc' => 'att_inc', 'attendance_mr' => 'att_inc', 'attendance_acc' => 'att_allow',
+    'attendance_st' => 'att_allow', 'attendance_off' => 'att_allow', 'locus_admin' => 'locus_admin', 'punctuality_acc' => 'punctuality', 'punctuality' => 'punctuality',
+    'punctuality_75' => 'punctuality', 'disc' => 'disc', 'total_ps_compliance' => 'ps', 'eco_incentive' => 'eco', 'bp_incentive' => 'bp', 'total_assortment' => 'assort',
+    'ete' => 'other_inc', 'meal_sr' => 'meal', 'meal_mr' => 'meal', '_meal' => 'meal', 'travel_sr' => 'travel', 'travel_mr' => 'travel', 'fuel_sr' => 'fuel',
+    'mobile_sr' => 'mobile', 'placement_compliance' => 'plc', 'dlink' => 'dlink', 'incentive_daily_90' => 'daily_inc', 'incentive_weekly_90' => 'weekly_inc',
+    'incentive_monthly_90' => 'monthly_inc', 'stores_damage' => 'stores_dmg', 'rsqm' => 'rsqm', 'loading_unloading' => 'load_unload'];
+/* the columns of a tab that can be linked: key => label */
+function ci_link_cols($sec) {
+    $o = []; foreach ($sec[2] as $c) $o[$c[0]] = $c[1];
+    if ($sec[3] !== 'none') $o['_meal'] = 'Meal';
+    return $o;
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'link_save') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (function_exists('rbac_can') && !rbac_can('edit', 'cc_acc_incentives')) { echo json_encode(['ok' => false, 'msg' => 'Permission blocked for your role.']); exit; }
+    ci_links_ensure($conn);
+    $in = json_decode((string)($_POST['links'] ?? ''), true); if (!is_array($in)) { echo json_encode(['ok' => false, 'msg' => 'Nothing to save.']); exit; }
+    $ok_ids = []; $r = ci_q($conn, "SELECT id FROM payroll_headers"); while ($r && ($x = mysqli_fetch_row($r))) $ok_ids[(int)$x[0]] = 1;
+    $by = mysqli_real_escape_string($conn, (string)($_SESSION['username'] ?? $_SESSION['user_name'] ?? $_SESSION['full_name'] ?? 'system'));
+    $n = 0;
+    foreach ($SECTIONS as $sk => $sec) foreach (ci_link_cols($sec) as $key => $lbl) {
+        if (!isset($in[$sk]) || !array_key_exists($key, $in[$sk])) continue;
+        $hid = (int)$in[$sk][$key]; $ke = mysqli_real_escape_string($conn, $key);
+        if ($hid > 0 && isset($ok_ids[$hid])) ci_q($conn, "REPLACE INTO incentive_sheet_headers (section, comp_key, header_id, updated_by, updated_at) VALUES ('$sk', '$ke', $hid, '$by', NOW())");
+        else ci_q($conn, "DELETE FROM incentive_sheet_headers WHERE section = '$sk' AND comp_key = '$ke'");
+        $n++;
+    }
+    echo json_encode(['ok' => true, 'msg' => 'Header links saved.']); exit;
+}
+
 /* ── SAVE (AJAX) ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
     header('Content-Type: application/json; charset=utf-8');
@@ -294,6 +334,26 @@ if ($period) {
         $out[$sk] = ['title' => $sec[0], 'comps' => $comps, 'groups' => array_values($groups), 'meal' => $sec[3], 'sa' => $sec[4]];
     }
 }
+/* payroll headers (additions) and the saved links */
+ci_links_ensure($conn);
+$PH = []; $r = ci_q($conn, "SELECT id, name, component_key, active FROM payroll_headers WHERE header_type = 'addition' ORDER BY active DESC, sort_order, name");
+while ($r && ($x = mysqli_fetch_assoc($r))) { $x['cats'] = []; $PH[(int)$x['id']] = $x; }
+$r = ci_q($conn, "SELECT header_id, category_code FROM payroll_header_categories"); while ($r && ($x = mysqli_fetch_row($r))) if (isset($PH[(int)$x[0]])) $PH[(int)$x[0]]['cats'][] = $x[1];
+$LINKS = []; $r = ci_q($conn, "SELECT section, comp_key, header_id FROM incentive_sheet_headers"); while ($r && ($x = mysqli_fetch_row($r))) if (isset($PH[(int)$x[2]])) $LINKS[$x[0]][$x[1]] = (int)$x[2];
+/* suggested header of a column: same salary component ticked for the category, else same component, else same name */
+$ci_suggest = function ($sk, $key, $label) use ($PH, $SECTIONS) {
+    $ck = CI_PH_KEY[$key] ?? ''; $cats = $SECTIONS[$sk][1]; $best = 0;
+    foreach ($PH as $id => $x) if ($ck !== '' && $x['component_key'] === $ck && array_intersect($cats, $x['cats'])) return $id;
+    foreach ($PH as $id => $x) if ($ck !== '' && $x['component_key'] === $ck) { $best = $id; break; }
+    if (!$best) foreach ($PH as $id => $x) if (strcasecmp(trim($x['name']), trim($label)) === 0) { $best = $id; break; }
+    return $best;
+};
+/* the header text of a column: the linked Payroll Header's name */
+$ci_head = function ($sk, $key, $label) use ($LINKS, $PH, $h) {
+    $id = $LINKS[$sk][$key] ?? 0;
+    if (!$id) return $h($label);
+    return '<span title="Linked to Payroll Header: ' . $h($PH[$id]['name']) . ($label !== $PH[$id]['name'] ? ' (' . $h($label) . ')' : '') . '">' . $h($PH[$id]['name']) . ' <i class="fa-solid fa-link" style="font-size:9px;opacity:.75"></i></span>';
+};
 $plabel = $period ? $MON[(int)$period['month']] . ' ' . $period['year'] : '';
 $closed = $period && strtolower((string)$period['status']) === 'closed';
 $back = (!empty($_SERVER['HTTP_REFERER']) && strpos((string)$_SERVER['HTTP_REFERER'], 'cc_acc_incentives.php') === false) ? $_SERVER['HTTP_REFERER'] : 'sr_salary.php';
@@ -344,6 +404,10 @@ td.fx{background:#fdecea !important;color:var(--neg) !important}
 tr.emp:hover td{background:#fff1a8} tr.emp:hover td.in{background:#fff1a8}
 tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;text-align:right}
 .note{flex:none;padding:3px 10px 6px;color:#55585e;font-size:10.5px}
+.mdl{position:fixed;inset:0;background:rgba(30,32,36,.45);display:none;align-items:center;justify-content:center;z-index:8;padding:12px}.mdl.on{display:flex}
+.mbox{width:min(760px,100%);max-height:92vh;display:flex;flex-direction:column;background:var(--win);border:1px solid #4a4c52;border-radius:7px;box-shadow:0 10px 30px rgba(0,0,0,.4);overflow:hidden}
+.mscroll{overflow:auto;flex:1;min-height:0;background:#fff;margin:6px 8px;border:1px solid #a7a9ad} .ltbl{width:100%} .ltbl td{height:26px} .ltbl select{width:100%;font:11px var(--f);height:22px;border:1px solid #8e909a;border-radius:2px}
+.ltbl select.chg{background:#fff3b0}
 .toast{position:fixed;right:18px;bottom:18px;padding:8px 14px;border-radius:6px;color:#fff;font-weight:bold;display:none;z-index:9;box-shadow:0 4px 12px rgba(0,0,0,.3)}
 @media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))} body{padding:4px}}
 @media print{body{background:#fff;padding:0}.win{border:0;box-shadow:none;height:auto}.bar,.tb .btn,.kpis,.note{display:none}.scroll{overflow:visible;border:0}thead th{position:static} td.in input{width:40px}}
@@ -354,6 +418,7 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
     <h1><i class="fa-solid fa-coins"></i> Incentives Sheet<?= $plabel ? ' — ' . $h($plabel) : '' ?></h1>
     <span class="dirty" id="ciDirty"><i class="fa-solid fa-circle-exclamation"></i> Unsaved changes</span>
     <button class="btn pri" id="ciSave" onclick="ciSave()"<?= (!$period || $closed) ? ' disabled' : '' ?>><i class="fa-solid fa-floppy-disk"></i> Save</button>
+    <button class="btn" onclick="ciLinks()" title="Link the columns to Payroll Headers"><i class="fa-solid fa-link"></i> Link Headers</button>
     <button class="btn" onclick="ciExport()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
     <button class="btn" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
   </div>
@@ -389,8 +454,8 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
       <thead>
         <tr><th rowspan="2" class="sticky">Name</th><th rowspan="2">Designation</th><th rowspan="2">Code</th>
           <?php foreach ($s['comps'] as $i => $c): $g = $c[3] === 'live' ? 'gR' : 'g' . ($i % 2);
-            $span = ci_is_pct($c) ? count($c[2]) + ($c[3] === 'gm' ? 2 : 1) : 1; ?><th colspan="<?= $span ?>" class="<?= $g ?>"><?= $h($c[1]) ?></th><?php endforeach; ?>
-          <?php if ($mealCol !== null): ?><th rowspan="2" class="gR">Meal</th><?php endif; ?><th rowspan="2" class="gT">Total</th><th rowspan="2">Days Worked</th><th rowspan="2">No Pay Days</th><th rowspan="2">Basic</th><th rowspan="2" class="gT">Basic + Incentives</th></tr>
+            $span = ci_is_pct($c) ? count($c[2]) + ($c[3] === 'gm' ? 2 : 1) : 1; ?><th colspan="<?= $span ?>" class="<?= $g ?>"><?= $ci_head($sk, $c[0], $c[1]) ?></th><?php endforeach; ?>
+          <?php if ($mealCol !== null): ?><th rowspan="2" class="gR"><?= $ci_head($sk, '_meal', 'Meal') ?></th><?php endif; ?><th rowspan="2" class="gT">Total</th><th rowspan="2">Days Worked</th><th rowspan="2">No Pay Days</th><th rowspan="2">Basic</th><th rowspan="2" class="gT">Basic + Incentives</th></tr>
         <tr><?php foreach ($s['comps'] as $i => $c): $g = $c[3] === 'live' ? 'gR' : 'g' . ($i % 2);
             if ($c[3] === 'amt'): ?><th class="<?= $g ?>">Amount</th><?php elseif ($c[3] === 'live'): ?><th class="<?= $g ?>">Live</th><?php else: ?>
             <th class="<?= $g ?>">Actual</th><?php if ($c[3] === 'gm'): ?><th class="<?= $g ?>">GM</th><?php endif; foreach ($c[2] as $t => $f): ?><th class="<?= $g ?>"><?= $tl($c, $t) ?></th><?php endforeach; endif; endforeach; ?></tr>
@@ -431,6 +496,39 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
   </div>
   <?php $first = false; endforeach; ?>
   <div class="note">Employees and attendance are live for the payroll month; rates come from <b>Salary Configuration</b> of each designation (the blue rows). Type <b>Actual</b> achievement % (e.g. 90.6 or 0.906); <b>GM</b> is the amended % used for the tier — leave it empty to use Actual. The amount falls in the highest tier reached; <b>Stores Damage</b> is the damage % (e.g. 0.007) — the lower the better. Amount cells (Discretionary Support, ETE) left empty use the employee profile value shown in grey. <b>Live</b> (blue) columns: attendance, meal / travelling / mobile, SR fuel and MR D-Link — green = already saved in Incentive Entry. <b>Save</b> stores the entries in Incentive Entries, so the salary sheets use them (SR meal / travelling / mobile are saved too, from live attendance). <span style="color:var(--neg)">Red</span> = an amount already entered in Incentive Entry is used by the salary sheet.</div>
+</div>
+<div class="mdl" id="ciLinkM" onclick="if(event.target===this)ciLinksClose()">
+  <div class="mbox">
+    <div class="tb"><h1><i class="fa-solid fa-link"></i> Link columns to Payroll Headers</h1><button class="btn" onclick="ciLinksClose()"><i class="fa-solid fa-xmark"></i></button></div>
+    <div class="bar">
+      <div class="tabs"><?php $first = true; foreach ($SECTIONS as $sk => $sec): ?><span class="tab ltab<?= $first ? ' on' : '' ?>" data-sec="<?= $sk ?>" onclick="ciLinkTab('<?= $sk ?>')"><?= $sk ?></span><?php $first = false; endforeach; ?></div>
+      <span class="sp"></span>
+      <button class="btn" onclick="ciLinkAuto()" title="Fill the empty ones with the suggested header"><i class="fa-solid fa-wand-magic-sparkles"></i> Auto-link</button>
+      <a class="btn" href="payroll_headers.php" target="_blank"><i class="fa-solid fa-list-check"></i> Payroll Headers</a>
+    </div>
+    <div class="mscroll">
+    <?php $first = true; foreach ($SECTIONS as $sk => $sec): ?>
+      <table class="ltbl" data-sec="<?= $sk ?>"<?= $first ? '' : ' style="display:none"' ?>>
+        <thead><tr><th style="width:34%">Column (<?= $h($sec[0]) ?>)</th><th>Payroll Header</th><th style="width:16%">Suggested</th></tr></thead>
+        <tbody>
+        <?php foreach (ci_link_cols($sec) as $key => $lbl): $cur = $LINKS[$sk][$key] ?? 0; $sug = $ci_suggest($sk, $key, $lbl); ?>
+          <tr><td class="b"><?= $h($lbl) ?></td>
+            <td><select class="lsel" data-sec="<?= $sk ?>" data-k="<?= $h($key) ?>" data-cur="<?= $cur ?>" data-sug="<?= $sug ?>">
+              <option value="0">— not linked —</option>
+              <?php $mine = []; $other = []; foreach ($PH as $id => $x) { if (array_intersect($sec[1], $x['cats'])) $mine[$id] = $x; else $other[$id] = $x; }
+              foreach (['Ticked for ' . implode(' / ', $sec[1]) => $mine, 'Other additions' => $other] as $gl => $list): if (!$list) continue; ?>
+                <optgroup label="<?= $h($gl) ?>"><?php foreach ($list as $id => $x): ?><option value="<?= $id ?>"<?= $id === $cur ? ' selected' : '' ?>><?= $h($x['name'] . ((int)$x['active'] ? '' : ' (inactive)')) ?></option><?php endforeach; ?></optgroup>
+              <?php endforeach; ?>
+            </select></td>
+            <td style="color:#55585e"><?= $sug ? $h($PH[$sug]['name']) : '—' ?></td></tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php $first = false; endforeach; ?>
+    <?php if (!$PH): ?><div style="padding:14px;color:var(--neg);font-weight:bold">No Payroll Headers (additions) yet — create them in Payroll Headers (Load Salary Components).</div><?php endif; ?>
+    </div>
+    <div class="bar" style="border-top:1px solid #a7a9ad;border-bottom:0"><span style="color:#55585e">The linked header's name is shown as the column title.</span><span class="sp"></span><button class="btn" onclick="ciLinksClose()">Cancel</button><button class="btn pri" onclick="ciLinkSave()"><i class="fa-solid fa-floppy-disk"></i> Save Links</button></div>
+  </div>
 </div>
 <div class="toast" id="ciToast"></div>
 <script>
@@ -477,8 +575,26 @@ function ciTotals(){
   document.getElementById('kN').textContent = s.n; document.getElementById('kI').textContent = fmt(s.inc); document.getElementById('kM').textContent = fmt(s.reimb);
   document.getElementById('kB').textContent = fmt(s.basic); document.getElementById('kG').textContent = fmt(s.inc + s.reimb + s.basic);
 }
+function ciLinks(){ document.getElementById('ciLinkM').classList.add('on'); var on = document.querySelector('.tab.on:not(.ltab)'); if (on) ciLinkTab(on.dataset.sec); }
+function ciLinksClose(){ document.getElementById('ciLinkM').classList.remove('on'); }
+function ciLinkTab(k){
+  document.querySelectorAll('.ltab').forEach(function(t){ t.classList.toggle('on', t.dataset.sec === k); });
+  document.querySelectorAll('.ltbl').forEach(function(t){ t.style.display = t.dataset.sec === k ? '' : 'none'; });
+}
+function ciLinkMark(s){ s.classList.toggle('chg', s.value !== s.dataset.cur); }
+document.addEventListener('change', function(e){ if (e.target.classList && e.target.classList.contains('lsel')) ciLinkMark(e.target); });
+function ciLinkAuto(){ var n = 0; document.querySelectorAll('.lsel').forEach(function(s){ if (s.value === '0' && s.dataset.sug !== '0') { s.value = s.dataset.sug; ciLinkMark(s); n++; } }); toast(n ? n + ' column(s) linked — Save Links to keep.' : 'Nothing to auto-link.', true); }
+function ciLinkSave(){
+  var links = {};
+  document.querySelectorAll('.lsel').forEach(function(s){ if (s.value !== s.dataset.cur) { (links[s.dataset.sec] = links[s.dataset.sec] || {})[s.dataset.k] = parseInt(s.value, 10) || 0; } });
+  if (!Object.keys(links).length) { ciLinksClose(); return; }
+  var fd = new FormData(); fd.append('action', 'link_save'); fd.append('links', JSON.stringify(links));
+  fetch(location.pathname, {method: 'POST', body: fd, credentials: 'same-origin'}).then(function(r){ return r.json(); })
+    .then(function(j){ toast(j.msg, j.ok); if (j.ok) { if (ciDirty && !confirm('Header links saved. Reload now? Unsaved sheet entries will be lost.')) return; ciDirty = false; location.reload(); } })
+    .catch(function(){ toast('Could not save the links.', false); });
+}
 function ciTab(k){
-  document.querySelectorAll('.tab').forEach(function(t){ t.classList.toggle('on', t.dataset.sec === k); });
+  document.querySelectorAll('.tab:not(.ltab)').forEach(function(t){ t.classList.toggle('on', t.dataset.sec === k); });
   document.querySelectorAll('.sec').forEach(function(s){ s.style.display = s.dataset.sec === k ? '' : 'none'; });
   ciFilter();
 }
