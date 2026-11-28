@@ -1186,24 +1186,44 @@ function dbr_diff_html($diff) {
             <div class="alert info">Every deposit of this range is reconciled.</div>
         <?php else: ?>
         <div class="card"><table id="pendTbl">
-            <thead><tr><th>#</th><th>Deposit</th><th>Deposit date</th><th>Delivery date(s)</th><th>Delivery person</th><th>Ref code</th><th>Bank account</th><th class="num">Days</th><th class="num">Amount</th></tr></thead>
+            <thead><tr><th>#</th><th>Deposit</th><th>Deposit date</th><th>Delivery date(s)</th><th>Delivery person</th><th>Ref code</th><th>Bank account</th><th class="num">Days</th><th class="num">Amount</th><?php if ($eff['account'] > 0): ?><th style="text-align:right;">Action</th><?php endif; ?></tr></thead>
             <tbody>
-            <?php $n = 0; foreach ($pend['rows'] as $p): $n++; ?>
-                <tr data-s="<?php echo dbr_h(strtolower($p['dp'] . ' ' . $p['ref'] . ' #' . $p['deposit_id'])); ?>" data-a="<?php echo $p['amount']; ?>">
+            <?php $n = 0; foreach ($pend['rows'] as $p): $n++;
+                /* the same data the manual reconcile dialog uses on the Reconcile tab */
+                $mdata = ['row' => 'p' . $n, 'dp' => $p['dp'], 'key' => $p['key'], 'mobile' => $p['ref'], 'deposits' => [$p['deposit_id']], 'amount' => $p['amount'],
+                          'date' => $p['deposit_date'] !== '' ? $p['deposit_date'] : (array_key_last($p['dd']) ?? date('Y-m-d')), 'dep_date' => $p['deposit_date']]; ?>
+                <tr data-s="<?php echo dbr_h(strtolower($p['dp'] . ' ' . $p['ref'] . ' #' . $p['deposit_id'])); ?>" data-a="<?php echo $p['amount']; ?>"
+                    data-mrow="p<?php echo $n; ?>" data-manual="<?php echo dbr_h(json_encode($mdata, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)); ?>">
                     <td class="muted"><?php echo $n; ?></td>
                     <td><a class="dep-link" href="cc_cash_deposit_dp.php?search=<?php echo urlencode($p['dp']); ?>" target="_blank" rel="noopener">#<?php echo (int)$p['deposit_id']; ?></a></td>
                     <td><?php echo $p['deposit_date'] !== '' ? dbr_fmt_date($p['deposit_date']) : '<span class="badge b-no">No date</span>'; ?></td>
                     <td><?php echo dbr_h(implode(', ', array_map('dbr_fmt_date', array_keys($p['dd']))) ?: '—'); ?></td>
-                    <td><b><?php echo dbr_h($p['dp']); ?></b></td>
+                    <td class="name"><b><?php echo dbr_h($p['dp']); ?></b><div class="rowmsg"></div></td>
                     <td><?php echo $p['ref'] !== '' ? dbr_h($p['ref']) : '<span class="badge b-no" title="No ref code in Cash Collectors — cannot be matched automatically">No ref</span>'; ?></td>
                     <td><?php echo $p['account'] ? dbr_h(dbr_account_label($accounts, $p['account'])) : '—'; ?></td>
                     <td class="num"><?php echo $p['days'] === null ? '—' : $p['days']; ?></td>
                     <td class="num"><?php echo dbr_money($p['amount']); ?></td>
+                    <?php if ($eff['account'] > 0): ?><td style="text-align:right;white-space:nowrap;">
+                        <button type="button" class="btn btn-light btn-sm js-manual"><i class="fa-solid fa-hand-pointer"></i> Manual reconcile</button>
+                        <button type="button" class="btn btn-danger btn-sm js-unstage" hidden title="Remove from batch"><i class="fa-solid fa-xmark"></i></button>
+                    </td><?php endif; ?>
                 </tr>
             <?php endforeach; ?>
             </tbody>
-            <tfoot><tr><td colspan="8" style="text-align:right;font-weight:700;">Total</td><td class="num" id="pendTot" style="font-weight:700;"><?php echo dbr_money($pend['total']); ?></td></tr></tfoot>
+            <tfoot><tr><td colspan="8" style="text-align:right;font-weight:700;">Total</td><td class="num" id="pendTot" style="font-weight:700;"><?php echo dbr_money($pend['total']); ?></td><?php if ($eff['account'] > 0): ?><td></td><?php endif; ?></tr></tfoot>
         </table></div>
+        <?php if ($eff['account'] > 0): ?>
+        <!-- manual picks are saved as a batch, the same way as on the Reconcile tab -->
+        <div class="savebar" id="dbrSavebar"
+             data-filters="<?php echo dbr_h(json_encode(['dd_from' => $f_from, 'dd_to' => $f_to, 'dp_from' => $fd_from, 'dp_to' => $fd_to])); ?>"
+             data-dep-total="<?php echo count($pend['rows']); ?>" data-bank-total="0">
+            <div class="grow"><input type="text" id="dbrRemark" maxlength="500" placeholder="Batch remark (optional)"></div>
+            <span class="muted" id="dbrSelInfo"></span>
+            <button type="button" class="btn btn-dark" id="dbrSave"><i class="fa-solid fa-layer-group"></i> Save batch</button>
+        </div>
+        <?php else: ?>
+        <div class="alert warn">Set the bank account in <a href="?tab=settings">Settings</a> to reconcile these deposits manually.</div>
+        <?php endif; ?>
         <script>
         (function () {
             var q = document.getElementById('pendQ'); if (!q) return;
