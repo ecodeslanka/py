@@ -335,8 +335,7 @@ function dbr_pending($conn, $o) {
     $R = ['error' => '', 'rows' => [], 'total' => 0.0, 'persons' => []];
     if ($o['dd_from'] === '' && $o['dp_from'] === '') { $R['error'] = 'Enter a delivery date range, a deposit date range, or both.'; return $R; }
     list($by_ref, $by_key) = dbr_collectors($conn);
-    $where = "d.handed_over_bo = 0";
-    if ($o['acc_only'] && $o['account'] > 0) $where .= " AND d.bank_account_id = " . (int)$o['account'];
+    $where = "d.handed_over_bo = 0";              /* the bank account chosen in the CC cash deposit entry is not used */
     if ($o['dd_from'] !== '') {
         $where .= " AND d.id IN (SELECT p2.deposit_id FROM cc_cash_deposit_dp_persons p2 JOIN cc_cash_deposit_dp d2 ON d2.id = p2.deposit_id
                                   WHERE COALESCE(p2.delivery_date, d2.delivery_date) BETWEEN '" . mysqli_real_escape_string($conn, $o['dd_from']) . "' AND '" . mysqli_real_escape_string($conn, $o['dd_to']) . "')";
@@ -1160,7 +1159,7 @@ function dbr_diff_html($diff) {
             <?php if ($f_from !== ''): ?>delivery date <b><?php echo dbr_range_label($f_from, $f_to); ?></b><?php endif; ?>
             <?php if ($f_from !== '' && $fd_from !== ''): ?> and <?php endif; ?>
             <?php if ($fd_from !== ''): ?>deposit date <b><?php echo dbr_range_label($fd_from, $fd_to); ?></b><?php endif; ?>
-            that are <b>not reconciled</b> with the bank statement yet<?php echo ($eff['acc_only'] && $eff['account'] > 0) ? ' — deposits to <b>' . dbr_h(dbr_account_label($accounts, $eff['account'])) . '</b> (Settings)' : ''; ?>.
+            that are <b>not reconciled</b> with the bank statement yet (whatever bank account was chosen in the deposit entry).
             <a href="?tab=run&amp;run=1&amp;dd_from=<?php echo urlencode($f_from); ?>&amp;dd_to=<?php echo urlencode($f_to); ?>&amp;dp_from=<?php echo urlencode($fd_from); ?>&amp;dp_to=<?php echo urlencode($fd_to); ?>"><b>Reconcile these →</b></a>
         </div>
         <div class="stats">
@@ -1186,7 +1185,7 @@ function dbr_diff_html($diff) {
             <div class="alert info">Every deposit of this range is reconciled.</div>
         <?php else: ?>
         <div class="card"><table id="pendTbl">
-            <thead><tr><th>#</th><th>Deposit</th><th>Deposit date</th><th>Delivery date(s)</th><th>Delivery person</th><th>Ref code</th><th>Bank account</th><th class="num">Days</th><th class="num">Amount</th><?php if ($eff['account'] > 0): ?><th style="text-align:right;">Action</th><?php endif; ?></tr></thead>
+            <thead><tr><th>#</th><th>Deposit</th><th>Deposit date</th><th>Delivery date(s)</th><th>Delivery person</th><th>Ref code</th><th class="num">Days</th><th class="num">Amount</th><?php if ($eff['account'] > 0): ?><th style="text-align:right;">Action</th><?php endif; ?></tr></thead>
             <tbody>
             <?php $n = 0; foreach ($pend['rows'] as $p): $n++;
                 /* the same data the manual reconcile dialog uses on the Reconcile tab */
@@ -1200,7 +1199,6 @@ function dbr_diff_html($diff) {
                     <td><?php echo dbr_h(implode(', ', array_map('dbr_fmt_date', array_keys($p['dd']))) ?: '—'); ?></td>
                     <td class="name"><b><?php echo dbr_h($p['dp']); ?></b><div class="rowmsg"></div></td>
                     <td><?php echo $p['ref'] !== '' ? dbr_h($p['ref']) : '<span class="badge b-no" title="No ref code in Cash Collectors — cannot be matched automatically">No ref</span>'; ?></td>
-                    <td><?php echo $p['account'] ? dbr_h(dbr_account_label($accounts, $p['account'])) : '—'; ?></td>
                     <td class="num"><?php echo $p['days'] === null ? '—' : $p['days']; ?></td>
                     <td class="num"><?php echo dbr_money($p['amount']); ?></td>
                     <?php if ($eff['account'] > 0): ?><td style="text-align:right;white-space:nowrap;">
@@ -1210,7 +1208,7 @@ function dbr_diff_html($diff) {
                 </tr>
             <?php endforeach; ?>
             </tbody>
-            <tfoot><tr><td colspan="8" style="text-align:right;font-weight:700;">Total</td><td class="num" id="pendTot" style="font-weight:700;"><?php echo dbr_money($pend['total']); ?></td><?php if ($eff['account'] > 0): ?><td></td><?php endif; ?></tr></tfoot>
+            <tfoot><tr><td colspan="7" style="text-align:right;font-weight:700;">Total</td><td class="num" id="pendTot" style="font-weight:700;"><?php echo dbr_money($pend['total']); ?></td><?php if ($eff['account'] > 0): ?><td></td><?php endif; ?></tr></tfoot>
         </table></div>
         <?php if ($eff['account'] > 0): ?>
         <!-- manual picks are saved as a batch, the same way as on the Reconcile tab -->
