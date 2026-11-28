@@ -108,9 +108,13 @@ if ($period) {
         return (float)$profile;
     };
     /* what the old salary sheets saved for the month (salary_sheet_entries): manual overrides and Additional Earnings / Deductions rows */
-    $sse = [];
-    $q = ls_q($conn, "SELECT * FROM salary_sheet_entries WHERE payroll_period_id = $pid AND employee_id IN ($ids)");
-    while ($q && ($x = mysqli_fetch_assoc($q))) $sse[(int)$x['employee_id']] = $x;
+    /* the CC / ACC / SR / MR sheets save to salary_sheet_entries, the Stores and Office sheets to their own tables */
+    $sse = ['' => [], 'ST' => [], 'OFF' => []];
+    foreach (['' => 'salary_sheet_entries', 'ST' => 'st_salary_sheet_entries', 'OFF' => 'off_salary_sheet_entries'] as $sk_ => $tb) {
+        if (!ls_has_table($conn, $tb)) continue;
+        $q = ls_q($conn, "SELECT * FROM `$tb` WHERE payroll_period_id = $pid AND employee_id IN ($ids)");
+        while ($q && ($x = mysqli_fetch_assoc($q))) $sse[$sk_][(int)$x['employee_id']] = $x;
+    }
     $addRows = function ($json) { $o = []; foreach ((json_decode((string)$json, true) ?: []) as $r) { $a = round((float)($r['amount'] ?? 0), 2); if ($a != 0) $o[] = ['label' => trim((string)($r['desc'] ?? '')) ?: 'Other', 'amount' => $a]; } return $o; };
     $fuel = [];
     if (ls_has_table($conn, 'sr_fuel_entries')) { $q = ls_q($conn, "SELECT employee_id, SUM(fuel_rate * fuel_liter) FROM sr_fuel_entries WHERE payroll_period_id = $pid AND employee_id IN ($ids) GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $fuel[(int)$x[0]] = (float)$x[1]; }
@@ -132,7 +136,7 @@ if ($period) {
         $mobile = in_array($cat, ['SR', 'CC'], true) ? $rmb($eid, 'mobile', ($e['reimbursement_mobile'] ?? 0) ?: ($e['mobile_reimbursement'] ?? 0)) : 0.0;
         $fuelA  = $cat === 'SR' ? ($fuel[$eid] ?? $f($e, 'reimbursement_fuel')) : 0.0;
         /* saved salary sheet of the month: its overrides replace the profile values, its additional rows are added */
-        $sv = $sse[$eid] ?? []; $ov = function ($k, $live) use ($sv) { return isset($sv[$k]) && $sv[$k] !== null && $sv[$k] !== '' ? (float)$sv[$k] : $live; };
+        $sv = (in_array($cat, ['ST', 'OFF'], true) ? ($sse[$cat][$eid] ?? null) : null) ?? ($sse[''][$eid] ?? []);   /* the employee's own sheet */ $ov = function ($k, $live) use ($sv) { return isset($sv[$k]) && $sv[$k] !== null && $sv[$k] !== '' ? (float)$sv[$k] : $live; };
         $fromSheet = [];
         foreach (['override_arrears' => 'arrears', 'override_excess' => 'excess_p', 'override_credit_r' => 'credit_r', 'override_cash_short' => 'cash_short', 'override_good_short' => 'good_short'] as $ok => $ck)
             if (isset($sv[$ok]) && $sv[$ok] !== null && $sv[$ok] !== '') $fromSheet[$ck] = 1;
