@@ -6,7 +6,7 @@
  *   Promotion : the designation (and its staff category / employee code) in force at the END of the month, from promotion_logs:
  *               a promotion / demotion effective after the month is undone for that month.
  *   Joiners   : not before their date of join.
- *   Inactive  : employees.active = 0 are left out, unless they left in or after the month (shown for their last month).
+ *   Everyone else of the Employee List is in (the employees.active flag is not used — the Employee List does not use it either).
  * pme_employees($conn, 'Y-m-d' from, 'Y-m-d' to) → [id => employee row + designation_name / designation_code / pme_* keys]
  */
 if (!function_exists('pme_employees')) {
@@ -15,7 +15,7 @@ if (!function_exists('pme_employees')) {
 
     function pme_employees($conn, $from, $to) {
         $from = mysqli_real_escape_string($conn, $from); $to = mysqli_real_escape_string($conn, $to);
-        $hasExit = pme_has($conn, 'employees', 'exit_date'); $hasAct = pme_has($conn, 'employees', 'active'); $hasDoj = pme_has($conn, 'employees', 'date_of_join');
+        $hasExit = pme_has($conn, 'employees', 'exit_date'); $hasDoj = pme_has($conn, 'employees', 'date_of_join');
         $desig = []; $r = pme_q($conn, "SELECT id, designation_name, designation_code, staff_category_id FROM designations"); while ($r && ($x = mysqli_fetch_assoc($r))) $desig[(int)$x['id']] = $x;
 
         /* exit dates from the employee log, for leavers without employees.exit_date */
@@ -46,7 +46,6 @@ if (!function_exists('pme_employees')) {
             $exit = $hasExit && !empty($e['exit_date']) ? $e['exit_date'] : ($left ? ($logExit[$eid] ?? null) : null);
             if ($exit !== null && $exit < $from) continue;                                                       /* left before the month */
             if ($exit === null && $left) continue;                                                               /* left, date unknown */
-            if ($hasAct && (int)($e['active'] ?? 1) === 0 && ($exit === null || $exit < $from)) continue;         /* inactive */
             /* the month's designation */
             $e['pme_current_designation_id'] = $e['designation_id'];
             if (isset($undo[$eid])) {

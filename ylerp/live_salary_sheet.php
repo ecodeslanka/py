@@ -18,7 +18,7 @@ function ls_cols($conn, $t) { static $c = []; if (!isset($c[$t])) { $c[$t] = [];
 function ls_has_table($conn, $t) { $r = ls_q($conn, "SHOW TABLES LIKE '$t'"); return $r && mysqli_num_rows($r) > 0; }
 $h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
 
-const LS_CATS = ['SR' => 'Sales Representatives', 'MR' => 'Merchandisers', 'CC' => 'Cash Collectors', 'ACC' => 'Assistant Cash Collectors', 'ST' => 'Store Staff', 'OFF' => 'Office Staff'];
+const LS_CATS = ['SR' => 'Sales Representatives', 'MR' => 'Merchandisers', 'CC' => 'Cash Collectors', 'ACC' => 'Assistant Cash Collectors', 'ST' => 'Store Staff', 'OFF' => 'Office Staff', 'OTH' => 'Other Staff (no salary sheet category)'];
 const LS_CAT_ALIAS = ['SACC' => 'CC'];          /* the CC salary sheet also pays SACC */
 
 /* ── payroll months ── */
@@ -44,7 +44,7 @@ if ($period) {
     foreach (pme_employees($conn, $from, $to) as $eid => $e) {
         $cat = '';
         foreach ([$scCode[(int)($e['staff_category_id'] ?? 0)] ?? '', $scCode[$dCat[(int)($e['designation_id'] ?? 0)] ?? 0] ?? ''] as $c) { $c = strtoupper(trim((string)$c)); $c = LS_CAT_ALIAS[$c] ?? $c; if (isset(LS_CATS[$c])) { $cat = $c; break; } }
-        if ($cat === '') continue;
+        if ($cat === '') $cat = 'OTH';                                                   /* every employee of the month is listed */
         $e['cat'] = $cat; $emps[(int)$eid] = $e;
     }
     $ids = $emps ? implode(',', array_keys($emps)) : '0';
