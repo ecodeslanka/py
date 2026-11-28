@@ -12,6 +12,7 @@
  *              → last 10 digits 0715283492 → Cash Collectors → delivery person.
  *              One deposit (per delivery person) ↔ one bank transaction.
  *              Deposits not found can be reconciled manually (1+ bank credits).
+ *  Not reconciled: every bank deposit line of the delivery / deposit date range that is not reconciled yet.
  *  Save batch: everything ticked + manual picks are saved as ONE batch,
  *              together with a snapshot of what was NOT reconciled.
  *              Bank statement transaction + deposit get the reconcile remark.
@@ -329,6 +330,46 @@ function dbr_refresh_deposit_remark($conn, $deposit_id) {
  * $o = [account, type, tol, acc_only, dd_from, dd_to, dp_from, dp_to]
  * Returns pairs (one deposit ↔ one bank txn), dep_only, bank_only, totals …
  */
+/* every deposit line (deposit × delivery person) of the delivery / deposit date range that is not reconciled yet */
+function dbr_pending($conn, $o) {
+    $R = ['error' => '', 'rows' => [], 'total' => 0.0, 'persons' => []];
+    if ($o['dd_from'] === '' && $o['dp_from'] === '') { $R['error'] = 'Enter a delivery date range, a deposit date range, or both.'; return $R; }
+    list($by_ref, $by_key) = dbr_collectors($conn);
+    $where = "d.handed_over_bo = 0";
+    if ($o['acc_only'] && $o['account'] > 0) $where .= " AND d.bank_account_id = " . (int)$o['account'];
+    if ($o['dd_from'] !== '') {
+        $where .= " AND d.id IN (SELECT p2.deposit_id FROM cc_cash_deposit_dp_persons p2 JOIN cc_cash_deposit_dp d2 ON d2.id = p2.deposit_id
+                                  WHERE COALESCE(p2.delivery_date, d2.delivery_date) BETWEEN '" . mysqli_real_escape_string($conn, $o['dd_from']) . "' AND '" . mysqli_real_escape_string($conn, $o['dd_to']) . "')";
+    }
+    if ($o['dp_from'] !== '') $where .= " AND d.deposit_date BETWEEN '" . mysqli_real_escape_string($conn, $o['dp_from']) . "' AND '" . mysqli_real_escape_string($conn, $o['dp_to']) . "'";
+    $parts = [];
+    $r = dbr_q($conn, "SELECT d.id, d.deposit_date, d.bank_account_id, p.delivery_person, p.amount, COALESCE(p.delivery_date, d.delivery_date) AS dd
+                         FROM cc_cash_deposit_dp d JOIN cc_cash_deposit_dp_persons p ON p.deposit_id = d.id
+                        WHERE $where ORDER BY d.deposit_date, d.id, p.sort_order");
+    if ($r) while ($row = mysqli_fetch_assoc($r)) {
+        $name = dbr_norm($row['delivery_person']); if ($name === '') continue;
+        $k = dbr_key($name); $pk = $row['id'] . '|' . $k;
+        if (!isset($parts[$pk])) $parts[$pk] = ['deposit_id' => (int)$row['id'], 'dp' => $name, 'key' => $k, 'account' => (int)$row['bank_account_id'],
+                                                'deposit_date' => dbr_valid_date((string)$row['deposit_date']) ? $row['deposit_date'] : '', 'amount' => 0.0, 'dd' => [], 'ref' => $by_key[$k] ?? ''];
+        $parts[$pk]['amount'] += (float)$row['amount'];
+        if (dbr_valid_date((string)$row['dd'])) $parts[$pk]['dd'][$row['dd']] = true;
+    }
+    if ($parts) {                                                               /* reconciled already → out */
+        $ids = array_unique(array_map(function ($p) { return $p['deposit_id']; }, $parts));
+        $r = dbr_q($conn, "SELECT deposit_id, dp_key FROM cc_dp_bank_recon_deposits WHERE deposit_id IN (" . dbr_ids($ids) . ")");
+        if ($r) while ($row = mysqli_fetch_assoc($r)) unset($parts[$row['deposit_id'] . '|' . $row['dp_key']]);
+    }
+    foreach ($parts as $p) {
+        ksort($p['dd']); $p['amount'] = round($p['amount'], 2);
+        $p['days'] = $p['deposit_date'] !== '' ? (int)floor((strtotime(date('Y-m-d')) - strtotime($p['deposit_date'])) / 86400) : null;
+        $R['rows'][] = $p; $R['total'] += $p['amount'];
+        $R['persons'][$p['key']] = ($R['persons'][$p['key']] ?? ['dp' => $p['dp'], 'cnt' => 0, 'amount' => 0.0]);
+        $R['persons'][$p['key']]['cnt']++; $R['persons'][$p['key']]['amount'] += $p['amount'];
+    }
+    uasort($R['persons'], function ($a, $b) { return $b['amount'] <=> $a['amount']; });
+    return $R;
+}
+
 function dbr_run($conn, $o) {
     $R = ['error' => '', 'pairs' => [], 'dep_only' => [], 'bank_only' => [], 'already' => ['dep' => 0, 'bank' => 0],
           'totals' => ['dep' => 0.0, 'bank' => 0.0, 'dep_cnt' => 0, 'bank_cnt' => 0],
@@ -852,7 +893,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 $accounts = dbr_statement_accounts($conn);
 $cfg      = dbr_get_settings($conn);
 $eff      = dbr_effective_settings($cfg, $accounts);
-$tab      = in_array($_GET['tab'] ?? '', ['saved', 'settings'], true) ? $_GET['tab'] : 'run';
+$tab      = in_array($_GET['tab'] ?? '', ['saved', 'settings', 'pending'], true) ? $_GET['tab'] : 'run';
 
 /* reconcile tab filters */
 $ran = isset($_GET['run']);
@@ -867,6 +908,9 @@ $run = null;
 if ($tab === 'run' && $ran) {
     $run = dbr_run($conn, $eff + ['dd_from' => $f_from, 'dd_to' => $f_to, 'dp_from' => $fd_from, 'dp_to' => $fd_to]);
 }
+$pend = null;
+$by_key_p = [];
+if ($tab === 'pending' && $ran) { $pend = dbr_pending($conn, $eff + ['dd_from' => $f_from, 'dd_to' => $f_to, 'dp_from' => $fd_from, 'dp_to' => $fd_to]); $by_key_p = dbr_collectors($conn)[1]; }
 $pairs     = $run ? $run['pairs'] : [];
 $dep_only  = $run ? $run['dep_only'] : [];
 $bank_only = $run ? $run['bank_only'] : [];
@@ -1088,11 +1132,92 @@ function dbr_diff_html($diff) {
 
     <div class="tabs">
         <a href="?tab=run" class="<?php echo $tab === 'run' ? 'on' : ''; ?>"><i class="fa-solid fa-wand-magic-sparkles"></i> Reconcile</a>
+        <a href="?tab=pending<?php echo $ran ? '&amp;run=1&amp;dd_from=' . urlencode($f_from) . '&amp;dd_to=' . urlencode($f_to) . '&amp;dp_from=' . urlencode($fd_from) . '&amp;dp_to=' . urlencode($fd_to) : ''; ?>" class="<?php echo $tab === 'pending' ? 'on' : ''; ?>"><i class="fa-solid fa-hourglass-half"></i> Not reconciled</a>
         <a href="?tab=saved" class="<?php echo $tab === 'saved' ? 'on' : ''; ?>"><i class="fa-solid fa-layer-group"></i> Saved batches</a>
         <a href="?tab=settings" class="<?php echo $tab === 'settings' ? 'on' : ''; ?>"><i class="fa-solid fa-gear"></i> Settings</a>
     </div>
 
-<?php if ($tab === 'run'): /* ═══════════ RECONCILE ═══════════ */ ?>
+<?php if ($tab === 'pending'): /* ═══════════ NOT RECONCILED ═══════════ */ ?>
+
+    <form class="filters" method="get">
+        <input type="hidden" name="tab" value="pending">
+        <input type="hidden" name="run" value="1">
+        <div><label class="f" for="dd_from">Delivery date from</label><input type="date" id="dd_from" name="dd_from" value="<?php echo dbr_h($f_from); ?>"></div>
+        <div><label class="f" for="dd_to">Delivery date to</label><input type="date" id="dd_to" name="dd_to" value="<?php echo dbr_h($f_to); ?>"></div>
+        <div><label class="f" for="dp_from">Deposit date from</label><input type="date" id="dp_from" name="dp_from" value="<?php echo dbr_h($fd_from); ?>"></div>
+        <div><label class="f" for="dp_to">Deposit date to</label><input type="date" id="dp_to" name="dp_to" value="<?php echo dbr_h($fd_to); ?>"></div>
+        <div><button type="button" class="btn btn-light" id="dbrClearDates" style="width:100%;justify-content:center;"><i class="fa-solid fa-eraser"></i> Clear dates</button></div>
+        <div><button class="btn btn-dark" type="submit" style="width:100%;justify-content:center;"><i class="fa-solid fa-magnifying-glass"></i> Show</button></div>
+    </form>
+
+    <?php if (!$pend): ?>
+        <div class="alert info">Choose a delivery date range and / or a deposit date range and click <b>Show</b> to list the deposits that are not reconciled yet.</div>
+    <?php elseif ($pend['error'] !== ''): ?>
+        <div class="alert err"><?php echo dbr_h($pend['error']); ?></div>
+    <?php else: ?>
+        <div class="alert info">
+            Deposits with
+            <?php if ($f_from !== ''): ?>delivery date <b><?php echo dbr_range_label($f_from, $f_to); ?></b><?php endif; ?>
+            <?php if ($f_from !== '' && $fd_from !== ''): ?> and <?php endif; ?>
+            <?php if ($fd_from !== ''): ?>deposit date <b><?php echo dbr_range_label($fd_from, $fd_to); ?></b><?php endif; ?>
+            that are <b>not reconciled</b> with the bank statement yet<?php echo ($eff['acc_only'] && $eff['account'] > 0) ? ' — deposits to <b>' . dbr_h(dbr_account_label($accounts, $eff['account'])) . '</b> (Settings)' : ''; ?>.
+            <a href="?tab=run&amp;run=1&amp;dd_from=<?php echo urlencode($f_from); ?>&amp;dd_to=<?php echo urlencode($f_to); ?>&amp;dp_from=<?php echo urlencode($fd_from); ?>&amp;dp_to=<?php echo urlencode($fd_to); ?>"><b>Reconcile these →</b></a>
+        </div>
+        <div class="stats">
+            <div class="stat r"><div class="lbl">Not reconciled</div><div class="val"><?php echo count($pend['rows']); ?></div><div class="cnt">deposit line(s)</div></div>
+            <div class="stat r"><div class="lbl">Amount</div><div class="val"><?php echo dbr_money($pend['total']); ?></div><div class="cnt">LKR</div></div>
+            <div class="stat"><div class="lbl">Delivery persons</div><div class="val"><?php echo count($pend['persons']); ?></div><div class="cnt">with deposits pending</div></div>
+            <div class="stat"><div class="lbl">Oldest</div><div class="val"><?php $od = array_filter(array_column($pend['rows'], 'days'), function ($v) { return $v !== null; }); echo $od ? max($od) . ' d' : '—'; ?></div><div class="cnt">since the deposit date</div></div>
+        </div>
+
+        <?php if ($pend['persons']): ?>
+        <h2><i class="fa-solid fa-user-clock" style="color:#b91c1c"></i> By delivery person <span class="count"><?php echo count($pend['persons']); ?></span></h2>
+        <div class="card"><table>
+            <thead><tr><th>Delivery person</th><th>Ref code</th><th class="num">Deposits</th><th class="num">Amount</th></tr></thead>
+            <tbody><?php foreach ($pend['persons'] as $k => $pp): ?>
+                <tr><td><b><?php echo dbr_h($pp['dp']); ?></b></td><td><?php echo dbr_h($by_key_p[$k] ?? ''); ?></td><td class="num"><?php echo (int)$pp['cnt']; ?></td><td class="num"><?php echo dbr_money($pp['amount']); ?></td></tr>
+            <?php endforeach; ?></tbody>
+        </table></div>
+        <?php endif; ?>
+
+        <h2><i class="fa-solid fa-building-columns" style="color:#b91c1c"></i> Deposits not reconciled <span class="count"><?php echo count($pend['rows']); ?></span>
+            <input type="search" id="pendQ" placeholder="Search person / ref / deposit…" style="margin-left:auto;max-width:260px;height:32px;"></h2>
+        <?php if (!$pend['rows']): ?>
+            <div class="alert info">Every deposit of this range is reconciled.</div>
+        <?php else: ?>
+        <div class="card"><table id="pendTbl">
+            <thead><tr><th>#</th><th>Deposit</th><th>Deposit date</th><th>Delivery date(s)</th><th>Delivery person</th><th>Ref code</th><th>Bank account</th><th class="num">Days</th><th class="num">Amount</th></tr></thead>
+            <tbody>
+            <?php $n = 0; foreach ($pend['rows'] as $p): $n++; ?>
+                <tr data-s="<?php echo dbr_h(strtolower($p['dp'] . ' ' . $p['ref'] . ' #' . $p['deposit_id'])); ?>" data-a="<?php echo $p['amount']; ?>">
+                    <td class="muted"><?php echo $n; ?></td>
+                    <td><a class="dep-link" href="cc_cash_deposit_dp.php?search=<?php echo urlencode($p['dp']); ?>" target="_blank" rel="noopener">#<?php echo (int)$p['deposit_id']; ?></a></td>
+                    <td><?php echo $p['deposit_date'] !== '' ? dbr_fmt_date($p['deposit_date']) : '<span class="badge b-no">No date</span>'; ?></td>
+                    <td><?php echo dbr_h(implode(', ', array_map('dbr_fmt_date', array_keys($p['dd']))) ?: '—'); ?></td>
+                    <td><b><?php echo dbr_h($p['dp']); ?></b></td>
+                    <td><?php echo $p['ref'] !== '' ? dbr_h($p['ref']) : '<span class="badge b-no" title="No ref code in Cash Collectors — cannot be matched automatically">No ref</span>'; ?></td>
+                    <td><?php echo $p['account'] ? dbr_h(dbr_account_label($accounts, $p['account'])) : '—'; ?></td>
+                    <td class="num"><?php echo $p['days'] === null ? '—' : $p['days']; ?></td>
+                    <td class="num"><?php echo dbr_money($p['amount']); ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+            <tfoot><tr><td colspan="8" style="text-align:right;font-weight:700;">Total</td><td class="num" id="pendTot" style="font-weight:700;"><?php echo dbr_money($pend['total']); ?></td></tr></tfoot>
+        </table></div>
+        <script>
+        (function () {
+            var q = document.getElementById('pendQ'); if (!q) return;
+            q.addEventListener('input', function () {
+                var v = q.value.trim().toLowerCase(), t = 0;
+                document.querySelectorAll('#pendTbl tbody tr').forEach(function (tr) { var on = !v || tr.dataset.s.indexOf(v) >= 0; tr.style.display = on ? '' : 'none'; if (on) t += parseFloat(tr.dataset.a) || 0; });
+                document.getElementById('pendTot').textContent = t.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            });
+        })();
+        </script>
+        <?php endif; ?>
+    <?php endif; ?>
+
+<?php elseif ($tab === 'run'): /* ═══════════ RECONCILE ═══════════ */ ?>
 
     <?php if ($eff['account'] <= 0): ?>
         <div class="alert warn">No bank account is set for reconcile yet. <a href="?tab=settings">Open Settings</a> and choose the bank account.</div>
