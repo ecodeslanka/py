@@ -134,7 +134,16 @@ if ($period) {
               'excess_p' => $f($e, 'excess_payment'), 'payee' => $f($e, 'payee') ?: $f($e, 'income_tax')];
         $ded = round(array_sum($d), 2);
         $epfR_ = round($basic * $epfR / 100, 2); $etf = round($basic * $etfR / 100, 2); $bonus = $basic > 0 ? round($basic / 12, 2) : 0; $grat = $basic > 0 ? round($basic / 24, 2) : 0; $ins = $f($e, 'insurance_amount');
+        /* details shown when the name is clicked (the fields the employee record has) */
+        $det = [];
+        foreach (['employee_full_name' => 'Full Name', 'name_with_initials' => 'Name with Initials', 'employee_id' => 'Employee Code', 'epf_number' => 'EPF No', 'nic_number' => 'NIC',
+                  'date_of_birth' => 'Date of Birth', 'gender' => 'Gender', 'mobile_number' => 'Mobile', 'mobile' => 'Mobile', 'contact_number' => 'Contact No', 'phone' => 'Phone', 'email' => 'Email',
+                  'address' => 'Address', 'date_of_join' => 'Date of Join', 'status' => 'Status', 'bank_code' => 'Bank', 'bank_branch_code' => 'Bank Branch', 'account_number' => 'Account No'] as $k => $lb)
+            if (isset($e[$k]) && trim((string)$e[$k]) !== '' && !isset($det[$lb])) $det[$lb] = (string)$e[$k];
+        $det = ['Designation' => $e['designation_name'] ?? '', 'Category' => $cat . ' — ' . LS_CATS[$cat]] + $det;
+        if (!empty($e['pme_note'])) $det['This month'] = $e['pme_note'];
         $rows[] = ['cat' => $cat, 'code' => $e['employee_id'] ?? '', 'epf_no' => $e['epf_number'] ?? ($e['epf_no'] ?? ''), 'name' => $e['employee_full_name'] ?? ($e['name_with_initials'] ?? ''),
+            'initials' => trim((string)($e['name_with_initials'] ?? '')) !== '' ? trim($e['name_with_initials']) : ($e['employee_full_name'] ?? ''), 'det' => $det, 'eid' => (int)$eid,
             'desig' => $e['designation_name'] ?? '', 'status' => $e['status'] ?? '', 'note' => $e['pme_note'] ?? '', 'left' => $e['pme_exit'] ?? null, 'doj' => $e['date_of_join'] ?? '', 'norm' => $norm, 'worked' => $worked, 'rate' => $rate,
             'basic' => $basic, 'no_pay_days' => $no_pay_days, 'basic_adj' => round($basic - $no_pay, 2),
             'incentive' => $incent, 'inc_list' => $incList, 'att_allow' => $att_allow, 'meal' => $meal, 'travel' => $travel, 'mobile' => $mobile, 'fuel' => $fuelA, 'arrears' => $arrears, 'earn' => $earn]
@@ -194,8 +203,19 @@ body{margin:0;background:linear-gradient(160deg,#8a8d93,#6f7278);font:11px/1.3 v
 .kpi .v{font-size:15px;font-weight:bold;font-variant-numeric:tabular-nums;color:var(--ob-navy);margin-top:1px}
 .title{flex:none;margin:0 8px;background:linear-gradient(#e9f0f8,#DCE6F1 50%,#B8CCE4);border:1px solid var(--ob-line);color:var(--ob-navy);font-weight:bold;font-size:13px;text-align:center;padding:3px;letter-spacing:.06em}
 .scroll{flex:1;min-height:0;overflow:auto;margin:4px 8px 8px;border:1px solid #a7a9ad;background:#fff}
-table{border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:10.5px;min-width:100%}
-th,td{border:1px solid var(--grid);padding:2px 5px;white-space:nowrap;height:18px}
+table{border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:10.5px;width:auto}
+th,td{border:1px solid var(--grid);padding:2px 4px;white-space:nowrap;height:18px}
+/* compact columns: the column titles wrap, so small number columns stay narrow */
+thead tr:nth-child(2) th{white-space:normal;line-height:1.1;min-width:34px;max-width:66px;vertical-align:middle;font-size:10px;padding:2px 3px}
+td.nm a{color:var(--ob-navy);text-decoration:none;border-bottom:1px dotted var(--ob-acc)} td.nm a:hover{color:#0070C0;border-bottom-style:solid}
+.mdl{position:fixed;inset:0;background:rgba(30,32,36,.45);display:none;align-items:center;justify-content:center;z-index:8;padding:12px}.mdl.on{display:flex}
+.mbox{width:min(820px,100%);max-height:92vh;display:flex;flex-direction:column;background:var(--win);border:1px solid #4a4c52;border-radius:7px;box-shadow:0 10px 30px rgba(0,0,0,.4);overflow:hidden}
+.mbody{overflow:auto;padding:8px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.mcard{border:1px solid #a7a9ad;background:#fff} .mcard h3{margin:0;padding:3px 8px;font-size:11px;color:#fff;background:linear-gradient(#3a64a0,var(--ob-navy))}
+.mcard.gA h3{background:linear-gradient(#4fa36a,#2e7d46)} .mcard.gD h3{background:linear-gradient(#df8b89,#c0504d 55%,#a33f3c)} .mcard.gB h3{background:linear-gradient(#9b7fd0,#6b4fa8)}
+.mcard table{width:100%} .mcard td{height:19px;white-space:normal} .mcard td.k{color:#55585e;width:44%} .mcard tr.t td{font-weight:bold;background:#f6f5f0}
+.mnet{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border:1px solid #d9b300;background:#fff3c4;font-weight:bold;font-size:13px;color:#3a2c00}
+@media (max-width:700px){.mbody{grid-template-columns:1fr}}
 thead th{position:sticky;z-index:2;background:linear-gradient(#3a64a0,var(--ob-navy));color:#fff;border-color:#173a63;font-weight:bold;text-align:center}
 thead tr:first-child th{top:0} thead tr:nth-child(2) th{top:20px}
 th.gA{background:linear-gradient(#4fa36a,#2e7d46)} th.gD{background:linear-gradient(#df8b89,#c0504d 55%,#a33f3c)} th.gS{background:linear-gradient(#ffd966,#f0b400);color:#3a2c00} th.gB{background:linear-gradient(#9b7fd0,#6b4fa8)}
@@ -252,7 +272,7 @@ tbody tr.r:hover td{background:#fff1a8}
           <?php endif; $last = $x['cat']; ?>
           <tr class="grp" data-cat="<?= $x['cat'] ?>"><td class="sticky"></td><td colspan="<?= count($COLS) ?>"><?= $h($x['cat'] . ' — ' . LS_CATS[$x['cat']]) ?></td></tr>
         <?php endif; $i++; ?>
-        <tr class="r" data-cat="<?= $x['cat'] ?>" data-s="<?= $h(mb_strtolower($x['name'] . ' ' . $x['code'] . ' ' . $x['desig'] . ' ' . $x['epf_no'])) ?>">
+        <tr class="r" data-cat="<?= $x['cat'] ?>" data-s="<?= $h(mb_strtolower($x['name'] . ' ' . $x['initials'] . ' ' . $x['code'] . ' ' . $x['desig'] . ' ' . $x['epf_no'])) ?>">
           <td class="sticky" style="color:#8e909a"><?= $i ?></td>
           <?php foreach ($COLS as $c) {
               if ($c[0] === 'net') continue;
@@ -260,6 +280,7 @@ tbody tr.r:hover td{background:#fff1a8}
               if ($c[0] === 'incentive') { $tt = implode("\n", array_map(function ($r) use ($num) { return $r['label'] . ': ' . $num($r['amount']); }, $x['inc_list'])); echo '<td class="n"' . ($tt !== '' ? ' title="' . $h($tt) . '"' : '') . '>' . $num($v) . '</td>'; continue; }
               if ($c[0] === 'status' && $x['left']) { echo '<td class="lft" title="' . $h($x['note']) . '">' . $h($v) . ' · left ' . $h(date('d M', strtotime($x['left']))) . '</td>'; continue; }
               if ($c[0] === 'desig' && $x['note'] !== '' && stripos($x['note'], 'moted') !== false) { echo '<td title="' . $h($x['note']) . '">' . $h($v) . ' <span class="mv">' . (stripos($x['note'], 'after this month') !== false ? 'before move' : 'moved') . '</span></td>'; continue; }
+              if ($c[0] === 'name') { echo '<td class="b nm"><a href="#" onclick="lsShow(' . ($i - 1) . ');return false" title="' . $h($x['name']) . ' — click for full details">' . $h($x['initials']) . '</a></td>'; continue; }
               if ($c[3] === 0) { echo '<td' . ($c[0] === 'name' ? ' class="b"' : '') . '>' . $h($c[0] === 'doj' && $v ? date('Y-m-d', strtotime($v)) : $v) . '</td>'; continue; }
               $cls = 'n' . (is_numeric($v) && $v < 0 ? ' neg' : '') . ($c[0] === 'earn' ? ' tE' : '') . ($c[0] === 'ded' ? ' tD' : '');
               echo '<td class="' . $cls . '">' . ($c[3] === 1 ? ($v + 0) : $num($v)) . '</td>';
@@ -276,7 +297,41 @@ tbody tr.r:hover td{background:#fff1a8}
   </div>
   <div class="note">Live figures for the chosen payroll month — not the saved salary sheets. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentive</b> = the Incentives Sheet amounts of the employee's staff category (hover for the columns; before November 2026 from the old Incentive Entries). Norm days = days in the month − special holidays; days worked = attendance; No Pay = basic ÷ norm days × the employee's no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
 </div>
+<div class="mdl" id="lsM" onclick="if(event.target===this)lsHide()">
+  <div class="mbox">
+    <div class="tb"><h1 id="lsMT"></h1><button class="btn" onclick="lsHide()"><i class="fa-solid fa-xmark"></i> Close</button></div>
+    <div class="mbody" id="lsMB"></div>
+  </div>
+</div>
 <script>
+<?php
+  $jsCols = array_map(function ($c) { return ['k' => $c[0], 'l' => $c[1], 'g' => $c[2], 't' => $c[3]]; }, $COLS);
+  $jsRows = array_map(function ($x) { $v = []; foreach ($GLOBALS['COLS'] as $c) $v[$c[0]] = $x[$c[0]] ?? null; return ['n' => $x['name'], 'i' => $x['initials'], 'd' => $x['det'], 'v' => $v, 'inc' => array_values($x['inc_list'])]; }, $rows);
+?>
+var LS_COLS = <?= json_encode($jsCols, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?>, LS_ROWS = <?= json_encode($jsRows, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?>;
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function money(v){ v = parseFloat(v) || 0; return Math.abs(v) < 0.005 ? '-' : (v < 0 ? '(' + (-v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ')' : v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})); }
+/* full details of an employee row */
+function lsShow(i){
+  var r = LS_ROWS[i]; if (!r) return;
+  document.getElementById('lsMT').innerHTML = '<i class="fa-solid fa-id-card"></i> ' + esc(r.n) + (r.i && r.i !== r.n ? ' <span style="font-weight:normal;color:#55585e">(' + esc(r.i) + ')</span>' : '');
+  var card = function(title, cls, lines){ return '<div class="mcard ' + cls + '"><h3>' + title + '</h3><table>' + lines.join('') + '</table></div>'; };
+  var line = function(k, v, t){ return '<tr' + (t ? ' class="t"' : '') + '><td class="k">' + esc(k) + '</td><td' + (typeof v === 'number' ? ' class="n"' : '') + '>' + (typeof v === 'number' ? money(v) : esc(v)) + '</td></tr>'; };
+  var det = Object.keys(r.d).map(function(k){ return line(k, r.d[k]); });
+  var att = ['norm', 'worked', 'rate', 'no_pay_days'].map(function(k){ var c = LS_COLS.filter(function(x){ return x.k === k; })[0]; return line(c.l, (r.v[k] == null ? '' : r.v[k]) + (k === 'rate' ? '%' : '')); });
+  att.push(line('Basic Salary', r.v.basic)); att.push(line('Basic Adjusted', r.v.basic_adj, 1));
+  var grp = function(g, skip){ return LS_COLS.filter(function(c){ return c.g === g && c.t === 2; }).map(function(c){
+      if (c.k === 'incentive' && r.inc && r.inc.length) return line(c.l, r.v[c.k]) + r.inc.map(function(x){ return '<tr><td class="k" style="padding-left:14px">· ' + esc(x.label) + '</td><td class="n">' + money(x.amount) + '</td></tr>'; }).join('');
+      if (c.k === skip) return line(c.l, r.v[c.k], 1);
+      return (parseFloat(r.v[c.k]) || 0) === 0 ? '' : line(c.l, r.v[c.k]); }); };
+  document.getElementById('lsMB').innerHTML = card('Employee', '', det) + card('Attendance & Basic', '', att)
+    + card('Additions', 'gA', grp('A', 'earn')) + card('Deductions', 'gD', grp('D', 'ded'))
+    + '<div class="mnet"><span>Net Salary</span><span>' + money(r.v.net) + '</span></div>'
+    + card('Employer Benefits', 'gB', grp('B', 'benefit'));
+  document.getElementById('lsM').classList.add('on');
+}
+function lsHide(){ document.getElementById('lsM').classList.remove('on'); }
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') lsHide(); });
 function lsApply(){
   var cats = [].filter.call(document.querySelectorAll('.lsCat'), function(c){ c.parentElement.classList.toggle('off', !c.checked); return c.checked; }).map(function(c){ return c.value; });
   var q = (document.getElementById('lsQ').value || '').trim().toLowerCase();
