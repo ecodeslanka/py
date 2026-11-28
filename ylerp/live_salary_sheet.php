@@ -51,7 +51,12 @@ if ($period) {
     $ids = $emps ? implode(',', array_keys($emps)) : '0';
 
     /* attendance + special holidays → norm days / days worked */
-    $att = []; $q = ls_q($conn, "SELECT employee_id, COUNT(*) c FROM attendance WHERE att_date BETWEEN '$from' AND '$to' AND employee_id IN ($ids) GROUP BY employee_id");
+    /* attendance / leave as the Attendance Summary (attendance_summary_salary.php): attended days, approved Annual + Casual + Medical leave */
+    $lv = []; $q = ls_q($conn, "SELECT employee_id, SUM(days_count) FROM leave_applications WHERE status = 'Approved' AND employee_id IN ($ids)
+                                 AND leave_type IN ('Annual Leave','Casual Leave','Medical Leave')
+                                 AND ((start_date BETWEEN '$from' AND '$to') OR (end_date BETWEEN '$from' AND '$to') OR (start_date <= '$from' AND end_date >= '$to')) GROUP BY employee_id");
+    while ($q && ($x = mysqli_fetch_row($q))) $lv[(int)$x[0]] = (float)$x[1];
+    $att = []; $q = ls_q($conn, "SELECT employee_id, COUNT(DISTINCT att_date) c FROM attendance WHERE att_date BETWEEN '$from' AND '$to' AND employee_id IN ($ids) GROUP BY employee_id");
     while ($q && ($x = mysqli_fetch_row($q))) $att[(int)$x[0]] = (int)$x[1];
     $shd = []; $q = ls_q($conn, "SELECT * FROM special_holidays WHERE active = 1 AND date_from <= '$to' AND date_to >= '$from'");
     while ($q && ($sh = mysqli_fetch_assoc($q))) {
@@ -116,7 +121,8 @@ if ($period) {
         $hol = $holidays($e); $norm = max(1, $mdays - $hol); $worked = $att[$eid] ?? 0; $rate = round($worked / $norm * 100, 2);
         $basic = $f($e, 'basic_salary'); if ($cat === 'ST' && $c && (float)($c['basic_salary'] ?? 0) > 0) $basic = (float)$c['basic_salary'];
         if ($basic <= 0 && $c) $basic = (float)($c['basic_salary'] ?? 0);
-        $no_pay_days = $f($e, 'no_pay'); $no_pay = $basic > 0 ? round($basic / $norm * $no_pay_days, 2) : 0;
+        /* No Pay as the Attendance Summary: norm days − attended days − leave; amount = basic ÷ norm days × no pay days */
+        $leave = $lv[$eid] ?? 0; $no_pay_days = max(0, $norm - $worked - $leave); $no_pay = $basic > 0 ? round($basic / $norm * $no_pay_days, 2) : 0;
         /* attendance allowance: the Salary Configuration tiers of the designation (≥90% / ≥85%), else the employee profile */
         $att_allow = 0.0;
         if ($c && ((float)($c['attendance_90'] ?? 0) > 0 || (float)($c['attendance_85'] ?? 0) > 0)) $att_allow = $rate >= 90 ? (float)($c['attendance_90'] ?? 0) : ($rate >= 85 ? (float)($c['attendance_85'] ?? 0) : 0);
@@ -156,7 +162,7 @@ if ($period) {
         if (!empty($e['pme_note'])) $det['This month'] = $e['pme_note'];
         $rows[] = ['cat' => $cat, 'code' => $e['employee_id'] ?? '', 'epf_no' => $e['epf_number'] ?? ($e['epf_no'] ?? ''), 'name' => $e['employee_full_name'] ?? ($e['name_with_initials'] ?? ''),
             'initials' => trim((string)($e['name_with_initials'] ?? '')) !== '' ? trim($e['name_with_initials']) : ($e['employee_full_name'] ?? ''), 'det' => $det, 'eid' => (int)$eid,
-            'desig' => $e['designation_name'] ?? '', 'status' => $e['status'] ?? '', 'note' => $e['pme_note'] ?? '', 'left' => $e['pme_exit'] ?? null, 'doj' => $e['date_of_join'] ?? '', 'norm' => $norm, 'worked' => $worked, 'rate' => $rate,
+            'desig' => $e['designation_name'] ?? '', 'status' => $e['status'] ?? '', 'note' => $e['pme_note'] ?? '', 'left' => $e['pme_exit'] ?? null, 'doj' => $e['date_of_join'] ?? '', 'norm' => $norm, 'worked' => $worked, 'leave' => $leave, 'rate' => $rate,
             'basic' => $basic, 'no_pay_days' => $no_pay_days, 'basic_adj' => round($basic - $no_pay, 2),
             'incentive' => $incent, 'inc_list' => $incList, 'add_e' => $addE, 'add_d' => $addD, 'add_earn' => $addEarn, 'from_sheet' => $fromSheet, 'att_allow' => $att_allow, 'meal' => $meal, 'travel' => $travel, 'mobile' => $mobile, 'fuel' => $fuelA, 'arrears' => $arrears, 'earn' => $earn]
             + $d + ['ded' => $ded, 'net' => round($earn - $ded, 2), 'epf12' => $epfR_, 'etf3' => $etf, 'bonus' => $bonus, 'gratuity' => $grat, 'insurance' => $ins,
@@ -169,7 +175,7 @@ if ($period) {
 /* column layout: key, label, group (''=info, A=additions, D=deductions, S=summary, B=benefits), number? */
 $COLS = [
     ['code', 'Emp Code', '', 0], ['epf_no', 'EPF No', '', 0], ['name', 'Name', '', 0], ['desig', 'Designation', '', 0], ['status', 'Status', '', 0], ['doj', 'Date of Join', '', 0],
-    ['norm', 'Norm Days', '', 1], ['worked', 'Days Worked', '', 1], ['rate', 'Att %', '', 1], ['basic', 'Basic Salary', '', 2], ['no_pay_days', 'No Pay Days', '', 1], ['basic_adj', 'Basic Adjusted', '', 2],
+    ['norm', 'Norm Days', '', 1], ['worked', 'Days Worked', '', 1], ['leave', 'Leave Days', '', 1], ['rate', 'Att %', '', 1], ['basic', 'Basic Salary', '', 2], ['no_pay_days', 'No Pay Days', '', 1], ['basic_adj', 'Basic Adjusted', '', 2],
     ['incentive', 'Incentive', 'A', 2], ['att_allow', 'Attendance Allowance', 'A', 2], ['meal', 'Meal Reimb.', 'A', 2], ['travel', 'Travelling Reimb.', 'A', 2], ['mobile', 'Mobile Reimb.', 'A', 2], ['fuel', 'Fuel Reimb.', 'A', 2], ['arrears', 'Arrears', 'A', 2], ['add_earn', 'Other Additions', 'A', 2], ['earn', 'Total Earnings', 'A', 2],
     ['epf8', 'EPF 8%', 'D', 2], ['welfare', 'Welfare', 'D', 2], ['w_loan', 'Welfare Loan', 'D', 2], ['w_soc', 'Welfare Society', 'D', 2], ['donations', 'Donations', 'D', 2], ['sal_adv', 'Salary Advance', 'D', 2], ['loan_ded', 'Loan Deduction', 'D', 2],
     ['credit_r', 'Credit Recovery', 'D', 2], ['cash_short', 'Cash Short', 'D', 2], ['good_short', 'Good Short', 'D', 2], ['no_pay', 'No Pay', 'D', 2], ['retention', 'Retention', 'D', 2], ['excess_p', 'Excess Payment', 'D', 2], ['payee', 'PAYEE', 'D', 2], ['add_ded', 'Other Deductions', 'D', 2], ['ded', 'Total Deductions', 'D', 2],
@@ -180,8 +186,8 @@ $num = function ($v, $dp = 2) { if ($v === null) return ''; return abs($v) < 0.0
 $tot = array_fill_keys($SUMK, 0.0); $byCat = [];
 foreach ($rows as $x) { foreach ($SUMK as $k) { $tot[$k] += $x[$k]; $byCat[$x['cat']][$k] = ($byCat[$x['cat']][$k] ?? 0) + $x[$k]; } $byCat[$x['cat']]['n'] = ($byCat[$x['cat']]['n'] ?? 0) + 1; }
 $totRow = function ($label, $sums, $cls, $cat = '') use ($COLS, $num, $h) {
-    $o = '<tr class="' . $cls . '"' . ($cat !== '' ? ' data-cat="' . $cat . '"' : '') . '><td class="sticky"></td><td colspan="9">' . $h($label) . '</td>';
-    foreach (array_slice($COLS, 9) as $c) {
+    $o = '<tr class="' . $cls . '"' . ($cat !== '' ? ' data-cat="' . $cat . '"' : '') . '><td class="sticky"></td><td colspan="10">' . $h($label) . '</td>';
+    foreach (array_slice($COLS, 10) as $c) {
         if ($c[0] === 'net') continue;
         $o .= '<td class="n">' . ($c[3] === 2 ? $num($sums[$c[0]] ?? 0) : '') . '</td>';
         if ($c[0] === 'ded') $o .= '<td class="n net">' . $num($sums['net'] ?? 0) . '</td>';
@@ -272,7 +278,7 @@ tbody tr.r:hover td{background:#fff1a8}
   <div class="scroll">
     <table id="lsTbl">
       <thead>
-        <tr><th rowspan="2" class="sticky">#</th><th colspan="12">Employee &amp; Attendance</th><th colspan="9" class="gA">Additions</th><th colspan="16" class="gD">Deductions</th><th rowspan="2" class="gS">Net Salary</th><th colspan="6" class="gB">Employer Benefits</th></tr>
+        <tr><th rowspan="2" class="sticky">#</th><th colspan="13">Employee &amp; Attendance</th><th colspan="9" class="gA">Additions</th><th colspan="16" class="gD">Deductions</th><th rowspan="2" class="gS">Net Salary</th><th colspan="6" class="gB">Employer Benefits</th></tr>
         <tr><?php foreach ($COLS as $c) if ($c[0] !== 'net') echo '<th class="' . ($c[2] ? 'g' . $c[2] : '') . '">' . $h($c[1]) . '</th>'; ?></tr>
       </thead>
       <tbody>
@@ -309,7 +315,7 @@ tbody tr.r:hover td{background:#fff1a8}
       <?php if ($rows): ?><tfoot><?= $totRow('GRAND TOTAL (' . count($rows) . ')', $tot, 'grand') ?></tfoot><?php endif; ?>
     </table>
   </div>
-  <div class="note">Live figures for the chosen payroll month. From the salary sheet saved for the month: the values changed there (Arrears, Excess Payment, Credit Recovery, Cash / Good Short) and its Additional Earnings / Deductions rows (<span style="color:#7c3aed;font-weight:bold">purple</span>, hover for the rows); everything else is live. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentive</b> = the Incentives Sheet amounts of the employee's staff category (hover for the columns; before November 2026 from the old Incentive Entries). Norm days = days in the month − special holidays; days worked = attendance; No Pay = basic ÷ norm days × the employee's no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
+  <div class="note">Live figures for the chosen payroll month. From the salary sheet saved for the month: the values changed there (Arrears, Excess Payment, Credit Recovery, Cash / Good Short) and its Additional Earnings / Deductions rows (<span style="color:#7c3aed;font-weight:bold">purple</span>, hover for the rows); everything else is live. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentive</b> = the Incentives Sheet amounts of the employee's staff category (hover for the columns; before November 2026 from the old Incentive Entries). Norm days = days in the month − special holidays; days worked = attendance; No Pay as the Attendance Summary: no-pay days = norm days − days worked − approved Annual / Casual / Medical leave; amount = basic ÷ norm days × no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
 </div>
 <div class="mdl" id="lsM" onclick="if(event.target===this)lsHide()">
   <div class="mbox">
@@ -332,7 +338,7 @@ function lsShow(i){
   var card = function(title, cls, lines){ return '<div class="mcard ' + cls + '"><h3>' + title + '</h3><table>' + lines.join('') + '</table></div>'; };
   var line = function(k, v, t){ return '<tr' + (t ? ' class="t"' : '') + '><td class="k">' + esc(k) + '</td><td' + (typeof v === 'number' ? ' class="n"' : '') + '>' + (typeof v === 'number' ? money(v) : esc(v)) + '</td></tr>'; };
   var det = Object.keys(r.d).map(function(k){ return line(k, r.d[k]); });
-  var att = ['norm', 'worked', 'rate', 'no_pay_days'].map(function(k){ var c = LS_COLS.filter(function(x){ return x.k === k; })[0]; return line(c.l, (r.v[k] == null ? '' : r.v[k]) + (k === 'rate' ? '%' : '')); });
+  var att = ['norm', 'worked', 'leave', 'rate', 'no_pay_days'].map(function(k){ var c = LS_COLS.filter(function(x){ return x.k === k; })[0]; return line(c.l, (r.v[k] == null ? '' : r.v[k]) + (k === 'rate' ? '%' : '')); });
   att.push(line('Basic Salary', r.v.basic)); att.push(line('Basic Adjusted', r.v.basic_adj, 1));
   var grp = function(g, skip){ return LS_COLS.filter(function(c){ return c.g === g && c.t === 2; }).map(function(c){
       var sub = c.k === 'add_earn' ? r.ae : (c.k === 'add_ded' ? r.ad : null);

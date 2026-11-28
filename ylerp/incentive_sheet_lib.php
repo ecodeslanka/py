@@ -139,8 +139,9 @@ function ci_ctx($conn, $period, $pid) {
     $x_['cfgs'] = ci_cfgs($conn);
     $q = ci_q($conn, "SELECT * FROM special_holidays WHERE active = 1 AND date_from <= '$to' AND date_to >= '$from'");
     while ($q && ($sh = mysqli_fetch_assoc($q))) for ($d = max($sh['date_from'], $from); $d <= min($sh['date_to'], $to); $d = date('Y-m-d', strtotime($d . ' +1 day'))) $x_['shd'][$d][] = $sh;
-    $q = ci_q($conn, "SELECT employee_id, COUNT(*) FROM attendance WHERE att_date BETWEEN '$from' AND '$to' GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $x_['att'][(int)$x[0]] = (int)$x[1];
-    $q = ci_q($conn, "SELECT employee_id, SUM(days_count) FROM leave_applications WHERE status = 'Approved' AND (start_date BETWEEN '$from' AND '$to' OR end_date BETWEEN '$from' AND '$to' OR (start_date <= '$from' AND end_date >= '$to')) GROUP BY employee_id");
+    $q = ci_q($conn, "SELECT employee_id, COUNT(DISTINCT att_date) FROM attendance WHERE att_date BETWEEN '$from' AND '$to' GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $x_['att'][(int)$x[0]] = (int)$x[1];
+    /* leave as the Attendance Summary: approved Annual + Casual + Medical leave (no pay = norm days − attended − leave) */
+    $q = ci_q($conn, "SELECT employee_id, SUM(days_count) FROM leave_applications WHERE status = 'Approved' AND leave_type IN ('Annual Leave','Casual Leave','Medical Leave') AND (start_date BETWEEN '$from' AND '$to' OR end_date BETWEEN '$from' AND '$to' OR (start_date <= '$from' AND end_date >= '$to')) GROUP BY employee_id");
     while ($q && ($x = mysqli_fetch_row($q))) $x_['leave'][(int)$x[0]] = (float)$x[1];
     $x_['inc'] = isl_labels($conn, $pid);                                                                  /* saved entries: incentive_sheet_entries */
     $q = ci_q($conn, "SELECT employee_id, SUM(fuel_rate * fuel_liter) FROM sr_fuel_entries WHERE payroll_period_id = $pid GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $x_['fuel'][(int)$x[0]] = (float)$x[1];
