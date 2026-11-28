@@ -35,24 +35,17 @@ if ($period) {
     $ec = ls_cols($conn, 'employees');
     $col = function ($c, $alias = 'e') use ($ec) { return isset($ec[$c]) ? "$alias.`$c`" : 'NULL'; };
 
-    /* employees in the month (not exited before it, joined by its end), with their salary-sheet category */
-    $where = [];
-    if (isset($ec['exit_date'])) $where[] = "NOT ((e.exit_date IS NOT NULL AND e.exit_date < '$from') OR (e.exit_date IS NULL AND " . (isset($ec['status']) ? "e.status IN ('Resigned','Terminated')" : '0') . "))";
-    elseif (isset($ec['status'])) $where[] = "COALESCE(e.status,'') NOT IN ('Resigned','Terminated')";
-    if (isset($ec['date_of_join'])) $where[] = "(e.date_of_join IS NULL OR e.date_of_join <= '$to')";
-    $sql = "SELECT e.*, d.designation_name, sc.category_code AS cat1, dsc.category_code AS cat2
-            FROM employees e
-            LEFT JOIN designations d ON d.id = e.designation_id
-            LEFT JOIN staff_categories sc ON sc.id = e.staff_category_id
-            LEFT JOIN staff_categories dsc ON dsc.id = d.staff_category_id"
-         . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . " ORDER BY e.employee_full_name";
-    $res = ls_q($conn, $sql); if (!$res) $warn[] = 'Employees: ' . mysqli_error($conn);
+    /* employees of the month as they were then (payroll_month_employees_lib.php): leavers of the month stay in it,
+       promotions after the month are undone (designation / category / code of the month), joiners from their join date */
+    include_once __DIR__ . '/payroll_month_employees_lib.php';
+    $scCode = []; $q = ls_q($conn, "SELECT id, category_code FROM staff_categories"); while ($q && ($x = mysqli_fetch_row($q))) $scCode[(int)$x[0]] = $x[1];
+    $dCat = []; $q = ls_q($conn, "SELECT id, staff_category_id FROM designations"); while ($q && ($x = mysqli_fetch_row($q))) $dCat[(int)$x[0]] = (int)$x[1];
     $emps = [];
-    while ($res && ($e = mysqli_fetch_assoc($res))) {
+    foreach (pme_employees($conn, $from, $to) as $eid => $e) {
         $cat = '';
-        foreach ([$e['cat1'], $e['cat2']] as $c) { $c = strtoupper(trim((string)$c)); $c = LS_CAT_ALIAS[$c] ?? $c; if (isset(LS_CATS[$c])) { $cat = $c; break; } }
+        foreach ([$scCode[(int)($e['staff_category_id'] ?? 0)] ?? '', $scCode[$dCat[(int)($e['designation_id'] ?? 0)] ?? 0] ?? ''] as $c) { $c = strtoupper(trim((string)$c)); $c = LS_CAT_ALIAS[$c] ?? $c; if (isset(LS_CATS[$c])) { $cat = $c; break; } }
         if ($cat === '') continue;
-        $e['cat'] = $cat; $emps[(int)$e['id']] = $e;
+        $e['cat'] = $cat; $emps[(int)$eid] = $e;
     }
     $ids = $emps ? implode(',', array_keys($emps)) : '0';
 
@@ -139,7 +132,7 @@ if ($period) {
         $ded = round(array_sum($d), 2);
         $epfR_ = round($basic * $epfR / 100, 2); $etf = round($basic * $etfR / 100, 2); $bonus = $basic > 0 ? round($basic / 12, 2) : 0; $grat = $basic > 0 ? round($basic / 24, 2) : 0; $ins = $f($e, 'insurance_amount');
         $rows[] = ['cat' => $cat, 'code' => $e['employee_id'] ?? '', 'epf_no' => $e['epf_number'] ?? ($e['epf_no'] ?? ''), 'name' => $e['employee_full_name'] ?? ($e['name_with_initials'] ?? ''),
-            'desig' => $e['designation_name'] ?? '', 'status' => $e['status'] ?? '', 'doj' => $e['date_of_join'] ?? '', 'norm' => $norm, 'worked' => $worked, 'rate' => $rate,
+            'desig' => $e['designation_name'] ?? '', 'status' => $e['status'] ?? '', 'note' => $e['pme_note'] ?? '', 'left' => $e['pme_exit'] ?? null, 'doj' => $e['date_of_join'] ?? '', 'norm' => $norm, 'worked' => $worked, 'rate' => $rate,
             'basic' => $basic, 'no_pay_days' => $no_pay_days, 'basic_adj' => round($basic - $no_pay, 2),
             'incentive' => null, 'att_allow' => $att_allow, 'meal' => $meal, 'travel' => $travel, 'mobile' => $mobile, 'fuel' => $fuelA, 'arrears' => $arrears, 'earn' => $earn]
             + $d + ['ded' => $ded, 'net' => round($earn - $ded, 2), 'epf12' => $epfR_, 'etf3' => $etf, 'bonus' => $bonus, 'gratuity' => $grat, 'insurance' => $ins,
@@ -205,7 +198,7 @@ thead tr:first-child th{top:0} thead tr:nth-child(2) th{top:20px}
 th.gA{background:linear-gradient(#4fa36a,#2e7d46)} th.gD{background:linear-gradient(#df8b89,#c0504d 55%,#a33f3c)} th.gS{background:linear-gradient(#ffd966,#f0b400);color:#3a2c00} th.gB{background:linear-gradient(#9b7fd0,#6b4fa8)}
 td.n{text-align:right} td.neg{color:var(--neg)} td.emp{color:#b9bac2;text-align:center;background:#fafafa}
 td.sticky,th.sticky{position:sticky;left:0;z-index:1;background:#fff} thead th.sticky{z-index:3}
-td.b{font-weight:bold} td.net{font-weight:bold;background:#fff8d6} td.tE{background:#e9f7ec;font-weight:bold} td.tD{background:#fdecea;font-weight:bold}
+td.b{font-weight:bold} td.lft{color:var(--neg);font-weight:bold} .mv{display:inline-block;padding:0 4px;border-radius:6px;background:#e9f0f8;border:1px solid var(--ob-line);color:var(--ob-navy);font-size:9.5px} td.net{font-weight:bold;background:#fff8d6} td.tE{background:#e9f7ec;font-weight:bold} td.tD{background:#fdecea;font-weight:bold}
 tr.grp td{background:var(--ob-pale);color:var(--ob-navy);font-weight:bold;font-size:11px}
 tr.sub td{background:#eef2f7;font-weight:bold} tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300}
 tbody tr.r:hover td{background:#fff1a8}
@@ -262,6 +255,8 @@ tbody tr.r:hover td{background:#fff1a8}
               if ($c[0] === 'net') continue;
               $v = $x[$c[0]];
               if ($c[0] === 'incentive') { echo '<td class="emp" title="Incentives are not included in the live sheet"></td>'; continue; }
+              if ($c[0] === 'status' && $x['left']) { echo '<td class="lft" title="' . $h($x['note']) . '">' . $h($v) . ' · left ' . $h(date('d M', strtotime($x['left']))) . '</td>'; continue; }
+              if ($c[0] === 'desig' && $x['note'] !== '' && stripos($x['note'], 'moted') !== false) { echo '<td title="' . $h($x['note']) . '">' . $h($v) . ' <span class="mv">' . (stripos($x['note'], 'after this month') !== false ? 'before move' : 'moved') . '</span></td>'; continue; }
               if ($c[3] === 0) { echo '<td' . ($c[0] === 'name' ? ' class="b"' : '') . '>' . $h($c[0] === 'doj' && $v ? date('Y-m-d', strtotime($v)) : $v) . '</td>'; continue; }
               $cls = 'n' . (is_numeric($v) && $v < 0 ? ' neg' : '') . ($c[0] === 'earn' ? ' tE' : '') . ($c[0] === 'ded' ? ' tD' : '');
               echo '<td class="' . $cls . '">' . ($c[3] === 1 ? ($v + 0) : $num($v)) . '</td>';
@@ -276,7 +271,7 @@ tbody tr.r:hover td{background:#fff1a8}
       <?php if ($rows): ?><tfoot><?= $totRow('GRAND TOTAL (' . count($rows) . ')', $tot, 'grand') ?></tfoot><?php endif; ?>
     </table>
   </div>
-  <div class="note">Live figures for the chosen payroll month — not the saved salary sheets. <b>Incentives are left empty.</b> Norm days = days in the month − special holidays; days worked = attendance; No Pay = basic ÷ norm days × the employee's no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
+  <div class="note">Live figures for the chosen payroll month — not the saved salary sheets. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentives are left empty.</b> Norm days = days in the month − special holidays; days worked = attendance; No Pay = basic ÷ norm days × the employee's no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
 </div>
 <script>
 function lsApply(){

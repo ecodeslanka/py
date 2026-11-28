@@ -107,20 +107,14 @@ if (!$pid && $periods) { foreach ($periods as $p) if (strtolower((string)$p['sta
 $period = null; foreach ($periods as $p) if ((int)$p['id'] === $pid) $period = $p;
 $MON = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-/* ── employees of a section (same rule as the salary sheets: staff category, or a designation of that category; active) ── */
-function ci_employees($conn, $codes) {
-    $in = implode(',', array_map(function ($c) { return "'" . $c . "'"; }, $codes));
-    $cats = []; $r = ci_q($conn, "SELECT id FROM staff_categories WHERE category_code IN ($in)"); while ($r && ($x = mysqli_fetch_row($r))) $cats[] = (int)$x[0];
-    if (!$cats) return [];
-    $ci = implode(',', $cats); $w = ["e.staff_category_id IN ($ci)"];
-    $ds = []; $r = ci_q($conn, "SELECT id FROM designations WHERE staff_category_id IN ($ci)"); while ($r && ($x = mysqli_fetch_row($r))) $ds[] = (int)$x[0];
-    if ($ds) $w[] = 'e.designation_id IN (' . implode(',', $ds) . ')';
-    $act = ci_q($conn, "SHOW COLUMNS FROM employees LIKE 'active'"); $act = $act && mysqli_num_rows($act) ? ' AND COALESCE(e.active,1) = 1' : '';
-    $o = []; $r = ci_q($conn, "SELECT e.*, d.designation_name, d.designation_code
-        FROM employees e LEFT JOIN designations d ON d.id = e.designation_id
-        WHERE (" . implode(' OR ', $w) . ")$act AND COALESCE(e.status,'') NOT IN ('Resigned','Terminated') ORDER BY e.employee_full_name");
-    while ($r && ($x = mysqli_fetch_assoc($r))) $o[(int)$x['id']] = $x;
-    return $o;
+/* ── employees of a section in the payroll month, as they were then (payroll_month_employees_lib.php):
+      leavers of the month stay in it, promotions after the month are undone, same category rule as the salary sheets ── */
+include_once __DIR__ . '/payroll_month_employees_lib.php';
+function ci_employees($conn, $codes, $period) {
+    static $all = [];
+    $from = sprintf('%04d-%02d-01', (int)$period['year'], (int)$period['month']); $to = date('Y-m-t', strtotime($from));
+    if (!isset($all[$from])) $all[$from] = pme_employees($conn, $from, $to);
+    return pme_filter_categories($conn, $all[$from], $codes);
 }
 /* incentive type to file new entries under (the one allowed for the category), else 0 */
 function ci_type_id($conn, $codes) {
@@ -263,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
     };
     foreach ($SECTIONS as $sk => $sec) {
         if (empty($data[$sk]) || !is_array($data[$sk])) continue;
-        $emps = ci_employees($conn, $sec[1]); $type = ci_type_id($conn, $sec[1]);
+        $emps = ci_employees($conn, $sec[1], $period); $type = ci_type_id($conn, $sec[1]);
         $comps = []; foreach ($sec[2] as $c) if (!in_array($c[3], ['att', 'live'], true)) $comps[$c[0]] = $c;
         foreach ($data[$sk] as $eid => $vals) {
             $eid = (int)$eid; if (!isset($emps[$eid]) || !is_array($vals)) continue;
@@ -296,7 +290,7 @@ $out = [];
 if ($period) {
     $ctx = ci_ctx($conn, $period, $pid); $cfgs = $ctx['cfgs']; $inc = $ctx['inc'];
     foreach ($SECTIONS as $sk => $sec) {
-        $emps = ci_employees($conn, $sec[1]);
+        $emps = ci_employees($conn, $sec[1], $period);
         /* tier columns: the tiers any designation of this section has a rate for (all when none is configured) */
         $comps = [];
         foreach ($sec[2] as $c) {
@@ -323,7 +317,7 @@ if ($period) {
                 $vals[$c[0]] = ['act' => $act, 'gm' => $gm, 'fixed' => $fixed > 0 ? $fixed : null, 'tiers' => array_keys(ci_tiers($c, $cfg))];
             }
             if (!isset($groups[$did])) $groups[$did] = ['name' => $e['designation_name'] ?: 'No designation', 'code' => $e['designation_code'] ?? '', 'cfg' => $cfg, 'emps' => []];
-            $groups[$did]['emps'][] = ['id' => $eid, 'name' => $e['employee_full_name'] ?? '', 'code' => $e['employee_id'] ?? '', 'days' => $calc['w'], 'norm' => $calc['norm'], 'rate' => $calc['rate'],
+            $groups[$did]['emps'][] = ['id' => $eid, 'name' => $e['employee_full_name'] ?? '', 'code' => $e['employee_id'] ?? '', 'note' => $e['pme_note'] ?? '', 'left' => $e['pme_exit'] ?? null, 'days' => $calc['w'], 'norm' => $calc['norm'], 'rate' => $calc['rate'],
                 'npd' => $calc['npd'], 'basic' => $basic, 'basic_adj' => $basic > 0 ? round($basic - $basic / $calc['norm'] * $calc['npd'], 2) : 0,
                 'meal_cfg' => (float)(($cfg['meal_reimbursement'] ?? null) ?: ($e['reimbursement_meal'] ?? 0)), 'v' => $vals,
                 /* meal saved for the month in Incentive Entry is used as it is (ST / OFF sheets do the same) */
@@ -423,6 +417,8 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
 .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable{background:var(--ob-acc);color:#fff}
 .select2-container--default .select2-results__option--selected{background:#e9f0f8}
 .select2-container.chg .select2-selection--single{background:#fff3b0}
+.lft{display:inline-block;padding:0 4px;border-radius:6px;background:#fdecea;border:1px solid #f1aeb5;color:var(--neg);font-size:9.5px;font-weight:bold}
+.mv{display:inline-block;padding:0 4px;border-radius:6px;background:#e9f0f8;border:1px solid var(--ob-line);color:var(--ob-navy);font-size:9.5px;font-weight:normal}
 .toast{position:fixed;right:18px;bottom:18px;padding:8px 14px;border-radius:6px;color:#fff;font-weight:bold;display:none;z-index:9;box-shadow:0 4px 12px rgba(0,0,0,.3)}
 @media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))} body{padding:4px}}
 @media print{body{background:#fff;padding:0}.win{border:0;box-shadow:none;height:auto}.bar,.tb .btn,.kpis,.note{display:none}.scroll{overflow:visible;border:0}thead th{position:static} td.in input{width:40px}}
@@ -487,7 +483,7 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
           <?php if ($mealCol !== null): ?><td class="n" title="<?= $s['meal'] === 'flat' ? 'Meal reimbursement (fixed)' : 'Meal reimbursement × attendance rate' ?>"><?= $nf($cfg['meal_reimbursement'] ?? null) ?></td><?php endif; ?><td></td><td></td><td></td><td></td><td></td></tr>
         <?php foreach ($g['emps'] as $e): ?>
         <tr class="emp" data-id="<?= $e['id'] ?>" data-s="<?= $h(mb_strtolower($e['name'] . ' ' . $e['code'] . ' ' . $g['name'])) ?>" data-rate="<?= $e['rate'] ?>" data-meal="<?= $e['meal_cfg'] ?>" data-mealmode="<?= $s['meal'] ?>" data-mealfix="<?= $e['meal_fixed'] === null ? '' : $e['meal_fixed'] ?>" data-basic="<?= $e['basic_adj'] ?>">
-          <td class="sticky b"><?= $h($e['name']) ?></td><td><?= $h($g['name']) ?></td><td><?= $h($e['code']) ?></td>
+          <td class="sticky b"<?= $e['note'] !== '' ? ' title="' . $h($e['note']) . '"' : '' ?>><?= $h($e['name']) ?><?php if ($e['left']): ?> <span class="lft">left <?= $h(date('d M', strtotime($e['left']))) ?></span><?php elseif ($e['note'] !== ''): ?> <span class="mv"><?= stripos($e['note'], 'after this month') !== false ? 'before move' : 'moved' ?></span><?php endif; ?></td><td><?= $h($g['name']) ?></td><td><?= $h($e['code']) ?></td>
           <?php foreach ($s['comps'] as $i => $c): $v = $e['v'][$c[0]]; $mc = $plan[$i]['money'];
             if ($c[3] === 'live') { echo '<td class="lv' . ($v['saved'] ? ' sv' : '') . '" data-col="' . $mc[0] . '" data-kind="r" data-v="' . $v['live'] . '" title="' . ($v['saved'] ? 'Saved in Incentive Entry' : 'Live') . '">' . $nf($v['live']) . '</td>'; continue; }
             if ($c[3] === 'amt') { echo '<td class="in amt" data-col="' . $mc[0] . '" data-kind="i"><input class="iamt" data-k="' . $c[0] . '" data-m="amt" data-fb="' . $v['fb'] . '" value="' . $h($v['amt'] === null ? '' : $pv($v['amt'])) . '" placeholder="' . $h($v['fb'] > 0 ? $nf($v['fb']) : '') . '" title="' . ($v['fb'] > 0 ? 'Empty = ' . $nf($v['fb']) . ' from the employee profile' : '') . '" inputmode="decimal"' . $dis . '></td>'; continue; }
@@ -510,7 +506,7 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
     </table>
   </div>
   <?php $first = false; endforeach; ?>
-  <div class="note">Employees and attendance are live for the payroll month; rates come from <b>Salary Configuration</b> of each designation (the blue rows). Type <b>Actual</b> achievement % (e.g. 90.6 or 0.906); <b>GM</b> is the amended % used for the tier — leave it empty to use Actual. The amount falls in the highest tier reached; <b>Stores Damage</b> is the damage % (e.g. 0.007) — the lower the better. Amount cells (Discretionary Support, ETE) left empty use the employee profile value shown in grey. <b>Live</b> (blue) columns: attendance, meal / travelling / mobile, SR fuel and MR D-Link — green = already saved in Incentive Entry. <b>Save</b> stores the entries in Incentive Entries, so the salary sheets use them (SR meal / travelling / mobile are saved too, from live attendance). <span style="color:var(--neg)">Red</span> = an amount already entered in Incentive Entry is used by the salary sheet.</div>
+  <div class="note">Employees and attendance are live for the payroll month, as they were in that month (resigned in the month = still shown, tag "left"; promoted after the month = the month's designation, tag "before move"); rates come from <b>Salary Configuration</b> of each designation (the blue rows). Type <b>Actual</b> achievement % (e.g. 90.6 or 0.906); <b>GM</b> is the amended % used for the tier — leave it empty to use Actual. The amount falls in the highest tier reached; <b>Stores Damage</b> is the damage % (e.g. 0.007) — the lower the better. Amount cells (Discretionary Support, ETE) left empty use the employee profile value shown in grey. <b>Live</b> (blue) columns: attendance, meal / travelling / mobile, SR fuel and MR D-Link — green = already saved in Incentive Entry. <b>Save</b> stores the entries in Incentive Entries, so the salary sheets use them (SR meal / travelling / mobile are saved too, from live attendance). <span style="color:var(--neg)">Red</span> = an amount already entered in Incentive Entry is used by the salary sheet.</div>
 </div>
 <div class="mdl" id="ciLinkM" onclick="if(event.target===this)ciLinksClose()">
   <div class="mbox">
