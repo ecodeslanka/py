@@ -1,6 +1,8 @@
 <?php
 /**
  * payroll_month_employees_lib.php — the employees of a payroll month, as they were in that month.
+ *   Active    : every employee whose status is not Resigned / Terminated (basic salary or not), unless the employee log shows
+ *               they were out for the whole month (resigned before it and made active again after it).
  *   Leavers   : an employee who resigned / was terminated IN the month is still in that month (gone from the next month).
  *               Exit date = employees.exit_date, else the date of the resign / terminate / status-change log (employee_logs).
  *   Promotion : the designation (and its staff category / employee code) in force at the END of the month, from promotion_logs:
@@ -18,12 +20,16 @@ if (!function_exists('pme_employees')) {
         $hasExit = pme_has($conn, 'employees', 'exit_date'); $hasDoj = pme_has($conn, 'employees', 'date_of_join');
         $desig = []; $r = pme_q($conn, "SELECT id, designation_name, designation_code, staff_category_id FROM designations"); while ($r && ($x = mysqli_fetch_assoc($r))) $desig[(int)$x['id']] = $x;
 
-        /* exit dates from the employee log, for leavers without employees.exit_date */
-        $logExit = [];
+        /* the employee log: when someone left (resigned / terminated) and when someone was made active again (status back to Probation / Permanent) */
+        $logExit = []; $events = [];
         if (pme_has($conn, 'employee_logs')) {
-            $r = pme_q($conn, "SELECT employee_id, MAX(DATE(created_at)) FROM employee_logs
-                               WHERE action IN ('resigned','terminated') OR (action = 'status_changed' AND new_value IN ('Resigned','Terminated')) GROUP BY employee_id");
-            while ($r && ($x = mysqli_fetch_row($r))) $logExit[(int)$x[0]] = $x[1];
+            $r = pme_q($conn, "SELECT employee_id, DATE(created_at) d, action, new_value FROM employee_logs
+                               WHERE action IN ('resigned','terminated') OR action = 'status_changed' ORDER BY created_at, id");
+            while ($r && ($x = mysqli_fetch_assoc($r))) {
+                $eid = (int)$x['employee_id']; $nv = (string)$x['new_value'];
+                if (in_array($x['action'], ['resigned', 'terminated'], true) || in_array($nv, ['Resigned', 'Terminated'], true)) { $events[$eid][] = [$x['d'], 'L']; $logExit[$eid] = $x['d']; }
+                elseif (in_array($nv, ['Probation', 'Permanent'], true)) $events[$eid][] = [$x['d'], 'A'];
+            }
         }
         /* promotions / demotions effective after the month end: the earliest one tells the designation the month had */
         $undo = []; $inMonth = [];
@@ -43,9 +49,19 @@ if (!function_exists('pme_employees')) {
             $eid = (int)$e['id'];
             if ($hasDoj && !empty($e['date_of_join']) && $e['date_of_join'] > $to) continue;                     /* joined after the month */
             $left = in_array((string)($e['status'] ?? ''), ['Resigned', 'Terminated'], true);
-            $exit = $hasExit && !empty($e['exit_date']) ? $e['exit_date'] : ($left ? ($logExit[$eid] ?? null) : null);
-            if ($exit !== null && $exit < $from) continue;                                                       /* left before the month */
-            if ($exit === null && $left) continue;                                                               /* left, date unknown */
+            if ($left) {
+                /* a leaver: in the months up to (and including) the exit month */
+                $exit = $hasExit && !empty($e['exit_date']) ? $e['exit_date'] : ($logExit[$eid] ?? null);
+                if ($exit === null || $exit < $from) continue;                                                   /* left before the month / date unknown */
+            } else {
+                /* active now (basic salary or not): in, unless the log shows them out for the whole month (left before it, made active again after it) */
+                $exit = null; $last = null;
+                foreach ($events[$eid] ?? [] as $ev) if ($ev[0] <= $to) $last = $ev;
+                if ($last && $last[1] === 'L') {
+                    if ($last[0] < $from) continue;                                                              /* out during this month */
+                    $exit = $last[0];                                                                            /* left in this month, back later */
+                }
+            }
             /* the month's designation */
             $e['pme_current_designation_id'] = $e['designation_id'];
             if (isset($undo[$eid])) {
