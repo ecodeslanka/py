@@ -292,7 +292,7 @@ tbody tr.r:hover td{background:#fff1a8}
               if ($c[0] === 'incentive') { $tt = implode("\n", array_map(function ($r) use ($num) { return $r['label'] . ': ' . $num($r['amount']); }, $x['inc_list'])); echo '<td class="n"' . ($tt !== '' ? ' title="' . $h($tt) . '"' : '') . '>' . $num($v) . '</td>'; continue; }
               if ($c[0] === 'status' && $x['left']) { echo '<td class="lft" title="' . $h($x['note']) . '">' . $h($v) . ' · left ' . $h(date('d M', strtotime($x['left']))) . '</td>'; continue; }
               if ($c[0] === 'desig' && $x['note'] !== '' && stripos($x['note'], 'moted') !== false) { echo '<td title="' . $h($x['note']) . '">' . $h($v) . ' <span class="mv">' . (stripos($x['note'], 'after this month') !== false ? 'before move' : 'moved') . '</span></td>'; continue; }
-              if ($c[0] === 'name') { echo '<td class="b nm"><a href="#" onclick="lsShow(' . ($i - 1) . ');return false" title="' . $h($x['name']) . ' — click for full details">' . $h($x['initials']) . '</a></td>'; continue; }
+              if ($c[0] === 'name') { echo '<td class="b nm" data-full="' . $h($x['name']) . '"><a href="#" onclick="lsShow(' . ($i - 1) . ');return false" title="' . $h($x['name']) . ' — click for full details">' . $h($x['initials']) . '</a></td>'; continue; }
               if ($c[3] === 0) { echo '<td' . ($c[0] === 'name' ? ' class="b"' : '') . '>' . $h($c[0] === 'doj' && $v ? date('Y-m-d', strtotime($v)) : $v) . '</td>'; continue; }
               $cls = 'n' . (is_numeric($v) && $v < 0 ? ' neg' : '') . ($c[0] === 'earn' ? ' tE' : '') . ($c[0] === 'ded' ? ' tD' : '') . (isset($x['from_sheet'][$c[0]]) || (in_array($c[0], ['add_earn', 'add_ded'], true) && $v != 0) ? ' sv' : '');
               $tt = $c[0] === 'add_earn' ? $x['add_e'] : ($c[0] === 'add_ded' ? $x['add_d'] : null);
@@ -362,6 +362,7 @@ function lsExport(){
   var go = function(){
     var t = document.getElementById('lsTbl').cloneNode(true);
     t.querySelectorAll('tr').forEach(function(tr){ if (tr.style.display === 'none') tr.remove(); });
+    t.querySelectorAll('td.nm').forEach(function(td){ td.textContent = td.dataset.full || td.textContent; });   /* full name in the Excel */
     var wb = XLSX.utils.table_to_book(t, {sheet: 'Live Salary', raw: false});
     XLSX.writeFile(wb, 'Live_Salary_<?= $h(preg_replace('/\W+/', '_', $plabel)) ?>.xlsx');
   };
