@@ -365,6 +365,7 @@ $dis = $closed ? ' disabled' : '';
 ?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Incentives Sheet<?= $plabel ? ' — ' . $h($plabel) : '' ?></title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css">
 <style>
 :root{ --ob-navy:#1F497D; --ob-acc:#4F81BD; --ob-pale:#DCE6F1; --ob-line:#0070C0; --ink:#1d1f22; --grid:#c9c9c4; --win:#ecebe4; --neg:#b3261e; --f: Tahoma, Verdana, "Segoe UI", Geneva, sans-serif; }
 html,body{height:100%} *{box-sizing:border-box}
@@ -408,6 +409,20 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
 .mbox{width:min(760px,100%);max-height:92vh;display:flex;flex-direction:column;background:var(--win);border:1px solid #4a4c52;border-radius:7px;box-shadow:0 10px 30px rgba(0,0,0,.4);overflow:hidden}
 .mscroll{overflow:auto;flex:1;min-height:0;background:#fff;margin:6px 8px;border:1px solid #a7a9ad} .ltbl{width:100%} .ltbl td{height:26px} .ltbl select{width:100%;font:11px var(--f);height:22px;border:1px solid #8e909a;border-radius:2px}
 .ltbl select.chg{background:#fff3b0}
+/* Select2 — compact, page style */
+.select2-container{font:11px var(--f)}
+.select2-container--default .select2-selection--single{height:22px;border:1px solid #8e909a;border-radius:2px;background:#fff}
+.select2-container--default .select2-selection--single .select2-selection__rendered{line-height:20px;padding-left:5px;padding-right:18px;color:var(--ink)}
+.select2-container--default .select2-selection--single .select2-selection__arrow{height:20px;width:16px}
+.select2-container--default.select2-container--focus .select2-selection--single,.select2-container--default.select2-container--open .select2-selection--single{border-color:var(--ob-line)}
+.select2-dropdown{font:11px var(--f);border-color:var(--ob-line);border-radius:2px;z-index:20}
+.select2-search--dropdown{padding:3px} .select2-search--dropdown .select2-search__field{font:11px var(--f);height:22px;padding:1px 4px;border-color:#8e909a}
+.select2-results__option{padding:3px 6px} .select2-results>.select2-results__options{max-height:240px}
+.select2-container--default .select2-results__group{padding:3px 6px;color:var(--ob-navy);background:var(--ob-pale);font-weight:bold}
+.select2-container--default .select2-results__option .select2-results__option{padding-left:14px}
+.select2-container--default .select2-results__option--highlighted.select2-results__option--selectable{background:var(--ob-acc);color:#fff}
+.select2-container--default .select2-results__option--selected{background:#e9f0f8}
+.select2-container.chg .select2-selection--single{background:#fff3b0}
 .toast{position:fixed;right:18px;bottom:18px;padding:8px 14px;border-radius:6px;color:#fff;font-weight:bold;display:none;z-index:9;box-shadow:0 4px 12px rgba(0,0,0,.3)}
 @media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))} body{padding:4px}}
 @media print{body{background:#fff;padding:0}.win{border:0;box-shadow:none;height:auto}.bar,.tb .btn,.kpis,.note{display:none}.scroll{overflow:visible;border:0}thead th{position:static} td.in input{width:40px}}
@@ -424,7 +439,7 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
   </div>
   <form class="bar" method="get">
     <label>Payroll Month</label>
-    <select name="period_id" onchange="if(!ciLeave()){this.value='<?= $pid ?>';return;} this.form.submit()">
+    <select name="period_id" onchange="if(!ciLeave()){this.value='<?= $pid ?>';if(window.jQuery&&jQuery(this).data('select2'))jQuery(this).trigger('change.select2');return;} this.form.submit()">
       <?php foreach ($periods as $p): ?><option value="<?= (int)$p['id'] ?>"<?= (int)$p['id'] === $pid ? ' selected' : '' ?>><?= $h($MON[(int)$p['month']] . ' ' . $p['year']) ?><?= $p['status'] ? ' (' . $h($p['status']) . ')' : '' ?></option><?php endforeach; ?>
     </select>
     <div class="tabs"><?php $first = true; foreach ($out as $sk => $s): $cnt = 0; foreach ($s['groups'] as $g) $cnt += count($g['emps']); ?><span class="tab<?= $first ? ' on' : '' ?>" data-sec="<?= $sk ?>" onclick="ciTab('<?= $sk ?>')" title="<?= $h($s['title']) ?>"><?= $sk ?> — <?= $h($s['title']) ?> (<?= $cnt ?>)</span><?php $first = false; endforeach; ?></div>
@@ -531,6 +546,8 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
   </div>
 </div>
 <div class="toast" id="ciToast"></div>
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script>
 var CI_PERIOD = <?= (int)$pid ?>, ciDirty = false;
 function num(v, m){ v = String(v == null ? '' : v).replace(/[%,\s]/g, ''); if (v === '' || isNaN(v)) return null; v = parseFloat(v);
@@ -581,9 +598,9 @@ function ciLinkTab(k){
   document.querySelectorAll('.ltab').forEach(function(t){ t.classList.toggle('on', t.dataset.sec === k); });
   document.querySelectorAll('.ltbl').forEach(function(t){ t.style.display = t.dataset.sec === k ? '' : 'none'; });
 }
-function ciLinkMark(s){ s.classList.toggle('chg', s.value !== s.dataset.cur); }
+function ciLinkMark(s){ var c = s.value !== s.dataset.cur; s.classList.toggle('chg', c); if (s.nextElementSibling && s.nextElementSibling.classList.contains('select2')) s.nextElementSibling.classList.toggle('chg', c); }
 document.addEventListener('change', function(e){ if (e.target.classList && e.target.classList.contains('lsel')) ciLinkMark(e.target); });
-function ciLinkAuto(){ var n = 0; document.querySelectorAll('.lsel').forEach(function(s){ if (s.value === '0' && s.dataset.sug !== '0') { s.value = s.dataset.sug; ciLinkMark(s); n++; } }); toast(n ? n + ' column(s) linked — Save Links to keep.' : 'Nothing to auto-link.', true); }
+function ciLinkAuto(){ var n = 0; document.querySelectorAll('.lsel').forEach(function(s){ if (s.value === '0' && s.dataset.sug !== '0') { s.value = s.dataset.sug; if (window.jQuery && jQuery(s).data('select2')) jQuery(s).trigger('change.select2'); ciLinkMark(s); n++; } }); toast(n ? n + ' column(s) linked — Save Links to keep.' : 'Nothing to auto-link.', true); }
 function ciLinkSave(){
   var links = {};
   document.querySelectorAll('.lsel').forEach(function(s){ if (s.value !== s.dataset.cur) { (links[s.dataset.sec] = links[s.dataset.sec] || {})[s.dataset.k] = parseInt(s.value, 10) || 0; } });
@@ -648,5 +665,11 @@ function ciExport(){
   var s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = go; s.onerror = function(){ alert('Could not load the Excel library (internet needed).'); }; document.head.appendChild(s);
 }
 document.querySelectorAll('tr.emp').forEach(ciRow); ciTotals();
+/* Select2 on the select boxes (plain selects stay when the library cannot load) */
+if (window.jQuery && jQuery.fn.select2) {
+  jQuery('select[name=period_id]').select2({width: '190px', minimumResultsForSearch: 8});
+  jQuery('.lsel').select2({width: '100%', dropdownParent: jQuery('#ciLinkM')})
+    .on('change', function(){ ciLinkMark(this); });
+}
 </script>
 </body></html>
