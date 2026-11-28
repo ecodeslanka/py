@@ -102,6 +102,11 @@ if ($period) {
         foreach ($rmbKeys[$pat] as $k) if (isset($isl[$eid][$k]) && $isl[$eid][$k]['amount'] !== null) return (float)$isl[$eid][$k]['amount'];
         return (float)$profile;
     };
+    /* what the old salary sheets saved for the month (salary_sheet_entries): manual overrides and Additional Earnings / Deductions rows */
+    $sse = [];
+    $q = ls_q($conn, "SELECT * FROM salary_sheet_entries WHERE payroll_period_id = $pid AND employee_id IN ($ids)");
+    while ($q && ($x = mysqli_fetch_assoc($q))) $sse[(int)$x['employee_id']] = $x;
+    $addRows = function ($json) { $o = []; foreach ((json_decode((string)$json, true) ?: []) as $r) { $a = round((float)($r['amount'] ?? 0), 2); if ($a != 0) $o[] = ['label' => trim((string)($r['desc'] ?? '')) ?: 'Other', 'amount' => $a]; } return $o; };
     $fuel = [];
     if (ls_has_table($conn, 'sr_fuel_entries')) { $q = ls_q($conn, "SELECT employee_id, SUM(fuel_rate * fuel_liter) FROM sr_fuel_entries WHERE payroll_period_id = $pid AND employee_id IN ($ids) GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $fuel[(int)$x[0]] = (float)$x[1]; }
 
@@ -120,18 +125,25 @@ if ($period) {
         $travel = in_array($cat, ['SR', 'MR'], true) ? $rmb($eid, 'travel', $e['reimbursement_traveling'] ?? 0) : 0.0;
         $mobile = in_array($cat, ['SR', 'CC'], true) ? $rmb($eid, 'mobile', ($e['reimbursement_mobile'] ?? 0) ?: ($e['mobile_reimbursement'] ?? 0)) : 0.0;
         $fuelA  = $cat === 'SR' ? ($fuel[$eid] ?? $f($e, 'reimbursement_fuel')) : 0.0;
-        $arrears = $f($e, 'arrears_salary');
+        /* saved salary sheet of the month: its overrides replace the profile values, its additional rows are added */
+        $sv = $sse[$eid] ?? []; $ov = function ($k, $live) use ($sv) { return isset($sv[$k]) && $sv[$k] !== null && $sv[$k] !== '' ? (float)$sv[$k] : $live; };
+        $fromSheet = [];
+        foreach (['override_arrears' => 'arrears', 'override_excess' => 'excess_p', 'override_credit_r' => 'credit_r', 'override_cash_short' => 'cash_short', 'override_good_short' => 'good_short'] as $ok => $ck)
+            if (isset($sv[$ok]) && $sv[$ok] !== null && $sv[$ok] !== '') $fromSheet[$ck] = 1;
+        $addE = $addRows($sv['additional_earnings'] ?? ''); $addD = $addRows($sv['additional_deductions'] ?? '');
+        $addEarn = round(array_sum(array_column($addE, 'amount')), 2); $addDed = round(array_sum(array_column($addD, 'amount')), 2);
+        $arrears = $ov('override_arrears', $f($e, 'arrears_salary'));
         /* incentives of the employee's staff category (Incentives Sheet columns; attendance / reimbursements are their own columns here) */
         $incList = $cat === 'OTH' ? [] : isl_incentives($cat, $isl[$eid] ?? [], $e);
         $incent = round(array_sum(array_column($incList, 'amount')), 2);
-        $earn = round($basic + $incent + $att_allow + $meal + $travel + $mobile + $fuelA + $arrears, 2);
+        $earn = round($basic + $incent + $att_allow + $meal + $travel + $mobile + $fuelA + $arrears + $addEarn, 2);
 
         $epf8 = round($basic * $epfE / 100, 2);
         $d = ['epf8' => $epf8, 'welfare' => $f($e, 'welfare_amount'), 'w_loan' => $f($e, 'welfare_loan_deduction'), 'w_soc' => $f($e, 'welfare_society'),
               'donations' => $f($e, 'donations'), 'sal_adv' => $adv[$eid] ?? $f($e, 'salary_advance'), 'loan_ded' => ($loan[$eid] ?? 0) > 0 ? round($loan[$eid], 2) : $f($e, 'loan_deduction'),
-              'credit_r' => $f($e, 'credit_recovery'), 'cash_short' => in_array($cat, ['CC', 'ACC'], true) ? $f($e, 'cash_short') : 0.0,
-              'good_short' => in_array($cat, ['CC', 'ACC'], true) ? $f($e, 'good_short') : 0.0, 'no_pay' => $no_pay, 'retention' => $f($e, 'retention'),
-              'excess_p' => $f($e, 'excess_payment'), 'payee' => $f($e, 'payee') ?: $f($e, 'income_tax')];
+              'credit_r' => $ov('override_credit_r', $f($e, 'credit_recovery')), 'cash_short' => in_array($cat, ['CC', 'ACC'], true) ? $ov('override_cash_short', $f($e, 'cash_short')) : 0.0,
+              'good_short' => in_array($cat, ['CC', 'ACC'], true) ? $ov('override_good_short', $f($e, 'good_short')) : 0.0, 'no_pay' => $no_pay, 'retention' => $f($e, 'retention'),
+              'excess_p' => $ov('override_excess', $f($e, 'excess_payment')), 'payee' => $f($e, 'payee') ?: $f($e, 'income_tax'), 'add_ded' => $addDed];
         $ded = round(array_sum($d), 2);
         $epfR_ = round($basic * $epfR / 100, 2); $etf = round($basic * $etfR / 100, 2); $bonus = $basic > 0 ? round($basic / 12, 2) : 0; $grat = $basic > 0 ? round($basic / 24, 2) : 0; $ins = $f($e, 'insurance_amount');
         /* details shown when the name is clicked (the fields the employee record has) */
@@ -146,7 +158,7 @@ if ($period) {
             'initials' => trim((string)($e['name_with_initials'] ?? '')) !== '' ? trim($e['name_with_initials']) : ($e['employee_full_name'] ?? ''), 'det' => $det, 'eid' => (int)$eid,
             'desig' => $e['designation_name'] ?? '', 'status' => $e['status'] ?? '', 'note' => $e['pme_note'] ?? '', 'left' => $e['pme_exit'] ?? null, 'doj' => $e['date_of_join'] ?? '', 'norm' => $norm, 'worked' => $worked, 'rate' => $rate,
             'basic' => $basic, 'no_pay_days' => $no_pay_days, 'basic_adj' => round($basic - $no_pay, 2),
-            'incentive' => $incent, 'inc_list' => $incList, 'att_allow' => $att_allow, 'meal' => $meal, 'travel' => $travel, 'mobile' => $mobile, 'fuel' => $fuelA, 'arrears' => $arrears, 'earn' => $earn]
+            'incentive' => $incent, 'inc_list' => $incList, 'add_e' => $addE, 'add_d' => $addD, 'add_earn' => $addEarn, 'from_sheet' => $fromSheet, 'att_allow' => $att_allow, 'meal' => $meal, 'travel' => $travel, 'mobile' => $mobile, 'fuel' => $fuelA, 'arrears' => $arrears, 'earn' => $earn]
             + $d + ['ded' => $ded, 'net' => round($earn - $ded, 2), 'epf12' => $epfR_, 'etf3' => $etf, 'bonus' => $bonus, 'gratuity' => $grat, 'insurance' => $ins,
             'benefit' => round($earn + $epfR_ + $etf + $bonus + $grat + $ins, 2)];
     }
@@ -158,9 +170,9 @@ if ($period) {
 $COLS = [
     ['code', 'Emp Code', '', 0], ['epf_no', 'EPF No', '', 0], ['name', 'Name', '', 0], ['desig', 'Designation', '', 0], ['status', 'Status', '', 0], ['doj', 'Date of Join', '', 0],
     ['norm', 'Norm Days', '', 1], ['worked', 'Days Worked', '', 1], ['rate', 'Att %', '', 1], ['basic', 'Basic Salary', '', 2], ['no_pay_days', 'No Pay Days', '', 1], ['basic_adj', 'Basic Adjusted', '', 2],
-    ['incentive', 'Incentive', 'A', 2], ['att_allow', 'Attendance Allowance', 'A', 2], ['meal', 'Meal Reimb.', 'A', 2], ['travel', 'Travelling Reimb.', 'A', 2], ['mobile', 'Mobile Reimb.', 'A', 2], ['fuel', 'Fuel Reimb.', 'A', 2], ['arrears', 'Arrears', 'A', 2], ['earn', 'Total Earnings', 'A', 2],
+    ['incentive', 'Incentive', 'A', 2], ['att_allow', 'Attendance Allowance', 'A', 2], ['meal', 'Meal Reimb.', 'A', 2], ['travel', 'Travelling Reimb.', 'A', 2], ['mobile', 'Mobile Reimb.', 'A', 2], ['fuel', 'Fuel Reimb.', 'A', 2], ['arrears', 'Arrears', 'A', 2], ['add_earn', 'Other Additions', 'A', 2], ['earn', 'Total Earnings', 'A', 2],
     ['epf8', 'EPF 8%', 'D', 2], ['welfare', 'Welfare', 'D', 2], ['w_loan', 'Welfare Loan', 'D', 2], ['w_soc', 'Welfare Society', 'D', 2], ['donations', 'Donations', 'D', 2], ['sal_adv', 'Salary Advance', 'D', 2], ['loan_ded', 'Loan Deduction', 'D', 2],
-    ['credit_r', 'Credit Recovery', 'D', 2], ['cash_short', 'Cash Short', 'D', 2], ['good_short', 'Good Short', 'D', 2], ['no_pay', 'No Pay', 'D', 2], ['retention', 'Retention', 'D', 2], ['excess_p', 'Excess Payment', 'D', 2], ['payee', 'PAYEE', 'D', 2], ['ded', 'Total Deductions', 'D', 2],
+    ['credit_r', 'Credit Recovery', 'D', 2], ['cash_short', 'Cash Short', 'D', 2], ['good_short', 'Good Short', 'D', 2], ['no_pay', 'No Pay', 'D', 2], ['retention', 'Retention', 'D', 2], ['excess_p', 'Excess Payment', 'D', 2], ['payee', 'PAYEE', 'D', 2], ['add_ded', 'Other Deductions', 'D', 2], ['ded', 'Total Deductions', 'D', 2],
     ['net', 'Net Salary', 'S', 2], ['epf12', 'EPF 12%', 'B', 2], ['etf3', 'ETF 3%', 'B', 2], ['bonus', 'Bonus Prov.', 'B', 2], ['gratuity', 'Gratuity Prov.', 'B', 2], ['insurance', 'Insurance', 'B', 2], ['benefit', 'Total Benefit', 'B', 2],
 ];
 $SUMK = array_values(array_map(function ($c) { return $c[0]; }, array_filter($COLS, function ($c) { return $c[3] === 2; })));
@@ -221,7 +233,7 @@ thead tr:first-child th{top:0} thead tr:nth-child(2) th{top:20px}
 th.gA{background:linear-gradient(#4fa36a,#2e7d46)} th.gD{background:linear-gradient(#df8b89,#c0504d 55%,#a33f3c)} th.gS{background:linear-gradient(#ffd966,#f0b400);color:#3a2c00} th.gB{background:linear-gradient(#9b7fd0,#6b4fa8)}
 td.n{text-align:right} td.neg{color:var(--neg)} td.emp{color:#b9bac2;text-align:center;background:#fafafa}
 td.sticky,th.sticky{position:sticky;left:0;z-index:1;background:#fff} thead th.sticky{z-index:3}
-td.b{font-weight:bold} td.lft{color:var(--neg);font-weight:bold} .mv{display:inline-block;padding:0 4px;border-radius:6px;background:#e9f0f8;border:1px solid var(--ob-line);color:var(--ob-navy);font-size:9.5px} td.net{font-weight:bold;background:#fff8d6} td.tE{background:#e9f7ec;font-weight:bold} td.tD{background:#fdecea;font-weight:bold}
+td.b{font-weight:bold} td.sv{color:#7c3aed;font-weight:bold} td.lft{color:var(--neg);font-weight:bold} .mv{display:inline-block;padding:0 4px;border-radius:6px;background:#e9f0f8;border:1px solid var(--ob-line);color:var(--ob-navy);font-size:9.5px} td.net{font-weight:bold;background:#fff8d6} td.tE{background:#e9f7ec;font-weight:bold} td.tD{background:#fdecea;font-weight:bold}
 tr.grp td{background:var(--ob-pale);color:var(--ob-navy);font-weight:bold;font-size:11px}
 tr.sub td{background:#eef2f7;font-weight:bold} tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300}
 tbody tr.r:hover td{background:#fff1a8}
@@ -260,7 +272,7 @@ tbody tr.r:hover td{background:#fff1a8}
   <div class="scroll">
     <table id="lsTbl">
       <thead>
-        <tr><th rowspan="2" class="sticky">#</th><th colspan="12">Employee &amp; Attendance</th><th colspan="8" class="gA">Additions</th><th colspan="15" class="gD">Deductions</th><th rowspan="2" class="gS">Net Salary</th><th colspan="6" class="gB">Employer Benefits</th></tr>
+        <tr><th rowspan="2" class="sticky">#</th><th colspan="12">Employee &amp; Attendance</th><th colspan="9" class="gA">Additions</th><th colspan="16" class="gD">Deductions</th><th rowspan="2" class="gS">Net Salary</th><th colspan="6" class="gB">Employer Benefits</th></tr>
         <tr><?php foreach ($COLS as $c) if ($c[0] !== 'net') echo '<th class="' . ($c[2] ? 'g' . $c[2] : '') . '">' . $h($c[1]) . '</th>'; ?></tr>
       </thead>
       <tbody>
@@ -282,8 +294,10 @@ tbody tr.r:hover td{background:#fff1a8}
               if ($c[0] === 'desig' && $x['note'] !== '' && stripos($x['note'], 'moted') !== false) { echo '<td title="' . $h($x['note']) . '">' . $h($v) . ' <span class="mv">' . (stripos($x['note'], 'after this month') !== false ? 'before move' : 'moved') . '</span></td>'; continue; }
               if ($c[0] === 'name') { echo '<td class="b nm"><a href="#" onclick="lsShow(' . ($i - 1) . ');return false" title="' . $h($x['name']) . ' — click for full details">' . $h($x['initials']) . '</a></td>'; continue; }
               if ($c[3] === 0) { echo '<td' . ($c[0] === 'name' ? ' class="b"' : '') . '>' . $h($c[0] === 'doj' && $v ? date('Y-m-d', strtotime($v)) : $v) . '</td>'; continue; }
-              $cls = 'n' . (is_numeric($v) && $v < 0 ? ' neg' : '') . ($c[0] === 'earn' ? ' tE' : '') . ($c[0] === 'ded' ? ' tD' : '');
-              echo '<td class="' . $cls . '">' . ($c[3] === 1 ? ($v + 0) : $num($v)) . '</td>';
+              $cls = 'n' . (is_numeric($v) && $v < 0 ? ' neg' : '') . ($c[0] === 'earn' ? ' tE' : '') . ($c[0] === 'ded' ? ' tD' : '') . (isset($x['from_sheet'][$c[0]]) || (in_array($c[0], ['add_earn', 'add_ded'], true) && $v != 0) ? ' sv' : '');
+              $tt = $c[0] === 'add_earn' ? $x['add_e'] : ($c[0] === 'add_ded' ? $x['add_d'] : null);
+              $ttl = $tt ? implode("\n", array_map(function ($r) use ($num) { return $r['label'] . ': ' . $num($r['amount']); }, $tt)) : (isset($x['from_sheet'][$c[0]]) ? 'From the saved salary sheet of the month' : '');
+              echo '<td class="' . $cls . '"' . ($ttl !== '' ? ' title="' . $h($ttl) . '"' : '') . '>' . ($c[3] === 1 ? ($v + 0) : $num($v)) . '</td>';
               if ($c[0] === 'ded') echo '<td class="n net' . ($x['net'] < 0 ? ' neg' : '') . '">' . $num($x['net']) . '</td>';
           } ?>
         </tr>
@@ -295,7 +309,7 @@ tbody tr.r:hover td{background:#fff1a8}
       <?php if ($rows): ?><tfoot><?= $totRow('GRAND TOTAL (' . count($rows) . ')', $tot, 'grand') ?></tfoot><?php endif; ?>
     </table>
   </div>
-  <div class="note">Live figures for the chosen payroll month — not the saved salary sheets. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentive</b> = the Incentives Sheet amounts of the employee's staff category (hover for the columns; before November 2026 from the old Incentive Entries). Norm days = days in the month − special holidays; days worked = attendance; No Pay = basic ÷ norm days × the employee's no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
+  <div class="note">Live figures for the chosen payroll month. From the salary sheet saved for the month: the values changed there (Arrears, Excess Payment, Credit Recovery, Cash / Good Short) and its Additional Earnings / Deductions rows (<span style="color:#7c3aed;font-weight:bold">purple</span>, hover for the rows); everything else is live. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentive</b> = the Incentives Sheet amounts of the employee's staff category (hover for the columns; before November 2026 from the old Incentive Entries). Norm days = days in the month − special holidays; days worked = attendance; No Pay = basic ÷ norm days × the employee's no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
 </div>
 <div class="mdl" id="lsM" onclick="if(event.target===this)lsHide()">
   <div class="mbox">
@@ -306,7 +320,7 @@ tbody tr.r:hover td{background:#fff1a8}
 <script>
 <?php
   $jsCols = array_map(function ($c) { return ['k' => $c[0], 'l' => $c[1], 'g' => $c[2], 't' => $c[3]]; }, $COLS);
-  $jsRows = array_map(function ($x) { $v = []; foreach ($GLOBALS['COLS'] as $c) $v[$c[0]] = $x[$c[0]] ?? null; return ['n' => $x['name'], 'i' => $x['initials'], 'd' => $x['det'], 'v' => $v, 'inc' => array_values($x['inc_list'])]; }, $rows);
+  $jsRows = array_map(function ($x) { $v = []; foreach ($GLOBALS['COLS'] as $c) $v[$c[0]] = $x[$c[0]] ?? null; return ['n' => $x['name'], 'i' => $x['initials'], 'd' => $x['det'], 'v' => $v, 'inc' => array_values($x['inc_list']), 'ae' => $x['add_e'], 'ad' => $x['add_d']]; }, $rows);
 ?>
 var LS_COLS = <?= json_encode($jsCols, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?>, LS_ROWS = <?= json_encode($jsRows, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?>;
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
@@ -321,6 +335,8 @@ function lsShow(i){
   var att = ['norm', 'worked', 'rate', 'no_pay_days'].map(function(k){ var c = LS_COLS.filter(function(x){ return x.k === k; })[0]; return line(c.l, (r.v[k] == null ? '' : r.v[k]) + (k === 'rate' ? '%' : '')); });
   att.push(line('Basic Salary', r.v.basic)); att.push(line('Basic Adjusted', r.v.basic_adj, 1));
   var grp = function(g, skip){ return LS_COLS.filter(function(c){ return c.g === g && c.t === 2; }).map(function(c){
+      var sub = c.k === 'add_earn' ? r.ae : (c.k === 'add_ded' ? r.ad : null);
+      if (sub && sub.length) return line(c.l, r.v[c.k]) + sub.map(function(x){ return '<tr><td class="k" style="padding-left:14px">· ' + esc(x.label) + '</td><td class="n">' + money(x.amount) + '</td></tr>'; }).join('');
       if (c.k === 'incentive' && r.inc && r.inc.length) return line(c.l, r.v[c.k]) + r.inc.map(function(x){ return '<tr><td class="k" style="padding-left:14px">· ' + esc(x.label) + '</td><td class="n">' + money(x.amount) + '</td></tr>'; }).join('');
       if (c.k === skip) return line(c.l, r.v[c.k], 1);
       return (parseFloat(r.v[c.k]) || 0) === 0 ? '' : line(c.l, r.v[c.k]); }); };
