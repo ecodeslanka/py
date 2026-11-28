@@ -15,89 +15,9 @@ if (function_exists('requireLogin')) requireLogin();
 if (function_exists('mysqli_report')) mysqli_report(MYSQLI_REPORT_OFF);
 date_default_timezone_set('Asia/Colombo');
 
-function ci_q($conn, $sql) { try { return mysqli_query($conn, $sql); } catch (Throwable $e) { return false; } }
-function ci_has($conn, $t) { $r = ci_q($conn, "SHOW TABLES LIKE '$t'"); return $r && mysqli_num_rows($r) > 0; }
+include_once __DIR__ . '/incentive_sheet_lib.php';
 $h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
-
-/* sections: code → [title, staff category codes, components, meal column ('rate' = config meal × attendance rate | 'flat' = fixed meal | 'none'), save amounts?]
-   component: [key, label, tiers [threshold => cfg column], mode, options]
-     mode  'gm'  Actual + GM % inputs        'act' Actual % input        'att' live attendance %
-           'dmg' damage % (LOWER is better)  'amt' an amount input        'live' a live amount (read only)
-     options  iach  label of the % row (default __iach__<key>)        amt   label of the amount row (default __incent__<key>)
-              thr   sr_incentive_rates key: the designation's own threshold for a single-tier incentive
-              fb    'amt' mode: the employee field used when the cell is empty (what the salary sheet pays then)
-              src   'live' mode: fuel | dlink | reimb;  field / calc / save for reimbursements (calc: att | att22 | flat | profile)
-   save amounts: the SR / ST / OFF salary sheets read the earned amount; MR / CC / ACC resolve the tier from the % themselves */
-$SSV_SR = []; foreach ([90, 95, 96, 97, 98, 99, 100, 103] as $t) $SSV_SR[$t] = 'ssvr_' . $t;
-$SECTIONS = [
-    'SR' => ['Sales Team', ['SR'], [
-        ['disc', 'Discretionary Support', [], 'amt', ['amt' => '__disc_amount', 'fb' => 'discretionary_support', 'cfg' => 'discretionary_support']],
-        ['ssv_sr', 'Secondary Sales Value', $SSV_SR, 'act', ['iach' => '__sec_achievement', 'amt' => '__ssv_amount']],
-        ['total_ps_compliance', 'PS Compliance', [80 => 'total_ps_compliance'], 'act', ['thr' => 'total_ps_compliance']],
-        ['eco_incentive', 'ECO', [95 => 'eco_incentive'], 'act', ['thr' => 'eco_incentive']],
-        ['bp_incentive', 'BP', [90 => 'bp_incentive'], 'act', ['thr' => 'bp_incentive']],
-        ['total_assortment', 'Total Assortment', [100 => 'total_assortment'], 'act', ['thr' => 'total_assortment']],
-        ['ete', 'ETE Incentive', [], 'amt', ['amt' => '__other_incentive']],
-        ['meal_sr', 'Meal', [], 'live', ['src' => 'reimb', 'field' => 'meal_reimbursement', 'pf' => 'reimbursement_meal', 'calc' => 'att', 'save' => '__reimb__meal_reimbursement']],
-        ['travel_sr', 'Travelling', [], 'live', ['src' => 'reimb', 'field' => 'traveling_reimbursement', 'pf' => 'reimbursement_traveling', 'calc' => 'att22', 'save' => '__reimb__traveling_reimbursement']],
-        ['fuel_sr', 'Fuel', [], 'live', ['src' => 'fuel']],
-        ['mobile_sr', 'Mobile / Data', [], 'live', ['src' => 'reimb', 'field' => 'mobile_reimbursement', 'pf' => 'reimbursement_mobile', 'calc' => 'flat', 'save' => '__reimb__mobile_reimbursement']],
-    ], 'none', true],
-    'MR' => ['Merchandising Team', ['MR'], [
-        ['placement_compliance', 'Placement Compliance', [70 => 'placement_compliance_70', 80 => 'placement_compliance_80', 90 => 'placement_compliance_90'], 'act'],
-        ['attendance_mr', 'Attendance', [70 => 'attendance_70', 80 => 'attendance_80', 90 => 'attendance_90'], 'att', ['amt' => '__incent__attendance']],
-        ['meal_mr', 'Meal', [], 'live', ['src' => 'reimb', 'field' => 'meal_reimbursement', 'pf' => 'reimbursement_meal', 'calc' => 'profile']],
-        ['travel_mr', 'Travelling', [], 'live', ['src' => 'reimb', 'field' => 'traveling_reimbursement', 'pf' => 'reimbursement_traveling', 'calc' => 'profile']],
-        ['dlink', 'D-Link', [], 'live', ['src' => 'dlink']],
-    ], 'none', false],
-    'CC' => ['Cash Collectors', ['CC', 'SACC'], [
-        ['ccfot', 'CCFOT', [90 => 'ccfot_90', 91 => 'ccfot_91', 92 => 'ccfot_92', 93 => 'ccfot_93', 94 => 'ccfot_94', 95 => 'ccfot_95'], 'gm'],
-        ['credit_mgt', 'Credit Mgt', [85 => 'credit_mgt_85', 90 => 'credit_mgt_90', 95 => 'credit_mgt_95'], 'gm'],
-        ['payee_chq', 'Payee Chq', [80 => 'payee_chq_80'], 'gm'],
-        ['ssv_cc', 'Secondary Sales Value', [90 => 'ssv_90', 95 => 'ssv_95'], 'act'],
-        ['attendance_cc', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
-        ['locus_admin', 'Locus Admin', [100 => 'locus_admin'], 'act'],
-    ], 'rate', false],
-    'ACC' => ['Assistant Cash Collectors', ['ACC'], [
-        ['ssv_acc', 'Secondary Sales Value', [90 => 'ssv_90', 95 => 'ssv_95'], 'act'],
-        ['ccfot_acc', 'CCFOT', [90 => 'ccfot_90', 91 => 'ccfot_91', 92 => 'ccfot_92', 93 => 'ccfot_93', 94 => 'ccfot_94', 95 => 'ccfot_95'], 'gm'],
-        ['punctuality_acc', 'Punctuality', [70 => 'punctuality_70', 80 => 'punctuality_80'], 'act'],
-        ['attendance_acc', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
-    ], 'rate', false],
-    'ST' => ['Back Office Stores Team', ['ST'], [
-        ['stores_damage', 'Stores Damage', ['0.007' => 'stores_damage_lo', '0.020' => 'stores_damage_hi'], 'dmg'],
-        ['rsqm', 'RSQM Score', [60 => 'rsqm_60', 70 => 'rsqm_70'], 'act'],
-        ['punctuality', 'Punctuality', [75 => 'punctuality_75', 85 => 'punctuality_85'], 'act'],
-        ['loading_unloading', 'L/Unloading', [90 => 'loading_unloading'], 'act'],
-        ['ccfot_st', 'CCFOT', [90 => 'ccfot_st'], 'act'],
-        ['attendance_st', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
-    ], 'rate', true],
-    'OFF' => ['Back Office Team', ['OFF'], [
-        ['incentive_daily_90', 'Daily', [90 => 'incentive_daily_90'], 'act'],
-        ['incentive_weekly_90', 'Weekly', [90 => 'incentive_weekly_90'], 'act'],
-        ['incentive_monthly_90', 'Monthly', [90 => 'incentive_monthly_90'], 'act'],
-        ['punctuality_75', 'Punctuality', [75 => 'punctuality_75'], 'act'],
-        ['attendance_off', 'Attendance', [85 => 'attendance_85', 90 => 'attendance_90'], 'att'],
-    ], 'flat', true],
-];
-function ci_opt($c, $k, $d = null) { return $c[4][$k] ?? $d; }
-function ci_lbl_pct($c) { return ci_opt($c, 'iach', '__iach__' . $c[0]); }
-function ci_lbl_amt($c) { return ci_opt($c, 'amt', '__incent__' . $c[0]); }
-function ci_is_pct($c) { return in_array($c[3], ['gm', 'act', 'att', 'dmg'], true); }
-/* the tiers of a component for one designation (its own threshold from sr_incentive_rates for SR single incentives) */
-function ci_tiers($c, $cfg) {
-    $k = ci_opt($c, 'thr');
-    if ($k && count($c[2]) === 1 && isset($cfg['_thr'][$k])) return [(string)$cfg['_thr'][$k] => reset($c[2])];
-    return $c[2];
-}
-/* the amount a % earns: highest tier reached (rate > 0); damage: the lowest limit not exceeded */
-function ci_amount($mode, $tiers, $cfg, $p) {
-    if ($p === null) return 0.0;
-    $hit = 0.0;
-    if ($mode === 'dmg') { $lim = $tiers; uksort($lim, function ($a, $b) { return (float)$b <=> (float)$a; }); foreach ($lim as $t => $f) if ($p <= (float)$t + 1e-9 && (float)($cfg[$f] ?? 0) > 0) $hit = (float)$cfg[$f]; return $hit; }
-    foreach ($tiers as $t => $f) if ($p >= (float)$t - 1e-9 && (float)($cfg[$f] ?? 0) > 0) $hit = (float)$cfg[$f];
-    return $hit;
-}
+$SECTIONS = isl_sections();
 
 /* ── payroll months ── */
 $periods = []; $r = ci_q($conn, "SELECT id, year, month, status FROM payroll_periods ORDER BY year DESC, month DESC");
@@ -107,82 +27,6 @@ if (!$pid && $periods) { foreach ($periods as $p) if (strtolower((string)$p['sta
 $period = null; foreach ($periods as $p) if ((int)$p['id'] === $pid) $period = $p;
 $MON = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-/* ── employees of a section in the payroll month, as they were then (payroll_month_employees_lib.php):
-      leavers of the month stay in it, promotions after the month are undone, same category rule as the salary sheets ── */
-include_once __DIR__ . '/payroll_month_employees_lib.php';
-function ci_employees($conn, $codes, $period) {
-    static $all = [];
-    $from = sprintf('%04d-%02d-01', (int)$period['year'], (int)$period['month']); $to = date('Y-m-t', strtotime($from));
-    if (!isset($all[$from])) $all[$from] = pme_employees($conn, $from, $to);
-    return pme_filter_categories($conn, $all[$from], $codes);
-}
-/* incentive type to file new entries under (the one allowed for the category), else 0 */
-function ci_type_id($conn, $codes) {
-    if (!ci_has($conn, 'incentive_types')) return 0;
-    $in = implode(',', array_map(function ($c) { return "'" . $c . "'"; }, $codes));
-    $r = ci_q($conn, "SELECT id FROM staff_categories WHERE category_code IN ($in)");
-    while ($r && ($x = mysqli_fetch_row($r))) {
-        $q = ci_q($conn, "SELECT id FROM incentive_types WHERE FIND_IN_SET(" . (int)$x[0] . ", REPLACE(COALESCE(allowed_category_ids,''),' ','')) ORDER BY id LIMIT 1");
-        if ($q && ($t = mysqli_fetch_row($q))) return (int)$t[0];
-    }
-    return 0;
-}
-
-/* ── live data of the month: configuration, attendance, holidays, leave, saved entries, SR fuel, MR D-Link ── */
-function ci_ctx($conn, $period, $pid) {
-    $from = sprintf('%04d-%02d-01', (int)$period['year'], (int)$period['month']); $to = date('Y-m-t', strtotime($from));
-    $x_ = ['from' => $from, 'to' => $to, 'mdays' => (int)date('t', strtotime($from)), 'cfgs' => [], 'shd' => [], 'att' => [], 'leave' => [], 'inc' => [], 'fuel' => [], 'dlink' => []];
-    $q = ci_q($conn, "SELECT * FROM sr_salary_config"); while ($q && ($x = mysqli_fetch_assoc($q))) $x_['cfgs'][(int)$x['designation_id']] = $x;
-    $q = ci_q($conn, "SELECT designation_id, rate_label, amount FROM sr_secondary_sales_rates");            /* SR secondary sales tiers */
-    while ($q && ($x = mysqli_fetch_assoc($q))) { $t = (float)str_replace('%', '', (string)$x['rate_label']); if ($t > 0) $x_['cfgs'][(int)$x['designation_id']]['ssvr_' . rtrim(rtrim(number_format($t, 2, '.', ''), '0'), '.')] = $x['amount']; }
-    $q = ci_q($conn, "SELECT designation_id, incent_key, rate_value FROM sr_incentive_rates");                /* SR incentive thresholds */
-    while ($q && ($x = mysqli_fetch_assoc($q))) { $t = (float)str_replace('%', '', (string)$x['rate_value']); if ($t > 0) $x_['cfgs'][(int)$x['designation_id']]['_thr'][$x['incent_key']] = $t; }
-    $q = ci_q($conn, "SELECT * FROM special_holidays WHERE active = 1 AND date_from <= '$to' AND date_to >= '$from'");
-    while ($q && ($sh = mysqli_fetch_assoc($q))) for ($d = max($sh['date_from'], $from); $d <= min($sh['date_to'], $to); $d = date('Y-m-d', strtotime($d . ' +1 day'))) $x_['shd'][$d][] = $sh;
-    $q = ci_q($conn, "SELECT employee_id, COUNT(*) FROM attendance WHERE att_date BETWEEN '$from' AND '$to' GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $x_['att'][(int)$x[0]] = (int)$x[1];
-    $q = ci_q($conn, "SELECT employee_id, SUM(days_count) FROM leave_applications WHERE status = 'Approved' AND (start_date BETWEEN '$from' AND '$to' OR end_date BETWEEN '$from' AND '$to' OR (start_date <= '$from' AND end_date >= '$to')) GROUP BY employee_id");
-    while ($q && ($x = mysqli_fetch_row($q))) $x_['leave'][(int)$x[0]] = (float)$x[1];
-    $q = ci_q($conn, "SELECT employee_id, component_label, amount, notes FROM incentive_entries WHERE payroll_period_id = $pid ORDER BY id");
-    while ($q && ($x = mysqli_fetch_assoc($q))) $x_['inc'][(int)$x['employee_id']][$x['component_label']] = $x;
-    $q = ci_q($conn, "SELECT employee_id, SUM(fuel_rate * fuel_liter) FROM sr_fuel_entries WHERE payroll_period_id = $pid GROUP BY employee_id"); while ($q && ($x = mysqli_fetch_row($q))) $x_['fuel'][(int)$x[0]] = (float)$x[1];
-    $q = ci_q($conn, "SELECT id, actual_per_day_rate FROM dlink_budget_entries WHERE year = " . (int)$period['year'] . " AND month = " . (int)$period['month'] . " LIMIT 1");
-    if ($q && ($dl = mysqli_fetch_assoc($q))) {
-        $q = ci_q($conn, "SELECT employee_db_id, attended_days FROM dlink_employee_days WHERE entry_id = " . (int)$dl['id'] . " AND employee_db_id > 0");
-        while ($q && ($x = mysqli_fetch_assoc($q))) $x_['dlink'][(int)$x['employee_db_id']] = round((float)$x['attended_days'] * (float)$dl['actual_per_day_rate'], 2);
-    }
-    return $x_;
-}
-/* days / attendance rate / no pay of one employee */
-function ci_emp_calc($ctx, $e) {
-    $eid = (int)$e['id']; $did = (int)($e['designation_id'] ?? 0); $hol = 0;
-    foreach ($ctx['shd'] as $list) foreach ($list as $sh) {
-        $ok = ($sh['target_type'] ?? '') === 'all'; $ids = json_decode((string)($sh['target_ids'] ?? ''), true) ?: [];
-        if (!$ok && $sh['target_type'] === 'employee') $ok = in_array($eid, $ids);
-        if (!$ok && $sh['target_type'] === 'staff_category') $ok = in_array((int)($e['staff_category_id'] ?? 0), $ids);
-        if (!$ok && $sh['target_type'] === 'designation') $ok = in_array($did, $ids);
-        if ($ok) { $hol++; break; }
-    }
-    $norm = max(1, $ctx['mdays'] - $hol); $w = $ctx['att'][$eid] ?? 0;
-    return ['norm' => $norm, 'w' => $w, 'rate' => round($w / $norm * 100, 2), 'npd' => max(0, $norm - $w - ($ctx['leave'][$eid] ?? 0))];
-}
-/* an incentive_entries row written by this page (recalculated, not someone's entry) */
-function ci_mine($row) { $n = json_decode((string)($row['notes'] ?? ''), true); return is_array($n) && ($n['src'] ?? '') === 'cc_acc_incentives'; }
-/* a live amount: [value, saved in Incentive Entry?] */
-function ci_live($ctx, $c, $e, $cfg, $calc) {
-    $eid = (int)$e['id']; $src = ci_opt($c, 'src');
-    if ($src === 'fuel') return [$ctx['fuel'][$eid] ?? (float)($e['reimbursement_fuel'] ?? 0), false];
-    if ($src === 'dlink') return [$ctx['dlink'][$eid] ?? 0.0, false];
-    $base = (float)(($cfg[ci_opt($c, 'field')] ?? null) ?: ($e[ci_opt($c, 'pf')] ?? 0));
-    $lbl = '__reimb__' . ci_opt($c, 'field'); $saved = $ctx['inc'][$eid][$lbl] ?? null;
-    $how = ci_opt($c, 'calc');
-    if ($saved && ci_mine($saved)) $saved = null;          /* saved by this page: worked out again from live attendance */
-    if ($how === 'profile') return [$saved && (float)$saved['amount'] > 0 ? (float)$saved['amount'] : (float)($e[ci_opt($c, 'pf')] ?? 0), $saved && (float)$saved['amount'] > 0];   /* MR sheet: saved, else profile */
-    if ($saved) return [(float)$saved['amount'], true];
-    $share = min(100, $calc['rate']) / 100;
-    if ($how === 'flat') return [$base, false];
-    if ($how === 'att22') return [$calc['w'] > 22 ? $base : round($base * $share, 2), false];
-    return [round($base * $share, 2), false];
-}
 $pct = function ($v, $mode = '') { $v = trim(str_replace(['%', ','], '', (string)$v)); if ($v === '' || !is_numeric($v)) return null; $v = (float)$v;
     if ($mode === 'amt') return round($v, 2);
     if ($mode === 'dmg') { if ($v > 0 && $v < 0.001) $v *= 100; return round($v, 5); }       /* damage typed as % (0.007), a fraction (0.00007) is converted */
@@ -234,10 +78,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
     if (function_exists('rbac_can') && !rbac_can('edit', 'cc_acc_incentives')) { echo json_encode(['ok' => false, 'msg' => 'Permission blocked for your role.']); exit; }
     if (!$period) { echo json_encode(['ok' => false, 'msg' => 'Choose a payroll month.']); exit; }
     if (strtolower((string)$period['status']) === 'closed') { echo json_encode(['ok' => false, 'msg' => 'This payroll month is closed.']); exit; }
+    if (isl_is_old($period)) { echo json_encode(['ok' => false, 'msg' => 'Months before ' . date('F Y', strtotime(ISL_CUTOVER . '-01')) . ' come from the old Incentive Entries — view only.']); exit; }
     $data = json_decode((string)($_POST['data'] ?? ''), true); if (!is_array($data)) { echo json_encode(['ok' => false, 'msg' => 'Nothing to save.']); exit; }
     $uid = (int)($_SESSION['user_id'] ?? $_SESSION['id'] ?? 0);
     $n = 0; $err = '';
     $run = function ($sql) use ($conn, &$err) { $ok = ci_q($conn, $sql); if (!$ok && $err === '') $err = mysqli_error($conn) ?: 'database error'; return $ok; };
+    $by = (string)($_SESSION['username'] ?? $_SESSION['user_name'] ?? $_SESSION['full_name'] ?? 'system');
+    isl_sync($conn, $period);
     $ctx = ci_ctx($conn, $period, $pid);
     /* one row per (employee, month, label): update the first, drop duplicates, insert when missing, delete when $val is null */
     $put = function ($eid, $label, $val, $notes, $type) use ($conn, $pid, $uid, $run) {
@@ -265,10 +112,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
             foreach ($vals as $key => $v) {
                 if (!isset($comps[$key]) || !is_array($v)) continue;
                 $c = $comps[$key];
-                if ($c[3] === 'amt') { $put($eid, ci_lbl_amt($c), $pct($v['act'] ?? '', 'amt'), null, $type); $n++; continue; }
+                /* incentive_sheet_entries (the sheet's table) + the old incentive_entries rows the salary sheets read */
+                if ($c[3] === 'amt') {
+                    $amt = $pct($v['act'] ?? '', 'amt');
+                    if (!isl_put($conn, $pid, $eid, $sk, $key, null, null, null, $amt, 1, 'sheet', $by) && $err === '') $err = mysqli_error($conn);
+                    $put($eid, ci_lbl_amt($c), $amt, null, $type); $n++; continue;
+                }
                 $act = $pct($v['act'] ?? '', $c[3]); $gm = $pct($v['gm'] ?? '', $c[3]); $use = $gm !== null ? $gm : $act;
+                $earn = $use === null ? null : ci_amount($c[3], ci_tiers($c, $cfg), $cfg, $use);
+                if (!isl_put($conn, $pid, $eid, $sk, $key, $use, $act, $gm, $earn, 0, 'sheet', $by) && $err === '') $err = mysqli_error($conn);
                 $put($eid, ci_lbl_pct($c), $use, json_encode(['act' => $act, 'gm' => $gm, 'src' => 'cc_acc_incentives']), $type);
-                if ($sec[4]) $put($eid, ci_lbl_amt($c), $use === null ? null : ci_amount($c[3], ci_tiers($c, $cfg), $cfg, $use), null, $type);
+                if ($sec[4]) $put($eid, ci_lbl_amt($c), $earn, null, $type);
                 $n++;
             }
             /* reimbursements the salary sheet reads only from Incentive Entry (SR): saved from live data (kept up to date by this page) */
@@ -277,7 +131,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
                 if ($c[3] !== 'live' || !ci_opt($c, 'save')) continue;
                 $old = $ctx['inc'][$eid][ci_opt($c, 'save')] ?? null;
                 if ($old && !ci_mine($old)) continue;                                 /* entered in Incentive Entry: left as it is */
-                $put($eid, ci_opt($c, 'save'), ci_live($ctx, $c, $e, $cfg, $calc)[0], json_encode(['src' => 'cc_acc_incentives', 'live' => 1]), $type);
+                $lv = ci_live($ctx, $c, $e, $cfg, $calc)[0];
+                isl_put($conn, $pid, $eid, $sk, $c[0], null, null, null, $lv, 0, 'live', $by);
+                $put($eid, ci_opt($c, 'save'), $lv, json_encode(['src' => 'cc_acc_incentives', 'live' => 1]), $type);
             }
         }
     }
@@ -288,6 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save'
 /* ── build the sheet ── */
 $out = [];
 if ($period) {
+    isl_sync($conn, $period);                                                     /* old incentive_entries → incentive_sheet_entries */
     $ctx = ci_ctx($conn, $period, $pid); $cfgs = $ctx['cfgs']; $inc = $ctx['inc'];
     foreach ($SECTIONS as $sk => $sec) {
         $emps = ci_employees($conn, $sec[1], $period);
@@ -349,7 +206,8 @@ $ci_head = function ($sk, $key, $label) use ($LINKS, $PH, $h) {
     return '<span title="Linked to Payroll Header: ' . $h($PH[$id]['name']) . ($label !== $PH[$id]['name'] ? ' (' . $h($label) . ')' : '') . '">' . $h($PH[$id]['name']) . ' <i class="fa-solid fa-link" style="font-size:9px;opacity:.75"></i></span>';
 };
 $plabel = $period ? $MON[(int)$period['month']] . ' ' . $period['year'] : '';
-$closed = $period && strtolower((string)$period['status']) === 'closed';
+$oldMonth = $period && isl_is_old($period);                                 /* before the cutover: from the old Incentive Entries, view only */
+$closed = $period && (strtolower((string)$period['status']) === 'closed' || $oldMonth);
 $back = (!empty($_SERVER['HTTP_REFERER']) && strpos((string)$_SERVER['HTTP_REFERER'], 'cc_acc_incentives.php') === false) ? $_SERVER['HTTP_REFERER'] : 'sr_salary.php';
 $nf = function ($v) { return $v === null || $v === '' ? '' : (abs((float)$v) < 0.005 ? '-' : number_format((float)$v, (float)$v == (int)$v ? 0 : 2)); };
 $pv = function ($v) { return $v === null || $v === '' ? '' : rtrim(rtrim(number_format((float)$v, 2, '.', ''), '0'), '.'); };
@@ -441,7 +299,8 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
     <div class="tabs"><?php $first = true; foreach ($out as $sk => $s): $cnt = 0; foreach ($s['groups'] as $g) $cnt += count($g['emps']); ?><span class="tab<?= $first ? ' on' : '' ?>" data-sec="<?= $sk ?>" onclick="ciTab('<?= $sk ?>')" title="<?= $h($s['title']) ?>"><?= $sk ?> — <?= $h($s['title']) ?> (<?= $cnt ?>)</span><?php $first = false; endforeach; ?></div>
     <input type="search" id="ciQ" placeholder="Search name / code…" oninput="ciFilter()" style="width:200px">
     <span class="sp"></span>
-    <?php if ($closed): ?><span style="color:var(--neg);font-weight:bold"><i class="fa-solid fa-lock"></i> Closed month — view only</span><?php endif; ?>
+    <?php if ($oldMonth): ?><span style="color:#b45309;font-weight:bold"><i class="fa-solid fa-clock-rotate-left"></i> From the old Incentive Entries (before <?= $h(date('F Y', strtotime(ISL_CUTOVER . '-01'))) ?>) — view only</span>
+    <?php elseif ($closed): ?><span style="color:var(--neg);font-weight:bold"><i class="fa-solid fa-lock"></i> Closed month — view only</span><?php endif; ?>
   </form>
   <div class="kpis">
     <div class="kpi"><div class="k">Employees</div><div class="v" id="kN">0</div></div>

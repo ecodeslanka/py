@@ -5,7 +5,8 @@
  *   attendance + special holidays (norm days), employee profile (basic, no pay days, welfare, donations, retention …),
  *   approved salary advances of the month, approved loans (monthly instalment), EPF / ETF settings,
  *   reimbursements saved for the month in Incentive Entry (else the profile), SR fuel entries.
- * Incentives are left EMPTY (not counted).
+ * Incentives come from the Incentives Sheet table (incentive_sheet_entries, incentive_sheet_lib.php) by staff category;
+ * before November 2026 that table is filled from the old Incentive Entries.
  */
 include 'config.php';
 @include_once __DIR__ . '/auth.php';
@@ -92,14 +93,13 @@ if ($period) {
         }
     }
 
-    /* reimbursements saved for the month in Incentive Entry (incentives themselves are NOT used) */
-    $reimb = [];
-    if (ls_has_table($conn, 'incentive_entries')) {
-        $q = ls_q($conn, "SELECT employee_id, component_label, amount FROM incentive_entries WHERE payroll_period_id = $pid AND employee_id IN ($ids) AND component_label LIKE '\\_\\_reimb\\_\\_%'");
-        while ($q && ($x = mysqli_fetch_assoc($q))) $reimb[(int)$x['employee_id']][$x['component_label']] = (float)$x['amount'];
-    }
-    $rmb = function ($eid, $pat, $profile) use ($reimb) {
-        foreach ($reimb[$eid] ?? [] as $lbl => $v) if (strpos($lbl, $pat) !== false) return $v;
+    /* incentives and reimbursements of the month: incentive_sheet_entries (the old incentive_entries are brought in first) */
+    include_once __DIR__ . '/incentive_sheet_lib.php';
+    isl_sync($conn, $period);
+    $isl = isl_rows($conn, $pid);
+    $rmbKeys = ['meal' => ['meal_sr', 'meal_mr', '_meal'], 'travel' => ['travel_sr', 'travel_mr'], 'mobile' => ['mobile_sr']];
+    $rmb = function ($eid, $pat, $profile) use ($isl, $rmbKeys) {
+        foreach ($rmbKeys[$pat] as $k) if (isset($isl[$eid][$k]) && $isl[$eid][$k]['amount'] !== null) return (float)$isl[$eid][$k]['amount'];
         return (float)$profile;
     };
     $fuel = [];
@@ -121,7 +121,10 @@ if ($period) {
         $mobile = in_array($cat, ['SR', 'CC'], true) ? $rmb($eid, 'mobile', ($e['reimbursement_mobile'] ?? 0) ?: ($e['mobile_reimbursement'] ?? 0)) : 0.0;
         $fuelA  = $cat === 'SR' ? ($fuel[$eid] ?? $f($e, 'reimbursement_fuel')) : 0.0;
         $arrears = $f($e, 'arrears_salary');
-        $earn = round($basic + $att_allow + $meal + $travel + $mobile + $fuelA + $arrears, 2);
+        /* incentives of the employee's staff category (Incentives Sheet columns; attendance / reimbursements are their own columns here) */
+        $incList = $cat === 'OTH' ? [] : isl_incentives($cat, $isl[$eid] ?? [], $e);
+        $incent = round(array_sum(array_column($incList, 'amount')), 2);
+        $earn = round($basic + $incent + $att_allow + $meal + $travel + $mobile + $fuelA + $arrears, 2);
 
         $epf8 = round($basic * $epfE / 100, 2);
         $d = ['epf8' => $epf8, 'welfare' => $f($e, 'welfare_amount'), 'w_loan' => $f($e, 'welfare_loan_deduction'), 'w_soc' => $f($e, 'welfare_society'),
@@ -134,7 +137,7 @@ if ($period) {
         $rows[] = ['cat' => $cat, 'code' => $e['employee_id'] ?? '', 'epf_no' => $e['epf_number'] ?? ($e['epf_no'] ?? ''), 'name' => $e['employee_full_name'] ?? ($e['name_with_initials'] ?? ''),
             'desig' => $e['designation_name'] ?? '', 'status' => $e['status'] ?? '', 'note' => $e['pme_note'] ?? '', 'left' => $e['pme_exit'] ?? null, 'doj' => $e['date_of_join'] ?? '', 'norm' => $norm, 'worked' => $worked, 'rate' => $rate,
             'basic' => $basic, 'no_pay_days' => $no_pay_days, 'basic_adj' => round($basic - $no_pay, 2),
-            'incentive' => null, 'att_allow' => $att_allow, 'meal' => $meal, 'travel' => $travel, 'mobile' => $mobile, 'fuel' => $fuelA, 'arrears' => $arrears, 'earn' => $earn]
+            'incentive' => $incent, 'inc_list' => $incList, 'att_allow' => $att_allow, 'meal' => $meal, 'travel' => $travel, 'mobile' => $mobile, 'fuel' => $fuelA, 'arrears' => $arrears, 'earn' => $earn]
             + $d + ['ded' => $ded, 'net' => round($earn - $ded, 2), 'epf12' => $epfR_, 'etf3' => $etf, 'bonus' => $bonus, 'gratuity' => $grat, 'insurance' => $ins,
             'benefit' => round($earn + $epfR_ + $etf + $bonus + $grat + $ins, 2)];
     }
@@ -151,7 +154,7 @@ $COLS = [
     ['credit_r', 'Credit Recovery', 'D', 2], ['cash_short', 'Cash Short', 'D', 2], ['good_short', 'Good Short', 'D', 2], ['no_pay', 'No Pay', 'D', 2], ['retention', 'Retention', 'D', 2], ['excess_p', 'Excess Payment', 'D', 2], ['payee', 'PAYEE', 'D', 2], ['ded', 'Total Deductions', 'D', 2],
     ['net', 'Net Salary', 'S', 2], ['epf12', 'EPF 12%', 'B', 2], ['etf3', 'ETF 3%', 'B', 2], ['bonus', 'Bonus Prov.', 'B', 2], ['gratuity', 'Gratuity Prov.', 'B', 2], ['insurance', 'Insurance', 'B', 2], ['benefit', 'Total Benefit', 'B', 2],
 ];
-$SUMK = array_values(array_map(function ($c) { return $c[0]; }, array_filter($COLS, function ($c) { return $c[3] === 2 && $c[0] !== 'incentive'; })));
+$SUMK = array_values(array_map(function ($c) { return $c[0]; }, array_filter($COLS, function ($c) { return $c[3] === 2; })));
 $num = function ($v, $dp = 2) { if ($v === null) return ''; return abs($v) < 0.005 ? '-' : ($v < 0 ? '(' . number_format(-$v, $dp) . ')' : number_format($v, $dp)); };
 $tot = array_fill_keys($SUMK, 0.0); $byCat = [];
 foreach ($rows as $x) { foreach ($SUMK as $k) { $tot[$k] += $x[$k]; $byCat[$x['cat']][$k] = ($byCat[$x['cat']][$k] ?? 0) + $x[$k]; } $byCat[$x['cat']]['n'] = ($byCat[$x['cat']]['n'] ?? 0) + 1; }
@@ -159,7 +162,7 @@ $totRow = function ($label, $sums, $cls, $cat = '') use ($COLS, $num, $h) {
     $o = '<tr class="' . $cls . '"' . ($cat !== '' ? ' data-cat="' . $cat . '"' : '') . '><td class="sticky"></td><td colspan="9">' . $h($label) . '</td>';
     foreach (array_slice($COLS, 9) as $c) {
         if ($c[0] === 'net') continue;
-        $o .= '<td class="n">' . ($c[3] === 2 && $c[0] !== 'incentive' ? $num($sums[$c[0]] ?? 0) : '') . '</td>';
+        $o .= '<td class="n">' . ($c[3] === 2 ? $num($sums[$c[0]] ?? 0) : '') . '</td>';
         if ($c[0] === 'ded') $o .= '<td class="n net">' . $num($sums['net'] ?? 0) . '</td>';
     }
     return $o . '</tr>';
@@ -254,7 +257,7 @@ tbody tr.r:hover td{background:#fff1a8}
           <?php foreach ($COLS as $c) {
               if ($c[0] === 'net') continue;
               $v = $x[$c[0]];
-              if ($c[0] === 'incentive') { echo '<td class="emp" title="Incentives are not included in the live sheet"></td>'; continue; }
+              if ($c[0] === 'incentive') { $tt = implode("\n", array_map(function ($r) use ($num) { return $r['label'] . ': ' . $num($r['amount']); }, $x['inc_list'])); echo '<td class="n"' . ($tt !== '' ? ' title="' . $h($tt) . '"' : '') . '>' . $num($v) . '</td>'; continue; }
               if ($c[0] === 'status' && $x['left']) { echo '<td class="lft" title="' . $h($x['note']) . '">' . $h($v) . ' · left ' . $h(date('d M', strtotime($x['left']))) . '</td>'; continue; }
               if ($c[0] === 'desig' && $x['note'] !== '' && stripos($x['note'], 'moted') !== false) { echo '<td title="' . $h($x['note']) . '">' . $h($v) . ' <span class="mv">' . (stripos($x['note'], 'after this month') !== false ? 'before move' : 'moved') . '</span></td>'; continue; }
               if ($c[3] === 0) { echo '<td' . ($c[0] === 'name' ? ' class="b"' : '') . '>' . $h($c[0] === 'doj' && $v ? date('Y-m-d', strtotime($v)) : $v) . '</td>'; continue; }
@@ -271,7 +274,7 @@ tbody tr.r:hover td{background:#fff1a8}
       <?php if ($rows): ?><tfoot><?= $totRow('GRAND TOTAL (' . count($rows) . ')', $tot, 'grand') ?></tfoot><?php endif; ?>
     </table>
   </div>
-  <div class="note">Live figures for the chosen payroll month — not the saved salary sheets. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentives are left empty.</b> Norm days = days in the month − special holidays; days worked = attendance; No Pay = basic ÷ norm days × the employee's no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
+  <div class="note">Live figures for the chosen payroll month — not the saved salary sheets. Employees as they were in that month: an employee who resigned in the month is in it (red "left"), a promotion takes the month's designation (tag on the designation). <b>Incentive</b> = the Incentives Sheet amounts of the employee's staff category (hover for the columns; before November 2026 from the old Incentive Entries). Norm days = days in the month − special holidays; days worked = attendance; No Pay = basic ÷ norm days × the employee's no-pay days. Attendance allowance from the Salary Configuration tiers (≥90% / ≥85%), else the employee profile. Reimbursements saved for the month in Incentive Entry, else the employee profile; SR fuel from SR Fuel Entry. Salary advance = approved advances of the month; loan = this month's instalment of approved loans. EPF / ETF from the EPF settings.</div>
 </div>
 <script>
 function lsApply(){
