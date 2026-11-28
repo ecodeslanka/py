@@ -319,14 +319,18 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
         if ($c[3] === 'amt' || $c[3] === 'live') { $plan[$i] = ['money' => [$col++]]; continue; }
         $m = []; foreach ($c[2] as $t => $f) $m[] = $col++; $plan[$i] = ['money' => $m];
     }
-    $mealCol = $s['meal'] !== 'none' ? $col++ : null; ?>
+    $mealCol = $s['meal'] !== 'none' ? $col++ : null;
+    /* Incentive Total: after the incentive columns, before the reimbursement (live) amount columns */
+    $firstLive = count($s['comps']); foreach ($s['comps'] as $i => $c) if ($c[3] === 'live') { $firstLive = $i; break; }
+    $nComp = count($s['comps']); ?>
   <div class="scroll sec" data-sec="<?= $sk ?>"<?= $first ? '' : ' style="display:none"' ?>>
     <table id="ciTbl_<?= $sk ?>" data-sa="<?= $s['sa'] ? 1 : 0 ?>">
       <thead>
         <tr><th rowspan="2" class="sticky">Name</th><th rowspan="2">Designation</th><th rowspan="2">Code</th>
           <?php foreach ($s['comps'] as $i => $c): $g = $c[3] === 'live' ? 'gR' : 'g' . ($i % 2);
-            $span = ci_is_pct($c) ? count($c[2]) + ($c[3] === 'gm' ? 2 : 1) : 1; ?><th colspan="<?= $span ?>" class="<?= $g ?>"><?= $ci_head($sk, $c[0], $c[1]) ?></th><?php endforeach; ?>
-          <?php if ($mealCol !== null): ?><th rowspan="2" class="gR"><?= $ci_head($sk, '_meal', 'Meal') ?></th><?php endif; ?><th rowspan="2" class="gT">Total</th><th rowspan="2">Days Worked</th><th rowspan="2">No Pay Days</th><th rowspan="2">Basic</th><th rowspan="2" class="gT">Basic + Incentives</th></tr>
+            if ($i === $firstLive) echo '<th rowspan="2" class="gT">Incentive Total</th>';
+            $span = ci_is_pct($c) ? count($c[2]) + ($c[3] === 'gm' ? 2 : 1) : 1; ?><th colspan="<?= $span ?>" class="<?= $g ?>"><?= $ci_head($sk, $c[0], $c[1]) ?></th><?php endforeach; if ($firstLive === $nComp) echo '<th rowspan="2" class="gT">Incentive Total</th>'; ?>
+          <?php if ($mealCol !== null): ?><th rowspan="2" class="gR"><?= $ci_head($sk, '_meal', 'Meal') ?></th><?php endif; ?><th rowspan="2" class="gT" title="Incentive Total + reimbursements">Total + Reimb.</th><th rowspan="2">Days Worked</th><th rowspan="2">No Pay Days</th><th rowspan="2">Basic</th><th rowspan="2" class="gT">Basic + Incentives</th></tr>
         <tr><?php foreach ($s['comps'] as $i => $c): $g = $c[3] === 'live' ? 'gR' : 'g' . ($i % 2);
             if ($c[3] === 'amt'): ?><th class="<?= $g ?>">Amount</th><?php elseif ($c[3] === 'live'): ?><th class="<?= $g ?>">Live</th><?php else: ?>
             <th class="<?= $g ?>">Actual</th><?php if ($c[3] === 'gm'): ?><th class="<?= $g ?>">GM</th><?php endif; foreach ($c[2] as $t => $f): ?><th class="<?= $g ?>"><?= $tl($c, $t) ?></th><?php endforeach; endif; endforeach; ?></tr>
@@ -335,16 +339,18 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
       <?php if (!$s['groups']): ?><tr><td colspan="99" style="text-align:center;padding:20px;color:#8e909a">No employees in this category.</td></tr><?php endif; ?>
       <?php foreach ($s['groups'] as $g): $cfg = $g['cfg']; ?>
         <tr class="rate"><td class="sticky"><?= $h($g['name']) ?></td><td><?= $h($g['name']) ?></td><td><?= $h($g['code']) ?></td>
-          <?php foreach ($s['comps'] as $c):
+          <?php foreach ($s['comps'] as $i => $c):
+            if ($i === $firstLive) echo '<td></td>';
             if ($c[3] === 'amt') { echo '<td class="n">' . $nf(ci_opt($c, 'cfg') ? ($cfg[ci_opt($c, 'cfg')] ?? null) : null) . '</td>'; continue; }
             if ($c[3] === 'live') { echo '<td class="n">' . $nf(ci_opt($c, 'field') ? ($cfg[ci_opt($c, 'field')] ?? null) : null) . '</td>'; continue; }
             $own = array_keys(ci_tiers($c, $cfg)); ?>
-            <td class="lbl"><?= count($c[2]) === 1 && (string)$own[0] !== (string)array_keys($c[2])[0] ? 'at ' . $h($tl($c, $own[0])) : 'rate' ?></td><?php if ($c[3] === 'gm'): ?><td class="lbl"></td><?php endif; foreach ($c[2] as $t => $f): ?><td class="n"><?= $nf($cfg[$f] ?? null) ?></td><?php endforeach; endforeach; ?>
+            <td class="lbl"><?= count($c[2]) === 1 && (string)$own[0] !== (string)array_keys($c[2])[0] ? 'at ' . $h($tl($c, $own[0])) : 'rate' ?></td><?php if ($c[3] === 'gm'): ?><td class="lbl"></td><?php endif; foreach ($c[2] as $t => $f): ?><td class="n"><?= $nf($cfg[$f] ?? null) ?></td><?php endforeach; endforeach; if ($firstLive === $nComp) echo '<td></td>'; ?>
           <?php if ($mealCol !== null): ?><td class="n" title="<?= $s['meal'] === 'flat' ? 'Meal reimbursement (fixed)' : 'Meal reimbursement × attendance rate' ?>"><?= $nf($cfg['meal_reimbursement'] ?? null) ?></td><?php endif; ?><td></td><td></td><td></td><td></td><td></td></tr>
         <?php foreach ($g['emps'] as $e): ?>
         <tr class="emp" data-id="<?= $e['id'] ?>" data-s="<?= $h(mb_strtolower($e['name'] . ' ' . $e['code'] . ' ' . $g['name'])) ?>" data-rate="<?= $e['rate'] ?>" data-meal="<?= $e['meal_cfg'] ?>" data-mealmode="<?= $s['meal'] ?>" data-mealfix="<?= $e['meal_fixed'] === null ? '' : $e['meal_fixed'] ?>" data-basic="<?= $e['basic_adj'] ?>">
           <td class="sticky b"<?= $e['note'] !== '' ? ' title="' . $h($e['note']) . '"' : '' ?>><?= $h($e['name']) ?><?php if ($e['left']): ?> <span class="lft">left <?= $h(date('d M', strtotime($e['left']))) ?></span><?php elseif ($e['note'] !== ''): ?> <span class="mv"><?= stripos($e['note'], 'after this month') !== false ? 'before move' : 'moved' ?></span><?php endif; ?></td><td><?= $h($g['name']) ?></td><td><?= $h($e['code']) ?></td>
           <?php foreach ($s['comps'] as $i => $c): $v = $e['v'][$c[0]]; $mc = $plan[$i]['money'];
+            if ($i === $firstLive) echo '<td class="tot itot"></td>';
             if ($c[3] === 'live') { echo '<td class="lv' . ($v['saved'] ? ' sv' : '') . '" data-col="' . $mc[0] . '" data-kind="r" data-v="' . $v['live'] . '" title="' . ($v['saved'] ? 'Saved in Incentive Entry' : 'Live') . '">' . $nf($v['live']) . '</td>'; continue; }
             if ($c[3] === 'amt') { echo '<td class="in amt" data-col="' . $mc[0] . '" data-kind="i"><input class="iamt" data-k="' . $c[0] . '" data-m="amt" data-fb="' . $v['fb'] . '" value="' . $h($v['amt'] === null ? '' : $pv($v['amt'])) . '" placeholder="' . $h($v['fb'] > 0 ? $nf($v['fb']) : '') . '" title="' . ($v['fb'] > 0 ? 'Empty = ' . $nf($v['fb']) . ' from the employee profile' : '') . '" inputmode="decimal"' . $dis . '></td>'; continue; }
             $tiers = $v['tiers']; $k = 0; ?>
@@ -352,7 +358,7 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
             <?php else: ?><td class="in"><input class="ia" data-k="<?= $c[0] ?>" data-m="<?= $c[3] ?>" value="<?= $h($c[3] === 'dmg' ? $dv($v['act']) : $pv($v['act'])) ?>" inputmode="decimal"<?= $dis ?>></td><?php endif; ?>
             <?php if ($c[3] === 'gm'): ?><td class="in gm"><input class="ig" data-k="<?= $c[0] ?>" value="<?= $h($pv($v['gm'])) ?>" inputmode="decimal"<?= $dis ?>></td><?php endif; ?>
             <?php foreach ($c[2] as $t => $f): $tt = count($c[2]) === 1 ? $tiers[0] : $t; ?><td class="tier" data-k="<?= $c[0] ?>" data-m="<?= $c[3] ?>" data-t="<?= $tt ?>" data-r="<?= (float)($cfg[$f] ?? 0) ?>" data-col="<?= $mc[$k++] ?>" data-kind="i"<?= $v['fixed'] !== null ? ' data-fixed="' . $v['fixed'] . '"' : '' ?>></td><?php endforeach; ?>
-          <?php endforeach; ?>
+          <?php endforeach; if ($firstLive === $nComp) echo '<td class="tot itot"></td>'; ?>
           <?php if ($mealCol !== null): ?><td class="live meal" data-col="<?= $mealCol ?>" data-kind="r"></td><?php endif; ?><td class="tot"></td><td class="c"><?= $e['days'] ?> / <?= $e['norm'] ?></td><td class="c"><?= $pv($e['npd']) ?></td><td class="n"><?= $nf($e['basic_adj']) ?></td><td class="tot gross"></td>
         </tr>
         <?php endforeach; ?>
@@ -360,8 +366,9 @@ tr.grand td{background:#fff3c4;font-weight:bold;border-top:2px solid #d9b300;tex
       </tbody>
       <?php if ($s['groups']): ?><tfoot><tr class="grand"><td class="sticky" style="text-align:left">TOTAL</td><td colspan="2"></td>
         <?php foreach ($s['comps'] as $i => $c): $mc = $plan[$i]['money'];
+          if ($i === $firstLive) echo '<td class="ft-itot"></td>';
           if (!ci_is_pct($c)) { echo '<td class="ft" data-col="' . $mc[0] . '"></td>'; continue; } ?>
-          <td></td><?php if ($c[3] === 'gm'): ?><td></td><?php endif; foreach ($mc as $m): ?><td class="ft" data-col="<?= $m ?>"></td><?php endforeach; endforeach; ?>
+          <td></td><?php if ($c[3] === 'gm'): ?><td></td><?php endif; foreach ($mc as $m): ?><td class="ft" data-col="<?= $m ?>"></td><?php endforeach; endforeach; if ($firstLive === $nComp) echo '<td class="ft-itot"></td>'; ?>
         <?php if ($mealCol !== null): ?><td class="ft" data-col="<?= $mealCol ?>"></td><?php endif; ?><td class="ft-tot"></td><td></td><td></td><td class="ft-basic"></td><td class="ft-gross"></td></tr></tfoot><?php endif; ?>
     </table>
   </div>
@@ -434,7 +441,8 @@ function ciRow(tr){
     mt.textContent = fmt(meal); mt.dataset.v = meal; reimb += meal;
   }
   tr.dataset.inc = inc; tr.dataset.reimb = reimb;
-  tr.querySelector('td.tot').textContent = fmt(inc + reimb);
+  var it = tr.querySelector('td.itot'); if (it) it.textContent = fmt(inc);                 /* incentives only */
+  tr.querySelector('td.tot:not(.itot):not(.gross)').textContent = fmt(inc + reimb);
   tr.querySelector('td.gross').textContent = fmt(inc + reimb + (parseFloat(tr.dataset.basic) || 0));
 }
 function ciTotals(){
@@ -444,6 +452,7 @@ function ciTotals(){
   sec.querySelectorAll('td.ft').forEach(function(f){ var v = 0; rows.forEach(function(tr){ var td = tr.querySelector('td[data-col="' + f.dataset.col + '"]'); v += parseFloat(td && td.dataset.v) || 0; }); f.textContent = fmt(v); });
   rows.forEach(function(tr){ s.inc += parseFloat(tr.dataset.inc) || 0; s.reimb += parseFloat(tr.dataset.reimb) || 0; s.basic += parseFloat(tr.dataset.basic) || 0; });
   var q = function(c){ return sec.querySelector(c); };
+  if (q('.ft-itot')) q('.ft-itot').textContent = fmt(s.inc);
   if (q('.ft-tot')) { q('.ft-tot').textContent = fmt(s.inc + s.reimb); q('.ft-basic').textContent = fmt(s.basic); q('.ft-gross').textContent = fmt(s.inc + s.reimb + s.basic); }
   document.getElementById('kN').textContent = s.n; document.getElementById('kI').textContent = fmt(s.inc); document.getElementById('kM').textContent = fmt(s.reimb);
   document.getElementById('kB').textContent = fmt(s.basic); document.getElementById('kG').textContent = fmt(s.inc + s.reimb + s.basic);
