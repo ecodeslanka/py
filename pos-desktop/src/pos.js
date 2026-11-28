@@ -32,7 +32,7 @@ PAGES.pos = async function (m) {
       const v = q.value.trim(); if (!v) return;
       const exact = S.items.find((i) => String(i.code).toLowerCase() === v.toLowerCase());
       const hit = exact || filteredItems()[0];
-      if (hit) { addToCart(hit); q.value = ''; renderGrid(); } else toast('No item found for "' + v + '"', 'err');
+      if (hit) { addToCart(hit); if (exact) beep(true); q.value = ''; renderGrid(); } else { beep(false); toast('No item found for "' + v + '"', 'err'); }
     }
   });
   $('#grid').addEventListener('click', (e) => { const c = e.target.closest('[data-id]'); if (c) { addToCart(S.items.find((i) => i.id === +c.dataset.id)); q.focus(); } });
@@ -126,6 +126,68 @@ async function clearBill(ask) {
   if (ask && cart.lines.length && !(await confirmBox('Clear bill', 'Remove all items from this bill?'))) { const q = $('#q'); q && q.focus(); return; }
   cart = newCart(); selLine = -1; renderBill(); const q = $('#q'); if (q) q.focus();
 }
+
+
+/* ===== barcode scanner: scan anywhere on the POS screen, matching item is added automatically ===== */
+const scan = { buf: '', last: 0, fast: 0, timer: null, el: null, before: '' };
+const scanReset = () => { clearTimeout(scan.timer); scan.buf = ''; scan.fast = 0; scan.el = null; };
+const findByBarcode = (code) => { const c = String(code).trim().toLowerCase(); return c ? S.items.find((i) => String(i.code).trim().toLowerCase() === c) : null; };
+let beepCtx = null;
+function beep(ok) {
+  if (S.settings && S.settings.scanBeep === false) return;
+  try {
+    beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = beepCtx.createOscillator(), g = beepCtx.createGain();
+    o.frequency.value = ok ? 1250 : 280; g.gain.value = 0.06; o.connect(g); g.connect(beepCtx.destination);
+    o.start(); o.stop(beepCtx.currentTime + (ok ? 0.07 : 0.28));
+  } catch (_) { /* no audio available */ }
+}
+function scanCommit(code) {
+  code = String(code).trim();
+  // take the scanned characters back out of whatever field received them
+  const el = scan.el, before = scan.before;
+  if (el && el.tagName === 'INPUT') {
+    if (el.id === 'q') el.value = el.value.endsWith(code) ? el.value.slice(0, el.value.length - code.length) : before;
+    else el.value = before;
+  }
+  scanReset();
+  const q = $('#q');
+  const it = findByBarcode(code);
+  if (!it) { beep(false); toast('Barcode "' + code + '" is not in the system', 'err'); }
+  else {
+    const inCart = cart.lines.filter((l) => l.itemId === it.id).reduce((a, l) => a + l.qty, 0);
+    if (!S.settings.allowNegativeStock && it.trackStock && inCart + 1 > it.stock) { beep(false); toast(it.name + ' — not enough stock (' + qtyFmt(it.stock) + ')', 'err'); }
+    else { addToCart(it); beep(true); toast('➕ ' + it.name + '  ' + money(it.price), 'ok'); }
+  }
+  if (q) { renderGrid(); q.focus(); }
+}
+// capture phase = runs before the search box / bill inputs see the key
+document.addEventListener('keydown', (e) => {
+  if (!S.user || S.page !== 'pos' || (typeof modal !== 'undefined' && modal) || e.isComposing) return;
+  const t = e.target, now = performance.now();
+  if (t.tagName === 'SELECT' || t.tagName === 'TEXTAREA') return;
+  const looksLikeScan = () => scan.buf.length >= 3 && scan.fast >= scan.buf.length - 1;   // every key arrived within 60 ms
+  if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    const gap = now - scan.last; scan.last = now;
+    if (gap > 100 || !scan.buf) {                       // first key of a new burst
+      scan.buf = ''; scan.fast = 0;
+      // letters/digits typed while focus is on a button / the page: send them to the search box
+      if (/^[a-z0-9]$/i.test(e.key) && !(t.tagName === 'INPUT' && t.type !== 'checkbox')) { const q = $('#q'); if (q) { q.focus(); scan.el = q; scan.before = q.value; } }
+      else { scan.el = t; scan.before = t.tagName === 'INPUT' ? t.value : ''; }
+    } else if (gap <= 60) scan.fast++;
+    scan.buf += e.key;
+    if (scan.fast >= 1) e.stopPropagation();           // part of a scan: don't let +, -, * trigger POS shortcuts
+    clearTimeout(scan.timer);
+    scan.timer = setTimeout(() => {                    // scanners that send no Enter: commit when the burst ends
+      if (looksLikeScan() && findByBarcode(scan.buf)) scanCommit(scan.buf); else scanReset();
+    }, 90);
+    return;
+  }
+  if ((e.key === 'Enter' || e.key === 'Tab') && looksLikeScan() && now - scan.last < 100) {
+    e.preventDefault(); e.stopPropagation(); clearTimeout(scan.timer);
+    scanCommit(scan.buf);
+  }
+}, true);
 
 /* ----- keyboard ----- */
 function posKey(e) {

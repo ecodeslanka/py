@@ -46,6 +46,7 @@ const defaultSettings = () => ({
   allowNegativeStock: true,
   cashierCanEditPrice: true,
   cashierCanDiscount: true,
+  scanBeep: true,
   backup: { dir: '', auto: true, everyMinutes: 30, keep: 30, onExit: true },
 });
 

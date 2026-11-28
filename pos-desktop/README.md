@@ -3,6 +3,7 @@
 Offline desktop POS (Electron). No database server needed – all data lives in **one file** and is backed up automatically.
 
 ## Features
+- **Barcode scanner** – scan anywhere on the POS screen: the item with that exact barcode is added automatically (beep on success, error for unknown codes); works with or without an Enter suffix.
 - **Fast POS screen** – item grid, barcode scanner / search box, bill panel, hold & recall bills, discount (amount or %), tax, quick cash.
 - **Full keyboard control** – `F2` search · `F3` customer · `F4` discount · `↑↓` select line · `+ −` qty · `*` type qty · `Del` remove · `F6` hold · `F7` recall · `F8` clear · `F9` pay · `F10` quick cash + print · `Ctrl+P` reprint · `Alt+1…8` pages · `F11` full screen · `F1` help.
 - **Items** – barcode, category, unit, **cost price** and **selling price** (live margin), stock, low-stock alert, add-stock.
